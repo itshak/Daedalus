@@ -14,12 +14,13 @@ The following changes passed GitHub's offline Python/engine tests, source-securi
 | `enforce-account-session-ownership` | Host-local world/player leases and authentication status states | [#8](https://github.com/itshak/Daedalus/pull/8) |
 | `native-desktop-control-center` | Working native Fluent GUI preview and read-only API client | [#9](https://github.com/itshak/Daedalus/pull/9) |
 | `package-native-macos-app` | CI-built, ad-hoc signed `Daedalus.app` preview artifact | [#10](https://github.com/itshak/Daedalus/pull/10) |
+| `connect-existing-ipc` | Opt-in existing-session read-only IPC, city lookup and warehouse snapshots | [#12](https://github.com/itshak/Daedalus/pull/12) |
 
-The archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
+The completed archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
 
 ## Read-only existing-session bridge (current feature milestone)
 
-The new `connect-existing-ipc` change adds an **opt-in**, local, authenticated IPC attachment to a compatible already-running IkaBot process, city discovery and warehouse snapshots, plus native UI attachment indicators. It is source-tested with fake sessions and a synthetic localhost socket; it has not yet been deployed against real accounts. When the change is verified in CI and merged, archive it via OpenSpec and fold its requirements into the canonical capability specs.
+The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
 ## Still active
 
@@ -33,7 +34,7 @@ Do **not** mark these changes as entirely done, or claim real game automation is
 
 ## Current integration change
 
-The active `connect-existing-ipc` change adds an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is not the same as the task-runner session owner and does not support task start/stop. The full native GUI control and Selenium login/assistance work remain open.
+The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is not the same as the task-runner session owner and does not support task start/stop. The full native GUI control and Selenium login/assistance work remain open.
 
 ## Current source of truth
 
