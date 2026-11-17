@@ -55,6 +55,10 @@ openspec list
 
 See [AGENTS.md](AGENTS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Design specifications and proposals live in [openspec](openspec/).
 
+## Account-session ownership groundwork
+
+Daedalus includes a host-local OS file lock and authentication-status state machine to prevent duplicate world/player workers **on the same backend host**. The authenticated API reports nonsecret session states for each account. This is groundwork only: **no Gameforge login, browser handoff, or game worker is started** by these components. The lock is not distributed across multiple servers; assign each account to one authoritative backend. See [session ownership and limitations](docs/SESSION-OWNERSHIP.md).
+
 ## Candidate public engine CLI (after installing `./engine/ikabot`)
 
 The vendored IkaBot **proposed** CLI supports native task flags such as `--task`, `--config`, `--batch` and `--cities`. To see the supported syntax without logging in, run:

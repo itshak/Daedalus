@@ -16,6 +16,7 @@ Build one maintainable Daedalus application: existing public IkaBot operations a
 2. Each account/world/player identity has a single active authenticated game-session owner, with locks, recovery, and explicit state transitions.
 3. The desktop client uses one versioned API contract regardless of local or remote deployment.
 4. Authentication MUST support restoration and human-assisted recovery; upstream password login is not assumed functional. Do not bypass CAPTCHAs.
+   Acquire a host-local world/player lease before any game-worker authentication and hold it through challenge waits; release it only after its game process stops. Never assume host-local locks coordinate two remote servers.
 5. Server-side policies SHALL be restart-safe, with state reconciliation and no duplicate state-changing actions.
 6. Packaging uses unique distribution and import namespaces. Never shadow the upstream `ikabot` package with the legacy GUI's package of the same name.
 
