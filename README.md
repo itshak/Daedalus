@@ -1,6 +1,6 @@
 # Daedalus for Ikariam
 
-**Status: engine-import prototype.** The pristine public IkaBot 7.7.2 source is vendored in `engine/ikabot/`. The application does **not yet** contain a game-account backend, an executable JSON task API, or the migrated desktop UI. Its CLI provides offline diagnostics and a source-level operation inventory only.
+**Status: read-only controller prototype.** Public IkaBot 7.7.2 is vendored in `engine/ikabot/`, and Daedalus provides a small authenticated read-only API, local account metadata, and an offline task registry. It does **not yet** connect authenticated game workers, start game tasks, offer the proposed JSON IPC dispatcher, or include the migrated desktop UI.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -26,9 +26,24 @@ python -m ruff check src tests scripts
 daedalus --version
 daedalus doctor
 daedalus engine inventory
+daedalus accounts list --config docs/examples/accounts.toml
 ```
 
 The `engine inventory` command reads public engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots, execute tasks or make game requests**. Current stable upstream 7.7.2 does not include the proposed structured JSON task launcher.
+
+## Read-only local API
+
+The initial controller implements metadata and capability reporting, not game automation. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
+
+Install the API extra and generate a secret before running it:
+
+```bash
+python -m pip install -e ".[server]"
+export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+daedalus serve --host 127.0.0.1 --port 8765
+```
+
+With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Warehouse queries explicitly return HTTP 503 until an authenticated game worker is connected; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by merely starting the service.
 
 OpenSpec 1.13 is used for spec-driven changes:
 
@@ -42,9 +57,9 @@ See [AGENTS.md](AGENTS.md), [architecture](docs/ARCHITECTURE.md), [migration pol
 
 ## Repository organization
 
-- `src/daedalus/`: distinct Python application package and offline CLI
+- `src/daedalus/`: distinct Python application package, offline CLI and authenticated read-only API
 - `engine/ikabot/`: clean public IkaBot 7.7.2 source, preserved MIT license
-- `server/`: future API and scheduler; not implemented yet
+- `server/`: future supervised account workers, scheduler and policies; not implemented yet
 - `desktop/`: future audited PySide6 GUI import; not implemented yet
 - `openspec/`: normative specifications, architecture decisions and change proposals
 

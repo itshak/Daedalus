@@ -17,10 +17,11 @@ def test_version(capsys):
 def test_doctor_is_offline_and_honest(capsys):
     assert main(["doctor"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["stage"] == "engine-import"
+    assert result["stage"] == "read-only-controller"
     assert result["engine_integrated"] is False
     assert result["live_accounts_configured"] is False
-    assert result["server_implemented"] is False
+    assert result["server_implemented"] is True
+    assert result["server_mode"] == "read_only"
     assert result["engine_source_available"] is True
     assert result["engine_capabilities_found"] >= 30
 
