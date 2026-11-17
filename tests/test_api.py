@@ -172,3 +172,87 @@ def test_same_id_but_different_player_coordinator_rejected(account_file, tmp_pat
     )
     with pytest.raises(ValueError, match="same accounts"):
         create_app(accounts_path=account_file, api_token=TOKEN, session_coordinator=mismatched)
+
+
+def test_existing_ipc_bridge_accounts_and_cities_are_authenticated(account_file):
+    class FakeIPC:
+        def __init__(self):
+            self.calls = []
+
+        def list_sessions(self):
+            self.calls.append("list_sessions")
+            return [
+                {"world": "s301-en", "player": "ExamplePlayer"},
+                {"world": "s999-en", "player": "OtherUnconfigured"},
+            ]
+
+        def cities(self, account):
+            self.calls.append((account.id, account.world, account.player))
+            return [{"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}]
+
+    connector = FakeIPC()
+    app = create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=connector)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/api/v1/engine/connected-accounts").status_code == 401
+    assert client.get("/api/v1/accounts/alpha/cities").status_code == 401
+    assert connector.calls == []
+    response = client.get("/api/v1/engine/connected-accounts", headers=auth)
+    assert response.json() == {
+        "connected_account_ids": ["alpha"], "engine_mode": "existing_session_only"
+    }
+    assert "OtherUnconfigured" not in response.text
+    result = client.get("/api/v1/accounts/alpha/cities", headers=auth)
+    assert result.status_code == 200
+    assert result.json()["cities"][0]["id"] == 42
+    assert connector.calls == ["list_sessions", ("alpha", "s301-en", "ExamplePlayer")]
+    assert client.post("/api/v1/accounts/alpha/cities", headers=auth).status_code == 405
+    assert client.get("/api/v1/accounts/not-configured/cities", headers=auth).status_code == 404
+
+
+def test_existing_ipc_failure_is_generic_without_secrets(account_file):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    class BrokenIPC:
+        def list_sessions(self):
+            raise EngineIPCUnavailable("private-token-from-game")
+
+        def cities(self, _account):
+            raise EngineIPCUnavailable("private-cookie-from-game")
+
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                  ipc_client=BrokenIPC()))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    for endpoint in ("/api/v1/engine/connected-accounts", "/api/v1/accounts/alpha/cities"):
+        response = client.get(endpoint, headers=auth)
+        assert response.status_code == 503
+        assert "private-" not in response.text
+
+
+def test_ipc_disabled_by_default_even_with_configured_account(account_file):
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/api/v1/accounts/alpha/cities", headers=auth).status_code == 503
+    assert client.get("/api/v1/engine/connected-accounts", headers=auth).status_code == 503
+
+
+def test_readonly_warehouse_provider_uses_existing_ipc_if_explicitly_attached(account_file):
+    from daedalus.warehouse import CityWarehouseSnapshot, WarehouseResources
+
+    class MockExisting:
+        def warehouses(self, account):
+            assert account.id == "alpha"
+            return [CityWarehouseSnapshot(
+                account_id="alpha", city_id=42, city_name="Athens",
+                captured_at="2026-11-18T10:00:00+00:00",
+                resources=WarehouseResources(unsecured={"wood": 100, "wine": 0,
+                    "marble": None, "glass": None, "sulfur": None}, capacity=50000),
+            )]
+
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   ipc_client=MockExisting()))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    response = client.get("/api/v1/warehouses/alpha", headers=auth)
+    assert response.status_code == 200
+    assert response.json()["cities"][0]["resources"]["unsecured"]["wood"] == 100
+    assert response.json()["cities"][0]["resources"]["unsecured"]["marble"] is None

@@ -605,6 +605,40 @@ class IPCServer:
         self._sessions.append(sess)
         return sess
 
+    def _existing_session(self, request):
+        """Select an in-memory logged-in session; NEVER restore or create one.
+
+        Daedalus uses this interface only with a fully specified world/player
+        identity, so a controller cannot accidentally start a second game login.
+        """
+        world = request.get("world")
+        player = request.get("player")
+        if not isinstance(world, str) or not world.strip():
+            raise ValueError("Existing-session IPC requires an explicit world")
+        if not isinstance(player, str) or not player.strip():
+            raise ValueError("Existing-session IPC requires an explicit player")
+        matches = [
+            sess
+            for sess in self._sessions
+            if self._session_matches(sess, None, world, None, player)
+        ]
+        if len(matches) != 1:
+            raise ValueError("No unique already-authenticated game session matches")
+        return matches[0]
+
+    def _list_existing_sessions(self):
+        """Nonsecret in-memory identities, without saved-session restoration."""
+        sessions = []
+        for sess in self._sessions:
+            if not getattr(sess, "logged", False):
+                continue
+            world = f"s{getattr(sess, 'mundo', '')}-{getattr(sess, 'servidor', '')}"
+            player = getattr(sess, "username", None)
+            if not player or world == "s-":
+                continue
+            sessions.append({"world": world, "player": str(player)})
+        return {"status": "ok", "pid": os.getpid(), "sessions": sessions}
+
     def handle_request(self, request):
         action = request.get("action")
         if action == "ping":
@@ -616,6 +650,12 @@ class IPCServer:
                     return self._start_task(request)
                 if action == "list_cities":
                     return self._list_cities(request)
+                if action == "list_sessions":
+                    return self._list_existing_sessions()
+                if action == "list_cities_existing":
+                    return self._list_cities(request, existing_only=True)
+                if action == "warehouse_snapshots_existing":
+                    return self._warehouse_snapshots_existing(request)
                 return {"status": "error", "error": f"Unknown IPC action: {action!r}"}
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
@@ -626,19 +666,22 @@ class IPCServer:
                 response["task"] = request["task"]
             return response
 
-    def _list_cities(self, request):
+    def _list_cities(self, request, existing_only=False):
         """The account's own cities, so task configs can use their ids."""
         from ikabot.helpers import pedirInfo
         from ikabot.helpers.varios import decodeUnicodeEscape
 
-        session = self._get_or_create_session(
-            request.get("email"), request.get("world"), request.get("server"), request.get("player")
+        session = (
+            self._existing_session(request)
+            if existing_only
+            else self._get_or_create_session(
+                request.get("email"), request.get("world"), request.get("server"), request.get("player")
+            )
         )
         pedirInfo.ids_cache = None  # the cache lives as long as the menu: a city may be new or renamed
         ids, cities = pedirInfo.getIdsOfCities(session)
-        return {
+        result = {
             "status": "ok",
-            "email": session.mail,
             "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username,
             "cities": [
@@ -651,6 +694,67 @@ class IPCServer:
                 for city_id in ids
             ],
         }
+        if not existing_only:
+            # Preserve upstream CLI semantics, including the email field.
+            result["email"] = session.mail
+        return result
+
+    def _warehouse_snapshots_existing(self, request):
+        """Read per-city warehouse spans via an existing authenticated session.
+
+        Return ONLY formatted numeric resource strings, never whole page HTML,
+        login data, actionRequest tokens or arbitrary hidden input values.
+        """
+        import html
+        import re
+
+        from ikabot.helpers import pedirInfo
+        from ikabot.helpers.varios import decodeUnicodeEscape
+
+        session = self._existing_session(request)
+        pedirInfo.ids_cache = None
+        ids, cities = pedirInfo.getIdsOfCities(session)
+        if len(ids) > 100:
+            raise ValueError("Too many cities for one warehouse snapshot")
+        span_pattern = re.compile(
+            r"""<span\b[^>]*\bid=["']js_(plunderable|capacity)_(wood|wine|marble|crystal|glass|sulfur)["'][^>]*>(.*?)</span>""",
+            re.IGNORECASE | re.DOTALL,
+        )
+        tooltip_pattern = re.compile(
+            r"""<div\b[^>]*\bclass=["'][^"']*\btooltip\b[^"']*["'][^>]*>(.*?)</div>""",
+            re.IGNORECASE | re.DOTALL,
+        )
+        safe_number = re.compile(r"[0-9][0-9,.\s\u00a0\u202f]*[KMBkmb]?\Z")
+        results = []
+        for city_id in ids:
+            if type(city_id) is not int or city_id <= 0:
+                raise ValueError("Invalid authenticated city ID")
+            markup = session.get(f"view=warehouse&cityId={city_id}", noIndex=True)
+            if not isinstance(markup, str):
+                raise ValueError("Warehouse response is not HTML")
+            unsecured = {}
+            capacity = None
+            for kind, resource, inner in span_pattern.findall(markup):
+                tooltip = tooltip_pattern.search(inner)
+                amount = tooltip.group(1) if tooltip is not None else inner
+                amount = html.unescape(re.sub(r"<[^>]*>", "", amount)).strip()
+                if not safe_number.fullmatch(amount):
+                    raise ValueError("Warehouse amount is not numeric")
+                key = "glass" if resource.casefold() == "crystal" else resource.casefold()
+                if kind.casefold() == "plunderable":
+                    unsecured[key] = amount
+                elif capacity is None:
+                    capacity = amount
+            if not unsecured:
+                raise ValueError("No unsecured warehouse resource values")
+            results.append({
+                "city_id": city_id,
+                "city_name": decodeUnicodeEscape(cities[city_id]["name"]),
+                "unsecured": unsecured,
+                "capacity": capacity,
+            })
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "cities": results}
 
     def _start_task(self, request):
         task_name = request.get("task")

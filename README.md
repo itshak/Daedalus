@@ -29,7 +29,7 @@ daedalus engine inventory
 daedalus accounts list --config docs/examples/accounts.toml
 ```
 
-The `engine inventory` command reads public engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots, execute tasks or make game requests**. Daedalus now contains a reviewed upstream CLI/IPC proposal; it is **not connected to live account workers**, and it does not make every individual task automatically safe or serializable.
+The `engine inventory` command reads engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots or execute tasks**. The upstream CLI/IPC proposal is included, and Daedalus now has an **opt-in existing-session-only read bridge** for city and warehouse data. The controller still cannot create authenticated workers or launch tasks.
 
 ## Native Mac GUI preview
 
@@ -40,7 +40,7 @@ python -m pip install -e ".[desktop]"
 daedalus-desktop
 ```
 
-Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, and **Warehouses**. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports; it displays no resource data until a real authenticated snapshot provider is connected. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
+Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, and **Warehouses**. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports. With explicit `--connect-existing-ipc` backend opt-in, it can read real resources through a compatible **already-authenticated** IkaBot session; otherwise the API reports unavailable. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
 
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
@@ -48,7 +48,7 @@ For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen 
 
 ## Read-only local API
 
-The initial controller implements metadata and capability reporting, not game automation. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
+The controller implements metadata, existing-session status, city lookup and optional warehouse reporting—not game task execution or login automation. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
 
 Install the API extra and generate a secret before running it:
 
@@ -58,7 +58,9 @@ export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urls
 daedalus serve --host 127.0.0.1 --port 8765
 ```
 
-With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Warehouse queries explicitly return HTTP 503 until an authenticated game worker is connected; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by merely starting the service.
+With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by merely starting the service.
+
+**Optional existing-session bridge:** Start the backend with `--connect-existing-ipc --accounts-file ~/.config/daedalus/accounts.toml` on the same machine/user as a **compatible, already-running** IkaBot IPC server. The Accounts page can check engine attachment and Warehouses can fetch read-only snapshots. This path never creates another Gameforge login. See [the full existing-IPC requirements, precautions and testing instructions](docs/EXISTING-IPC.md). **Do not use the current production bot installation as a test worker.**
 
 OpenSpec 1.13 is used for spec-driven changes:
 
@@ -85,6 +87,10 @@ python -m ikabot --help
 Actual task execution requires an authenticated IkaBot session and explicit account ownership. It must not be tried against production accounts until the session coordination and backend task adapter are ready. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
 
 See [the precise upstream merge record](engine/UPSTREAM.md), [the archived OpenSpec CLI/IPC integration change](openspec/changes/archive/2026-11-18-integrate-upstream-cli-ipc/proposal.md) and [current implementation status](docs/PROJECT-STATUS.md).
+
+## Existing-session-only bridge
+
+Daedalus can now connect **read-only** to an already-running instance of the Daedalus-vendored IkaBot engine that supports the new restricted IPC actions. The **Accounts** view has a **Check IkaBot sessions** button, and **Warehouses** can read exact unsecured-resource totals. The backend never restores a game login for these requests; the connection is explicitly opted into with `daedalus serve --connect-existing-ipc`. This does not yet provide game task start/stop or the Selenium authentication assistant. Read [the bridge setup and limitations](docs/EXISTING-IPC.md).
 
 ## Repository organization
 

@@ -120,3 +120,20 @@ def test_client_refuses_short_or_control_character_token():
     for token in ("short", "x" * 32 + "\n"):
         with pytest.raises(ValueError):
             DaedalusClient("http://localhost:8765", token)
+
+
+def test_readonly_desktop_client_attached_engine_cities():
+    def handler(request):
+        if request.url.path == "/api/v1/engine/connected-accounts":
+            return httpx.Response(200, json={"connected_account_ids": ["alpha"]})
+        if request.url.path == "/api/v1/accounts/alpha/cities":
+            return httpx.Response(200, json={"account_id": "alpha", "cities": [
+                {"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}
+            ]})
+        return httpx.Response(404)
+
+    with mock_client(handler) as client:
+        assert client.connected_accounts() == ["alpha"]
+        assert client.cities("alpha")[0]["name"] == "Athens"
+        with pytest.raises(ValueError):
+            client.cities("../invalid")

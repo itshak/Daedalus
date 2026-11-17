@@ -97,6 +97,7 @@ class ConnectionPage(QWidget):
 
 class AccountsPage(QWidget):
     refresh_requested = Signal()
+    check_engine_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -110,12 +111,27 @@ class AccountsPage(QWidget):
         self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
         header.addWidget(self.refresh_button)
+        self.check_engine_button = PushButton("Check IkaBot sessions")
+        self.check_engine_button.clicked.connect(self.check_engine_requested.emit)
+        header.addWidget(self.check_engine_button)
         layout.addLayout(header)
-        layout.addWidget(CaptionLabel("Account metadata and session status from your backend."))
-        self.table = _table(["Account", "World", "Player", "Enabled", "Session"])
+        layout.addWidget(CaptionLabel(
+            "Read-only account status. IkaBot sessions are checked only when requested."
+        ))
+        self._accounts: list[dict[str, object]] = []
+        self._connected_ids: set[str] | None = None
+        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot"])
         layout.addWidget(self.table, 1)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
+        self._accounts = accounts
+        self._render()
+
+    def set_connected_ids(self, account_ids: list[str]) -> None:
+        self._connected_ids = set(account_ids)
+        self._render()
+
+    def _render(self) -> None:
         _populate(
             self.table,
             [
@@ -125,8 +141,11 @@ class AccountsPage(QWidget):
                     acc.get("player"),
                     "Yes" if acc.get("enabled") else "No",
                     acc.get("session_status") or "not_connected",
+                    "Not checked" if self._connected_ids is None else (
+                        "Attached" if acc.get("id") in self._connected_ids else "Not attached"
+                    ),
                 ]
-                for acc in accounts
+                for acc in self._accounts
             ],
         )
 

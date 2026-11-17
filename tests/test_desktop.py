@@ -62,6 +62,11 @@ def test_accounts_page_reports_real_nonsecret_states(qt_app):
     )
     assert page.table.rowCount() == 1
     assert page.table.item(0, 4).text() == "needs_assistance"
+    assert page.table.item(0, 5).text() == "Not checked"
+    page.set_connected_ids(["alpha"])
+    assert page.table.item(0, 5).text() == "Attached"
+    page.set_connected_ids([])
+    assert page.table.item(0, 5).text() == "Not attached"
     page.close()
 
 

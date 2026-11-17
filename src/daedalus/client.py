@@ -66,7 +66,7 @@ class DaedalusClient:
         self._http = httpx.Client(
             base_url=server,
             headers={"Authorization": f"Bearer {api_token}"},
-            timeout=8,
+            timeout=httpx.Timeout(connect=8, read=120, write=8, pool=8),
             follow_redirects=False,
             trust_env=False,
             transport=transport,
@@ -123,6 +123,20 @@ class DaedalusClient:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
         return self._read(f"accounts/{account_id}/session")
+
+    def connected_accounts(self) -> list[str]:
+        data = self._read("engine/connected-accounts").get("connected_account_ids")
+        if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+            raise APIConnectionError("Backend returned invalid attached-account list")
+        return data
+
+    def cities(self, account_id: str) -> list[dict[str, object]]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        data = self._read(f"accounts/{account_id}/cities").get("cities")
+        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+            raise APIConnectionError("Backend returned invalid city data")
+        return data
 
     def warehouses(self, account_id: str) -> list[dict[str, object]]:
         if not _ACCOUNT_ID.fullmatch(account_id):

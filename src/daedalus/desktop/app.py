@@ -79,6 +79,8 @@ class APIWorker(QThread):
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "connected_accounts":
+                result = self.client.connected_accounts()
             elif self.action == "capabilities":
                 result = self.client.capabilities()
             elif self.action == "warehouses" and self.account_id:
@@ -125,6 +127,9 @@ class MainWindow(FluentWindow):
 
         self.connection_page.connect_requested.connect(self._connect)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
+        self.accounts_page.check_engine_requested.connect(
+            lambda: self._request("connected_accounts")
+        )
         self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
         self.warehouses_page.load_requested.connect(
             lambda account_id: self._request("warehouses", account_id=account_id)
@@ -192,6 +197,10 @@ class MainWindow(FluentWindow):
         elif action == "accounts":
             self._show_accounts(payload)
             logger.info("Accounts refreshed")
+        elif action == "connected_accounts":
+            assert isinstance(payload, list)
+            self.accounts_page.set_connected_ids(payload)
+            logger.info("IkaBot existing-session status refreshed")
         elif action == "capabilities":
             self._show_capabilities(payload)
             logger.info("Operations inventory refreshed")

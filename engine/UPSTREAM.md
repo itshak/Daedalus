@@ -30,6 +30,12 @@ git merge --no-commit --no-ff refs/remotes/origin/daedalus-pr499
 
 The commit pair precisely defines the source. The engine in Daedalus retains the upstream `ikabot` package namespace and its own tests. The desktop GUI will use a renamed package to prevent imports from shadowing the engine.
 
+## Daedalus-maintained IPC compatibility overlay
+
+Starting with the `connect-existing-ipc` milestone, Daedalus adds a **small tracked patch** to `engine/ikabot/ikabot/helpers/ipc.py` and a synthetic regression test `test_daedalus_existing_ipc.py`. The new operations are `list_sessions`, `list_cities_existing`, and `warehouse_snapshots_existing`. They require an already-authenticated in-memory session and cannot invoke `Session.from_saved`. The warehouse action returns numeric resource fields only, never full game HTML or action tokens. Upstream `start_task` and `list_cities` remain intact for compatibility.
+
+The two public upstream revisions still define the **base** engine import; the Daedalus-specific patch must be applied on top (and will appear explicitly in the `[connect-existing-ipc]` repository commit). This overlay is not attributed to upstream IkaBot, nor presented as a stable upstream release. See [bridge design](../openspec/changes/connect-existing-ipc/design.md).
+
 ## Available, not yet exposed to live account workers
 
 The proposed engine adds:

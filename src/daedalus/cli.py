@@ -43,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default="127.0.0.1", help="Loopback only; use a secure tunnel remotely")
     serve.add_argument("--port", type=_port, default=8765, help="TCP port (default 8765)")
     serve.add_argument("--accounts-file", help="Local TOML metadata configuration")
+    serve.add_argument(
+        "--connect-existing-ipc", action="store_true",
+        help="Read only from an existing authenticated IkaBot IPC worker; never start a login",
+    )
+    serve.add_argument("--ipc-descriptor", help="Owner-only IkaBot IPC discovery file")
 
     args = parser.parse_args(argv)
 
@@ -101,7 +106,14 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from daedalus.api import create_app
 
-            app = create_app(accounts_path=args.accounts_file)
+            if args.ipc_descriptor and not args.connect_existing_ipc:
+                parser.error("--ipc-descriptor requires --connect-existing-ipc")
+            ipc = None
+            if args.connect_existing_ipc:
+                from daedalus.engine_ipc import ExistingIPCClient
+
+                ipc = ExistingIPCClient(args.ipc_descriptor)
+            app = create_app(accounts_path=args.accounts_file, ipc_client=ipc)
         except (AccountConfigError, ValueError, ImportError) as exc:
             parser.error(str(exc))
         try:
