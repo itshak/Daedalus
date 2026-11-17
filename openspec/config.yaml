@@ -1,0 +1,42 @@
+schema: spec-driven
+
+context: |
+  Project: Daedalus, a desktop-first Python automation control center for
+  the upstream IkaBot engine. Public repository, planned GPL-3.0-only
+  project-original code, Python 3.11+, PySide6 native GUI, local/remote
+  multi-account backend. OpenSpec is the source of truth.
+  Public IkaBot engine is MIT licensed; preserve its license/provenance.
+  Port source only after review from existing local projects; never publish
+  tokens, cookies, passwords, saved sessions, browser profiles, logs,
+  account configuration, or server-specific data.
+  Upstream email/password login has not worked reliably in the owner's
+  environment. Support saved sessions and human-assisted Selenium login
+  and CAPTCHA recovery without assuming password-only bot login works.
+  No production game traffic or game logins in public CI.
+
+rules:
+  proposal:
+    - Keep scope narrow; state non-goals and migration safety.
+    - Reference relevant ADRs and explain licensing/provenance.
+  specs:
+    - Use MUST/SHALL requirements with Given/When/Then scenarios.
+    - Describe local and remote behavior for account-facing capabilities.
+    - Include failure, retry, privacy and multi-account isolation behavior.
+  design:
+    - Keep public IkaBot as sole game-operation engine; avoid reimplementing game actions.
+    - Document protocol/API contracts, account ownership and state transitions.
+    - Document offline testing, security and legacy-code migration.
+  tasks:
+    - Each task should be implementable and verifiable in one coding session.
+    - Finish with automated tests, OpenSpec validation, secret scan and build checks.
+
+operations:
+  apply:
+    guidance:
+      - Prefix Git commit titles with the OpenSpec change ID in square brackets.
+      - No real accounts or game networking during CI or initial migrations.
+      - Preserve upstream attribution and do not modify live server sessions.
+      - Run pytest, ruff and OpenSpec validation after code changes.
+  archive:
+    guidance:
+      - Reconcile changed capability specs and record verification outcomes.
