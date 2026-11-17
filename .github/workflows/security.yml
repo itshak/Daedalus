@@ -24,14 +24,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  dependency-review:
-    name: Review dependency changes
+  dependency-audit:
+    name: Audit runtime Python dependencies
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/setup-python@v5
         with:
-          fail-on-severity: high
+          python-version: "3.11"
+      - name: Install the checked-out Daedalus and engine with the vulnerability scanner
+        run: |
+          python -m pip install --upgrade pip 'setuptools>=84.1.0' wheel
+          python -m pip install -e .
+          python -m pip install -e ./engine/ikabot
+          python -m pip install pip-audit
+      - name: Check installed dependency graph for known vulnerabilities
+        run: python -m pip_audit --local --progress-spinner off

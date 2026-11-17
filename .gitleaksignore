@@ -1,0 +1,6 @@
+# Upstream IkaBot 7.7.2 test fixture contains the literal dummy token
+# 0123456789abcdef0123456789abcdef in a unit assertion. This exact
+# finding is not a credential and is preserved byte-for-byte for provenance.
+# Ignore ONLY this commit/path/line/rule fingerprint, not the entire
+# upstream source tree or other occurrences.
+9bae081ff0df8061d1cf2bd39cd72903ed4be411:engine/ikabot/tests/ikabot/web/test_session_expiry.py:generic-api-key:197

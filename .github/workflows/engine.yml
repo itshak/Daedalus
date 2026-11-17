@@ -1,0 +1,39 @@
+name: Vendored IkaBot engine
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine-tests:
+    name: Engine unit tests / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install engine directly from checked-out source
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./engine/ikabot pytest pytest-mock
+      - name: Run upstream unit tests with synthetic fixtures
+        run: python -m pytest -q engine/ikabot/tests/ikabot
+      - name: Confirm bundled engine version
+        run: python -c "from ikabot.config import IKABOT_VERSION; assert IKABOT_VERSION == '7.7.2'"
