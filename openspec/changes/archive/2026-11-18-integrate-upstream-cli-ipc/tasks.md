@@ -13,6 +13,6 @@
 - [x] Run full combined upstream test suite offline.
 
 ## Verification and publication
-- [ ] Run updated Daedalus unit tests, lint and OpenSpec checks.
-- [ ] Push as `itshak` and obtain clean GitHub CI and security scan results.
-- [ ] Review and merge without bypassing required CI.
+- [x] Run updated Daedalus unit tests, lint and OpenSpec checks.
+- [x] Push as `itshak` and obtain clean GitHub CI and security scan results.
+- [x] Review and merge without bypassing required CI.

@@ -9,5 +9,5 @@
 ## CI and verification
 - [x] Add a macOS build workflow with a short-retention artifact.
 - [x] Add synthetic packaging tests that never call PyInstaller by default.
-- [ ] Verify macOS GitHub Actions produces the app and verifies its signature.
-- [ ] Review and merge with all required checks under itshak.
+- [x] Verify macOS GitHub Actions produces the app and verifies its signature.
+- [x] Review and merge with all required checks under itshak.

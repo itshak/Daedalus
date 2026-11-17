@@ -15,6 +15,6 @@
 ## Verification and documentation
 - [x] Record reviewed GUI source provenance and intentionally excluded legacy files.
 - [x] Add headless Qt smoke tests and a dedicated macOS desktop workflow.
-- [ ] Verify desktop dependencies actually install and Qt smoke tests run in CI.
-- [ ] Run all basic tests, linting, OpenSpec and security checks.
-- [ ] Merge only after clean GitHub CI under the itshak identity.
+- [x] Verify desktop dependencies actually install and Qt smoke tests run in CI.
+- [x] Run all basic tests, linting, OpenSpec and security checks.
+- [x] Merge only after clean GitHub CI under the itshak identity.
