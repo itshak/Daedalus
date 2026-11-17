@@ -1,0 +1,18 @@
+# This file is a public SYNTHETIC example. Save personal configuration outside
+# your cloned repository, e.g. ~/.config/daedalus/accounts.toml.
+# NEVER put passwords, Gameforge tokens, browser cookies or email secrets here.
+schema = 1
+
+[[accounts]]
+id = "alpha"
+world = "s301-en"
+player = "ExamplePlayerOne"
+label = "Primary account"
+enabled = true
+
+[[accounts]]
+id = "beta"
+world = "s302-en"
+player = "ExamplePlayerTwo"
+label = "Secondary account"
+enabled = true
