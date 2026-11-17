@@ -17,5 +17,5 @@
 
 ## Verification
 - [x] Run Daedalus tests, OpenSpec validation, Ruff and tracked-file guard.
-- [ ] Review GitHub CI across supported operating systems and Python versions.
-- [ ] Merge only after clean CI; real worker connection is a separate change.
+- [x] Review GitHub CI across supported operating systems and Python versions.
+- [x] Merge only after clean CI; real worker connection is a separate change.

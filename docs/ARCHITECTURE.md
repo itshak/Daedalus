@@ -1,6 +1,6 @@
-# Architecture — design baseline
+# Architecture — target design and current implementation
 
-The product is a single **monorepo**, with distinct installable/runtime components.
+The product is a single **monorepo**, with distinct installable/runtime components. The diagram below represents the **target** architecture, not the current runtime: the desktop client and read-only API exist, but real supervised IkaBot workers, authenticated account handoff and task orchestration are still forthcoming. See [implementation status](PROJECT-STATUS.md).
 
 ```text
 PySide6 desktop (Mac/Windows/Linux)

@@ -17,5 +17,5 @@
 
 ## Verification
 - [x] Run new/old tests, lint, OpenSpec validation and source-security guard locally.
-- [ ] Confirm CI passes on GitHub after pushing.
-- [ ] Review security/provenance before merging.
+- [x] Confirm CI passes on GitHub after pushing.
+- [x] Review security/provenance before merging.

@@ -7,6 +7,7 @@ Build one maintainable Daedalus application: existing public IkaBot operations a
 - Read applicable `openspec/specs/*/spec.md` and `openspec/adr/` before coding.
 - Read and update an active `openspec/changes/<change-id>/` proposal, design, delta specs and tasks for substantive changes.
 - Workflow: explore → propose → apply → verify → archive.
+- On completion, check every verified task, run offline tests and GitHub CI, archive with `openspec archive <change-id> -y`, and ensure the resulting updates are merged into canonical `openspec/specs/`. Keep umbrella proposals active until all their outstanding work is genuinely done.
 - Validate with `openspec validate --all --strict --no-interactive`.
 - Prefix commits implementing a change with `[change-id]`.
 - Use English, normative SHALL/MUST requirements and Given/When/Then scenarios.

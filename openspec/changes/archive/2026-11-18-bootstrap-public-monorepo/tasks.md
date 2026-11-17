@@ -13,5 +13,5 @@
 ## 3. CI and verification
 - [x] Create read-only offline Python test/lint and OpenSpec validation workflows.
 - [x] Create source-package build validation and security checks.
-- [ ] Confirm GitHub-hosted Actions pass on the public repository.
-- [ ] Configure optional repository branch protection and required status checks.
+- [x] Confirm GitHub-hosted Actions pass on the public repository.
+- [x] Configure optional repository branch protection and required status checks.

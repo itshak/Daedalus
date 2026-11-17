@@ -68,7 +68,7 @@ openspec validate --all --strict --no-interactive
 openspec list
 ```
 
-See [AGENTS.md](AGENTS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Design specifications and proposals live in [openspec](openspec/).
+See [AGENTS.md](AGENTS.md), [implementation and OpenSpec status](docs/PROJECT-STATUS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Normative capability requirements live in [openspec/specs](openspec/specs/); completed change records live in [openspec/changes/archive](openspec/changes/archive/).
 
 ## Account-session ownership groundwork
 
@@ -84,7 +84,7 @@ python -m ikabot --help
 
 Actual task execution requires an authenticated IkaBot session and explicit account ownership. It must not be tried against production accounts until the session coordination and backend task adapter are ready. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
 
-See [the precise upstream merge record](engine/UPSTREAM.md) and [the OpenSpec integration change](openspec/changes/integrate-upstream-cli-ipc/proposal.md).
+See [the precise upstream merge record](engine/UPSTREAM.md), [the archived OpenSpec CLI/IPC integration change](openspec/changes/archive/2026-11-18-integrate-upstream-cli-ipc/proposal.md) and [current implementation status](docs/PROJECT-STATUS.md).
 
 ## Repository organization
 
