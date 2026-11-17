@@ -4,3 +4,5 @@
 # Ignore ONLY this commit/path/line/rule fingerprint, not the entire
 # upstream source tree or other occurrences.
 9bae081ff0df8061d1cf2bd39cd72903ed4be411:engine/ikabot/tests/ikabot/web/test_session_expiry.py:generic-api-key:197
+# Same exact upstream test fixture after PR #5 was squash-merged into main.
+ab070fbfa4d153b55564bf434c7bec8794b60754:engine/ikabot/tests/ikabot/web/test_session_expiry.py:generic-api-key:197
