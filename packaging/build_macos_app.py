@@ -55,6 +55,8 @@ def build_command(
         "--hidden-import",
         "daedalus.desktop.pages",
         "--hidden-import",
+        "daedalus.desktop.tasks_page",
+        "--hidden-import",
         "daedalus.desktop.log_page",
         "--hidden-import",
         "daedalus.desktop.theme",

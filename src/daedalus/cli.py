@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Read only from an existing authenticated IkaBot IPC worker; never start a login",
     )
     serve.add_argument("--ipc-descriptor", help="Owner-only IkaBot IPC discovery file")
+    serve.add_argument(
+        "--enable-task-control", action="store_true",
+        help="Allow start/stop of built-in tasks on already-authenticated IkaBot accounts",
+    )
 
     args = parser.parse_args(argv)
 
@@ -113,7 +117,17 @@ def main(argv: list[str] | None = None) -> int:
                 from daedalus.engine_ipc import ExistingIPCClient
 
                 ipc = ExistingIPCClient(args.ipc_descriptor)
-            app = create_app(accounts_path=args.accounts_file, ipc_client=ipc)
+            if args.enable_task_control and not args.connect_existing_ipc:
+                parser.error("--enable-task-control requires --connect-existing-ipc")
+            task_controller = None
+            if args.enable_task_control:
+                from daedalus.engine_ipc import ExistingTaskIPCClient
+
+                task_controller = ExistingTaskIPCClient(args.ipc_descriptor)
+            app = create_app(
+                accounts_path=args.accounts_file, ipc_client=ipc,
+                task_controller=task_controller,
+            )
         except (AccountConfigError, ValueError, ImportError) as exc:
             parser.error(str(exc))
         try:

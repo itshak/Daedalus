@@ -5,6 +5,7 @@
 - [x] Implement versioned local/remote API client with masked in-memory bearer token and protected transport.
 - [ ] Add optional secure persistent connection preferences and reconnect UX.
 - [x] Implement UI filtering and CSV/JSON exports with null distinct from zero, using backend snapshot contract.
-- [ ] Wire the real authenticated engine warehouse snapshot provider.
-- [ ] Add task registry forms and dedicated workflow screens.
+- [x] Wire warehouse snapshots through the opt-in compatible existing-session IPC provider.
+- [x] Add a dedicated Tasks workflow page with a generic JSON configuration editor and managed start/stop controls.
+- [ ] Implement task-specific config forms for native background operations.
 - [x] Test native GUI and .app packaging in macOS CI and validate OpenSpec.

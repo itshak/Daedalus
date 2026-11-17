@@ -1,7 +1,7 @@
 """Native Fluent control center. Adapted from the user's original Mac main window.
 
-Only read-only Daedalus API calls are offered. No Selenium browser, session
-token handoff, IPC task execution or live game worker is started here.
+Read-only dashboards are the default. Explicitly enabled task start/stop
+uses an existing authenticated IkaBot session; no Selenium login is started.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from qfluentwidgets import FluentWindow, InfoBar, InfoBarPosition, NavigationIte
 from daedalus.client import APIConnectionError, DaedalusClient
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
+from daedalus.desktop.tasks_page import TaskControlPage
 
 logger = logging.getLogger("daedalus.desktop")
 
@@ -62,12 +63,14 @@ class APIWorker(QThread):
         action: str,
         *,
         account_id: str | None = None,
+        parameters: dict[str, object] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.client = client
         self.action = action
         self.account_id = account_id
+        self.parameters = parameters or {}
 
     def run(self) -> None:
         try:
@@ -76,6 +79,7 @@ class APIWorker(QThread):
                     "health": self.client.health(),
                     "accounts": self.client.accounts(),
                     "capabilities": self.client.capabilities(),
+                    "task_control": self.client.task_control_status(),
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
@@ -88,10 +92,23 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.warehouses(self.account_id),
                 }
+            elif self.action == "tasks" and self.account_id:
+                result = {
+                    "account_id": self.account_id,
+                    "tasks": self.client.tasks(self.account_id),
+                }
+            elif self.action == "start_task" and self.account_id:
+                result = self.client.start_task(
+                    self.account_id,
+                    self.parameters["task"],
+                    self.parameters["config"],
+                )
+            elif self.action == "stop_task" and self.account_id:
+                result = self.client.stop_task(self.account_id, self.parameters["pid"])
             else:
                 raise ValueError("Unsupported desktop API request")
             self.completed.emit(self.action, result)
-        except (APIConnectionError, ValueError) as exc:
+        except (APIConnectionError, ValueError, TypeError) as exc:
             self.failed.emit(self.action, str(exc))
         except Exception:  # noqa: BLE001 - catch worker faults without exposing private details
             # Never surface arbitrary transport or game-session exceptions to the UI.
@@ -106,16 +123,19 @@ class MainWindow(FluentWindow):
         self.client: DaedalusClient | None = None
         self._pending_client: DaedalusClient | None = None
         self._worker: APIWorker | None = None
+        self._pending_task_refresh: str | None = None
 
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
+        self.tasks_page = TaskControlPage(self)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
 
         self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
         self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
         self.addSubInterface(self.operations_page, FIF.PLAY, "Operations")
+        self.addSubInterface(self.tasks_page, FIF.ROBOT, "Tasks")
         self.addSubInterface(self.log_page, FIF.DOCUMENT, "Log")
         self.addSubInterface(
             self.connection_page, FIF.SETTING, "Connection", NavigationItemPosition.BOTTOM
@@ -131,6 +151,20 @@ class MainWindow(FluentWindow):
             lambda: self._request("connected_accounts")
         )
         self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
+        self.tasks_page.refresh_requested.connect(
+            lambda account_id: self._request("tasks", account_id=account_id)
+        )
+        self.tasks_page.start_requested.connect(
+            lambda account_id, task, config: self._request(
+                "start_task", account_id=account_id,
+                parameters={"task": task, "config": config},
+            )
+        )
+        self.tasks_page.stop_requested.connect(
+            lambda account_id, pid: self._request(
+                "stop_task", account_id=account_id, parameters={"pid": pid},
+            )
+        )
         self.warehouses_page.load_requested.connect(
             lambda account_id: self._request("warehouses", account_id=account_id)
         )
@@ -162,19 +196,26 @@ class MainWindow(FluentWindow):
         self._pending_client = candidate
         self._launch(candidate, "connect")
 
-    def _request(self, action: str, *, account_id: str | None = None) -> None:
+    def _request(
+        self, action: str, *, account_id: str | None = None,
+        parameters: dict[str, object] | None = None,
+    ) -> None:
         if self.client is None:
             self._notice("Not connected", "Connect to a Daedalus backend first.")
             return
         if self._worker is not None:
             self._notice("Request in progress", "Another backend request is still running.")
             return
-        self._launch(self.client, action, account_id=account_id)
+        self._launch(self.client, action, account_id=account_id, parameters=parameters)
 
     def _launch(
-        self, client: DaedalusClient, action: str, *, account_id: str | None = None
+        self, client: DaedalusClient, action: str, *,
+        account_id: str | None = None,
+        parameters: dict[str, object] | None = None,
     ) -> None:
-        worker = APIWorker(client, action, account_id=account_id, parent=self)
+        worker = APIWorker(
+            client, action, account_id=account_id, parameters=parameters, parent=self
+        )
         self._worker = worker
         self.connection_page.connect_button.setEnabled(False)
         worker.completed.connect(self._on_completed)
@@ -193,6 +234,7 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True)
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
+            self.tasks_page.set_enabled(payload["task_control"].get("enabled") is True)
             logger.info("Connected to Daedalus API")
         elif action == "accounts":
             self._show_accounts(payload)
@@ -208,15 +250,25 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.warehouses_page.set_snapshots(payload["account_id"], payload["cities"])
             logger.info("Warehouse snapshot report updated")
+        elif action == "tasks":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_tasks(payload["tasks"])
+            logger.info("Managed task status refreshed")
+        elif action in {"start_task", "stop_task"}:
+            assert isinstance(payload, dict)
+            self._pending_task_refresh = self.tasks_page.selected_account_id()
+            logger.info("Managed task action acknowledged: %s", action)
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
         self.accounts_page.set_accounts(data)
         self.warehouses_page.set_accounts(data)
+        self.tasks_page.set_accounts(data)
 
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
         self.operations_page.set_operations(data["operations"])
+        self.tasks_page.set_operations(data["operations"])
 
     def _on_failed(self, action: str, error: str) -> None:
         if action == "connect" and self._pending_client is not None:
@@ -229,6 +281,10 @@ class MainWindow(FluentWindow):
     def _on_worker_finished(self) -> None:
         self._worker = None
         self.connection_page.connect_button.setEnabled(True)
+        account_id = self._pending_task_refresh
+        self._pending_task_refresh = None
+        if account_id is not None:
+            self._request("tasks", account_id=account_id)
 
     def _notice(self, title: str, message: str) -> None:
         InfoBar.warning(

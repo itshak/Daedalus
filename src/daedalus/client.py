@@ -10,6 +10,7 @@ import ipaddress
 import re
 from typing import Self
 from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -103,6 +104,69 @@ class DaedalusClient:
         if not isinstance(document, dict):
             raise APIConnectionError("Backend returned an unexpected response shape")
         return document
+
+    def _mutate(
+        self, method: str, path: str, *, payload: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        if method not in {"POST", "DELETE"}:
+            raise ValueError("Unsupported HTTP method")
+        try:
+            response = self._http.request(method, "/api/v1/" + path, json=payload)
+        except httpx.RequestError as exc:
+            raise APIConnectionError("Cannot reach the Daedalus task controller") from exc
+        if response.status_code != 200:
+            explanation = {
+                401: "Backend authorization rejected",
+                404: "Requested account or task was not found",
+                409: "Account is disabled",
+                422: "Task request did not pass validation",
+                503: "Task control is disabled or unavailable",
+            }.get(response.status_code, "Task operation failed")
+            raise APIConnectionError(explanation, response.status_code)
+        try:
+            document = response.json()
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid task result") from exc
+        if not isinstance(document, dict):
+            raise APIConnectionError("Backend returned unexpected task result")
+        return document
+
+    def task_control_status(self) -> dict[str, object]:
+        return self._read("task-control")
+
+    def tasks(self, account_id: str) -> list[dict[str, object]]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        values = self._read(f"accounts/{account_id}/tasks").get("tasks")
+        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+            raise APIConnectionError("Backend returned invalid managed tasks")
+        return values
+
+    def start_task(
+        self, account_id: str, task: str, config: dict[str, object],
+        *, request_id: str | None = None,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if not isinstance(task, str) or not task or len(task) > 80:
+            raise ValueError("Invalid task name")
+        if not isinstance(config, dict):
+            raise TypeError("Task config must be JSON object")
+        if request_id is None:
+            request_id = str(uuid4())
+        if UUID(request_id).version != 4:
+            raise ValueError("Task request ID must be UUID4")
+        return self._mutate(
+            "POST", f"accounts/{account_id}/tasks",
+            payload={"task": task, "config": config, "request_id": request_id},
+        )
+
+    def stop_task(self, account_id: str, pid: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("Invalid task PID")
+        return self._mutate("DELETE", f"accounts/{account_id}/tasks/{pid}")
 
     def health(self) -> dict[str, object]:
         return self._read("health")

@@ -36,6 +36,10 @@ Do **not** mark these changes as entirely done, or claim real game automation is
 
 The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is not the same as the task-runner session owner and does not support task start/stop. The full native GUI control and Selenium login/assistance work remain open.
 
+## In-progress task-control milestone
+
+The `enable-existing-session-tasks` change adds opt-in built-in IkaBot task start/list/stop against existing in-memory authenticated accounts. The engine owns each session; the controller does not open a second login. Only tasks launched through this explicit Daedalus path can be stopped through its managed Process handles. The native Tasks page has a generic JSON config editor and requires confirmation for each mutation. The implementation is tested offline, but **should not be considered production-ready until GitHub CI and actual isolated-account testing pass**. Selenium login restoration and distributed session coordination remain separate unfinished changes.
+
 ## Current source of truth
 
 Normative capability requirements live in `openspec/specs/<capability>/spec.md`. Archived change deltas are historical evidence, **not separate competing specifications**. An active OpenSpec proposal describes only the changes that are still planned. The source code, `README.md` and `docs/` must agree with the current implementation.

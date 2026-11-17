@@ -23,6 +23,7 @@ from daedalus.desktop.pages import (
     OperationsPage,
     WarehousesPage,
 )
+from daedalus.desktop.tasks_page import TaskControlPage
 
 
 @pytest.fixture(scope="module")
@@ -40,6 +41,7 @@ def test_full_fluent_navigation_constructs_without_backend(qt_app):
         assert isinstance(window.warehouses_page, WarehousesPage)
         assert isinstance(window.operations_page, OperationsPage)
         assert isinstance(window.connection_page, ConnectionPage)
+        assert isinstance(window.tasks_page, TaskControlPage)
     finally:
         window.close()
 
@@ -113,3 +115,45 @@ def test_warehouse_view_preserves_220k_filter_and_unknown_values(qt_app):
     from PySide6.QtCore import QCoreApplication, QEvent
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     qt_app.processEvents()
+
+
+def test_task_page_requires_backend_enablement_before_actions(qt_app):
+    page = TaskControlPage()
+    try:
+        assert not page.start_button.isEnabled()
+        assert not page.refresh_button.isEnabled()
+        page.set_accounts([
+            {"id": "alpha", "label": "Primary", "world": "s301-en", "player": "Example", "enabled": True},
+            {"id": "disabled", "label": "Disabled", "world": "s302-en", "player": "Other", "enabled": False},
+        ])
+        page.set_operations([
+            {"name": "constructionList", "kind": "background_task"},
+            {"name": "getStatus", "kind": "menu_only"},
+        ])
+        assert page.selected_account_id() == "alpha"
+        assert page.selected_task() == "constructionList"
+        assert page.account_combo.count() == 1
+        assert page.task_combo.count() == 1
+        assert not page.start_button.isEnabled()
+        page.set_enabled(True)
+        assert page.start_button.isEnabled()
+        assert page.refresh_button.isEnabled()
+        captured = []
+        page.refresh_requested.connect(captured.append)
+        page._refresh()
+        assert captured == ["alpha"]
+        page.set_tasks([
+            {"pid": 81001, "task": "constructionList", "status": "running", "started_at": 1}
+        ])
+        assert page.table.rowCount() == 1
+        assert page.stop_button.isEnabled()
+        page.set_tasks([{"pid": 81001, "task": "constructionList", "status": "finished", "started_at": 1}])
+        assert not page.stop_button.isEnabled()
+        page.set_enabled(False)
+        assert not page.start_button.isEnabled()
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()
