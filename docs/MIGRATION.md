@@ -5,9 +5,11 @@
 ## Clean upstream source
 
 - Repository: https://github.com/Ikabot-Collective/ikabot
-- Baseline reviewed: upstream 7.7.2, master revision `3ea1e0e` (2026-11-16).
-- Relevant proposed (not yet master) work: upstream CLI/IPC and JSON task launch in PRs #499, #502 and #510.
-- Bring upstream code in as an explicit tracked import; retain license/provenance; preserve a repeatable upstream merge process.
+- Public engine baseline imported: 7.7.2, master revision `3ea1e0e` (2026-11-16).
+- Local source import path: `engine/ikabot/`, with original MIT license and standalone engine setup/tests.
+- Reproduction procedure and precise SHA: [engine/UPSTREAM.md](../engine/UPSTREAM.md).
+- Relevant proposed (not in imported stable baseline) work: upstream CLI/IPC and JSON task launch in PR #499, with merged changes #502 and #511 associated with its branch.
+- The new `daedalus engine inventory` command reads source AST and makes no account requests.
 
 ## Local migration inputs (never committed wholesale)
 
@@ -23,4 +25,4 @@
 - Ensure all tests use synthetic accounts/fixtures and make no game-network calls.
 - Confirm no second implementation of game actions is introduced.
 
-No game login, existing tmux session, or production task has been changed by this foundation commit.
+No game login, existing tmux session, or production task has been changed by this integration.

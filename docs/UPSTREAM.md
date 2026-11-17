@@ -4,9 +4,11 @@
 
 - Source: https://github.com/Ikabot-Collective/ikabot
 - License: MIT (Copyright (c) 2018 Physics; subsequent contributors retain their rights).
-- No public IkaBot source has been imported at this foundation stage.
-- On import, keep a verbatim copy of its MIT LICENSE in the engine's provenance directory and preserve all required copyright notices.
-- Prefer upstream-compatible changes. Document the upstream commit and merge strategy.
+- Baseline imported at `engine/ikabot/`: public version 7.7.2, commit `3ea1e0eebfb2e52b5f53ea8b5051df2a9a887579`.
+- Verbatim upstream MIT license: [engine/ikabot/LICENSE](../engine/ikabot/LICENSE).
+- Source import inventory and reproducible archive command: [engine/UPSTREAM.md](../engine/UPSTREAM.md).
+- No production server credentials or local account configuration imported.
+- Track future upstream updates in dedicated OpenSpec changes and preserve compatibility when possible.
 
 ## Private source migration
 
