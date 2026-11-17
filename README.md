@@ -1,6 +1,6 @@
 # Daedalus for Ikariam
 
-**Status: read-only controller plus experimental upstream CLI/IPC engine.** Daedalus provides a credential-free local multi-account configuration format, an authenticated read-only API, and an offline task registry. The vendored engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499), including #502 and #511. This engine code is **not yet an official stable upstream release**. Daedalus does **not yet** connect authenticated workers, execute game tasks through the controller, or include the migrated desktop UI.
+**Status: native desktop preview with read-only backend.** Daedalus now includes an adapted PySide6/Fluent desktop shell with Accounts, Warehouses, Operations, Log and Connection pages, a credential-free local multi-account configuration format, an authenticated read-only API, and a task registry. The engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The GUI cannot yet start authenticated game workers, launch tasks or complete browser-assisted login.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -30,6 +30,19 @@ daedalus accounts list --config docs/examples/accounts.toml
 ```
 
 The `engine inventory` command reads public engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots, execute tasks or make game requests**. Daedalus now contains a reviewed upstream CLI/IPC proposal; it is **not connected to live account workers**, and it does not make every individual task automatically safe or serializable.
+
+## Native Mac GUI preview
+
+The current desktop reuses the Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging patterns from our existing Mac GUI, while replacing direct Selenium data fetching with the Daedalus read-only backend API. It is a **partial migration**, not a release-ready replacement for the existing scraper or bot control application.
+
+```bash
+python -m pip install -e ".[desktop]"
+daedalus-desktop
+```
+
+Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, and **Warehouses**. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports; it displays no resource data until a real authenticated snapshot provider is connected. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
+
+For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
 ## Read-only local API
 
@@ -73,10 +86,10 @@ See [the precise upstream merge record](engine/UPSTREAM.md) and [the OpenSpec in
 
 ## Repository organization
 
-- `src/daedalus/`: distinct Python application package, offline CLI and authenticated read-only API
+- `src/daedalus/`: application package, local/remote HTTP client, reporting utilities and authenticated read-only API
 - `engine/ikabot/`: public MIT-licensed IkaBot 7.7.2 with proposed, unreleased PR #499 CLI/IPC code
 - `server/`: future supervised account workers, task dispatcher, scheduler and policies; not implemented yet
-- `desktop/`: future audited PySide6 GUI import; not implemented yet
+- `src/daedalus/desktop/`: reviewed Fluent desktop preview; task launch and login assistance pending
 - `openspec/`: normative specifications, architecture decisions and change proposals
 
 ## License and provenance

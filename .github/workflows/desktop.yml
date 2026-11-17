@@ -1,0 +1,37 @@
+name: Native desktop smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-desktop:
+    name: macOS Fluent UI / Python 3.11
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: cocoa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install native UI from current checkout
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,desktop]"
+      - name: Verify headless GUI layouts and nonsecret dashboard behavior
+        run: python -m pytest -q tests/test_desktop.py
+      - name: Confirm desktop CLI is installed
+        run: python -c "from daedalus.desktop import main; assert callable(main)"
