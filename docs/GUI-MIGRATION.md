@@ -20,7 +20,8 @@ Code has been adapted into `src/daedalus/desktop/`, with an independent, read-on
 The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 - **Accounts:** protected metadata and backend-reported session status
 - **Warehouses:** per-account unsecured counts, 220K filter, copy/save CSV and JSON
-- **Operations:** all discovered engine tasks/menu operations; **read-only, no start button yet**
+- **Operations:** all discovered engine task/menu operations, read-only inventory
+- **Tasks:** opt-in engine background-task selection, JSON configuration, explicit start/stop and manual reconciliation
 - **Log:** local bounded UI diagnostics
 - **Connection:** local or HTTPS/SSH-tunneled API URL and a masked bearer-token field
 
@@ -32,7 +33,7 @@ No game login or Selenium browser is launched by the GUI. Warehouse data can now
 
 ## UI parity still to complete
 
-This is a **foundation**, not a complete port. The existing multi-account edit dialogs, island-grouped text exports, browser login assistant, task-specific editors, start/stop/pause flows, notifications, persistent GUI settings and native .app packaging remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
+This is a **foundation**, not a complete port. The existing multi-account edit dialogs, island-grouped text exports, browser login assistant, task-specific generated editors, pause/resume policies, notifications and persistent GUI settings remain future changes. Start/list/stop is now available only via the opt-in controlled-task API, and native .app packaging exists as a CI preview. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
 
 ## License
 

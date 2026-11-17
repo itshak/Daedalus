@@ -22,6 +22,10 @@ The completed archive folders are dated `2026-11-18`. Their checkboxes reflect *
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
+## Controlled task execution (current implementation milestone)
+
+The `controlled-task-dispatch` change adds explicitly enabled task start/list/stop through existing authenticated IkaBot IPC, a world/player lease, a private durable idempotency ledger, a native Tasks page with confirmations, and an HTTP API requiring bearer authorization. Only engine-managed task IDs can be stopped; arbitrary OS PIDs cannot. The feature is currently being verified on its feature branch and has **not** been deployed to live game accounts. The unfinished browser-assisted authentication and production supervision changes remain active.
+
 ## Still active
 
 The following umbrella changes have unfinished tasks and were deliberately **not archived**:
@@ -34,7 +38,7 @@ Do **not** mark these changes as entirely done, or claim real game automation is
 
 ## Current integration change
 
-The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is not the same as the task-runner session owner and does not support task start/stop. The full native GUI control and Selenium login/assistance work remain open.
+The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. That archived bridge remains read-only by default. The separate opt-in controlled-task change adds managed task start/list/stop and explicit reconciliation, while Selenium login/assistance and production supervision remain open.
 
 ## Current source of truth
 
@@ -55,4 +59,4 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 ## Release and production status
 
-The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend currently does **not** start engine workers, provide secure Selenium session handoff, or support task dispatch, and no real production accounts have been migrated.
+The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The opt-in task controller can dispatch tasks **only to existing authenticated engine sessions**; it does not yet authenticate new workers, provide secure Selenium session handoff, supervise production sessions or automatically reconcile ambiguous in-game state. No real production accounts have been migrated.

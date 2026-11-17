@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import stat
 from datetime import UTC, datetime
@@ -112,14 +113,21 @@ class ExistingIPCClient:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
             raise ValueError("Account is disabled")
-        port, secret = self._descriptor()
-        payload: dict[str, str] = {"action": action, "authkey": secret}
+        payload: dict[str, object] = {"action": action}
         if account is not None:
             payload.update(world=account.world, player=account.player)
-        wire = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        return self._exchange(payload)
+
+    def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0) -> dict[str, Any]:
+        """Internal authenticated transport; public read bridge remains allowlisted."""
+        port, secret = self._descriptor()
+        wire_data = {**payload, "authkey": secret}
+        wire = (json.dumps(wire_data, separators=(",", ":")) + "\n").encode("utf-8")
+        if len(wire) > 32768:
+            raise ValueError("IPC request exceeds safe size limit")
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=2.0) as conn:
-                conn.settimeout(8.0)
+                conn.settimeout(read_timeout)
                 conn.sendall(wire)
                 data = bytearray()
                 while len(data) <= _MAX_REPLY_BYTES:
@@ -246,3 +254,73 @@ class ExistingIPCClient:
                 resources=WarehouseResources(unsecured=values, capacity=capacity),
             ))
         return snapshots
+
+
+class ControlledIPCClient(ExistingIPCClient):
+    """Opt-in task transport; never exposed through the parent read-only API."""
+
+    @staticmethod
+    def _identity(account: Account) -> dict[str, str]:
+        if not account.enabled:
+            raise ValueError("Account is disabled")
+        return {"world": account.world, "player": account.player}
+
+    def start_managed_task(
+        self, account: Account, task: str, config: dict[str, object]
+    ) -> dict[str, object]:
+        if not isinstance(task, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", task):
+            raise ValueError("Invalid engine task name")
+        if not isinstance(config, dict):
+            raise TypeError("Task configuration must be a JSON object")
+        response = self._exchange(
+            {"action": "start_task_existing", **self._identity(account),
+             "task": task, "config": config},
+            read_timeout=120.0,
+        )
+        task_id, pid = response.get("task_id"), response.get("pid")
+        if (
+            not isinstance(task_id, str)
+            or not re.fullmatch(r"[0-9a-f]{24}", task_id)
+            or type(pid) is not int or pid <= 0
+            or str(response.get("world", "")).casefold() != account.world.casefold()
+            or str(response.get("username", "")).casefold() != account.player.casefold()
+        ):
+            raise EngineIPCUnavailable("Engine task receipt is invalid")
+        return {"task_id": task_id, "pid": pid, "task": task, "status": "running"}
+
+    def list_managed_tasks(self, account: Account) -> list[dict[str, object]]:
+        response = self._exchange({"action": "list_tasks_existing", **self._identity(account)})
+        if (
+            str(response.get("world", "")).casefold() != account.world.casefold()
+            or str(response.get("player", "")).casefold() != account.player.casefold()
+        ):
+            raise EngineIPCUnavailable("Engine task list belongs to another account")
+        rows = response.get("tasks")
+        if not isinstance(rows, list) or len(rows) > 256:
+            raise EngineIPCUnavailable("Invalid engine task list")
+        cleaned = []
+        for item in rows:
+            if not isinstance(item, dict):
+                raise EngineIPCUnavailable("Invalid engine task entry")
+            task_id, task, status = item.get("task_id"), item.get("task"), item.get("status")
+            if (
+                not isinstance(task_id, str) or not re.fullmatch(r"[0-9a-f]{24}", task_id)
+                or not isinstance(task, str) or not isinstance(status, str)
+                or status not in {"running", "finished", "stopping", "stopped"}
+            ):
+                raise EngineIPCUnavailable("Invalid engine task state")
+            cleaned.append({"task_id": task_id, "task": task, "status": status,
+                            "pid": item.get("pid"), "started_at": item.get("started_at")})
+        return cleaned
+
+    def stop_managed_task(self, account: Account, task_id: str) -> dict[str, object]:
+        if not isinstance(task_id, str) or not re.fullmatch(r"[0-9a-f]{24}", task_id):
+            raise ValueError("Invalid managed task ID")
+        response = self._exchange({"action": "stop_task_existing",
+                                   **self._identity(account), "task_id": task_id},
+                                  read_timeout=10.0)
+        if response.get("task_id") != task_id or response.get("task_status") not in {
+            "running", "stopping", "stopped", "finished"
+        }:
+            raise EngineIPCUnavailable("Invalid engine stop receipt")
+        return {"task_id": task_id, "status": response["task_status"]}

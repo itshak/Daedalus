@@ -1,6 +1,6 @@
 # Daedalus for Ikariam
 
-**Status: native desktop preview with read-only backend.** Daedalus now includes an adapted PySide6/Fluent desktop shell with Accounts, Warehouses, Operations, Log and Connection pages, a credential-free local multi-account configuration format, an authenticated read-only API, and a task registry. The engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The GUI cannot yet start authenticated game workers, launch tasks or complete browser-assisted login.
+**Status: native desktop preview with opt-in controlled engine task execution.** Daedalus now includes an adapted PySide6/Fluent desktop shell with Accounts, Warehouses, Operations, Log and Connection pages, a credential-free local multi-account configuration format, an authenticated read-only API, and a task registry. The engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The GUI can start/list/stop Daedalus-managed tasks **only after the backend operator explicitly enables task control and a compatible existing IkaBot session is already authenticated**. It cannot yet log in, complete browser-assisted authentication, or migrate live production workers.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -45,6 +45,12 @@ Open **Connection**, enter the backend URL and the bearer token from the local b
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
 **Mac .app preview:** On a Mac, install `.[desktop,macos-build]` and run `python packaging/build_macos_app.py --output-dir dist --adhoc-sign` to create `dist/Daedalus.app` without installing it. The CI build uploads an ad-hoc signed preview archive; it is **not notarized**. Details: [macOS packaging](docs/MACOS-BUILD.md).
+
+## Optional engine task control
+
+A fully separate, **opt-in** task controller is available for compatible already-authenticated IkaBot sessions. Start the backend with **both** `--connect-existing-ipc` and `--enable-task-control` on the engine host; it remains bound to loopback. The native **Tasks** view then offers task selection, JSON parameter editing, explicit authorization/confirmation, start/list/stop, and manual reconciliation of uncertain launches. A private SQLite request ledger prevents automatic replay across backend restarts; no task arguments or credentials are stored. Without the opt-in flag all game-task mutation endpoints return HTTP 503.
+
+See [task-control setup, safety and API](docs/TASK-CONTROL.md). The existing game engine must already hold the correct logged-in world/player session. **Do not test by restarting or upgrading your current production bots.** Automated CI never contacts Gameforge.
 
 ## Read-only local API
 

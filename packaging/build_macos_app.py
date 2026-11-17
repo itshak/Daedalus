@@ -53,6 +53,8 @@ def build_command(
         "--hidden-import",
         "daedalus.desktop.app",
         "--hidden-import",
+        "daedalus.desktop.task_page",
+        "--hidden-import",
         "daedalus.desktop.pages",
         "--hidden-import",
         "daedalus.desktop.log_page",

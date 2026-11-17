@@ -11,14 +11,20 @@ import os
 import secrets
 from collections.abc import Callable
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 
 from daedalus import __version__
-from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
+from daedalus.account_sessions import (
+    AccountSessionCoordinator,
+    SessionBusyError,
+    SessionPhase,
+)
 from daedalus.accounts import Account, load_accounts
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
+from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
 from daedalus.warehouse import CityWarehouseSnapshot
 
 SnapshotProvider = Callable[[str], list[CityWarehouseSnapshot]]
@@ -31,6 +37,7 @@ def create_app(
     snapshot_provider: SnapshotProvider | None = None,
     session_coordinator: AccountSessionCoordinator | None = None,
     ipc_client: ExistingIPCClient | None = None,
+    task_controller: TaskController | None = None,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
@@ -67,7 +74,7 @@ def create_app(
         return {
             "service": "daedalus",
             "version": __version__,
-            "mode": "read_only",
+            "mode": "task_control_opt_in" if task_controller is not None else "read_only",
             "authenticated_workers": sum(
                 owner.status(account.id) == SessionPhase.AUTHENTICATED.value
                 for account in configured_accounts
@@ -94,7 +101,7 @@ def create_app(
         operations = inspect_engine()
         return {
             "operations": [item.to_dict() for item in operations],
-            "structured_engine_dispatch": False,
+            "structured_engine_dispatch": task_controller is not None,
         }
 
     @app.get("/api/v1/engine/connected-accounts", dependencies=[Depends(authorized)])
@@ -130,6 +137,69 @@ def create_app(
         except (EngineIPCUnavailable, ValueError) as exc:
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
+
+    def require_task_controller(account_id: str) -> TaskController:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if task_controller is None:
+            raise HTTPException(status_code=503, detail="Task dispatch is not enabled")
+        return task_controller
+
+    @app.get("/api/v1/accounts/{account_id}/tasks", dependencies=[Depends(authorized)])
+    def list_account_tasks(account_id: str) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.list_tasks(account_id)
+        except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Existing task owner unavailable") from exc
+
+    @app.post("/api/v1/accounts/{account_id}/tasks", dependencies=[Depends(authorized)])
+    def start_account_task(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            confirmed = payload.get("confirmed") is True
+            return controller.start(
+                account_id, payload.get("task"), payload.get("config"),
+                payload.get("request_id"), confirmed=confirmed,
+            )
+        except TaskConflict as exc:
+            raise HTTPException(status_code=409, detail="Conflicting task request ID") from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Existing authenticated task worker unavailable") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/{task_id}/stop",
+        dependencies=[Depends(authorized)],
+    )
+    def stop_account_task(account_id: str, task_id: str) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.stop(account_id, task_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Managed engine task unavailable") from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/requests/{request_id}/acknowledge",
+        dependencies=[Depends(authorized)],
+    )
+    def acknowledge_task_request(
+        account_id: str, request_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.acknowledge_uncertain_request(
+                account_id, request_id, confirmed=payload.get("confirmed") is True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/v1/warehouses/{account_id}", dependencies=[Depends(authorized)])
     def warehouses(account_id: str) -> dict[str, object]:

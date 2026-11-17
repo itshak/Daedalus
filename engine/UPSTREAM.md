@@ -34,7 +34,13 @@ The commit pair precisely defines the source. The engine in Daedalus retains the
 
 Starting with the `connect-existing-ipc` milestone, Daedalus adds a **small tracked patch** to `engine/ikabot/ikabot/helpers/ipc.py` and a synthetic regression test `test_daedalus_existing_ipc.py`. The new operations are `list_sessions`, `list_cities_existing`, and `warehouse_snapshots_existing`. They require an already-authenticated in-memory session and cannot invoke `Session.from_saved`. The warehouse action returns numeric resource fields only, never full game HTML or action tokens. Upstream `start_task` and `list_cities` remain intact for compatibility.
 
-The two public upstream revisions still define the **base** engine import; the Daedalus-specific patch must be applied on top (and will appear explicitly in the `[connect-existing-ipc]` repository commit). This overlay is not attributed to upstream IkaBot, nor presented as a stable upstream release. See [bridge design](../openspec/changes/connect-existing-ipc/design.md).
+The two public upstream revisions still define the **base** engine import; the Daedalus-specific patch must be applied on top (and will appear explicitly in the `[connect-existing-ipc]` repository commit). This overlay is not attributed to upstream IkaBot, nor presented as a stable upstream release. See [archived bridge design](../openspec/changes/archive/2026-11-18-connect-existing-ipc/design.md).
+
+## Explicit managed-task overlay
+
+The separate `controlled-task-dispatch` milestone extends the Daedalus-only patch with `start_task_existing`, `list_tasks_existing` and `stop_task_existing`. These actions use only a matched in-memory game session, retain task child-process handles under opaque task IDs and refuse to terminate unknown PIDs or another account's task. The default upstream `start_task` and `list_cities` actions are preserved. No part of this overlay is attributed to the upstream maintainers as an accepted release.
+
+These additions are only available to the `ControlledIPCClient` and opt-in task controller. The `ExistingIPCClient` remains explicitly read-only. See [task-control design](../openspec/changes/controlled-task-dispatch/design.md).
 
 ## Available, not yet exposed to live account workers
 
@@ -45,7 +51,7 @@ The proposed engine adds:
 - Local IPC server with loopback socket, authentication key and 0600-protected discovery file
 - Task configuration viewing/saving/relaunch and preparation hooks in multiple native modules
 
-Daedalus does **not** expose this privileged IPC server directly over its HTTP API. Task validation, account ownership, idempotent execution, status reporting and stop/pause capability are separate integrations. The existing CLI may create authenticated sessions; run it only after explicit account provisioning, never from public CI.
+Daedalus does **not** expose the raw privileged IPC server over HTTP. Its authenticated, opt-in task controller validates account ownership and request IDs; automatic restart reconciliation, task-specific forms and production-grade supervision remain separate integrations. The existing CLI may create authenticated sessions; run it only after explicit account provisioning, never from public CI.
 
 ## Verification
 

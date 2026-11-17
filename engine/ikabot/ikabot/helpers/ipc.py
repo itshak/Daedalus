@@ -459,6 +459,7 @@ class IPCServer:
         self._active_requests = 0
         self._running = False
         self._sessions = [default_session] if default_session is not None else []
+        self._daedalus_tasks = {}  # only children started by existing-session IPC
         self._thread = None
 
     @property
@@ -656,6 +657,12 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
+                if action == "start_task_existing":
+                    return self._start_task(request, existing_only=True)
+                if action == "list_tasks_existing":
+                    return self._list_existing_tasks(request)
+                if action == "stop_task_existing":
+                    return self._stop_existing_task(request)
                 return {"status": "error", "error": f"Unknown IPC action: {action!r}"}
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
@@ -756,7 +763,50 @@ class IPCServer:
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "cities": results}
 
-    def _start_task(self, request):
+    def _task_entry(self, request):
+        world = request.get("world")
+        player = request.get("player")
+        if not isinstance(world, str) or not world.strip():
+            raise ValueError("Task management requires world")
+        if not isinstance(player, str) or not player.strip():
+            raise ValueError("Task management requires player")
+        return world.casefold(), player.casefold()
+
+    def _list_existing_tasks(self, request):
+        world, player = self._task_entry(request)
+        rows = []
+        for task_id, entry in self._daedalus_tasks.items():
+            if (entry["world"].casefold(), entry["player"].casefold()) != (world, player):
+                continue
+            proc = entry["process"]
+            if entry["status"] == "running" and not proc.is_alive():
+                entry["status"] = "finished"
+            rows.append({
+                "task_id": task_id, "task": entry["task"], "pid": entry["pid"],
+                "status": entry["status"], "started_at": entry["started_at"],
+            })
+        return {"status": "ok", "tasks": rows, "world": request["world"],
+                "player": request["player"]}
+
+    def _stop_existing_task(self, request):
+        world, player = self._task_entry(request)
+        task_id = request.get("task_id")
+        if not isinstance(task_id, str) or len(task_id) != 24:
+            raise ValueError("A valid managed task ID is required")
+        entry = self._daedalus_tasks.get(task_id)
+        if entry is None or (entry["world"].casefold(), entry["player"].casefold()) != (world, player):
+            raise ValueError("Task is not managed for this account")
+        proc = entry["process"]
+        if entry["status"] in ("finished", "stopped") or not proc.is_alive():
+            entry["status"] = "finished" if entry["status"] != "stopped" else "stopped"
+        else:
+            proc.terminate()
+            proc.join(timeout=2.0)
+            entry["status"] = "stopping" if proc.is_alive() else "stopped"
+        return {"status": "ok", "task_id": task_id, "task": entry["task"],
+                "pid": entry["pid"], "task_status": entry["status"]}
+
+    def _start_task(self, request, existing_only=False):
         task_name = request.get("task")
         config_dict = request.get("config") or {}
         email = request.get("email")
@@ -766,7 +816,11 @@ class IPCServer:
 
         canonical_name, task_func = _resolve_task(task_name)
         clean_config = _validate_task_config(canonical_name, task_func, config_dict)
-        session = self._get_or_create_session(email, world, server, player)
+        session = self._existing_session(request) if existing_only else self._get_or_create_session(
+            email, world, server, player
+        )
+        if existing_only and len(self._daedalus_tasks) >= 256:
+            raise ValueError("Managed task registry has reached its safety limit")
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log
@@ -797,15 +851,23 @@ class IPCServer:
         }
         updateProcessList(session, programprocesslist=[entry])
 
-        return {
-            "status": "ok",
-            "pid": proc.pid,
-            "task": canonical_name,
-            "email": session.mail,
+        response = {
+            "status": "ok", "pid": proc.pid, "task": canonical_name,
             "world": f"s{session.mundo}-{session.servidor}",
-            "username": session.username,
-            "host_pid": os.getpid(),
+            "username": session.username, "host_pid": os.getpid(),
         }
+        if existing_only:
+            task_id = secrets.token_hex(12)
+            self._daedalus_tasks[task_id] = {
+                "process": proc, "pid": proc.pid, "task": canonical_name,
+                "world": response["world"], "player": session.username,
+                "status": "running", "started_at": time.time(),
+            }
+            response["task_id"] = task_id
+        else:
+            # Keep the original upstream CLI response intact.
+            response["email"] = session.mail
+        return response
 
 
 def send_ipc_request(request, connect_timeout=1.5, read_timeout=120.0):

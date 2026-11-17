@@ -84,6 +84,56 @@ class DaedalusClient:
     def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         self.close()
 
+    def _write(self, path: str, payload: dict[str, object]) -> dict[str, object]:
+        try:
+            response = self._http.post("/api/v1/" + path, json=payload)
+        except httpx.RequestError as exc:
+            raise APIConnectionError("Cannot connect to Daedalus backend") from exc
+        if response.status_code != 200:
+            raise APIConnectionError("Backend task request was rejected", response.status_code)
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid task JSON") from exc
+        if not isinstance(data, dict):
+            raise APIConnectionError("Backend returned invalid task receipt")
+        return data
+
+    def start_task(
+        self, account_id: str, task: str, config: dict[str, object],
+        request_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        return self._write(f"accounts/{account_id}/tasks", {
+            "task": task, "config": config, "request_id": request_id,
+            "confirmed": confirmed,
+        })
+
+    def tasks(self, account_id: str) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        return self._read(f"accounts/{account_id}/tasks")
+
+    def stop_task(self, account_id: str, task_id: str) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if not re.fullmatch(r"[0-9a-f]{24}", task_id):
+            raise ValueError("Invalid managed task ID")
+        return self._write(f"accounts/{account_id}/tasks/{task_id}/stop", {})
+
+    def acknowledge_task(
+        self, account_id: str, request_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if not re.fullmatch(r"[0-9a-f-]{36}", request_id):
+            raise ValueError("Invalid task request ID")
+        return self._write(
+            f"accounts/{account_id}/tasks/requests/{request_id}/acknowledge",
+            {"confirmed": confirmed},
+        )
+
     def _read(self, path: str) -> dict[str, object]:
         try:
             response = self._http.get("/api/v1/" + path)
