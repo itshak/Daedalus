@@ -14,5 +14,5 @@
 ## Verification
 - [x] Add synthetic socket, engine session and Qt/API integration tests.
 - [x] Complete full local offline tests, lint, OpenSpec and source-security guard.
-- [ ] Confirm GitHub CI and reviewer checks are green.
-- [ ] Merge through itshak, archive completed OpenSpec change and sync documentation/specs.
+- [x] Confirm GitHub CI and reviewer checks are green.
+- [x] Merge through itshak, archive completed OpenSpec change and sync documentation/specs.
