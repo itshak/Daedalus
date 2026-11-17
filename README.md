@@ -44,6 +44,8 @@ Open **Connection**, enter the backend URL and the bearer token from the local b
 
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
+**Mac .app preview:** On a Mac, install `.[desktop,macos-build]` and run `python packaging/build_macos_app.py --output-dir dist --adhoc-sign` to create `dist/Daedalus.app` without installing it. The CI build uploads an ad-hoc signed preview archive; it is **not notarized**. Details: [macOS packaging](docs/MACOS-BUILD.md).
+
 ## Read-only local API
 
 The initial controller implements metadata and capability reporting, not game automation. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
