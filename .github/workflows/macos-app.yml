@@ -1,0 +1,53 @@
+name: Native macOS app preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-app-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build unsigned-preview Daedalus.app
+    runs-on: macos-latest
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: cocoa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install source and Mac builder
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[desktop,macos-build]"
+      - name: Build and ad-hoc sign local app
+        run: python packaging/build_macos_app.py --output-dir dist --adhoc-sign
+      - name: Verify app identity and absence of private runtime files
+        run: |
+          test -f dist/Daedalus.app/Contents/MacOS/Daedalus
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' dist/Daedalus.app/Contents/Info.plist | grep -Fx io.github.itshak.daedalus
+          codesign --verify --deep --strict --verbose=2 dist/Daedalus.app
+          if find dist/Daedalus.app -type f \( -name 'tokens.json' -o -name 'accounts.toml' -o -name '*.env' -o -name 'cookies.json' \) | grep .; then
+            echo "Unexpected private runtime/configuration path in app" >&2
+            exit 1
+          fi
+      - name: Archive reproducible preview
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Daedalus.app dist/Daedalus-macos-preview.zip
+      - name: Upload CI preview, not a public release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daedalus-macos-app-preview
+          path: dist/Daedalus-macos-preview.zip
+          if-no-files-found: error
+          retention-days: 7
