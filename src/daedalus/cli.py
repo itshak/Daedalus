@@ -7,7 +7,11 @@ import json
 
 from daedalus import __version__
 from daedalus.accounts import AccountConfigError, load_accounts
-from daedalus.engine_registry import EngineNotFoundError, inspect_engine
+from daedalus.engine_registry import (
+    EngineNotFoundError,
+    inspect_engine,
+    supports_structured_cli,
+)
 
 
 def _port(text: str) -> int:
@@ -46,9 +50,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             count = len(inspect_engine())
             available = True
+            cli_available = supports_structured_cli()
         except (EngineNotFoundError, OSError, SyntaxError):
             count = 0
             available = False
+            cli_available = False
         print(
             json.dumps(
                 {
@@ -57,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                     "stage": "read-only-controller",
                     "engine_source_available": available,
                     "engine_capabilities_found": count,
+                    "engine_cli_available": cli_available,
                     "engine_integrated": False,
                     "server_implemented": True,
                     "server_mode": "read_only",
@@ -75,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "source": "public-ikabot",
-                    "structured_cli_available": False,
+                    "structured_cli_available": supports_structured_cli(args.source),
                     "capabilities": [item.to_dict() for item in capabilities],
                 },
                 ensure_ascii=False,

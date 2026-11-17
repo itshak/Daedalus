@@ -106,6 +106,26 @@ def _native_tasks(function_path: Path) -> dict[str, tuple[str, tuple[str, ...]]]
     return tasks
 
 
+def supports_structured_cli(source: str | Path | None = None) -> bool:
+    """Check whether the engine contains the *proposed* JSON CLI/IPC entry points.
+
+    The backend must independently validate each task before exposing it as an
+    executable operation. Presence of IPC support is not permission to dispatch.
+    """
+    root = locate_engine_source(source)
+    ipc_file = root / "helpers" / "ipc.py"
+    if not ipc_file.is_file():
+        return False
+    tree = _parse(ipc_file)
+    declared_functions = {
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    declared_classes = {
+        node.name for node in tree.body if isinstance(node, ast.ClassDef)
+    }
+    return {"run_cli_task", "_validate_task_config"} <= declared_functions and "IPCServer" in declared_classes
+
+
 def inspect_engine(source: str | Path | None = None) -> list[EngineCapability]:
     """Produce a deterministic, honest menu/task inventory from source code."""
     root = locate_engine_source(source)
@@ -123,8 +143,8 @@ def inspect_engine(source: str | Path | None = None) -> list[EngineCapability]:
                 module=task[0] if task else imports.get(name, "unknown"),
                 menu_codes=tuple(sorted(menu.get(name, []))),
                 parameters=task[1] if task else (),
-                # Public stable IkaBot 7.7.2 only supports legacy predetermined
-                # input. An explicit JSON API is proposed but not merged.
+                # Individual tasks remain unvalidated for Daedalus dispatch,
+                # even though the candidate engine has a JSON CLI launcher.
                 structured_cli=False,
             )
         )

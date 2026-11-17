@@ -24,6 +24,7 @@ def test_doctor_is_offline_and_honest(capsys):
     assert result["server_mode"] == "read_only"
     assert result["engine_source_available"] is True
     assert result["engine_capabilities_found"] >= 30
+    assert result["engine_cli_available"] is True
 
 
 def test_help(capsys):
@@ -35,7 +36,7 @@ def test_engine_inventory_json_is_offline(capsys):
     assert main(["engine", "inventory"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["source"] == "public-ikabot"
-    assert data["structured_cli_available"] is False
+    assert data["structured_cli_available"] is True
     capabilities = {item["name"]: item for item in data["capabilities"]}
     assert capabilities["getStatus"]["kind"] == "interactive_menu"
     assert capabilities["getStatus"]["menu_codes"] == [4]
