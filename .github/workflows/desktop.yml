@@ -19,7 +19,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     env:
-      QT_QPA_PLATFORM: offscreen
+      QT_QPA_PLATFORM: cocoa
     steps:
       - uses: actions/checkout@v4
         with:
