@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from daedalus import __version__
+from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
 from daedalus.accounts import Account, load_accounts
 from daedalus.engine_registry import inspect_engine
 from daedalus.warehouse import CityWarehouseSnapshot
@@ -27,6 +28,7 @@ def create_app(
     accounts_path: str | Path | None = None,
     api_token: str | None = None,
     snapshot_provider: SnapshotProvider | None = None,
+    session_coordinator: AccountSessionCoordinator | None = None,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
@@ -34,6 +36,10 @@ def create_app(
         raise ValueError("DAEDALUS_API_TOKEN must be a secret of at least 32 characters")
     configured_accounts: list[Account] = load_accounts(accounts_path)
     account_by_id = {account.id: account for account in configured_accounts}
+    owner = session_coordinator or AccountSessionCoordinator(configured_accounts)
+    if not owner.matches_accounts(configured_accounts):
+        raise ValueError("Session coordinator and configuration must contain the same accounts")
+    # Account workers may use this in-process coordinator later; startup never acquires a lease.
     app = FastAPI(
         title="Daedalus Read-only API",
         version=__version__,
@@ -60,12 +66,26 @@ def create_app(
             "service": "daedalus",
             "version": __version__,
             "mode": "read_only",
-            "authenticated_workers": 0,
+            "authenticated_workers": sum(
+                owner.status(account.id) == SessionPhase.AUTHENTICATED.value
+                for account in configured_accounts
+            ),
         }
 
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:
-        return {"accounts": [account.to_dict() for account in configured_accounts]}
+        entries = []
+        for account in configured_accounts:
+            entry = account.to_dict()
+            entry["session_status"] = owner.status(account.id)
+            entries.append(entry)
+        return {"accounts": entries}
+
+    @app.get("/api/v1/accounts/{account_id}/session", dependencies=[Depends(authorized)])
+    def account_session(account_id: str) -> dict[str, str]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return {"account_id": account_id, "session_status": owner.status(account_id)}
 
     @app.get("/api/v1/capabilities", dependencies=[Depends(authorized)])
     def capabilities() -> dict[str, object]:

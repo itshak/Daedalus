@@ -114,3 +114,61 @@ def test_snapshot_provider_errors_are_redacted(account_file):
     )
     assert result.status_code == 503
     assert "private-credential" not in result.text
+
+
+def test_coordinator_state_is_readable_but_cannot_trigger_login(account_file, tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
+    from daedalus.accounts import load_accounts
+
+    manager = AccountSessionCoordinator(load_accounts(account_file), state_dir=tmp_path / "leases")
+    client = TestClient(
+        create_app(accounts_path=account_file, api_token=TOKEN, session_coordinator=manager)
+    )
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    endpoint = "/api/v1/accounts/alpha/session"
+    assert client.get(endpoint).status_code == 401
+    assert client.get(endpoint, headers=headers).json() == {
+        "account_id": "alpha", "session_status": "not_connected"
+    }
+    assert client.get("/api/v1/accounts/unknown/session", headers=headers).status_code == 404
+    with manager.acquire("alpha") as owned:
+        assert client.get(endpoint, headers=headers).json()["session_status"] == "validating_session"
+        assert client.get("/api/v1/accounts", headers=headers).json()["accounts"][0][
+            "session_status"
+        ] == "validating_session"
+        owned.transition(SessionPhase.NEEDS_ASSISTANCE)
+        assert client.get(endpoint, headers=headers).json()["session_status"] == "needs_assistance"
+        assert client.get("/api/v1/health").json()["authenticated_workers"] == 0
+        owned.transition(SessionPhase.ASSISTED_LOGIN)
+        owned.transition(SessionPhase.VALIDATING_HANDOFF)
+        owned.transition(SessionPhase.AUTHENTICATED)
+        assert client.get("/api/v1/health").json()["authenticated_workers"] == 1
+        assert client.get(endpoint, headers=headers).json()["session_status"] == "authenticated"
+    assert client.get(endpoint, headers=headers).json()["session_status"] == "not_connected"
+    assert client.get("/api/v1/health").json()["authenticated_workers"] == 0
+    # These endpoints are strictly GET-only; none can launch authentication.
+    assert client.post(endpoint, headers=headers).status_code == 405
+
+
+def test_mismatched_coordinator_rejected(account_file, tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.accounts import Account
+
+    manager = AccountSessionCoordinator(
+        [Account(id="different", world="s302-en", player="Fake", label="Fake", enabled=True)],
+        state_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="same accounts"):
+        create_app(accounts_path=account_file, api_token=TOKEN, session_coordinator=manager)
+
+
+def test_same_id_but_different_player_coordinator_rejected(account_file, tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.accounts import Account
+
+    mismatched = AccountSessionCoordinator(
+        [Account(id="alpha", world="s301-en", player="DifferentPlayer", label="ExamplePlayer", enabled=True)],
+        state_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="same accounts"):
+        create_app(accounts_path=account_file, api_token=TOKEN, session_coordinator=mismatched)
