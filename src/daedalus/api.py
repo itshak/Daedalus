@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from daedalus import __version__
 from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
 from daedalus.accounts import Account, load_accounts
+from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.warehouse import CityWarehouseSnapshot
 
@@ -29,6 +30,7 @@ def create_app(
     api_token: str | None = None,
     snapshot_provider: SnapshotProvider | None = None,
     session_coordinator: AccountSessionCoordinator | None = None,
+    ipc_client: ExistingIPCClient | None = None,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
@@ -95,16 +97,53 @@ def create_app(
             "structured_engine_dispatch": False,
         }
 
+    @app.get("/api/v1/engine/connected-accounts", dependencies=[Depends(authorized)])
+    def connected_accounts() -> dict[str, object]:
+        if ipc_client is None:
+            raise HTTPException(status_code=503, detail="Existing IPC attachment is disabled")
+        try:
+            live = ipc_client.list_sessions()
+        except (EngineIPCUnavailable, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Existing IkaBot IPC is unavailable") from exc
+        # Only configured identities; never enumerate unrelated engine accounts.
+        attached = [
+            account.id for account in configured_accounts
+            if account.enabled and sum(
+                item["world"].casefold() == account.world.casefold()
+                and item["player"].casefold() == account.player.casefold()
+                for item in live
+            ) == 1
+        ]
+        return {"connected_account_ids": attached, "engine_mode": "existing_session_only"}
+
+    @app.get("/api/v1/accounts/{account_id}/cities", dependencies=[Depends(authorized)])
+    def account_cities(account_id: str) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if ipc_client is None:
+            raise HTTPException(status_code=503, detail="Existing IPC attachment is disabled")
+        try:
+            cities = ipc_client.cities(account)
+        except (EngineIPCUnavailable, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
+        return {"account_id": account_id, "cities": cities}
+
     @app.get("/api/v1/warehouses/{account_id}", dependencies=[Depends(authorized)])
     def warehouses(account_id: str) -> dict[str, object]:
         if account_id not in account_by_id:
             raise HTTPException(status_code=404, detail="Account not found")
-        if snapshot_provider is None:
+        if snapshot_provider is None and ipc_client is None:
             raise HTTPException(
                 status_code=503, detail="No authenticated account snapshot provider is connected"
             )
         try:
-            snapshots = snapshot_provider(account_id)
+            if snapshot_provider is not None:
+                snapshots = snapshot_provider(account_id)
+            else:
+                snapshots = ipc_client.warehouses(account_by_id[account_id])
         except Exception as exc:
             # Do not expose session internals or authentication material to clients.
             raise HTTPException(status_code=503, detail="Warehouse snapshots unavailable") from exc

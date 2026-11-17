@@ -21,6 +21,7 @@ One authenticated game session per account/world/player
 ## Invariants
 
 - No new parallel game-protocol implementation in the controller.
+- The explicit, read-only `--connect-existing-ipc` attachment reads cities and warehouse spans from a compatible already-authenticated engine; it never creates a game login. Task dispatch and session restoration are still separate planned work.
 - One account session owner; browser-assisted login is coordinated through the owner.
 - Desktop API is transport-independent and not tied to tmux.
 - Bot workers run under a process supervisor; tmux is for diagnostic access only.

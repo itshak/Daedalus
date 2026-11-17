@@ -24,9 +24,11 @@ The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 - **Log:** local bounded UI diagnostics
 - **Connection:** local or HTTPS/SSH-tunneled API URL and a masked bearer-token field
 
+The Accounts page provides an explicit **Check IkaBot sessions** button; only configured identities with a unique matching existing engine session show Attached. The warehouse view can read live data after the backend is explicitly started with `--connect-existing-ipc` against a compatible, already-authenticated engine. Neither operation creates a login; see [existing engine attachment](EXISTING-IPC.md).
+
 Backend requests run in a Qt worker thread. A connection may be replaced without restarting the app. Bearer tokens exist in process memory only; there is no settings file or implicit credentials import.
 
-No game login or Selenium browser is launched by the GUI. Warehouse data requires a real server-side authenticated session snapshot provider; until one exists, the UI should display an explicit unavailable error.
+No game login or Selenium browser is launched by the GUI. Warehouse data can now come from the opt-in read-only existing-session IPC bridge when a compatible engine process already holds a valid authenticated session; otherwise the UI displays an explicit unavailable error. The Accounts page can also show which configured accounts have an attached engine session.
 
 ## UI parity still to complete
 
