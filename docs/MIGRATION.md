@@ -5,10 +5,11 @@
 ## Clean upstream source
 
 - Repository: https://github.com/Ikabot-Collective/ikabot
-- Public engine baseline imported: 7.7.2, master revision `3ea1e0e` (2026-11-16).
+- Stable engine baseline: 7.7.2, master revision `3ea1e0e` (2026-11-16).
+- Proposed CLI/IPC feature snapshot: PR #499 head `062feec`, merged conflict-free into the stable source tree and still under upstream review.
 - Local source import path: `engine/ikabot/`, with original MIT license and standalone engine setup/tests.
 - Reproduction procedure and precise SHA: [engine/UPSTREAM.md](../engine/UPSTREAM.md).
-- Relevant proposed (not in imported stable baseline) work: upstream CLI/IPC and JSON task launch in PR #499, with merged changes #502 and #511 associated with its branch.
+- Integrated experimental source contains the upstream CLI/IPC JSON task launcher from PR #499 and follow-ups #502 and #511. Do not describe this as a stable release or as a controller with account-owner coordination.
 - The new `daedalus engine inventory` command reads source AST and makes no account requests.
 
 ## Local migration inputs (never committed wholesale)

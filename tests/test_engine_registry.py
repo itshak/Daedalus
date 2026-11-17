@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from daedalus.engine_registry import EngineNotFoundError, inspect_engine, locate_engine_source
+from daedalus.engine_registry import (
+    EngineNotFoundError,
+    inspect_engine,
+    locate_engine_source,
+    supports_structured_cli,
+)
 
 
 def test_local_source_is_detectable():
@@ -30,3 +35,10 @@ def test_manifest_includes_native_and_menu_only_functions():
 def test_explicit_empty_source_fails(tmp_path: Path):
     with pytest.raises(EngineNotFoundError):
         inspect_engine(tmp_path)
+
+
+def test_upstream_ipc_presence_detected_without_imports():
+    assert supports_structured_cli() is True
+    ipc_path = locate_engine_source() / "helpers" / "ipc.py"
+    assert ipc_path.is_file()
+    assert "authkey" in ipc_path.read_text(encoding="utf-8")

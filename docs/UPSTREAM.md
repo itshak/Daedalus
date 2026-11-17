@@ -4,9 +4,11 @@
 
 - Source: https://github.com/Ikabot-Collective/ikabot
 - License: MIT (Copyright (c) 2018 Physics; subsequent contributors retain their rights).
-- Baseline imported at `engine/ikabot/`: public version 7.7.2, commit `3ea1e0eebfb2e52b5f53ea8b5051df2a9a887579`.
+- Stable baseline: public version 7.7.2, commit `3ea1e0eebfb2e52b5f53ea8b5051df2a9a887579`.
+- Experimental CLI/IPC overlay: upstream PR #499 head `062feec0f5f6ea5810bfe91126e337a2b86aa3e3`, including follow-up PRs #502 and #511. This is unmerged proposed upstream code and not a released version.
+- Imported tree: conflict-free working-tree merge of the two upstream revisions, reproducible as documented in `engine/UPSTREAM.md`.
 - Verbatim upstream MIT license: [engine/ikabot/LICENSE](../engine/ikabot/LICENSE).
-- Source import inventory and reproducible archive command: [engine/UPSTREAM.md](../engine/UPSTREAM.md).
+- Source provenance and reproducible two-commit merge command: [engine/UPSTREAM.md](../engine/UPSTREAM.md).
 - No production server credentials or local account configuration imported.
 - Track future upstream updates in dedicated OpenSpec changes and preserve compatibility when possible.
 

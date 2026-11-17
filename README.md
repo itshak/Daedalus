@@ -1,6 +1,6 @@
 # Daedalus for Ikariam
 
-**Status: read-only controller prototype.** Public IkaBot 7.7.2 is vendored in `engine/ikabot/`, and Daedalus provides a small authenticated read-only API, local account metadata, and an offline task registry. It does **not yet** connect authenticated game workers, start game tasks, offer the proposed JSON IPC dispatcher, or include the migrated desktop UI.
+**Status: read-only controller plus experimental upstream CLI/IPC engine.** Daedalus provides a credential-free local multi-account configuration format, an authenticated read-only API, and an offline task registry. The vendored engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499), including #502 and #511. This engine code is **not yet an official stable upstream release**. Daedalus does **not yet** connect authenticated workers, execute game tasks through the controller, or include the migrated desktop UI.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -29,7 +29,7 @@ daedalus engine inventory
 daedalus accounts list --config docs/examples/accounts.toml
 ```
 
-The `engine inventory` command reads public engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots, execute tasks or make game requests**. Current stable upstream 7.7.2 does not include the proposed structured JSON task launcher.
+The `engine inventory` command reads public engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots, execute tasks or make game requests**. Daedalus now contains a reviewed upstream CLI/IPC proposal; it is **not connected to live account workers**, and it does not make every individual task automatically safe or serializable.
 
 ## Read-only local API
 
@@ -55,11 +55,23 @@ openspec list
 
 See [AGENTS.md](AGENTS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Design specifications and proposals live in [openspec](openspec/).
 
+## Candidate public engine CLI (after installing `./engine/ikabot`)
+
+The vendored IkaBot **proposed** CLI supports native task flags such as `--task`, `--config`, `--batch` and `--cities`. To see the supported syntax without logging in, run:
+
+```bash
+python -m ikabot --help
+```
+
+Actual task execution requires an authenticated IkaBot session and explicit account ownership. It must not be tried against production accounts until the session coordination and backend task adapter are ready. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
+
+See [the precise upstream merge record](engine/UPSTREAM.md) and [the OpenSpec integration change](openspec/changes/integrate-upstream-cli-ipc/proposal.md).
+
 ## Repository organization
 
 - `src/daedalus/`: distinct Python application package, offline CLI and authenticated read-only API
-- `engine/ikabot/`: clean public IkaBot 7.7.2 source, preserved MIT license
-- `server/`: future supervised account workers, scheduler and policies; not implemented yet
+- `engine/ikabot/`: public MIT-licensed IkaBot 7.7.2 with proposed, unreleased PR #499 CLI/IPC code
+- `server/`: future supervised account workers, task dispatcher, scheduler and policies; not implemented yet
 - `desktop/`: future audited PySide6 GUI import; not implemented yet
 - `openspec/`: normative specifications, architecture decisions and change proposals
 
