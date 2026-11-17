@@ -38,4 +38,4 @@ Daedalus-original code is GPL-3.0-only. The proprietary author-owned legacy GUI 
 
 ## Headless CI
 
-The normal Python tests run without optional Qt dependencies; UI tests skip when those are absent. A dedicated macOS GitHub Actions workflow installs `daedalus[desktop,dev]` and runs a headless Qt smoke suite with `QT_QPA_PLATFORM=offscreen`.
+The normal Python tests run without optional Qt dependencies; UI tests skip when those are absent. The dedicated macOS GitHub Actions workflow installs `daedalus[desktop,dev]` and uses `QT_QPA_PLATFORM=cocoa` for native Fluent window tests. The macOS frameless window needs a real NSWindow; forcing the offscreen plugin crashes the native window implementation. Linux smoke tests use `QT_QPA_PLATFORM=offscreen` instead.

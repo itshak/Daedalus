@@ -42,7 +42,7 @@ daedalus-desktop
 
 Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, and **Warehouses**. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports; it displays no resource data until a real authenticated snapshot provider is connected. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
 
-For headless UI tests, install `.[dev,desktop]` and run `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`. A separate macOS GitHub Actions workflow exercises these native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
+For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
 ## Read-only local API
 
