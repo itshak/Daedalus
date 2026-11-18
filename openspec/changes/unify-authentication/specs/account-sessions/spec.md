@@ -40,3 +40,16 @@ An explicitly approved local recovery SHALL launch a nonpersistent visible brows
 - **GIVEN** a browser with no secure cookie for the configured world or a worker reporting a different player
 - **WHEN** the operator attempts recovery
 - **THEN** the application SHALL reject the handoff, close the ephemeral browser and retain the previous keyring binding
+
+### Requirement: Idle-only verified dedicated-worker recovery
+A dedicated cookie-only worker SHALL allow a user-approved replacement of its session only while its account lease remains held, the new protected cookie restores the exact configured world/player, and the controller confirms no active or uncertain task. It SHALL stop the old IPC endpoint before publishing the replacement, and SHALL NOT replay a task. Failure after IPC shutdown SHALL retain the lease in a failed state for manual reconciliation.
+
+#### Scenario: Recovery of an idle dedicated worker
+- **GIVEN** an owned dedicated worker with no running or uncertain tasks and a newly verified world-cookie binding
+- **WHEN** the operator approves a session replacement
+- **THEN** the worker SHALL validate the replacement, stop its old IPC endpoint, start the new endpoint, and retain the same account lease
+
+#### Scenario: Uncertain task prevents session replacement
+- **GIVEN** an unresolved task dispatch or active engine task
+- **WHEN** recovery is requested
+- **THEN** the worker SHALL refuse session replacement without stopping its existing IPC endpoint

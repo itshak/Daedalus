@@ -104,6 +104,93 @@ class SavedCookieWorker:
                 "manual recovery may be required"
             ) from exc
 
+    def recover_from_verified_cookie(self, controller, *, confirmed: bool) -> dict[str, str]:
+        """Rebind an idle dedicated worker without releasing its identity lease.
+
+        The operator must have already imported and engine-verified a fresh
+        world cookie into this host's keyring. No task is replayed. Reject
+        running or uncertain tasks before replacing the IPC session.
+        """
+        if confirmed is not True:
+            raise SavedWorkerUnavailable("Explicit worker recovery approval is required")
+        with controller._mutex:
+            if (
+                self.lease is None or self.lease._closed
+                or self._session is None or self._ipc_server is None
+                or controller._coordinator is not self.coordinator
+                or self.lease not in controller.owned_sessions()
+            ):
+                raise SavedWorkerUnavailable("A matching owned dedicated worker is required")
+            try:
+                status = controller.list_tasks(self.account.id)
+                if any(task.get("status") in {"running", "stopping"}
+                       for task in status["engine_tasks"]) or any(
+                    item.get("status") in {"pending", "dispatching", "uncertain"}
+                    for item in status["requests"]
+                ):
+                    raise SavedWorkerUnavailable(
+                        "Active or uncertain tasks must be reconciled before recovery"
+                    )
+            except SavedWorkerUnavailable:
+                raise
+            except Exception as exc:
+                raise SavedWorkerUnavailable("Cannot verify that the worker is idle") from exc
+            candidate = None
+            try:
+                email = _email_binding(self.account, self._credentials)
+                cookie = _world_cookie_binding(self.account, self._credentials)
+                candidate = self._restore(self.account, email, cookie)
+                verify_restored_identity(candidate, self.account)
+            except Exception as exc:
+                if candidate is not None:
+                    http = getattr(candidate, "s", None)
+                    if callable(getattr(http, "close", None)):
+                        http.close()
+                raise SavedWorkerUnavailable("Recovered cookie did not verify the worker") from exc
+            old = self._session
+            try:
+                if self._stop_ipc is None:
+                    from ikabot.helpers.ipc import stop_ipc_server
+                    stop_ipc_server()
+                else:
+                    self._stop_ipc()
+            except Exception as exc:
+                http = getattr(candidate, "s", None)
+                if callable(getattr(http, "close", None)):
+                    http.close()
+                raise SavedWorkerUnavailable("Cannot safely stop the old IPC owner") from exc
+            self._ipc_server = None
+            try:
+                if self._start_ipc is None:
+                    from ikabot.helpers.ipc import start_dedicated_ipc_server
+                    new_ipc = start_dedicated_ipc_server(candidate)
+                else:
+                    new_ipc = self._start_ipc(candidate)
+                if new_ipc is None:
+                    raise SavedWorkerUnavailable("Recovered IPC owner did not start")
+                self._ipc_server = new_ipc
+                self._session = candidate
+                old_http = getattr(old, "s", None)
+                if callable(getattr(old_http, "close", None)):
+                    try:
+                        old_http.close()
+                    except OSError:
+                        logger.warning("Previous session cleanup was incomplete")
+                if self.lease.phase is SessionPhase.PAUSED:
+                    self.lease.transition(SessionPhase.VALIDATING_SESSION)
+                if self.lease.phase is SessionPhase.VALIDATING_SESSION:
+                    self.lease.transition(SessionPhase.AUTHENTICATED)
+                return {"account_id": self.account.id, "status": "worker_recovered"}
+            except Exception as exc:
+                self._session = candidate
+                # Keep the lease; a supervisor must explicitly shut down or
+                # reconcile the now unavailable worker. Never retry tasks.
+                if self.lease.phase is not SessionPhase.FAILED:
+                    self.lease.transition(SessionPhase.FAILED)
+                raise SavedWorkerUnavailable(
+                    "Recovered worker IPC failed; account lease retained"
+                ) from exc
+
     def close(self) -> None:
         if self._ipc_server is not None:
             try:

@@ -163,3 +163,83 @@ def test_task_controller_rejects_unverified_local_worker(system):
     finally:
         controller.close()
         worker.close()
+
+
+class IdleRecoveryController:
+    def __init__(self, worker, *, tasks=None, requests=None):
+        from threading import RLock
+        self._mutex = RLock()
+        self._coordinator = worker.coordinator
+        self.worker = worker
+        self.tasks = tasks or []
+        self.requests = requests or []
+
+    def owned_sessions(self):
+        return (self.worker.lease,)
+
+    def list_tasks(self, _account_id):
+        return {"engine_tasks": self.tasks, "requests": self.requests}
+
+
+def test_idle_saved_worker_can_rebind_verified_cookie_without_releasing_lease(system):
+    account, owner, keyring, old, events, worker, _ = system
+    worker.start(confirmed=True)
+    lease = worker.lease
+    fresh = SimpleNamespace(logged=True, mundo="301", servidor="en", username="ExamplePlayer",
+                            s=SimpleNamespace(close=lambda: None))
+    worker._restore = lambda *_: fresh
+    from daedalus.saved_session_recovery import _COOKIE_SERVICE, _account_key
+    keyring.set_password(_COOKIE_SERVICE, _account_key(account), "S" * 48)
+    controller = IdleRecoveryController(worker)
+    result = worker.recover_from_verified_cookie(controller, confirmed=True)
+    assert result == {"account_id": "alpha", "status": "worker_recovered"}
+    assert worker.lease is lease and worker._session is fresh
+    assert old.s.closed
+    assert events[-2] == ("stop-ipc",)
+    assert events[-1] == ("start-ipc", fresh)
+    with pytest.raises(SessionBusyError):
+        owner.acquire(account.id)
+    worker.close()
+
+
+@pytest.mark.parametrize("tasks,requests", [
+    ([{"status": "running"}], []),
+    ([], [{"status": "uncertain"}]),
+    ([], [{"status": "dispatching"}]),
+])
+def test_worker_recovery_rejects_active_or_uncertain_tasks(system, tasks, requests):
+    _account, _owner, _, _, events, worker, _ = system
+    worker.start(confirmed=True)
+    before = list(events)
+    with pytest.raises(SavedWorkerUnavailable, match="reconciled"):
+        worker.recover_from_verified_cookie(
+            IdleRecoveryController(worker, tasks=tasks, requests=requests), confirmed=True,
+        )
+    assert events == before
+    worker.close()
+
+
+def test_worker_recovery_failure_keeps_original_ipc_and_lease(system):
+    _account, _owner, _, old, events, worker, _ = system
+    worker.start(confirmed=True)
+    worker._restore = lambda *_: SimpleNamespace(
+        logged=True, mundo="302", servidor="en", username="Wrong",
+        s=SimpleNamespace(close=lambda: None),
+    )
+    with pytest.raises(SavedWorkerUnavailable, match="did not verify"):
+        worker.recover_from_verified_cookie(IdleRecoveryController(worker), confirmed=True)
+    assert worker._session is old and worker.lease is not None
+    assert len(events) == 2
+    worker.close()
+
+
+def test_worker_recovery_ipc_restart_failure_keeps_lease(system):
+    _account, _owner, _, _, events, worker, _ = system
+    worker.start(confirmed=True)
+    worker._start_ipc = lambda _: None
+    with pytest.raises(SavedWorkerUnavailable, match="lease retained"):
+        worker.recover_from_verified_cookie(IdleRecoveryController(worker), confirmed=True)
+    assert worker.lease is not None
+    assert worker.lease.phase is SessionPhase.FAILED
+    assert events[-1] == ("stop-ipc",)
+    worker.close()
