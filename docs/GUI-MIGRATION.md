@@ -15,6 +15,8 @@ Reviewed legacy files:
 
 Code has been adapted into `src/daedalus/desktop/`, with an independent, secure HTTP client (read-only by default; mutating calls explicitly gated) in `src/daedalus/client.py` and pure reporting utilities in `src/daedalus/reporting.py`. The original scraper, Selenium worker, legacy config.ini, token/cookie storage and private Git history were **not** copied into Daedalus.
 
+The [legacy GUI source and dependency audit](LEGACY-GUI-AUDIT.md) records the file-by-file parity matrix, license metadata, deliberately excluded secrets and remaining acceptance gates. The source/license review task is complete; functional parity is not.
+
 ## Current UI scope
 
 The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
