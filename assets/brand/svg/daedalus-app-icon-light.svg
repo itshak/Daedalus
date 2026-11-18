@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Daedalus light application icon">
+<title>Daedalus light application icon</title>
+
+<rect x="24" y="24" width="976" height="976" rx="220" fill="#F7F3EA"/><g transform="translate(0 112)">
+    <!-- compact sun: sun and feathers are not miniature copies of full lockup -->
+    <path d="M 443 317 A 69 69 0 0 1 581 317 Z" fill="#FFC764"/>
+    <path d="M 494 166 L 512 112 L 530 166 Z M 428 188 L 399 147 L 453 174 Z M 596 174 L 650 147 L 621 188 Z M 392 225 L 349 192 L 414 209 Z M 610 209 L 675 192 L 632 225 Z M 395 271 L 342 250 L 398 244 Z M 626 244 L 682 250 L 629 271 Z" fill="#FFC764"/>
+    <g fill="#FFC764">
+      <path d="M 394 387 C 332 346 242 336 137 261 C 139 335 175 367 250 395 L 394 448 Z"/>
+      <path d="M 393 465 C 333 419 276 423 182 388 C 202 463 262 483 315 488 C 352 489 368 510 395 526 Z"/>
+      <path d="M 394 541 C 353 512 327 515 250 508 C 290 567 333 583 386 577 Z"/>
+    </g>
+    <g transform="translate(1024 0) scale(-1 1)" fill="#FFC764">
+      <path d="M 394 387 C 332 346 242 336 137 261 C 139 335 175 367 250 395 L 394 448 Z"/>
+      <path d="M 393 465 C 333 419 276 423 182 388 C 202 463 262 483 315 488 C 352 489 368 510 395 526 Z"/>
+      <path d="M 394 541 C 353 512 327 515 250 508 C 290 567 333 583 386 577 Z"/>
+    </g>
+    <path d="M 379 334 H 528 C 651 334 707 408 707 504 C 707 607 647 674 529 674 H 379 L 405 645 V 361 Z" fill="#102F46"/>
+    <path d="M 420 373 H 524 C 615 373 666 424 666 501 C 666 582 608 635 522 635 H 420 Z" fill="#FFF4DE"/>
+    <path d="M 472 423 H 523 C 577 423 615 455 615 502 C 615 548 580 584 523 584 H 472 Z" fill="#102F46"/>
+    <path d="M 450 526 H 514 V 466 H 548 V 551" stroke="#FFF4DE" stroke-width="26" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+    </g>
+</svg>

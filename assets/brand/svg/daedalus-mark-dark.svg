@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="715" viewBox="0 0 1200 715" role="img" aria-label="Daedalus emblem, for dark backgrounds">
+<title>Daedalus emblem, for dark backgrounds</title>
+
+<path d="M 488.4 244.0 L 430.0 253.0 L 488.4 262.0 Z" fill="#FFC764"/>
+<path d="M 499.8 202.9 L 442.4 189.3 L 493.1 219.5 Z" fill="#FFC764"/>
+<path d="M 524.5 170.3 L 475.7 137.1 L 512.2 183.4 Z" fill="#FFC764"/>
+<path d="M 564.6 146.7 L 533.6 96.5 L 548.1 153.7 Z" fill="#FFC764"/>
+<path d="M 609.0 141.4 L 600.0 83.0 L 591.0 141.4 Z" fill="#FFC764"/>
+<path d="M 651.9 153.7 L 666.4 96.5 L 635.4 146.7 Z" fill="#FFC764"/>
+<path d="M 687.8 183.4 L 724.3 137.1 L 675.5 170.3 Z" fill="#FFC764"/>
+<path d="M 706.9 219.5 L 757.6 189.3 L 700.2 202.9 Z" fill="#FFC764"/>
+<path d="M 711.6 262.0 L 770.0 253.0 L 711.6 244.0 Z" fill="#FFC764"/>
+<path d="M 508 274 A 92 92 0 0 1 692 274 Z" fill="#FFC764"/>
+<g fill="#FFC764">
+      <path d="M 478 335 C 436 302 344 282 191 178 C 185 259 217 316 319 342 L 478 400 Z"/>
+      <path d="M 478 420 C 440 383 403 362 348 356 C 290 350 250 342 206 319 C 229 400 272 429 363 432 C 412 434 438 467 478 491 Z"/>
+      <path d="M 478 513 C 439 470 416 460 366 458 C 325 459 299 458 266 446 C 301 513 343 542 394 535 C 430 532 454 552 473 562 Z"/>
+    </g>
+<g transform="translate(1200 0) scale(-1 1)" fill="#FFC764">
+      <path d="M 478 335 C 436 302 344 282 191 178 C 185 259 217 316 319 342 L 478 400 Z"/>
+      <path d="M 478 420 C 440 383 403 362 348 356 C 290 350 250 342 206 319 C 229 400 272 429 363 432 C 412 434 438 467 478 491 Z"/>
+      <path d="M 478 513 C 439 470 416 460 366 458 C 325 459 299 458 266 446 C 301 513 343 542 394 535 C 430 532 454 552 473 562 Z"/>
+    </g>
+<path d="M 461 291 H 624 C 735 291 795 365 795 452 C 795 548 730 621 621 621 H 461 L 492 582 V 336 Z" fill="#176184"/>
+<path d="M 523 340 H 623 C 700 340 751 388 751 457 C 751 528 700 575 622 575 H 523 Z" fill="#FFF4DE"/>
+<path d="M 570 389 H 619 C 669 389 705 414 705 457 C 705 503 669 528 619 528 H 570 Z" fill="#176184"/><path d="M 550 486 H 604 V 433 H 628 V 501" stroke="#FFF4DE" stroke-width="24" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+<path d="M 410 666 H 452" stroke="#FFF4DE" stroke-width="15" fill="none"/>
+<path d="M 452 666 H 475 V 625 H 534 V 660 H 501 V 643 H 517" stroke="#FFF4DE" stroke-width="15" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+<path d="M 552 666 H 575 V 625 H 634 V 660 H 601 V 643 H 617" stroke="#FFF4DE" stroke-width="15" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+<path d="M 652 666 H 675 V 625 H 734 V 660 H 701 V 643 H 717" stroke="#FFF4DE" stroke-width="15" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+<path d="M 744 666 H 785" stroke="#FFF4DE" stroke-width="15" fill="none"/>
+</svg>

@@ -47,6 +47,20 @@ def test_pyinstaller_build_is_native_and_avoids_legacy_scraper(packager, tmp_pat
     assert "/Applications" not in " ".join(cmd)
 
 
+def test_native_icon_and_bundled_qt_resource_are_in_packager(packager, tmp_path):
+    cmd = packager.build_command(
+        tmp_path / "launcher.py", output_dir=tmp_path / "dist",
+        work_dir=tmp_path / "build", spec_dir=tmp_path / "spec",
+    )
+    icon_path = Path(cmd[cmd.index("--icon") + 1])
+    assert icon_path.name == "Daedalus.icns"
+    assert icon_path.is_file()
+    assert icon_path.read_bytes().startswith(b"icns")
+    bundled = cmd[cmd.index("--add-data") + 1]
+    assert "daedalus/desktop/resources" in bundled
+    assert (packager.ROOT / "src/daedalus/desktop/resources/app-icon-256.png").is_file()
+
+
 def test_dry_run_does_not_create_app_or_user_files(packager, tmp_path, monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("dry-run must not invoke PyInstaller")
