@@ -23,7 +23,8 @@ def test_doctor_is_offline_and_honest(capsys):
     assert result["server_implemented"] is True
     assert result["server_mode"] == "read_only_by_default"
     assert result["desktop_implemented"] is True
-    assert result["new_worker_bootstrap_implemented"] is False
+    assert result["new_worker_bootstrap_implemented"] is True
+    assert result["new_worker_bootstrap_scope"] == "explicit_single_account_saved_cookies_only"
     assert result["automatic_browser_authentication_implemented"] is False
     assert result["production_ready"] is False
     assert result["network_requests_performed"] == 0

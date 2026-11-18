@@ -69,6 +69,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     serve.add_argument("--ipc-descriptor", help="Owner-only IkaBot IPC discovery file")
     serve.add_argument(
+        "--restore-saved-account", metavar="ACCOUNT_ID",
+        help="Explicitly start one verified cookie-only IkaBot worker (no lobby login)",
+    )
+    serve.add_argument(
+        "--confirm-read-only-network", action="store_true",
+        help="Required for restore: allow one read-only Gameforge world validation",
+    )
+    serve.add_argument(
         "--enable-task-control", action="store_true",
         help="Opt in to authorized start/list/stop of existing-session IkaBot tasks",
     )
@@ -187,7 +195,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("Only loopback binding is supported; use SSH/Tailscale tunnel for remote use")
         try:
             from daedalus.account_editor import AccountEditUnavailable
+            from daedalus.account_sessions import AccountSessionCoordinator, SessionBusyError
             from daedalus.api import create_app
+            from daedalus.saved_worker import SavedCookieWorker, SavedWorkerUnavailable
+            from daedalus.task_control import TaskUnavailable
 
             if args.ipc_descriptor and not args.connect_existing_ipc:
                 parser.error("--ipc-descriptor requires --connect-existing-ipc")
@@ -199,10 +210,24 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--monitor-existing-sessions requires --enable-task-control")
             if args.enable_account_editing and args.enable_task_control:
                 parser.error("--enable-account-editing is incompatible with --enable-task-control")
+            if args.restore_saved_account and (
+                not args.accounts_file or not args.connect_existing_ipc
+                or not args.confirm_read_only_network
+            ):
+                parser.error(
+                    "Cookie-only worker requires --accounts-file, --connect-existing-ipc "
+                    "and --confirm-read-only-network"
+                )
+            if args.restore_saved_account and (
+                args.ipc_descriptor or args.enable_account_editing or args.demo
+            ):
+                parser.error(
+                    "Cookie-only worker cannot use external IPC, metadata editing or demo mode"
+                )
             if args.demo and (
                 args.accounts_file or args.connect_existing_ipc or args.ipc_descriptor
                 or args.enable_task_control or args.task_ledger or args.enable_account_editing
-                or args.monitor_existing_sessions
+                or args.monitor_existing_sessions or args.restore_saved_account
             ):
                 parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
@@ -210,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             owner = None
             broker = None
             monitor = None
+            worker = None
             if args.connect_existing_ipc:
                 from daedalus.engine_ipc import ControlledIPCClient, ExistingIPCClient
 
@@ -218,12 +244,12 @@ def main(argv: list[str] | None = None) -> int:
                     if args.enable_task_control
                     else ExistingIPCClient(args.ipc_descriptor)
                 )
-            if args.enable_task_control:
-                from daedalus.account_sessions import AccountSessionCoordinator
-                from daedalus.task_control import TaskController
-
+            if args.enable_task_control or args.restore_saved_account:
                 configured = load_accounts(args.accounts_file)
                 owner = AccountSessionCoordinator(configured)
+            if args.enable_task_control:
+                from daedalus.task_control import TaskController
+
                 task_controller = TaskController(
                     configured, owner, ipc, ledger_path=args.task_ledger,
                     active_validation=args.monitor_existing_sessions,
@@ -234,6 +260,16 @@ def main(argv: list[str] | None = None) -> int:
 
                     broker = AssistanceBroker(owner)
                     monitor = ExistingSessionRecoveryMonitor(task_controller, broker)
+            if args.restore_saved_account:
+                account = next(
+                    (row for row in configured if row.id == args.restore_saved_account), None
+                )
+                if account is None:
+                    parser.error("The requested saved worker account was not configured")
+                worker = SavedCookieWorker(account, owner)
+                worker.start(confirmed=True)
+                if task_controller is not None:
+                    task_controller.adopt_verified_saved_worker(account.id, worker.lease)
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
@@ -241,13 +277,26 @@ def main(argv: list[str] | None = None) -> int:
                 assistance_broker=broker, recovery_monitor=monitor,
                 demo_mode=args.demo,
             )
-        except (AccountConfigError, AccountEditUnavailable, ValueError, ImportError) as exc:
+        except (
+            AccountConfigError, AccountEditUnavailable, SessionBusyError,
+            SavedWorkerUnavailable, TaskUnavailable, ValueError, ImportError,
+        ) as exc:
+            if worker is not None:
+                worker.close()
+            if task_controller is not None:
+                task_controller.close()
             parser.error(str(exc))
         try:
-            import uvicorn
-        except ImportError:
-            parser.error("Install daedalus[server] to run the API")
-        uvicorn.run(app, host=args.host, port=args.port, access_log=False)
+            try:
+                import uvicorn
+            except ImportError:
+                parser.error("Install daedalus[server] to run the API")
+            uvicorn.run(app, host=args.host, port=args.port, access_log=False)
+        finally:
+            if task_controller is not None:
+                task_controller.close()
+            if worker is not None:
+                worker.close()
     else:
         parser.print_help()
     return 0

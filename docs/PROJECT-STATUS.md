@@ -34,6 +34,14 @@ The completed archive folders are dated `2026-11-18`. Their checkboxes reflect *
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
+## Experimental cookie-only worker bootstrap (pending integration validation)
+
+The opt-in single-account worker can start a dedicated IPC server from a
+previously saved and exactly verified world session, retain the account lease
+and optionally hand it to the existing task controller. It cannot initiate
+Gameforge login or CAPTCHA, and no live account validation has been performed.
+See [saved worker](SAVED-WORKER.md). This is not production readiness.
+
 ## Still active
 
 The following umbrella changes have unfinished tasks and were deliberately **not archived**:
@@ -43,6 +51,23 @@ The following umbrella changes have unfinished tasks and were deliberately **not
 - `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; per-task parameter forms and island-grouped reports are delivered. The new opt-in metadata editor covers basic account create/edit/disable/remove, while full legacy parity and authenticated worker recovery remain incomplete.
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
+
+### Remaining OpenSpec completion gates
+
+As of this audit, **7 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
+
+| Active change | Remaining gate | Evidence needed before checking off |
+| --- | --- | --- |
+| `import-public-ikabot-engine` | Reconcile production authentication modifications with upstream without private material | File-by-file reviewed diff, explicit license/provenance and isolated engine regression tests |
+| `migrate-native-desktop` | Finish legacy GUI source and dependency license audit | Source inventory, attribution/compatibility review and binary redistribution decision |
+| `migrate-native-desktop` | Finish advanced legacy GUI parity | Implemented UI workflows and native desktop regression tests, with no credential leakage |
+| `unify-authentication` | Safe browser login and manual CAPTCHA assistance | User-authorized manual browser flow, explicit consent, safe secret handling and mocked failure tests |
+| `unify-authentication` | Validated remote handoff or protected remote-browser fallback | Threat model, authenticated transport, host-local ownership and no secret exposure to controller |
+| `unify-authentication` | Secure user-approved task resume after real browser recovery | Verified identity, replay protection, explicit per-task approval and crash/retry tests |
+| `unify-authentication` | Complete end-to-end recovery verification | Offline failure matrix, secret scan, strict OpenSpec, protected CI and isolated-account validation |
+
+The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
+
 
 ## Opt-in account metadata editor (shipped)
 

@@ -1056,6 +1056,36 @@ def ensure_ipc_server(default_session=None):
             return _LOCAL_SERVER
 
 
+
+
+def start_dedicated_ipc_server(default_session):
+    """Own a fresh IPC endpoint for an already authenticated Daedalus session.
+
+    Never reuse an existing in-process or external IPC owner. In particular,
+    a cookie-only worker must not attach its newly restored session to someone
+    else's running IkaBot or replace that worker's descriptor.
+    """
+    global _LOCAL_SERVER
+    if default_session is None or getattr(default_session, "logged", False) is not True:
+        raise ValueError("A verified authenticated session is required")
+    with _LOCAL_SERVER_LOCK:
+        if _LOCAL_SERVER is not None:
+            raise RuntimeError("An IkaBot IPC owner is already running in this process")
+        with _StartupLock() as startup_lock:
+            if not startup_lock.acquired:
+                raise RuntimeError("Cannot acquire the exclusive IkaBot startup lock")
+            if ping_ipc_server():
+                raise RuntimeError("Another IkaBot IPC owner is already running")
+            server = IPCServer(default_session=default_session)
+            try:
+                server.start()
+            except BaseException:
+                server.stop()
+                raise
+            _LOCAL_SERVER = server
+            return server
+
+
 def stop_ipc_server():
     """Stop this process's IPC server if one was started."""
     global _LOCAL_SERVER
