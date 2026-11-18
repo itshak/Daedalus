@@ -132,3 +132,8 @@ This documents **code quality policy**, not any policy on an individual's choice
 ## Release and production status
 
 The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend can explicitly bootstrap **one** already-authenticated saved-cookie world session, but cannot perform new Gameforge lobby login, Selenium handoff, or unattended worker recovery. It supports separately opted-in start/list/stop on verified existing sessions. No real production accounts have been migrated.
+
+
+## Authentication progress (2026-11-18)
+
+The optional ephemeral human-operated Chromium login assistant is implemented in `src/daedalus/browser_recovery.py` and documented in [browser recovery](BROWSER-RECOVERY.md). It keeps world cookies out of the API and checks a matching engine session before keyring persistence. Host-local graphical remote-desktop fallback avoids copying session secrets across machines. Synthetic browser tests do not prove Gameforge compatibility. **A running worker cannot yet receive and validate a replacement world cookie in-place**, so the full `unify-authentication` proposal remains active until that secure engine-side handoff and offline regression tests are delivered. Do not mistake a verified cookie saved for future cookie-only startup for a recovered existing worker.
