@@ -4,7 +4,7 @@ Last reviewed: **2026-11-18**. The public repository's default branch is `main`.
 
 ## Complete and archived
 
-The following changes passed GitHub's offline Python/engine tests, source-security checks, package build, strict OpenSpec validation and relevant native macOS checks before being merged. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
+The following changes have merged implementation and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
@@ -27,20 +27,17 @@ The following changes passed GitHub's offline Python/engine tests, source-securi
 | existing-session-recovery-monitor | Opt-in verified in-memory session monitoring, nonsecret manual-assistance notifications, worker revalidation and no task replay | [#33](https://github.com/itshak/Daedalus/pull/33) |
 | private-world-cookie-handoff | Local hidden-input world-cookie validation and OS keyring binding, no remote cookie transfer | [#35](https://github.com/itshak/Daedalus/pull/35) |
 | offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
+| cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
 
-The completed archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
+The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
 ## Existing-session read-only bridge (shipped)
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
-## Experimental cookie-only worker bootstrap (pending integration validation)
+## Experimental cookie-only worker bootstrap (merged; live validation pending)
 
-The opt-in single-account worker can start a dedicated IPC server from a
-previously saved and exactly verified world session, retain the account lease
-and optionally hand it to the existing task controller. It cannot initiate
-Gameforge login or CAPTCHA, and no live account validation has been performed.
-See [saved worker](SAVED-WORKER.md). This is not production readiness.
+PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA, and no live account validation has been performed. See [saved worker](SAVED-WORKER.md). This is not production readiness.
 
 ## Still active
 
@@ -113,4 +110,4 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 ## Release and production status
 
-The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend currently does **not** bootstrap new authenticated game workers or provide Selenium handoff; it does support explicitly opted-in start/list/stop on existing sessions. No real production accounts have been migrated.
+The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend can explicitly bootstrap **one** already-authenticated saved-cookie world session, but cannot perform new Gameforge lobby login, Selenium handoff, or unattended worker recovery. It supports separately opted-in start/list/stop on verified existing sessions. No real production accounts have been migrated.
