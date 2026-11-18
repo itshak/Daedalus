@@ -57,6 +57,7 @@ class SavedCookieWorker:
         self.lease: OwnedAccountSession | None = None
         self._session: object | None = None
         self._ipc_server: object | None = None
+        self._recovery_uncertain = False
 
     def start(self, *, confirmed: bool) -> SavedCookieWorker:
         if confirmed is not True:
@@ -183,6 +184,7 @@ class SavedCookieWorker:
                 return {"account_id": self.account.id, "status": "worker_recovered"}
             except Exception as exc:
                 self._session = candidate
+                self._recovery_uncertain = True
                 # Keep the lease; a supervisor must explicitly shut down or
                 # reconcile the now unavailable worker. Never retry tasks.
                 if self.lease.phase is not SessionPhase.FAILED:
@@ -192,6 +194,10 @@ class SavedCookieWorker:
                 ) from exc
 
     def close(self) -> None:
+        if self._recovery_uncertain:
+            raise SavedWorkerUnavailable(
+                "Cannot confirm recovery IPC stopped; account lease retained"
+            )
         if self._ipc_server is not None:
             try:
                 if self._stop_ipc is None:

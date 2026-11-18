@@ -242,4 +242,6 @@ def test_worker_recovery_ipc_restart_failure_keeps_lease(system):
     assert worker.lease is not None
     assert worker.lease.phase is SessionPhase.FAILED
     assert events[-1] == ("stop-ipc",)
-    worker.close()
+    with pytest.raises(SavedWorkerUnavailable, match="lease retained"):
+        worker.close()
+    assert worker.lease is not None
