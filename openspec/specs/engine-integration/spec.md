@@ -104,3 +104,11 @@ The engine MUST stop only child processes created and retained under its own opa
 - **GIVEN** a managed task belongs to account A
 - **WHEN** account B requests its task ID be stopped
 - **THEN** the engine refuses and leaves the child running
+
+### Requirement: Offline bounded task parameter metadata
+The engine registry SHALL derive form metadata only from parsed public IkaBot source files without importing game modules or evaluating arbitrary expressions.
+
+#### Scenario: Task has a runtime default expression
+- **GIVEN** a task default argument is a function call rather than a literal
+- **WHEN** offline registry introspection inspects that task
+- **THEN** no expression is executed and no fabricated default value is returned
