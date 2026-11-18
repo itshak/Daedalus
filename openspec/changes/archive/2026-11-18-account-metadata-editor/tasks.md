@@ -3,5 +3,5 @@
 - [x] Add opt-in bearer-protected API, idle-session reconfiguration and safe CLI flag.
 - [x] Add native account editor with create/remove/enable controls and confirmation.
 - [x] Add offline API/config/Qt tests, failure and identity isolation cases.
-- [ ] Run full offline verification, strict OpenSpec, packaging, and macOS CI.
-- [ ] Merge as itshak, archive change and sync canonical specs/docs.
+- [x] Run full offline verification, strict OpenSpec, packaging, and macOS CI.
+- [x] Merge as itshak, archive change and sync canonical specs/docs.
