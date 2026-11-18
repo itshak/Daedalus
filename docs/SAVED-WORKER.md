@@ -35,11 +35,11 @@ world/player are accepted. Do not enable it for a read-only preview.
 
 The worker owns the account lease until API shutdown and closes its session
 and dedicated IPC endpoint on exit. It cannot perform interactive login or
-recover expired cookies. The assisted-login ticket protocol does not yet launch a browser or recover
-expired cookies. An operator must complete browser authentication separately
-and explicitly import the validated world cookie using the hidden local
-`daedalus sessions bind-world-cookie` flow before retrying. Any managed
-background task subprocesses may outlive the API; reconcile those tasks
-individually before starting another worker. Run the synthetic
+recover expired cookies. The manual-assistance ticket protocol cannot
+launch a browser or restore expired cookies yet. An operator must authenticate
+separately in their browser, then use the hidden local
+`daedalus sessions bind-world-cookie` action to verify and import that cookie.
+Managed task subprocesses may outlive the API; reconcile them before restarting.
+Run the synthetic
 `daedalus doctor --smoke` first to test the local API without contacting the
 game. Do not commit private account files, credentials or cookie values.
