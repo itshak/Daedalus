@@ -71,6 +71,14 @@ def read(
     try:
         read_input = input(msg)
     except EOFError:
+        # A detached worker with exhausted stdin must fail immediately. The
+        # previous 20 recursive prompts obscured the real recovery requirement.
+        try:
+            detached = not sys.stdin.isatty()
+        except (AttributeError, OSError, ValueError):
+            detached = True
+        if detached:
+            raise EOFError("Interactive input unavailable in detached IkaBot worker") from None
         return _invalid()
     
     if additionalValues is not None and read_input in additionalValues:

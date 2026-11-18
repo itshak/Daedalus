@@ -188,3 +188,5 @@ The normative, maintained requirements are in [OpenSpec capabilities](openspec/s
 The [saved-cookie worker](docs/SAVED-WORKER.md) is an explicitly opted-in, single-account bootstrap from **previously authenticated** cookies. It does not provide a fresh Gameforge login, browser/CAPTCHA handoff, unattended recovery or live-account certification. The [synthetic demo](docs/SYNTHETIC-DEMO.md) remains the safe first test.
 
 Authentication recovery implementation and limitations: [Human browser recovery](docs/BROWSER-RECOVERY.md).
+
+Production engine source review and nonsecret upstream reconciliation: [Engine authentication reconciliation](docs/ENGINE-AUTH-RECONCILIATION.md).

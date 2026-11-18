@@ -30,6 +30,7 @@ The following changes have merged implementation and archived OpenSpec requireme
 | cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
 | desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
 | `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, dedicated Wine/Construction workflows, private appearance and grouped exports | [#52](https://github.com/itshak/Daedalus/pull/52) |
+| `import-public-ikabot-engine` | Audited pinned public engine and six-file production source diff; safe bounded token API retries, noninteractive fail-fast and explicit rejected credential/auto-launch code | [#53](https://github.com/itshak/Daedalus/pull/53) |
 
 The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
@@ -43,29 +44,29 @@ PR #41 merged the opt-in single-account worker: it can start a dedicated IPC ser
 
 ## Still active
 
-Two umbrella changes remain **open**. Owner-supervised authentication acceptance
-will be performed only when the app is ready for real-account testing:
+One umbrella change remains **open**. Its owner-supervised live-account
+acceptance is explicitly deferred until the complete app can be tested:
 
-- `import-public-ikabot-engine`: upstream and experimental IPC are integrated,
-  but private production-authentication differences still need a reviewed,
-  nonsecret file-by-file reconciliation.
-- `validate-live-authentication`: protected desktop/browser recovery UX,
-  independent player identity attestation and live account/worker acceptance
-  remain unfinished. Offline `unify-authentication` was archived without
-  claiming production authorization.
+- `validate-live-authentication`: native desktop-to-authoritative-host
+  browser recovery UX, independent server-side player attestation, and
+  owner-supervised real-account/worker acceptance remain unfinished. The
+  offline authentication foundations and public/production engine source
+  reconciliation are already archived, **without production authorization**.
 
-`migrate-native-desktop` is archived for its completed **nonsecret** GUI scope.
-Original credential/password and Selenium automation controls were not imported.
-Live authentication, notarization and binary-license approval remain separate gates.
+`migrate-native-desktop` and `import-public-ikabot-engine` are archived for their
+reviewed, nonsecret scopes. The production engine comparison reviewed six
+tracked source modifications against public 7.7.2 + PR #499, accepted only
+bounded token-API retries and detached manual-prompt failure handling, and
+rejected automatic credentials and unconfirmed task/server start. See
+[production authentication source reconciliation](ENGINE-AUTH-RECONCILIATION.md).
 
 ### Remaining OpenSpec completion gates
 
-**6 unchecked tasks across 2 active changes** remain. Synthetic GUI tests do not
-validate live workflows.
+**5 unchecked tasks across 1 active change** remain. None can be declared
+ready from the synthetic source-audit and GUI tests alone.
 
 | Active change | Remaining gate | Evidence required |
 | --- | --- | --- |
-| `import-public-ikabot-engine` | Reconcile production authentication modifications | File-by-file provenance, license review and isolated engine regression tests |
 | `validate-live-authentication` | Wire desktop UX to host-only human recovery flow | Synthetic UI/API tests; no HTTP cookie transfer |
 | `validate-live-authentication` | Independently attest recovered server-side player identity | Synthetic negative tests and no unverified binding |
 | `validate-live-authentication` | Supervise real browser/CAPTCHA and saved-cookie flows | Owner-approved isolated real-account results |

@@ -82,7 +82,25 @@ except ValueError:
     _blackbox_read_timeout = 60
 if _blackbox_read_timeout <= 0:
     _blackbox_read_timeout = 60
-blackboxTokenTimeout = (10, _blackbox_read_timeout)
+# Detached workers must not wait indefinitely when the external API fails.
+_blackbox_read_timeout = min(_blackbox_read_timeout, 120)
+try:
+    _blackbox_connect_timeout = int(os.getenv("IKABOT_BLACKBOX_CONNECT_TIMEOUT", "10"))
+except ValueError:
+    _blackbox_connect_timeout = 10
+if _blackbox_connect_timeout <= 0:
+    _blackbox_connect_timeout = 10
+blackboxTokenTimeout = (min(_blackbox_connect_timeout, 30), _blackbox_read_timeout)
+
+# At most four token API attempts (with one 400/422 compatibility retry per
+# attempt); this is not a Gameforge login retry or an environment secret loader.
+try:
+    blackboxTokenRetries = int(os.getenv("IKABOT_BLACKBOX_RETRIES", "1"))
+except ValueError:
+    blackboxTokenRetries = 1
+if blackboxTokenRetries < 0:
+    blackboxTokenRetries = 1
+blackboxTokenRetries = min(blackboxTokenRetries, 3)
 ids_cache = None
 cities_cache = None
 has_params = False

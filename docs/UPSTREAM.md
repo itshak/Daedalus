@@ -23,3 +23,10 @@ The existing PySide6 Fluent Widgets dependency has separate license conditions. 
 ## Package naming
 
 The intended PyPI distribution, Python import and CLI are all `daedalus`. No PyPI release has been claimed; verify name eligibility before publishing.
+
+## Production auth reconciliation
+The reviewed production IkaBot source differences and safety decisions are
+documented in [engine auth source reconciliation](ENGINE-AUTH-RECONCILIATION.md).
+Only independently rewritten, secret-free reliability improvements were added;
+no local credentials, saved users or runtime files were imported. Production
+browser/session acceptance remains pending.

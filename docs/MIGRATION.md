@@ -27,3 +27,14 @@
 - Confirm no second implementation of game actions is introduced.
 
 No game login, existing tmux session, or production task has been changed by this integration.
+
+## Source-only production authentication reconciliation (2026-11-18)
+
+The six modified tracked production IkaBot source files (7.7.0 baseline) have
+been compared against the pinned public 7.7.2 + proposed CLI/IPC engine.
+Safe bounded token API retries and noninteractive prompt fail-fast were
+independently reimplemented with synthetic regressions. Automatic environment
+credential loading, unreviewed direct login, indefinite menu parking and
+unconfirmed web server launch were explicitly rejected. No real account,
+runtime or saved-session paths were read. See the [file-by-file review](ENGINE-AUTH-RECONCILIATION.md). This source reconciliation does not complete
+`validate-live-authentication` or authorize production workers.
