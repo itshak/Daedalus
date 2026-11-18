@@ -247,6 +247,54 @@ def probe_saved_cookies(
 
 
 
+def _verify_and_save_world_cookie(
+    account: Account,
+    cookie: str,
+    *,
+    credential_store: CredentialStore | None,
+    restore: Callable[[Account, str, str], object],
+) -> dict[str, str]:
+    """Caller MUST hold the account lease through validation and keyring save."""
+    email = _email_binding(account, credential_store)
+    session = None
+    try:
+        try:
+            session = restore(account, email, cookie)
+            verify_restored_identity(session, account)
+        except Exception as exc:
+            raise SavedSessionUnavailable(
+                "Browser world session could not verify the selected account"
+            ) from exc
+        try:
+            _store(credential_store).set_password(
+                _COOKIE_SERVICE, _account_key(account), cookie,
+            )
+        except Exception as exc:
+            raise SavedSessionUnavailable("Unable to store verified world cookie in keyring") from exc
+        return {"account_id": account.id, "status": "world_cookie_bound"}
+    finally:
+        if session is not None:
+            http = getattr(session, "s", None)
+            if callable(getattr(http, "close", None)):
+                try:
+                    http.close()
+                except (OSError, ValueError):
+                    import logging
+                    logging.getLogger("daedalus.recovery").warning(
+                        "Ephemeral browser verification cleanup was incomplete"
+                    )
+
+
+def _require_cookie_account(account: Account, coordinator: AccountSessionCoordinator) -> None:
+    if (
+        not account.enabled
+        or account.id not in coordinator.account_ids
+        or coordinator._accounts[account.id] != account
+        or _WORLD.fullmatch(account.world) is None
+    ):
+        raise SavedSessionUnavailable("A matching enabled account with canonical world is required")
+
+
 def bind_world_cookie(
     account: Account,
     coordinator: AccountSessionCoordinator,
@@ -256,29 +304,62 @@ def bind_world_cookie(
     credential_store: CredentialStore | None = None,
     restore: Callable[[Account, str, str], object] | None = None,
 ) -> dict[str, str]:
-    """Import one manually obtained browser world cookie locally, with consent.
-
-    The browser or trusted human must first complete interactive login and
-    CAPTCHA. This function performs only a cookie-authenticated read-only game
-    GET, verifies exact identity, closes it and saves the cookie in OS keyring
-    after success. It never sends the cookie over Daedalus HTTP or stdout.
-    """
+    """Validate a manually obtained cookie under one lease, then store privately."""
     if confirmed is not True:
         raise SavedSessionUnavailable("Import requires explicit network confirmation")
     cookie = _validated_world_cookie(value)
-    if restore is None:
-        restore = lambda a, email, secret: _real_restore(a, email, secret)
-    # All account identity, lease, exact world and saved-email prerequisites
-    # are enforced by the ordinary confirmed validation mechanism.
-    probe_saved_cookies(
-        account, coordinator, confirmed=True, credential_store=credential_store,
-        restore=lambda a, email: restore(a, email, cookie),
-    )
+    _require_cookie_account(account, coordinator)
+    _email_binding(account, credential_store)
     try:
-        _store(credential_store).set_password(_COOKIE_SERVICE, _account_key(account), cookie)
-    except Exception as exc:
-        raise SavedSessionUnavailable("Unable to store verified world cookie in keyring") from exc
-    return {"account_id": account.id, "status": "world_cookie_bound"}
+        with coordinator.acquire(account.id):
+            return _verify_and_save_world_cookie(
+                account, cookie, credential_store=credential_store,
+                restore=restore or _real_restore,
+            )
+    except SessionBusyError as exc:
+        raise SavedSessionUnavailable("Another worker owns this account on the host") from exc
+
+
+def assisted_browser_cookie_login(
+    account: Account,
+    coordinator: AccountSessionCoordinator,
+    *,
+    confirmed: bool,
+    credential_store: CredentialStore | None = None,
+    browser_open: Callable[[str], bool] | None = None,
+    read_cookie: Callable[[], str] | None = None,
+    restore: Callable[[Account, str, str], object] | None = None,
+) -> dict[str, str]:
+    """Human-operated browser recovery; no CAPTCHA solving or credential capture.
+
+    A host-local lease is held before the browser opens, through the user's
+    manual login/challenge and verified cookie persistence. No Daedalus HTTP
+    endpoint, environment variable or command argument receives the cookie.
+    """
+    if confirmed is not True:
+        raise SavedSessionUnavailable("Explicit browser recovery approval is required")
+    _require_cookie_account(account, coordinator)
+    _email_binding(account, credential_store)
+    if browser_open is None:
+        import webbrowser
+        browser_open = webbrowser.open
+    if read_cookie is None:
+        import getpass
+        read_cookie = lambda: getpass.getpass("Authenticated world ikariam cookie (hidden): ")
+    try:
+        with coordinator.acquire(account.id):
+            # Fixed official lobby origin, never user-provided URLs or redirects.
+            if browser_open("https://lobby.ikariam.gameforge.com/") is not True:
+                raise SavedSessionUnavailable("Could not open the official browser lobby")
+            # The operator handles login and any CAPTCHA in their own browser.
+            # Only the world cookie is accepted; no passwords/GF tokens.
+            cookie = _validated_world_cookie(read_cookie())
+            return _verify_and_save_world_cookie(
+                account, cookie, credential_store=credential_store,
+                restore=restore or _real_restore,
+            )
+    except SessionBusyError as exc:
+        raise SavedSessionUnavailable("Another worker owns this account on the host") from exc
 
 
 def unbind_world_cookie(

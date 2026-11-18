@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sessions.add_argument("action", choices=[
         "bind-email", "forget-email", "probe-saved-cookies",
-        "bind-world-cookie", "forget-world-cookie",
+        "bind-world-cookie", "forget-world-cookie", "assist-browser-login",
     ])
     sessions.add_argument("account_id", help="Configured secret-free account ID")
     sessions.add_argument("--config", help="TOML account metadata path outside repository")
@@ -133,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "sessions":
         from daedalus.saved_session_recovery import (
             SavedSessionUnavailable,
+            assisted_browser_cookie_login,
             bind_saved_email,
             bind_world_cookie,
             probe_saved_cookies,
@@ -177,6 +178,24 @@ def main(argv: list[str] | None = None) -> int:
                 result = bind_world_cookie(
                     account, AccountSessionCoordinator(configured), cookie,
                     confirmed=True,
+                )
+                print(json.dumps(result))
+            elif args.action == "assist-browser-login":
+                import sys
+
+                if not args.confirm_read_only_network:
+                    parser.error("Browser assistance requires --confirm-read-only-network")
+                if not sys.stdin.isatty():
+                    parser.error("Browser assistance requires an interactive local terminal")
+                from daedalus.account_sessions import AccountSessionCoordinator
+
+                print(
+                    "Complete login and any CAPTCHA yourself in the official browser. "
+                    "Then supply only the world ikariam cookie in the hidden prompt. "
+                    "No password or lobby token is requested."
+                )
+                result = assisted_browser_cookie_login(
+                    account, AccountSessionCoordinator(configured), confirmed=True,
                 )
                 print(json.dumps(result))
             elif args.action == "probe-saved-cookies":

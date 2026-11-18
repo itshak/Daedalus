@@ -425,3 +425,102 @@ def test_canonical_os_keyring_backend_is_accepted(monkeypatch):
     fake_keyring = SimpleNamespace(get_keyring=lambda: MacKeyring())
     monkeypatch.setitem(sys.modules, "keyring", fake_keyring)
     assert _store(None) is fake_keyring
+
+
+def test_assisted_browser_holds_lease_through_manual_challenge_and_storage(setup):
+    from daedalus.saved_session_recovery import assisted_browser_cookie_login
+
+    account, owner, keys = setup
+    bind_saved_email(account, "synthetic@example.invalid", credential_store=keys)
+    events = []
+    secret = "B" * 48
+
+    def browser(url):
+        assert url == "https://lobby.ikariam.gameforge.com/"
+        assert owner.status(account.id) != "not_connected"
+        events.append("browser")
+        return True
+
+    def human():
+        assert owner.status(account.id) != "not_connected"
+        events.append("manual_challenge")
+        return secret
+
+    def restore(a, email, cookie):
+        assert owner.status(account.id) != "not_connected"
+        assert cookie == secret
+        events.append("verify")
+        return _session()
+
+    result = assisted_browser_cookie_login(
+        account, owner, confirmed=True, credential_store=keys,
+        browser_open=browser, read_cookie=human, restore=restore,
+    )
+    assert result == {"account_id": account.id, "status": "world_cookie_bound"}
+    assert events == ["browser", "manual_challenge", "verify"]
+    assert owner.status(account.id) == "not_connected"
+    assert secret not in str(result)
+
+
+def test_assisted_browser_denies_unauthorized_or_busy_accounts(setup):
+    from daedalus.saved_session_recovery import assisted_browser_cookie_login
+
+    account, owner, keys = setup
+    bind_saved_email(account, "synthetic@example.invalid", credential_store=keys)
+    calls = []
+    opts = {"credential_store": keys, "browser_open": lambda _: calls.append(1) or True,
+            "read_cookie": lambda: "C" * 48,
+            "restore": lambda *_: _session()}
+    with pytest.raises(SavedSessionUnavailable, match="approval"):
+        assisted_browser_cookie_login(account, owner, confirmed=False, **opts)
+    with owner.acquire(account.id), pytest.raises(SavedSessionUnavailable, match="owns"):
+        assisted_browser_cookie_login(account, owner, confirmed=True, **opts)
+    assert calls == []
+
+
+def test_assisted_browser_rejects_wrong_identity_without_persisting(setup):
+    from daedalus.saved_session_recovery import assisted_browser_cookie_login
+
+    account, owner, keys = setup
+    bind_saved_email(account, "synthetic@example.invalid", credential_store=keys)
+    old = dict(keys.entries)
+    with pytest.raises(SavedSessionUnavailable, match="could not verify"):
+        assisted_browser_cookie_login(
+            account, owner, confirmed=True, credential_store=keys,
+            browser_open=lambda _: True, read_cookie=lambda: "D" * 48,
+            restore=lambda *_: _session(player="WrongPlayer"),
+        )
+    assert keys.entries == old
+    assert owner.status(account.id) == "not_connected"
+
+
+def test_assisted_browser_failed_open_does_not_prompt_for_secret(setup):
+    from daedalus.saved_session_recovery import assisted_browser_cookie_login
+
+    account, owner, keys = setup
+    bind_saved_email(account, "synthetic@example.invalid", credential_store=keys)
+    with pytest.raises(SavedSessionUnavailable, match="open"):
+        assisted_browser_cookie_login(
+            account, owner, confirmed=True, credential_store=keys,
+            browser_open=lambda _: False,
+            read_cookie=lambda: pytest.fail("No secret prompt expected"),
+        )
+    assert owner.status(account.id) == "not_connected"
+
+
+def test_browser_assistance_cli_is_opt_in_and_requires_local_tty(tmp_path, monkeypatch, capsys):
+    from daedalus.cli import main
+
+    path = tmp_path / "accounts.toml"
+    path.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s301-en"\n'
+                    'player = "ExamplePlayer"\n')
+    argv = ["sessions", "assist-browser-login", "alpha", "--config", str(path)]
+    with pytest.raises(SystemExit) as missing_consent:
+        main(argv)
+    assert missing_consent.value.code == 2
+    assert "confirm-read-only-network" in capsys.readouterr().err
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    with pytest.raises(SystemExit) as not_local:
+        main([*argv, "--confirm-read-only-network"])
+    assert not_local.value.code == 2
+    assert "interactive local terminal" in capsys.readouterr().err

@@ -43,3 +43,10 @@ Managed task subprocesses may outlive the API; reconcile them before restarting.
 Run the synthetic
 `daedalus doctor --smoke` first to test the local API without contacting the
 game. Do not commit private account files, credentials or cookie values.
+
+
+## Local manual browser recovery (opt-in)
+
+If saved world cookies have expired, run `daedalus sessions assist-browser-login ACCOUNT_ID --config /path/to/accounts.toml --confirm-read-only-network` **on the machine that owns the account** in an interactive terminal. First bind the saved email with `sessions bind-email`. This opens only the official Gameforge lobby in the user's regular browser. The human completes login and any CAPTCHA, then manually supplies the **world** `ikariam` cookie via the hidden prompt (never a password, lobby token, CLI flag or HTTP API). The lease is held from before browser launch through cookie verification and OS-keyring persistence. The engine performs a read-only world request and checks the exact world/player identity; invalid cookies are rejected. The lease is released after the short-lived verification, so this is not a live worker takeover or remote session transfer.
+
+Do not run this against an account already owned by another Daedalus worker or a separate uncoordinated host. Remote browser handoff and full in-place worker recovery are not yet implemented; use the local authorized machine and secure shell rather than transmitting cookie material to the desktop API.
