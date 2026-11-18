@@ -109,7 +109,22 @@ The optional remote Mac controller can now approve **host-only** staging and
 rebind of one existing Daedalus-owned dedicated worker, but never uploads
 cookies or launches a remote browser. The original public IkaBot CLI and
 default non-cookies-only saved-session path are unchanged. The new parser
-has only been verified with synthetic markup; live Gameforge compatibility is
-pending explicit owner-supervised testing under
-`openspec/changes/validate-live-authentication`. A changed website layout
-must fail closed until carefully reviewed, not bypass the safety check.
+was subsequently checked against one owner-authorized isolated live
+world page on 2026-11-19. The real own-player marker was a scoped
+`#GF_toolbar li.avatarName` element, not a legacy `#avatarName` ID. The
+parser now accepts this exact server-rendered self marker but still rejects
+missing, conflicting or unscoped names. This is partial field evidence,
+not proof of every world, full account recovery or task execution. A changed
+website layout must fail closed until carefully reviewed.
+
+The same limited live smoke exposed two upstream-compatible IPC mismatches:
+`getIdsOfCities` provides numeric string map keys, so the existing-session
+bridge now converts only strict positive decimal IDs to typed IPC integers
+while preserving upstream legacy CLI behavior. The current warehouse page
+requires a warehouse building slot from the authenticated city view, and
+reports plunderable/capacity values in a server-rendered JSON updater map,
+not always direct spans. Only bounded numeric resource values leave the
+engine; arbitrary HTML, page tokens and raw cookies remain private. One
+owner-approved test returned seven city and seven warehouse records; the
+remaining live recovery, explicit task dispatch and production gates in
+`openspec/changes/validate-live-authentication` remain open.

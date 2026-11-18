@@ -1,6 +1,6 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-18**. The public repository's default branch is `main`.
+Last reviewed: **2026-11-19** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
 
 ## Complete and archived
 
@@ -36,11 +36,11 @@ The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect
 
 ## Existing-session read-only bridge (shipped)
 
-The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
+The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. A later owner-approved isolated field smoke verified one saved game identity and read-only city/warehouse IPC on a dedicated worker; it was not a production-wide certification.
 
 ## Experimental cookie-only worker bootstrap (merged; live validation pending)
 
-PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA, and no live account validation has been performed. See [saved worker](SAVED-WORKER.md). This is not production readiness.
+PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA; one subsequent isolated saved-cookie live validation passed, while task execution and recovery acceptance remain pending. See [saved worker](SAVED-WORKER.md). This is not production readiness.
 
 ## Still active
 
@@ -54,7 +54,7 @@ have passed synthetic tests.
   nonsecret assistance ticket, and confirms independently verified rebind.
   The backend stores staged cookies solely in that host's OS keyring.
   The engine now requires recognizable server-rendered player identity on
-  fresh TLS-validated game-world responses. This is **not a real account test**.
+  fresh TLS-validated game-world responses. A subsequent limited real-account smoke passed saved-cookie identity attestation and read-only data, but **not** the complete real-account recovery/task acceptance.
 
 `migrate-native-desktop` and `import-public-ikabot-engine` are archived for their
 reviewed, nonsecret scopes. The production engine comparison reviewed six

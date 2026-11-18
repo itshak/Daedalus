@@ -28,3 +28,19 @@ daedalus doctor --smoke
 This uses FastAPI's in-process test client and fictional demo users. It checks bearer authorization, demo-only mode, fake accounts, capabilities and warehouse reporting, without Gameforge requests or binding a TCP port. Missing optional test dependencies result in a sanitized failure with a nonzero exit. It is not a native Qt smoke; the latter runs in protected macOS CI.
 
 For an interactive desktop preview, run `daedalus serve --demo` with a newly generated backend bearer token and connect the installed native app to localhost. See [synthetic desktop demo](SYNTHETIC-DEMO.md). **A synthetic test does not prove real game account authentication.**
+
+## Limited owner-supervised field smoke (2026-11-19)
+
+On one explicitly isolated, previously provisioned Gameforge account, a
+saved-lobby-session renewal and the strict cookies-only world/player probe
+succeeded against live HTTPS game responses. An authenticated single worker
+then exposed seven real city records and seven resource-only warehouse
+snapshots through the protected Mac-facing REST API. One unmodified production
+worker for that account was stopped by explicit owner authorization, and no
+other production bots were intentionally restarted. No real game task was
+dispatched, no browser/CAPTCHA session or dedicated rebind was accepted, and
+no production cutover is approved. Credentials, account identity, session
+cookies and raw page content are intentionally omitted from public evidence.
+
+The `doctor` null field still means the **offline diagnostic** does not perform
+live checks; it is not a record of this separately supervised field test.

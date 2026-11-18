@@ -4,7 +4,7 @@ Never contact Gameforge or restore saved sessions. Existing-only IPC actions
 must not call Session.from_saved under any error or success path.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from ikabot.helpers.ipc import IPCServer
 
@@ -66,6 +66,38 @@ def test_existing_only_cities_use_matching_session_without_restoring():
     mocked.assert_called_once_with(session)
 
 
+def test_existing_cities_normalize_live_string_ids_but_keep_legacy_cli_ids():
+    session = make_session()
+    server = IPCServer(default_session=session)
+    cities = {"123": {"name": "Athens", "coords": "[1:2]", "tradegood": 1}}
+    with patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=(["123"], cities)):
+        existing = server.handle_request({
+            "action": "list_cities_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+        legacy = server.handle_request({
+            "action": "list_cities", "world": "s301-en", "player": "ExamplePlayer",
+        })
+    assert existing["status"] == "ok"
+    assert existing["cities"][0]["id"] == 123
+    assert type(existing["cities"][0]["id"]) is int
+    assert legacy["status"] == "ok"
+    assert legacy["cities"][0]["id"] == "123"
+
+
+def test_existing_cities_reject_malformed_string_ids():
+    session = make_session()
+    server = IPCServer(default_session=session)
+    for bad in ("0", "-12", "1e2", "1.0", "000123", "123x", True):
+        cities = {bad: {"name": "Athens", "coords": "[1:2]", "tradegood": 1}}
+        with patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=([bad], cities)):
+            result = server.handle_request({
+                "action": "list_cities_existing", "world": "s301-en",
+                "player": "ExamplePlayer",
+            })
+        assert result["status"] == "error"
+
+
 def test_missing_or_ambiguous_identity_never_launches_login():
     session = make_session()
     server = IPCServer(default_session=session)
@@ -102,12 +134,13 @@ def test_original_list_cities_action_is_preserved_for_upstream_cli():
 
 def test_existing_only_warehouse_uses_real_game_session_and_redacts_html():
     session = make_session()
-    session.get.return_value = (
-        '<html><input name="actionRequest" value="private-session-token">'
-        '<span id="js_plunderable_wood">2.97M<div class="tooltip">2,970,123</div></span>'
-        '<span id="js_plunderable_wine">17,254</span>'
-        '<span id="js_capacity_wood">1,000,000</span></html>'
-    )
+    session.get.side_effect = [
+        '<div class="position7 building warehouse level31"></div>',
+        ('<html><input name="actionRequest" value="private-session-token">'
+         '<span id="js_plunderable_wood">2.97M<div class="tooltip">2,970,123</div></span>'
+         '<span id="js_plunderable_wine">17,254</span>'
+         '<span id="js_capacity_wood">1,000,000</span></html>'),
+    ]
     cities = {42: {"name": "Athens", "coords": "[1:2]", "tradegood": 0}}
     server = IPCServer(default_session=session)
     with (
@@ -124,12 +157,95 @@ def test_existing_only_warehouse_uses_real_game_session_and_redacts_html():
     assert "private-session-token" not in str(resp)
     assert "actionRequest" not in str(resp)
     assert "email" not in str(resp)
-    session.get.assert_called_once_with("view=warehouse&cityId=42", noIndex=True)
+    assert session.get.call_args_list == [
+        call("view=city&cityId=42", noIndex=True),
+        call("view=warehouse&cityId=42&position=7", noIndex=True),
+    ]
+
+
+def test_live_warehouse_accepts_string_city_ids_as_typed_ipc_ints():
+    session = make_session()
+    session.get.side_effect = [
+        '<div class="position7 building warehouse level31"></div>',
+        '<span id="js_plunderable_wood">100</span>',
+    ]
+    cities = {"42": {"name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    server = IPCServer(default_session=session)
+    with patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=(["42"], cities)):
+        result = server.handle_request({
+            "action": "warehouse_snapshots_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+    assert result["status"] == "ok"
+    assert result["cities"][0]["city_id"] == 42
+    assert type(result["cities"][0]["city_id"]) is int
+    assert result["cities"][0]["unsecured"]["wood"] == "100"
+    assert session.get.call_args_list == [
+        call("view=city&cityId=42", noIndex=True),
+        call("view=warehouse&cityId=42&position=7", noIndex=True),
+    ]
+
+
+def test_current_warehouse_json_updates_are_numeric_and_secret_free():
+    session = make_session()
+    city_page = (
+        '<div class="position8 building warehouse level10"></div>'
+        '<div class="position7 building warehouse level31"></div>'
+    )
+    resource_update = (
+        '<script>var resourceUpdater = {'
+        '"js_plunderable_wood":{"text":"2.97M","tooltip":"2,970,123"},'
+        '"js_plunderable_wine":{"text":"17,254","tooltip":"17,254"},'
+        '"js_capacity_wood":{"text":"1,000,000","tooltip":"1,000,000"}'
+        '}; var secretNeverReturned = "private-game-cookie";</script>'
+    )
+    session.get.side_effect = [city_page, resource_update]
+    cities = {"42": {"name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    server = IPCServer(default_session=session)
+    with patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=(["42"], cities)):
+        result = server.handle_request({
+            "action": "warehouse_snapshots_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+    assert result["status"] == "ok"
+    city = result["cities"][0]
+    assert city["unsecured"] == {"wood": "2,970,123", "wine": "17,254"}
+    assert city["capacity"] == "1,000,000"
+    assert "private-game-cookie" not in str(result)
+    assert session.get.call_args_list == [
+        call("view=city&cityId=42", noIndex=True),
+        call("view=warehouse&cityId=42&position=7", noIndex=True),
+    ]
+
+
+def test_warehouse_untrusted_slot_or_nonnumeric_update_fails_closed():
+    session = make_session()
+    cities = {"42": {"name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    server = IPCServer(default_session=session)
+    for city_page, page in [
+        ('<div class="building warehouse"></div>',
+         '<script>{"js_plunderable_wood":{"text":"100"}}</script>'),
+        ('<div class="position7 building warehouse"></div>',
+         '<script>{"js_plunderable_wood":{"text":"<img src=x>"}}</script>'),
+        ('<div class="position7 building warehouse"></div>',
+         '<script>{"js_plunderable_wood":{"text":"100"},'
+         '"js_plunderable_wood":{"text":"200"}}</script>'),
+    ]:
+        session.get.side_effect = [city_page, page]
+        with patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=(["42"], cities)):
+            result = server.handle_request({
+                "action": "warehouse_snapshots_existing", "world": "s301-en",
+                "player": "ExamplePlayer",
+            })
+        assert result["status"] == "error"
 
 
 def test_warehouse_malformed_coords_dont_leak_into_ipc():
     session = make_session()
-    session.get.return_value = '<span id="js_plunderable_wood">0</span>'
+    session.get.side_effect = [
+        '<div class="position7 building warehouse level31"></div>',
+        '<span id="js_plunderable_wood">0</span>',
+    ]
     cities = {42: {"name": "Athens", "coords": "[token-cookie-unsafe]", "tradegood": 0}}
     server = IPCServer(default_session=session)
     with (

@@ -16,6 +16,12 @@ from ikabot.web.session import Session
      '<div id="playerName">ExamplePlayer</div></div>'),
     '<script>var game = {"avatarId":42,"avatarName":"ExamplePlayer"}</script>',
     '<script>window.game = {"avatarName":"ExamplePlayer"}</script>',
+    ('<div class="GF_toolbar"><ul><li class="avatarName">'
+     '<a id="avatarPictureSmall"><img src="/avatar.png"></a>'
+     'ExamplePlayer</li></ul></div>'),
+    ('<div id="other"><div class="GF_toolbar layout"><ul>'
+     '<li class="status avatarName">ExamplePlayer</li>'
+     '</ul></div></div>'),
 ])
 def test_server_rendered_own_player_is_attested(html):
     assert attest_player_from_world_html(html, "ExamplePlayer")
@@ -37,6 +43,14 @@ def test_server_rendered_own_player_is_attested(html):
     '<input type="hidden" id="playerName" value="ExamplePlayer">',
     '<span id="avatarName">ExamplePlayer</span><span id="playerName">OtherPlayer</span>',
     '<span id="avatarName">ExamplePlayer\\x00</span>',
+    '<li class="avatarName">ExamplePlayer</li>',
+    '<div class="toolbar"><li class="avatarName">ExamplePlayer</li></div>',
+    '<div class="GF_toolbar"><li class="avatarName">OtherPlayer</li></div>',
+    ('<div class="GF_toolbar"><li class="avatarName">ExamplePlayer</li></div>'
+     '<span id="playerName">OtherPlayer</span>'),
+    '<div class="GF_toolbar"><li class="avatarName"></li></div>',
+    '<div class="GF_toolbar"><li class="avatarName">ExamplePlayer</div>',
+
 ])
 def test_missing_wrong_or_ambiguous_server_identity_fails_closed(html):
     assert attest_player_from_world_html(html, "ExamplePlayer") is False

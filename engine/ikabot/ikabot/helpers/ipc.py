@@ -53,6 +53,21 @@ _BATCH_ENTRY_KEYS = ("task", "config", "email", "world", "server", "player")
 # the game's order of the resources (a city's "tradegood" index)
 _TRADEGOODS = ("wood", "wine", "marble", "crystal", "sulfur")
 _MAX_IPC_MSG_BYTES = 16 * 1024 * 1024
+
+
+def _existing_city_id(value):
+    """Normalize upstream JSON city-map keys at the IPC security boundary.
+
+    Ikariam's relatedCityData object uses decimal STRING keys, whereas the
+    typed Daedalus protocol requires a positive integer. Reject malformed
+    keys instead of coercing arbitrary values, and leave legacy CLI values
+    unchanged so upstream tasks retain their original city-map indexing.
+    """
+    if type(value) is int and value > 0:
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,11}", value):
+        return int(value)
+    raise ValueError("Invalid authenticated city ID")
 _TASK_STARTUP_TIMEOUT = 60.0
 _LOCAL_SERVER = None
 _LOCAL_SERVER_LOCK = threading.Lock()
@@ -767,7 +782,7 @@ class IPCServer:
             "username": session.username,
             "cities": [
                 {
-                    "id": city_id,
+                    "id": _existing_city_id(city_id) if existing_only else city_id,
                     "name": decodeUnicodeEscape(cities[city_id]["name"]),
                     "coords": cities[city_id]["coords"].strip().strip("[]"),
                     "tradegood": _TRADEGOODS[int(cities[city_id]["tradegood"])],
@@ -781,16 +796,41 @@ class IPCServer:
         return result
 
     def _warehouse_snapshots_existing(self, request):
-        """Read per-city warehouse spans via an existing authenticated session.
+        """Read numeric-only plunderable values from a real owned warehouse.
 
-        Return ONLY formatted numeric resource strings, never whole page HTML,
-        login data, actionRequest tokens or arbitrary hidden input values.
+        The authenticated city view supplies the warehouse *building position*.
+        Current Ikariam refuses a position-free warehouse view and renders
+        resource values in a JavaScript JSON update map instead of direct
+        span nodes. Support both verified formats, never whole page HTML or
+        arbitrary markup as an amount, and never expose login/session tokens.
         """
         import html
-        import re
+        from html.parser import HTMLParser
 
         from ikabot.helpers import pedirInfo
         from ikabot.helpers.varios import decodeUnicodeEscape
+
+        class _WarehouseSlots(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.positions = set()
+                self.invalid = False
+
+            def handle_starttag(self, tag, attrs):
+                if tag != "div":
+                    return
+                classes = set((dict(attrs).get("class") or "").split())
+                if not {"building", "warehouse"}.issubset(classes):
+                    return
+                slots = [
+                    re.fullmatch(r"position([0-9]{1,2})", name)
+                    for name in classes
+                ]
+                slots = [item for item in slots if item is not None]
+                if len(slots) != 1:
+                    self.invalid = True
+                else:
+                    self.positions.add(int(slots[0].group(1)))
 
         session = self._existing_session(request)
         pedirInfo.ids_cache = None
@@ -805,32 +845,64 @@ class IPCServer:
             r"""<div\b[^>]*\bclass=["'][^"']*\btooltip\b[^"']*["'][^>]*>(.*?)</div>""",
             re.IGNORECASE | re.DOTALL,
         )
+        # Numeric JSON updater values are delivered in the current game's
+        # authenticated warehouse markup as text + exact tooltip strings.
+        update_pattern = re.compile(
+            r'"js_(plunderable|capacity)_(wood|wine|marble|crystal|glass|sulfur)"\s*:\s*(\{)',
+            re.IGNORECASE,
+        )
         safe_number = re.compile(r"[0-9][0-9,.\s\u00a0\u202f]*[KMBkmb]?\Z")
         results = []
-        for city_id in ids:
-            if type(city_id) is not int or city_id <= 0:
-                raise ValueError("Invalid authenticated city ID")
-            markup = session.get(f"view=warehouse&cityId={city_id}", noIndex=True)
-            if not isinstance(markup, str):
-                raise ValueError("Warehouse response is not HTML")
-            unsecured = {}
-            capacity = None
+        for raw_city_id in ids:
+            city_id = _existing_city_id(raw_city_id)
+            city_html = session.get(f"view=city&cityId={city_id}", noIndex=True)
+            if not isinstance(city_html, str) or len(city_html) > 2_000_000:
+                raise ValueError("Invalid authenticated city building view")
+            slots = _WarehouseSlots()
+            slots.feed(city_html)
+            slots.close()
+            if slots.invalid or not slots.positions:
+                raise ValueError("No trusted warehouse building slot in city view")
+            position = min(slots.positions)
+            markup = session.get(
+                f"view=warehouse&cityId={city_id}&position={position}", noIndex=True,
+            )
+            if not isinstance(markup, str) or len(markup) > 2_000_000:
+                raise ValueError("Invalid authenticated warehouse response")
+            fields = {}
+
+            def record(kind, resource, amount):
+                key = (kind.casefold(), "glass" if resource.casefold() == "crystal"
+                       else resource.casefold())
+                if not isinstance(amount, str) or not safe_number.fullmatch(amount):
+                    raise ValueError("Warehouse amount is not numeric")
+                prior = fields.get(key)
+                if prior is not None and prior != amount:
+                    raise ValueError("Conflicting warehouse numeric resource values")
+                fields[key] = amount
+
             for kind, resource, inner in span_pattern.findall(markup):
                 tooltip = tooltip_pattern.search(inner)
-                amount = tooltip.group(1) if tooltip is not None else inner
-                amount = html.unescape(re.sub(r"<[^>]*>", "", amount)).strip()
-                if not safe_number.fullmatch(amount):
-                    raise ValueError("Warehouse amount is not numeric")
-                key = "glass" if resource.casefold() == "crystal" else resource.casefold()
-                if kind.casefold() == "plunderable":
-                    unsecured[key] = amount
-                elif capacity is None:
-                    capacity = amount
+                value = tooltip.group(1) if tooltip is not None else inner
+                value = html.unescape(re.sub(r"<[^>]*>", "", value)).strip()
+                record(kind, resource, value)
+            for match in update_pattern.finditer(markup):
+                try:
+                    item, _ = json.JSONDecoder().raw_decode(markup[match.start(3):])
+                except (ValueError, TypeError) as exc:
+                    raise ValueError("Invalid warehouse resource update") from exc
+                if not isinstance(item, dict) or set(item) - {"text", "tooltip"}:
+                    raise ValueError("Invalid warehouse resource update fields")
+                value = item.get("tooltip") if item.get("tooltip") is not None else item.get("text")
+                record(match.group(1), match.group(2), value)
+            unsecured = {res: amount for (kind, res), amount in fields.items()
+                         if kind == "plunderable"}
+            capacity_values = [amount for (kind, _), amount in fields.items()
+                               if kind == "capacity"]
             if not unsecured:
                 raise ValueError("No unsecured warehouse resource values")
-            raw_coords = cities[city_id].get("coords")
-            # Only numeric coordinate pairs may leave the engine. The city
-            # inventory comes from the authenticated session; no second call.
+            capacity = capacity_values[0] if capacity_values else None
+            raw_coords = cities[raw_city_id].get("coords")
             island = None
             if isinstance(raw_coords, str):
                 candidate = raw_coords.strip().strip("[]").strip()
@@ -838,7 +910,7 @@ class IPCServer:
                     island = candidate
             results.append({
                 "city_id": city_id,
-                "city_name": decodeUnicodeEscape(cities[city_id]["name"]),
+                "city_name": decodeUnicodeEscape(cities[raw_city_id]["name"]),
                 "unsecured": unsecured,
                 "capacity": capacity,
                 "island": island,
