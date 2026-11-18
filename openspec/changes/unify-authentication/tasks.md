@@ -4,7 +4,8 @@
 - [x] Implement the nonsecret lease-bound human completion acknowledgment protocol (no real browser login, handoff or recovery).
 - [x] Add a safe cookie-only probe of previously saved sessions (no lobby loginLink or automatic account worker).
 - [x] Add local, hidden-input OS-keyring handoff for an already authenticated world cookie (no browser automation).
-- [ ] Port safe browser login and manual CAPTCHA assistance without credentials.
+- [x] Add an opt-in local browser-assisted cookie recovery path holding the account lease through human CAPTCHA and verified keyring persistence (offline synthetic tests).
+- [ ] Complete browser login integration and manual CAPTCHA recovery across local/remote workers without credentials.
 - [ ] Implement validated remote handoff or protected remote-browser fallback.
 - [x] Add opt-in existing-session expiration detection, GUI notification and worker revalidation (no automatic task resume).
 - [ ] Add secure, user-approved task resume after verified real browser recovery.
