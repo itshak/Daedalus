@@ -204,7 +204,7 @@ def test_idle_saved_worker_can_rebind_verified_cookie_without_releasing_lease(sy
 
 @pytest.mark.parametrize("tasks,requests", [
     ([{"status": "running"}], []),
-    ([], [{"status": "uncertain"}]),
+    ([], [{"status": "unconfirmed"}]),
     ([], [{"status": "dispatching"}]),
 ])
 def test_worker_recovery_rejects_active_or_uncertain_tasks(system, tasks, requests):

@@ -125,7 +125,7 @@ class SavedCookieWorker:
                 status = controller.list_tasks(self.account.id)
                 if any(task.get("status") in {"running", "stopping"}
                        for task in status["engine_tasks"]) or any(
-                    item.get("status") in {"pending", "dispatching", "uncertain"}
+                    item.get("status") in {"dispatching", "unconfirmed"}
                     for item in status["requests"]
                 ):
                     raise SavedWorkerUnavailable(
