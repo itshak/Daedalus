@@ -26,6 +26,7 @@ The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 - **Tasks:** opt-in, confirmed built-in background task launch/list/stop through an existing authenticated engine session; parameter-aware forms generated from upstream public task signatures, plus an advanced JSON editor
 - **Log:** local bounded UI diagnostics
 - **Connection:** local or HTTPS/SSH-tunneled API URL and a masked bearer-token field
+- **Appearance:** local-only theme and reporting defaults, no game credentials
 
 The Accounts page offers confirmed **Add/Edit/Enable/Disable/Remove** account metadata controls only when the backend is separately started with `--enable-account-editing`; the controls never accept credentials or launch authentication. It also provides an explicit **Check IkaBot sessions** button; only configured identities with a unique matching existing engine session show Attached. The warehouse view can read live data after the backend is explicitly started with `--connect-existing-ipc` against a compatible, already-authenticated engine. Neither operation creates a login; see [existing engine attachment](EXISTING-IPC.md).
 
@@ -33,9 +34,36 @@ Backend requests run in a Qt worker thread. A connection may be replaced without
 
 No game login or Selenium browser is launched by the GUI. Warehouse data can now come from the opt-in read-only existing-session IPC bridge when a compatible engine process already holds a valid authenticated session; otherwise the UI displays an explicit unavailable error. The Accounts page can also show which configured accounts have an attached engine session.
 
-## UI parity still to complete
+## Completed nonsecret legacy GUI parity
 
-This is a **foundation**, not a complete port. Basic account metadata editing is now available in a separate opt-in mode; remaining advanced legacy account dialogs, browser login assistance, durable resume/reconciliation, notifications, additional preference coverage and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
+The reviewed native Fluent desktop now contains the owner's original safe
+account/report/settings interactions, backed by a single Daedalus API client:
+
+- **Accounts:** opt-in Add/Edit/Enable/Disable/Remove for secret-free metadata,
+  per-account inclusion checkboxes and Select All for warehouse reporting.
+  Report inclusion never changes account enablement or starts game tasks.
+- **Warehouses:** single-account or **Load selected accounts** (up to 32),
+  including per-account labels, 220K filter, null-not-zero values, grouping by
+  validated island, Copy CSV, **Copy by island**, and TXT/CSV/JSON exports.
+  Partial backend failures remain conspicuous; successful rows can still be
+  copied or saved without pretending failed accounts returned zero.
+- **Appearance:** System/Light/Dark themes, 220K default and island grouping
+  default, stored in a separate versioned owner-private
+  `~/.config/daedalus/gui.json` file (or `XDG_CONFIG_HOME`).
+  Report exclusions are keyed by the SHA-256 of the validated backend URL,
+  so a different backend never reuses the last backend's account selection.
+  The file has no game credentials, session cookies or API bearer tokens.
+- **Connection:** switching to another successfully authenticated backend
+  clears all previously loaded warehouse reports.
+
+The original `config.ini` username/email/password, direct Selenium runner,
+browser-choice/headless/retry/tokens settings and automatic login are
+**intentionally not ported**. Manual browser/CAPTCHA recovery, remote
+assistance and server-side player attestation are tracked separately under
+`validate-live-authentication`. Native Mac notarization, production testing
+and third-party binary redistribution obligations are also separate release
+gates. The completed **nonsecret** migration does not imply a production login.
+
 
 ## License
 

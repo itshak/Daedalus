@@ -23,7 +23,17 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Daedalus")
     app.setWindowIcon(application_icon())
-    setTheme(Theme.AUTO)
+    from daedalus.gui_preferences import (
+        GuiPreferenceError,
+        GuiPreferences,
+        load_gui_preferences,
+    )
+
+    try:
+        saved = load_gui_preferences()
+    except GuiPreferenceError:
+        saved = GuiPreferences()
+    setTheme({"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}[saved.theme])
     init_app_theme()
     window = MainWindow()
     window.show()

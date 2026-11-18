@@ -19,3 +19,11 @@ No web UI rewrite or import of private account files and tokens.
 
 ## Impact
 A native Mac client with a persistent remote server. See ADR-001, ADR-004 and ADR-005.
+
+## Completion boundary (2026-11-18)
+This migration includes the reviewed native Fluent pages and authenticated
+local/remote API client, typed managed tasks, safe metadata account editing,
+multi-account warehouse selection/reporting and locally private appearance
+preferences. The original login/credential/Selenium UI is intentionally
+not imported; its secure replacement and real-account acceptance remain
+with the active `validate-live-authentication` change.

@@ -7,10 +7,10 @@ Reviewed on **2026-11-18** against the owner's private `itshak/ikabot` source tr
 | Legacy source | Intended behavior | Daedalus replacement | Remaining boundary |
 | --- | --- | --- | --- |
 | `src/ikabot/gui/main_window.py` | Fluent navigation, macOS traffic lights, log bridge, cancelable run | `desktop/app.py`, standalone backend client and worker thread | Legacy Selenium runner intentionally not imported |
-| `gui/accounts_page.py`, `gui/dialogs.py` | User selection and account editor | `desktop/pages.py` Accounts, API-protected nonsecret metadata CRUD | Secrets and cross-account batch selection are intentionally excluded; assisted login requires a separate design |
-| `gui/run_page.py`, `report.py`, `models.py` | Warehouse rows, 220K filter, CSV/JSON/TXT and island export | `desktop/pages.py`, `reporting.py`, read-only snapshot API | Live reports require an already verified engine session; no Selenium scraping fallback |
-| `gui/log_page.py`, `gui/theme.py`, `gui/widgets.py` | Buffered logs, Fluent styling and scrolling tables | Corresponding `desktop/` modules | Theme selection and additional local preferences are not yet parity-complete |
-| `gui/settings_page.py`, `settings.py` | Browser choices, retries, debug, credentials and theme | Secure `Connection` page, optional OS-keyring-backed connection preferences | No password fields or unsafe legacy config import; browser recovery preferences require a separate security review |
+| `gui/accounts_page.py`, `gui/dialogs.py` | User selection and account editor | `desktop/pages.py` Accounts, protected metadata CRUD and report inclusion/select-all | Password fields excluded; assisted login separate |
+| `gui/run_page.py`, `report.py`, `models.py` | Warehouse table, 220K filter, CSV/JSON/TXT and island export | `desktop/pages.py`, `reporting.py`, read-only API, multi-account reports and island clipboard | Live reports require verified sessions; no Selenium scraping |
+| `gui/log_page.py`, `gui/theme.py`, `gui/widgets.py` | Buffered logs, Fluent styling and scrolling tables | Matching `desktop/` modules and local `appearance_page.py` | Theme persisted privately; no credential settings |
+| `gui/settings_page.py`, `settings.py` | Browser options, debug, credentials and theme | `Connection` and local-only `Appearance` pages, versioned GUI preferences | Password and browser settings excluded pending security review |
 | `gui/worker.py`, `browser.py`, `login.py`, `runner.py` | Local Selenium/browser-backed game login, scraping and manual steps | Lease/state protocol, saved-cookie validation, explicit existing-session task worker | Real browser assistance, protected remote handoff and validated task resume are still incomplete |
 
 The current Daedalus Tasks page also offers managed IkaBot task controls and reviewed typed task parameters absent from the legacy GUI.
@@ -23,11 +23,17 @@ The current Daedalus Tasks page also offers managed IkaBot task controls and rev
 - The private legacy application declares Selenium, webdriver-manager, undetected-chromedriver, PySide6 and PySide6-Fluent-Widgets. Selenium browser orchestration and its dependencies were **not** carried into the currently shipping Daedalus desktop extras. Re-evaluate browser-driver terms and maintenance status before adding any optional login assistant.
 - Bearer tokens, account cookies and browser sessions are not part of the public source or docs. **Never** use real account credentials or an active production profile for CI, demos or compatibility tests.
 
-## Remaining acceptance gates
+## Audit conclusion and remaining release/authentication gates
 
-1. Complete any requested nonsecret legacy account selection/preferences UX with native UI tests, while maintaining backend ownership of all game sessions.
-2. Add an opt-in audited browser login/manual CAPTCHA path, using only authorized operator interaction and worker verification, without independent competing logins.
-3. Implement a protected same-owner remote handoff or authorized remote-browser fallback, then explicitly approved recovery and task resume.
-4. Run mocked failure-path tests, static secret scanning, strict OpenSpec validation and an isolated non-production Mac end-to-end run. Verify third-party redistribution notices before public binary release.
+The audited nonsecret GUI features (account report inclusion, metadata editing,
+grouped warehouse exports, theme and display preferences) are now implemented
+with synthetic native regressions and local-only secure settings tests. They
+close `migrate-native-desktop`; no private credentials or Selenium code
+were copied.
 
-This closes the **review/license-audit task only** in `migrate-native-desktop`. It is not evidence that the remaining UI parity, authentication recovery or app release requirements are complete.
+Secure browser login/manual CAPTCHA assistance, host-only remote recovery,
+independent server-side player identity attestation and real-account acceptance
+are **not** part of GUI migration; they remain active in
+`validate-live-authentication`. The project must separately pass supervised
+Mac integration testing and complete Qt/PySide6 binary redistribution notice
+and notarization review before any production release.

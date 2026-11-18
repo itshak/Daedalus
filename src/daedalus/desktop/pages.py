@@ -6,7 +6,7 @@ window feeds them typed data from the Daedalus backend API.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
@@ -144,6 +144,7 @@ class AccountsPage(QWidget):
     assistance_check_requested = Signal(str)
     assistance_approve_requested = Signal(str, str)
     monitor_requested = Signal(str)
+    report_selection_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -168,7 +169,17 @@ class AccountsPage(QWidget):
         self._connected_ids: set[str] | None = None
         self._edit_revision: str | None = None
         self._editable_accounts: list[dict[str, object]] = []
-        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot"])
+        self._excluded_report_ids: set[str] = set()
+        self._updating_report_checks = False
+        self.select_all_reports = CheckBox("Include all accounts in warehouse reports")
+        self.select_all_reports.setToolTip(
+            "Local report selection only; does not start game tasks or change account enablement"
+        )
+        self.select_all_reports.setChecked(True)
+        self.select_all_reports.stateChanged.connect(self._set_all_reports)
+        layout.addWidget(self.select_all_reports)
+        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
+        self.table.itemChanged.connect(self._report_item_changed)
         layout.addWidget(self.table, 1)
         editor_actions = QHBoxLayout()
         self.create_button = PushButton("Add account")
@@ -216,30 +227,104 @@ class AccountsPage(QWidget):
         self._accounts = accounts
         self._assistance_ticket = None
         self._assistance_account_id = None
+        # Removed accounts no longer need a persisted exclusion.
+        self._excluded_report_ids.intersection_update(
+            str(account["id"]) for account in accounts if isinstance(account.get("id"), str)
+        )
         self._render()
         self._update_assistance_buttons()
+        self._emit_report_selection()
 
-    def set_connected_ids(self, account_ids: list[str]) -> None:
-        self._connected_ids = set(account_ids)
+    def set_report_exclusions(self, excluded_ids: set[str]) -> None:
+        """Apply backend-scoped, private UI report preferences only."""
+        self._excluded_report_ids = set(excluded_ids)
+        self._render()
+        self._emit_report_selection()
+
+    def selected_report_account_ids(self) -> list[str]:
+        return [
+            str(account["id"]) for account in self._accounts
+            if isinstance(account.get("id"), str)
+            and account["id"] not in self._excluded_report_ids
+        ]
+
+    def report_exclusions(self) -> set[str]:
+        return set(self._excluded_report_ids)
+
+    def _emit_report_selection(self) -> None:
+        self.report_selection_changed.emit(self.selected_report_account_ids())
+
+    def _update_select_all_reports(self) -> None:
+        with QSignalBlocker(self.select_all_reports):
+            selected = self.selected_report_account_ids()
+            if not self._accounts or len(selected) == len(self._accounts):
+                state = Qt.Checked
+            elif not selected:
+                state = Qt.Unchecked
+            else:
+                state = Qt.PartiallyChecked
+            self.select_all_reports.setCheckState(state)
+
+    def _set_all_reports(self, state: int) -> None:
+        if self._updating_report_checks:
+            return
+        self._excluded_report_ids = (
+            set() if state == Qt.Checked.value
+            else {str(account["id"]) for account in self._accounts if isinstance(account.get("id"), str)}
+        )
+        self._render()
+        self._emit_report_selection()
+
+    def _report_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._updating_report_checks or item.column() != 6:
+            return
+        row = item.row()
+        if not 0 <= row < len(self._accounts):
+            return
+        account_id = self._accounts[row].get("id")
+        if not isinstance(account_id, str):
+            return
+        if item.checkState() == Qt.Checked:
+            self._excluded_report_ids.discard(account_id)
+        else:
+            self._excluded_report_ids.add(account_id)
+        self._update_select_all_reports()
+        self._emit_report_selection()
+
+    def set_connected_ids(self, account_ids: list[str] | None) -> None:
+        self._connected_ids = set(account_ids) if account_ids is not None else None
         self._render()
 
     def _render(self) -> None:
-        _populate(
-            self.table,
-            [
+        self._updating_report_checks = True
+        try:
+            _populate(
+                self.table,
                 [
-                    acc.get("label") or acc.get("id"),
-                    acc.get("world"),
-                    acc.get("player"),
-                    "Yes" if acc.get("enabled") else "No",
-                    acc.get("session_status") or "not_connected",
-                    "Not checked" if self._connected_ids is None else (
-                        "Attached" if acc.get("id") in self._connected_ids else "Not attached"
-                    ),
-                ]
-                for acc in self._accounts
-            ],
-        )
+                    [
+                        acc.get("label") or acc.get("id"),
+                        acc.get("world"),
+                        acc.get("player"),
+                        "Yes" if acc.get("enabled") else "No",
+                        acc.get("session_status") or "not_connected",
+                        "Not checked" if self._connected_ids is None else (
+                            "Attached" if acc.get("id") in self._connected_ids else "Not attached"
+                        ),
+                        "",
+                    ]
+                    for acc in self._accounts
+                ],
+            )
+            for index, account in enumerate(self._accounts):
+                item = self.table.item(index, 6)
+                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.Unchecked if account.get("id") in self._excluded_report_ids else Qt.Checked
+                )
+                item.setToolTip("Include in read-only warehouse reporting")
+        finally:
+            self._updating_report_checks = False
+        self._update_select_all_reports()
 
     def _selected_visible_id(self) -> str | None:
         index = self.table.currentRow()
@@ -486,8 +571,9 @@ class OperationsPage(QWidget):
 
 class WarehousesPage(QWidget):
     load_requested = Signal(str)
+    load_selected_requested = Signal(object)
 
-    _COLUMNS = ("City", "Island", "World", *RESOURCES, "Capacity", "Captured", "Incomplete")
+    _COLUMNS = ("City", "Island", "World", *RESOURCES, "Capacity", "Captured", "Incomplete", "Account")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -497,6 +583,9 @@ class WarehousesPage(QWidget):
         self._selected_account: dict[str, object] = {}
         self._snapshots: list[dict[str, object]] = []
         self._rows: list[dict[str, object]] = []
+        self._included_ids: list[str] = []
+        self._reports: list[tuple[str, list[dict[str, object]]]] = []
+        self._failed_accounts: list[str] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -517,6 +606,13 @@ class WarehousesPage(QWidget):
         self.load_button = PrimaryPushButton("Load warehouses")
         self.load_button.clicked.connect(self._load)
         controls.addWidget(self.load_button)
+        self.load_selected_button = PushButton("Load selected accounts")
+        self.load_selected_button.setToolTip(
+            "Read-only snapshots for accounts selected on the Accounts page; no tasks started"
+        )
+        self.load_selected_button.clicked.connect(self._load_selected)
+        self.load_selected_button.setEnabled(False)
+        controls.addWidget(self.load_selected_button)
         self.only_220k = CheckBox("Only 220K+")
         self.only_220k.setToolTip(
             "Show cities with at least 220,000 known unsecured resources in total"
@@ -537,13 +633,18 @@ class WarehousesPage(QWidget):
         actions = QHBoxLayout()
         self.copy_button = PushButton("Copy CSV")
         self.copy_button.clicked.connect(self._copy_csv)
+        self.copy_islands_button = PushButton("Copy by island")
+        self.copy_islands_button.clicked.connect(self._copy_islands)
         self.csv_button = PushButton("Save CSV")
         self.csv_button.clicked.connect(lambda: self._save("csv"))
         self.json_button = PushButton("Save JSON")
         self.json_button.clicked.connect(lambda: self._save("json"))
         self.txt_button = PushButton("Save TXT")
         self.txt_button.clicked.connect(lambda: self._save("txt"))
-        for button in (self.copy_button, self.csv_button, self.json_button, self.txt_button):
+        for button in (
+            self.copy_button, self.copy_islands_button,
+            self.csv_button, self.json_button, self.txt_button,
+        ):
             button.setEnabled(False)
             actions.addWidget(button)
         actions.addStretch(1)
@@ -569,6 +670,35 @@ class WarehousesPage(QWidget):
         index = self.account_combo.currentIndex()
         return self._account_ids[index] if 0 <= index < len(self._account_ids) else None
 
+    def set_selected_accounts(self, account_ids: list[str]) -> None:
+        """Local report inclusion only; never changes engine account enablement."""
+        included = set(account_ids)
+        self._included_ids = [aid for aid in self._account_ids if aid in included]
+        self.load_selected_button.setEnabled(bool(self._included_ids))
+
+    def set_display_preferences(self, *, only_220k: bool, group_by_island: bool) -> None:
+        self.only_220k.setChecked(only_220k)
+        self.group_island.setChecked(group_by_island)
+
+    def clear_reports(self) -> None:
+        """Avoid displaying another backend's resource data after a reconnect."""
+        self._reports = []
+        self._failed_accounts = []
+        self._rows = []
+        self._snapshots = []
+        self._selected_account = {}
+        self.table.setRowCount(0)
+        self.status_label.setText("No warehouse snapshots loaded")
+        for button in (
+            self.copy_button, self.copy_islands_button,
+            self.csv_button, self.json_button, self.txt_button,
+        ):
+            button.setEnabled(False)
+
+    def _load_selected(self) -> None:
+        if self._included_ids:
+            self.load_selected_requested.emit(list(self._included_ids))
+
     def _load(self) -> None:
         account_id = self.selected_account_id()
         if account_id is not None:
@@ -577,16 +707,42 @@ class WarehousesPage(QWidget):
     def set_snapshots(self, account_id: str, snapshots: list[dict[str, object]]) -> None:
         self._selected_account = self._accounts.get(account_id, {"id": account_id})
         self._snapshots = snapshots
+        self._reports = [(account_id, snapshots)]
+        self._failed_accounts = []
+        self._render()
+
+    def set_batch_snapshots(self, results: list[dict[str, object]]) -> None:
+        """Partial results are explicitly labeled; no failed account data is invented."""
+        self._reports = []
+        self._failed_accounts = []
+        for result in results:
+            account_id = result.get("account_id")
+            if not isinstance(account_id, str) or account_id not in self._accounts:
+                continue
+            if result.get("error"):
+                self._failed_accounts.append(account_id)
+                continue
+            cities = result.get("cities")
+            if isinstance(cities, list) and all(isinstance(city, dict) for city in cities):
+                self._reports.append((account_id, cities))
+            else:
+                self._failed_accounts.append(account_id)
         self._render()
 
     def _render(self, *_args: object) -> None:
-        self._rows = rows_for_warehouse(
-            self._selected_account, self._snapshots, only_220k=self.only_220k.isChecked()
-        )
+        self._rows = [
+            row for account_id, snapshots in self._reports
+            for row in rows_for_warehouse(
+                self._accounts.get(account_id, {"id": account_id}), snapshots,
+                only_220k=self.only_220k.isChecked(),
+            )
+        ]
         if self.group_island.isChecked():
             self._rows.sort(key=lambda row: (
+                str(row.get("world") or ""),
                 row.get("island") is None,
                 str(row.get("island") or ""),
+                str(row.get("account") or ""),
                 str(row.get("city") or ""),
             ))
         _populate(
@@ -600,16 +756,32 @@ class WarehousesPage(QWidget):
                     row.get("capacity"),
                     row.get("captured_at"),
                     "Yes" if row.get("incomplete") else "No",
+                    row.get("account"),
                 ]
                 for row in self._rows
             ],
         )
-        self.status_label.setText(f"{len(self._rows)} cities shown")
-        for button in (self.copy_button, self.csv_button, self.json_button, self.txt_button):
+        status = f"{len(self._rows)} cities shown"
+        if self._failed_accounts:
+            labels = [
+                str(self._accounts.get(aid, {}).get("label") or aid)
+                for aid in self._failed_accounts
+            ]
+            status += "; unavailable account snapshots: " + ", ".join(labels[:5])
+            if len(labels) > 5:
+                status += f" (+{len(labels) - 5} more)"
+        self.status_label.setText(status)
+        for button in (
+            self.copy_button, self.copy_islands_button,
+            self.csv_button, self.json_button, self.txt_button,
+        ):
             button.setEnabled(bool(self._rows))
 
     def _copy_csv(self) -> None:
         QGuiApplication.clipboard().setText(report_csv(self._rows))
+
+    def _copy_islands(self) -> None:
+        QGuiApplication.clipboard().setText(report_txt(self._rows, group_by_island=True))
 
     def _save(self, format_name: str) -> None:
         if format_name not in {"csv", "json", "txt"}:
