@@ -49,6 +49,14 @@ class IkariamErrorPage(Exception):
     """Ikariam returned an error page, but the session is not known to be expired"""
 
 
+def _can_request_manual_auth():
+    """Only a real operator terminal may be asked for login credentials."""
+    try:
+        return bool(sys.stdin is not None and sys.stdin.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 class Session:
     def __init__(self):
         self.padre = True
@@ -442,6 +450,8 @@ class Session:
         only in that moment, and only in the parent process.
         """
         if not self.password and self.padre:
+            if not _can_request_manual_auth():
+                raise RuntimeError("Manual account authentication required: no interactive terminal")
             if not self.mail:
                 print("\nThe stored session has expired and no account mail was provided.")
                 self.mail = read(msg="Mail: ")
@@ -467,10 +477,12 @@ class Session:
             self.blackbox = blackbox_token
             return True
         except Exception as e:
-            self.logger.error("Failed to obtain new blackbox token from API: ", exc_info=True)
-            if not self.padre: # only exit if running in a child process because user won't be looking at the console to provide the cookies
-                sys.exit('Failed to regenerate blackbox token')
-            print(f'{bcolors.RED}[ERROR]{bcolors.ENDC} Failed to obtain new blackbox token from API: ' + str(e)) # using expired fallback token here so that user can insert cookie manually since blackbox generation failed at this point
+            self.logger.error("Blackbox token API unavailable; operator assistance required")
+            if not self.padre:
+                sys.exit("Failed to regenerate blackbox token; manual assistance required")
+            if not _can_request_manual_auth():
+                raise RuntimeError("Manual blackbox assistance required: no interactive terminal") from None
+            print(f'{bcolors.RED}[ERROR]{bcolors.ENDC} Failed to obtain new blackbox token from API. Manual assistance required.')
             print('Please report this issue to developers on github or the discord server!!')
             print('')
             if allow_lobby_cookie_fallback:

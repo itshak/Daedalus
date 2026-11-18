@@ -73,3 +73,20 @@ The separate Daedalus-maintained existing-session-recovery-monitor change adds v
 ## Optional private world-cookie handoff overlay
 
 The Daedalus-maintained private-world-cookie-handoff change extends the explicit safe Session.from_saved cookies-only mode with world_cookie_override, an in-memory-only cookie obtained from the user's OS keyring after a confirmed local browser-cookie import. The default upstream CLI and login path remain unchanged, and this override is refused without cookies-only mode or exact world/player selectors. It never calls the lobby loginLink path or writes the imported cookie into upstream saved-session JSON. This is not a stable upstream feature; see [local cookie handoff](../docs/PRIVATE-WORLD-COOKIE-HANDOFF.md).
+
+## Source-only production authentication reconciliation overlay (2026-11-18)
+
+An owner-authorized *tracked-source-only* comparison against the locally
+modified production IkaBot 7.7.0 checkout was completed. The six-file
+source patch, decisions and digest are documented without private code or
+credentials in [engine authentication reconciliation](../docs/ENGINE-AUTH-RECONCILIATION.md). Official upstream `master` and
+PR #499 still match the pinned revisions above; the original MIT notice
+is retained.
+
+Daedalus independently adds bounded, sanitized blackbox API transport retry,
+bounded operator-controlled timeouts and fail-fast behavior for unattended
+password/manual-token prompts. No automatic environment credential bootstrap,
+unconfirmed web server, extra Gameforge login or task replay has been ported.
+This is a separately maintained Daedalus overlay, **not** upstream-author
+code or evidence of live compatibility. The existing public CLI contract
+and browser-assisted authentication boundary are retained.
