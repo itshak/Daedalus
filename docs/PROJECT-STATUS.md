@@ -49,6 +49,23 @@ The following umbrella changes have unfinished tasks and were deliberately **not
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
 
+### Remaining OpenSpec completion gates
+
+As of this audit, **7 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
+
+| Active change | Remaining gate | Evidence needed before checking off |
+| --- | --- | --- |
+| `import-public-ikabot-engine` | Reconcile production authentication modifications with upstream without private material | File-by-file reviewed diff, explicit license/provenance and isolated engine regression tests |
+| `migrate-native-desktop` | Finish legacy GUI source and dependency license audit | Source inventory, attribution/compatibility review and binary redistribution decision |
+| `migrate-native-desktop` | Finish advanced legacy GUI parity | Implemented UI workflows and native desktop regression tests, with no credential leakage |
+| `unify-authentication` | Safe browser login and manual CAPTCHA assistance | User-authorized manual browser flow, explicit consent, safe secret handling and mocked failure tests |
+| `unify-authentication` | Validated remote handoff or protected remote-browser fallback | Threat model, authenticated transport, host-local ownership and no secret exposure to controller |
+| `unify-authentication` | Secure user-approved task resume after real browser recovery | Verified identity, replay protection, explicit per-task approval and crash/retry tests |
+| `unify-authentication` | Complete end-to-end recovery verification | Offline failure matrix, secret scan, strict OpenSpec, protected CI and isolated-account validation |
+
+The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
+
+
 ## Opt-in account metadata editor (shipped)
 
 The `account-metadata-editor` change adds a separate confirmed, bearer-protected metadata-only backend mode and native account edit controls. It persists only validated account identifiers, worlds, players, labels and enabled flags with an optimistic generation, owner-only atomic write and local identity-lease check. Editing is incompatible with task dispatch. It does not log into Gameforge or migrate any production bot.
