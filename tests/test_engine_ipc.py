@@ -38,7 +38,7 @@ def fake_worker(tmp_path, responder=None):
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
-                    "wood": "2,970,123", "wine": "0", "glass": "1.2K"}, "capacity": "1,000,000"}
+                     "wood": "2,970,123", "wine": "0", "glass": "1.2K"}, "capacity": "1,000,000", "island": "8:20"}
             ]}
         return {"status": "ok", "pid": os.getpid()}
 
@@ -184,6 +184,7 @@ def test_warehouse_resources_end_to_end_over_real_ipc_socket(tmp_path):
         assert snapshot.resources.unsecured["glass"] == 1200
         assert snapshot.resources.unsecured["marble"] is None
         assert snapshot.resources.capacity == 1_000_000
+        assert snapshot.island == "8:20"
         assert [r["action"] for r in requests] == [
             "list_sessions", "warehouse_snapshots_existing"
         ]
@@ -234,3 +235,19 @@ def test_current_task_transport_rejects_old_pid_action_names(tmp_path):
         with pytest.raises(ValueError):
             controller.stop_managed_task(ALPHA, "-1")
         assert calls == ["start_task_existing", "list_tasks_existing", "stop_task_existing"]
+
+
+def test_warehouse_ipc_rejects_arbitrary_island_strings(tmp_path):
+    def reply(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{"world": ALPHA.world, "player": ALPHA.player}]}
+        return {"status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+                "cities": [{"city_id": 42, "city_name": "Athens",
+                            "unsecured": {"wood": "0"}, "capacity": None,
+                            "island": "secret-token-example"}]}
+
+    with (
+        fake_worker(tmp_path, responder=reply) as (client, _, _),
+        pytest.raises(EngineIPCUnavailable, match="island"),
+    ):
+        client.warehouses(ALPHA)

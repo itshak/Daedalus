@@ -758,11 +758,20 @@ class IPCServer:
                     capacity = amount
             if not unsecured:
                 raise ValueError("No unsecured warehouse resource values")
+            raw_coords = cities[city_id].get("coords")
+            # Only numeric coordinate pairs may leave the engine. The city
+            # inventory comes from the authenticated session; no second call.
+            island = None
+            if isinstance(raw_coords, str):
+                candidate = raw_coords.strip().strip("[]").strip()
+                if re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", candidate):
+                    island = candidate
             results.append({
                 "city_id": city_id,
                 "city_name": decodeUnicodeEscape(cities[city_id]["name"]),
                 "unsecured": unsecured,
                 "capacity": capacity,
+                "island": island,
             })
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "cities": results}

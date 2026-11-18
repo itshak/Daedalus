@@ -29,7 +29,7 @@ The following umbrella changes have unfinished tasks and were deliberately **not
 
 - `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
 - `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
-- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; dedicated per-task parameter forms, island-grouped exports, secure optional preferences and full GUI parity remain incomplete
+- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; dedicated per-task parameter forms, secure optional preferences and account-editing parity remain incomplete. Island-grouped TXT reporting is being implemented in the warehouse-island-reports change.
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
 
