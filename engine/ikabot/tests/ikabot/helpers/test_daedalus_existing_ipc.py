@@ -120,10 +120,29 @@ def test_existing_only_warehouse_uses_real_game_session_and_redacts_html():
     assert resp["status"] == "ok"
     assert resp["cities"][0]["unsecured"] == {"wood": "2,970,123", "wine": "17,254"}
     assert resp["cities"][0]["capacity"] == "1,000,000"
+    assert resp["cities"][0]["island"] == "1:2"
     assert "private-session-token" not in str(resp)
     assert "actionRequest" not in str(resp)
     assert "email" not in str(resp)
     session.get.assert_called_once_with("view=warehouse&cityId=42", noIndex=True)
+
+
+def test_warehouse_malformed_coords_dont_leak_into_ipc():
+    session = make_session()
+    session.get.return_value = '<span id="js_plunderable_wood">0</span>'
+    cities = {42: {"name": "Athens", "coords": "[token-cookie-unsafe]", "tradegood": 0}}
+    server = IPCServer(default_session=session)
+    with (
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
+        patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=([42], cities)),
+    ):
+        response = server.handle_request({
+            "action": "warehouse_snapshots_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+    assert response["status"] == "ok"
+    assert response["cities"][0]["island"] is None
+    assert "token-cookie-unsafe" not in str(response)
 
 
 def test_warehouse_missing_auth_does_not_open_session():

@@ -246,12 +246,19 @@ class ExistingIPCClient:
                 capacity = parse_amount(capacity_str) if capacity_str is not None else None
             except WarehouseParseError as exc:
                 raise EngineIPCUnavailable("Invalid warehouse numeric value") from exc
+            island = row.get("island")
+            if island is not None and (
+                not isinstance(island, str)
+                or not re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", island)
+            ):
+                raise EngineIPCUnavailable("Invalid island coordinates in warehouse snapshot")
             snapshots.append(CityWarehouseSnapshot(
                 account_id=account.id,
                 city_id=city_id,
                 city_name=name,
                 captured_at=datetime.now(UTC).isoformat(),
                 resources=WarehouseResources(unsecured=values, capacity=capacity),
+                island=island,
             ))
         return snapshots
 
