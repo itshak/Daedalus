@@ -15,6 +15,7 @@ The following changes passed GitHub's offline Python/engine tests, source-securi
 | `native-desktop-control-center` | Working native Fluent GUI preview and read-only API client | [#9](https://github.com/itshak/Daedalus/pull/9) |
 | `package-native-macos-app` | CI-built, ad-hoc signed `Daedalus.app` preview artifact | [#10](https://github.com/itshak/Daedalus/pull/10) |
 | `connect-existing-ipc` | Opt-in existing-session read-only IPC, city lookup and warehouse snapshots | [#12](https://github.com/itshak/Daedalus/pull/12) |
+| `enable-existing-session-tasks` | Explicit existing-session built-in task start/list/stop and native Tasks UI | [#15](https://github.com/itshak/Daedalus/pull/15) |
 
 The completed archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
 
@@ -26,19 +27,19 @@ The completed `connect-existing-ipc` change was merged through PR #12, verified 
 
 The following umbrella changes have unfinished tasks and were deliberately **not archived**:
 
-- `import-public-ikabot-engine`: the clean engine and experimental CLI are imported, but a validated controller-to-engine worker adapter, failure reconciliation and reviewed production authentication differences remain incomplete
+- `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
 - `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
-- `migrate-native-desktop`: the user-confirmed GUI preview, API client, report filter and basic macOS packaging work; full legacy GUI parity, task workflow editors, island-grouped exports, secure optional preferences and live snapshot wiring remain incomplete
+- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; dedicated per-task parameter forms, island-grouped exports, secure optional preferences and full GUI parity remain incomplete
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
 
 ## Current integration change
 
-The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is not the same as the task-runner session owner and does not support task start/stop. The full native GUI control and Selenium login/assistance work remain open.
+The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is separate from the explicitly enabled task-control interface and does not create a competing game login. The full native GUI control and Selenium login/assistance work remain open.
 
-## In-progress task-control milestone
+## Completed opt-in task-control milestone
 
-The `enable-existing-session-tasks` change adds opt-in built-in IkaBot task start/list/stop against existing in-memory authenticated accounts. The engine owns each session; the controller does not open a second login. Only tasks launched through this explicit Daedalus path can be stopped through its managed Process handles. The native Tasks page has a generic JSON config editor and requires confirmation for each mutation. The implementation is tested offline, but **should not be considered production-ready until GitHub CI and actual isolated-account testing pass**. Selenium login restoration and distributed session coordination remain separate unfinished changes.
+The archived `enable-existing-session-tasks` change adds opt-in built-in IkaBot task start/list/stop against existing in-memory authenticated accounts. The engine owns each session; the controller does not open a second login. Only tasks launched through this explicit Daedalus path can be stopped through its managed Process handles. The native Tasks page has a generic JSON config editor and requires confirmation for each mutation. The implementation passed all required GitHub CI, but **an actual isolated-account integration test remains necessary before production use**. Selenium login restoration and distributed session coordination remain separate unfinished changes.
 
 ## Current source of truth
 
@@ -59,4 +60,4 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 ## Release and production status
 
-The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend currently does **not** start engine workers, provide secure Selenium session handoff, or support task dispatch, and no real production accounts have been migrated.
+The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend currently does **not** bootstrap new authenticated game workers or provide Selenium handoff; it does support explicitly opted-in start/list/stop on existing sessions. No real production accounts have been migrated.
