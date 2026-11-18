@@ -125,6 +125,10 @@ For an existing IkaBot saved account, a separately authorized local operator can
 
 Run `daedalus doctor` to see installed preview capabilities and the dependencies actually present. The report marks live account status as not inspected, and does not claim new-worker bootstrap, automatic browser login or production readiness. Use `daedalus doctor --smoke` after installing server/client test dependencies to check the real API routes in-process with only fictional demo data, without Gameforge or an external TCP socket. See [offline readiness instructions](docs/TEST-READINESS.md).
 
+## One-click synthetic Mac demo (no setup or game login)
+
+In the native Connection page, click **Try offline demo — no game login**. Daedalus starts a private loopback-only synthetic backend, connects with an ephemeral in-memory token, shows clearly labeled fictional accounts/cities/resources, and stops the server when the app closes. Neither IkaBot cookies nor real account settings are used. See [native one-click synthetic demo](docs/ONECLICK-DEMO.md).
+
 ## Manual authentication assistance protocol (foundation only)
 
 The repository includes a credential-free, lease-bound acknowledgment protocol for **future** trusted worker login assistance. In the native Accounts view, a selected account can request nonsecret assistance status and an explicit manual-step acknowledgment when a compatible trusted in-process broker is injected into the server. This action does **not** authenticate, transfer a cookie, bypass a CAPTCHA, start a login, or resume any game task. The normal CLI does not enable this broker until an actual supervised engine/browser integration is implemented. See [manual authentication assistance and limitations](docs/AUTH-ASSISTANCE.md).

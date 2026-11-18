@@ -426,3 +426,44 @@ def test_native_assistance_notification_is_nonsecret_and_only_once(qt_app, monke
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_native_oneclick_demo_shows_consent_action_without_token(qt_app, monkeypatch):
+    page = ConnectionPage()
+    invoked = []
+    page.demo_requested.connect(lambda: invoked.append(True))
+    try:
+        page.demo_button.click()
+        assert invoked == [True]
+        assert "offline demo" in page.demo_button.text().lower()
+        assert page.token_input.text() == ""
+    finally:
+        page.close()
+
+
+def test_native_oneclick_demo_does_not_persist_ephemeral_bearer(qt_app, monkeypatch):
+    window = MainWindow()
+    attempted = []
+    monkeypatch.setattr(
+        window, "_connect",
+        lambda url, token: attempted.append((url, token)),
+    )
+    try:
+        window.connection_page.remember_checkbox.setChecked(True)
+        window._start_offline_demo()
+        assert window._embedded_demo is not None
+        assert window._embedded_demo.running
+        assert attempted
+        url, token = attempted[0]
+        assert url.startswith("http://127.0.0.1:")
+        assert len(token) >= 32
+        assert not window.connection_page.remember_checkbox.isChecked()
+        assert window.connection_page.token_input.text() == ""
+        # Reusing the same explicitly started demo does not spawn another backend.
+        window._start_offline_demo()
+        assert attempted[1] == attempted[0]
+    finally:
+        backend = window._embedded_demo
+        window.close()
+        assert backend is not None
+        assert not backend.running
