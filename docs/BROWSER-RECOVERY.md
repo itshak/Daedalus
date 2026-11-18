@@ -13,4 +13,9 @@ For Playwright, install `pip install -e '.[browser-recovery]'` and `python -m pl
 
 ## Offline verification
 
-`tests/test_browser_recovery.py` exercises account locking during human interaction, explicit consent, exact origin/world cookie selection, cleanup, keyring persistence only after engine validation, and rejection of invalid or mismatched sessions using a fake browser. No Gameforge requests or real credentials are used. These tests verify the orchestration contract, **not** live Chromium/Gameforge compatibility.
+`tests/test_browser_recovery.py` exercises account locking during human interaction, explicit consent, exact origin/world cookie selection, cleanup, keyring persistence only after engine validation, and rejection of invalid or mismatched sessions using a fake browser. No Gameforge requests or real credentials are used. The optional Playwright test has also been executed against a locally installed headless Chromium browser with all page traffic intercepted and synthetic cookie isolation: **7/7 browser recovery tests passed**. This verifies actual Chromium cookie-domain isolation, **not** Gameforge compatibility or real login.
+
+
+## Dedicated-worker rebind API (offline-verified internal primitive)
+
+`SavedCookieWorker.recover_from_verified_cookie(controller, confirmed=True)` provides an internal, explicit recovery step for a *dedicated* cookie-only worker on the same host. It checks the controller's managed-task list and durable uncertain requests, restores and verifies the new keyring cookie, stops the old IPC endpoint, and starts a replacement while retaining the original world/player lease. It does not replay any task; if the new IPC fails, the lease remains held for manual reconciliation. This is an **internal primitive**, not yet a GUI button or remotely callable operation; it does not alter independently running legacy workers.

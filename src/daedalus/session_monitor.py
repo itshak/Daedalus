@@ -8,8 +8,10 @@ restricted existing-session IPC action and a read-only world GET.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from dataclasses import dataclass
+from uuid import UUID
 
 from daedalus.account_sessions import SessionPhase
 from daedalus.auth_assistance import (
@@ -63,6 +65,7 @@ class ExistingSessionRecoveryMonitor:
         self._halt = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
+        self._consumed_recovery_tickets: set[str] = set()
 
     def observe(self, account_id: str, *, confirmed: bool) -> dict[str, str]:
         """Operator-confirmed lease attachment; never a new Gameforge login."""
@@ -116,6 +119,64 @@ class ExistingSessionRecoveryMonitor:
                     logger.warning("Monitored engine session is unavailable")
                 statuses.append(MonitorStatus(account.id, owned.phase.value))
         return statuses
+
+    def resume_verified_task(
+        self,
+        account_id: str,
+        ticket_id: str,
+        task: str,
+        config: object,
+        request_id: str,
+        *,
+        confirmed: bool,
+    ) -> dict[str, object]:
+        """One explicitly approved NEW dispatch after trusted worker validation.
+
+        Never replays an old task or its configuration. The recovery ticket is
+        consumed before IPC dispatch because a lost response is ambiguous.
+        The task ledger separately rejects duplicate request IDs and uncertain
+        older dispatches. No HTTP endpoint exposes this internal owner gate.
+        """
+        if confirmed is not True:
+            raise MonitoringUnavailable("Explicit post-recovery task approval is required")
+        with self._lock, self.controller._mutex:
+            owned = next(
+                (session for session in self.controller.owned_sessions()
+                 if session.account.id == account_id), None,
+            )
+            ticket = self.broker.snapshot(account_id)["ticket"]
+            if (
+                owned is None
+                or owned.phase is not SessionPhase.AUTHENTICATED
+                or not isinstance(ticket, dict)
+                or ticket.get("ticket_id") != ticket_id
+                or ticket.get("state") != AssistanceState.VERIFIED.value
+                or ticket_id in self._consumed_recovery_tickets
+            ):
+                raise MonitoringUnavailable("A fresh worker-verified recovery is required")
+            if not self._session_valid(owned.account):
+                raise MonitoringUnavailable("The recovered game session is no longer valid")
+            if self.controller._ledger.unresolved_except(account_id, request_id):
+                raise MonitoringUnavailable("Uncertain earlier dispatch requires reconciliation")
+            # Reject malformed or unsupported requests before burning the
+            # single-use recovery approval. The controller repeats validation.
+            from daedalus.task_control import validated_configuration
+
+            if (
+                not isinstance(request_id, str)
+                or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", request_id)
+                or UUID(request_id).version != 4
+            ):
+                raise ValueError("A fresh UUIDv4 request ID is required")
+            if task not in self.controller._supported:
+                raise ValueError("Unsupported engine task")
+            validated_configuration(config)
+            # Once dispatch begins, an IPC timeout cannot establish whether
+            # the game accepted it. Never retry this recovery ticket.
+            self._consumed_recovery_tickets.add(ticket_id)
+            return self.controller.start(
+                account_id, task, config, request_id, confirmed=True,
+            )
 
     def pending(self) -> dict[str, object]:
         """Only nonsecret waiting requests, for desktop notifications."""

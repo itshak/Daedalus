@@ -232,6 +232,31 @@ def create_app(
         except (MonitoringUnavailable, TaskUnavailable) as exc:
             raise HTTPException(status_code=503, detail="No verified existing IkaBot session") from exc
 
+    @app.post(
+        "/api/v1/accounts/{account_id}/recovery/{ticket_id}/resume-task",
+        dependencies=[Depends(authorized)],
+    )
+    def resume_task_after_recovery(
+        account_id: str, ticket_id: str,
+        payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if recovery_monitor is None:
+            raise HTTPException(status_code=503, detail="Verified recovery is disabled")
+        if payload.keys() != {"confirmed", "task", "config", "request_id"} or payload["confirmed"] is not True:
+            raise HTTPException(status_code=422, detail="Explicit approval and a new task request are required")
+        try:
+            return recovery_monitor.resume_verified_task(
+                account_id, ticket_id, payload["task"], payload["config"],
+                payload["request_id"], confirmed=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid new task request") from exc
+        except (MonitoringUnavailable, TaskUnavailable, TaskConflict,
+                EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=409, detail="Verified recovery or safe task dispatch unavailable") from exc
+
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:
         entries = []
