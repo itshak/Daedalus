@@ -112,3 +112,67 @@ def test_doctor_does_not_access_real_account_config_or_keyring(capsys, monkeypat
     assert report["live_accounts_configured"] is None
     assert "token" not in report
     assert "password" not in report
+
+
+def test_cookie_only_worker_requires_separate_explicit_consents(capsys):
+    import pytest
+
+    base = ["serve", "--restore-saved-account", "alpha"]
+    for args in (
+        base,
+        [*base, "--accounts-file", "/synthetic/accounts.toml"],
+        [*base, "--accounts-file", "/synthetic/accounts.toml", "--connect-existing-ipc"],
+        [*base, "--accounts-file", "/synthetic/accounts.toml",
+         "--connect-existing-ipc", "--confirm-read-only-network", "--demo"],
+        [*base, "--accounts-file", "/synthetic/accounts.toml",
+         "--connect-existing-ipc", "--confirm-read-only-network", "--ipc-descriptor", "bad"],
+    ):
+        with pytest.raises(SystemExit) as error:
+            main(args)
+        assert error.value.code == 2
+    output = capsys.readouterr().err
+    assert "Cookie-only worker" in output
+
+
+def test_cookie_only_cli_bootstraps_only_selected_worker_offline(monkeypatch):
+    import daedalus.api as api_module
+    import daedalus.cli as cli_module
+    import daedalus.saved_worker as worker_module
+    from daedalus.accounts import Account
+
+    fake = Account("alpha", "s301-en", "ExamplePlayer", "Test", True)
+    events = []
+    sentinel = object()
+
+    class FakeWorker:
+        def __init__(self, account, coordinator):
+            assert account == fake
+            assert coordinator.account_ids == frozenset({"alpha"})
+            events.append("new-worker")
+
+        def start(self, *, confirmed):
+            assert confirmed is True
+            events.append("confirmed-cookie-only-restore")
+
+        def close(self):
+            events.append("closed-worker")
+
+    monkeypatch.setattr(cli_module, "load_accounts", lambda *_: [fake])
+    monkeypatch.setattr(worker_module, "SavedCookieWorker", FakeWorker)
+    monkeypatch.setattr(api_module, "create_app", lambda **kwargs: (
+        events.append(("api", kwargs["accounts_path"], kwargs["task_controller"])),
+        sentinel,
+    )[1])
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: (
+        events.append(("serve", app, kwargs["host"], kwargs["port"]))
+    ))
+    assert main([
+        "serve", "--accounts-file", "/synthetic/private.toml",
+        "--connect-existing-ipc", "--restore-saved-account", "alpha",
+        "--confirm-read-only-network",
+    ]) == 0
+    assert events == [
+        "new-worker", "confirmed-cookie-only-restore",
+        ("api", "/synthetic/private.toml", None),
+        ("serve", sentinel, "127.0.0.1", 8765), "closed-worker",
+    ]

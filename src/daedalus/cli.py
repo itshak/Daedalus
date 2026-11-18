@@ -293,10 +293,12 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("Install daedalus[server] to run the API")
             uvicorn.run(app, host=args.host, port=args.port, access_log=False)
         finally:
-            if task_controller is not None:
-                task_controller.close()
+            # Stop the engine-owned IPC before releasing the shared identity
+            # lease. Otherwise a competing owner could start during shutdown.
             if worker is not None:
                 worker.close()
+            if task_controller is not None:
+                task_controller.close()
     else:
         parser.print_help()
     return 0
