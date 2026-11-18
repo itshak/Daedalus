@@ -106,7 +106,7 @@ def test_warehouse_view_preserves_220k_filter_and_unknown_values(qt_app):
         ],
     )
     assert page.table.rowCount() == 2
-    assert page.table.item(1, 4).text() == "—"  # unknown marble is not zero
+    assert page.table.item(1, 5).text() == "—"  # unknown marble is not zero
     page.only_220k.setChecked(True)
     assert page.table.rowCount() == 1
     assert page.table.item(0, 0).text() == "Athens"
@@ -150,6 +150,46 @@ def test_task_page_requires_backend_enablement_before_actions(qt_app):
         assert page.task_table.rowCount() == 1
         page.set_capabilities([], enabled=False)
         assert not page.start_button.isEnabled()
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()
+
+
+def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    page = WarehousesPage()
+    page.set_accounts([
+        {"id": "alpha", "label": "Primary", "world": "s301-en", "player": "Example"}
+    ])
+    page.set_snapshots("alpha", [
+        {"city_name": "Unknown Isle", "island": None,
+         "resources": {"unsecured": {"wine": 0}}},
+        {"city_name": "Athens", "island": "1:2",
+         "resources": {"unsecured": {"wood": 300_000, "wine": 0}}},
+        {"city_name": "Ephesus", "island": "1:2",
+         "resources": {"unsecured": {"wood": 10_000, "wine": None}}},
+    ])
+    try:
+        page.group_island.setChecked(True)
+        assert [page.table.item(i, 0).text() for i in range(3)] == [
+            "Athens", "Ephesus", "Unknown Isle",
+        ]
+        path = tmp_path / "warehouse.txt"
+        monkeypatch.setattr(
+            QFileDialog, "getSaveFileName",
+            lambda *_args, **_kwargs: (str(path), "Text"),
+        )
+        page._save("txt")
+        content = path.read_text(encoding="utf-8")
+        assert content.count("Island 1:2") == 1
+        assert "wine: 0" in content and "wine: —" in content
+        page.only_220k.setChecked(True)
+        assert page.table.rowCount() == 1
+        assert page.table.item(0, 0).text() == "Athens"
     finally:
         page.close()
         page.deleteLater()

@@ -29,7 +29,7 @@ from qfluentwidgets import (
 )
 
 from daedalus.desktop.widgets import ScrollTableWidget
-from daedalus.reporting import RESOURCES, report_csv, report_json, rows_for_warehouse
+from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
 
 
 def _table(headers: list[str]) -> ScrollTableWidget:
@@ -207,7 +207,7 @@ class OperationsPage(QWidget):
 class WarehousesPage(QWidget):
     load_requested = Signal(str)
 
-    _COLUMNS = ("City", "World", *RESOURCES, "Capacity", "Captured", "Incomplete")
+    _COLUMNS = ("City", "Island", "World", *RESOURCES, "Capacity", "Captured", "Incomplete")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -241,6 +241,10 @@ class WarehousesPage(QWidget):
         )
         self.only_220k.stateChanged.connect(self._render)
         controls.addWidget(self.only_220k)
+        self.group_island = CheckBox("Group by island")
+        self.group_island.setToolTip("Order rows by existing city island coordinates")
+        self.group_island.stateChanged.connect(self._render)
+        controls.addWidget(self.group_island)
         layout.addLayout(controls)
 
         self.status_label = CaptionLabel("No warehouse snapshots loaded")
@@ -255,7 +259,9 @@ class WarehousesPage(QWidget):
         self.csv_button.clicked.connect(lambda: self._save("csv"))
         self.json_button = PushButton("Save JSON")
         self.json_button.clicked.connect(lambda: self._save("json"))
-        for button in (self.copy_button, self.csv_button, self.json_button):
+        self.txt_button = PushButton("Save TXT")
+        self.txt_button.clicked.connect(lambda: self._save("txt"))
+        for button in (self.copy_button, self.csv_button, self.json_button, self.txt_button):
             button.setEnabled(False)
             actions.addWidget(button)
         actions.addStretch(1)
@@ -289,11 +295,18 @@ class WarehousesPage(QWidget):
         self._rows = rows_for_warehouse(
             self._selected_account, self._snapshots, only_220k=self.only_220k.isChecked()
         )
+        if self.group_island.isChecked():
+            self._rows.sort(key=lambda row: (
+                row.get("island") is None,
+                str(row.get("island") or ""),
+                str(row.get("city") or ""),
+            ))
         _populate(
             self.table,
             [
                 [
                     row.get("city"),
+                    row.get("island"),
                     row.get("world"),
                     *(row.get(name) for name in RESOURCES),
                     row.get("capacity"),
@@ -304,19 +317,25 @@ class WarehousesPage(QWidget):
             ],
         )
         self.status_label.setText(f"{len(self._rows)} cities shown")
-        for button in (self.copy_button, self.csv_button, self.json_button):
+        for button in (self.copy_button, self.csv_button, self.json_button, self.txt_button):
             button.setEnabled(bool(self._rows))
 
     def _copy_csv(self) -> None:
         QGuiApplication.clipboard().setText(report_csv(self._rows))
 
     def _save(self, format_name: str) -> None:
-        suffix = ".csv" if format_name == "csv" else ".json"
+        if format_name not in {"csv", "json", "txt"}:
+            raise ValueError("Unsupported warehouse export format")
+        suffix = {"csv": ".csv", "json": ".json", "txt": ".txt"}[format_name]
         filename, _selected = QFileDialog.getSaveFileName(
             self, "Save warehouse report", f"daedalus-warehouses{suffix}"
         )
         if not filename:
             return
-        output = report_csv(self._rows) if format_name == "csv" else report_json(self._rows)
+        output = (
+            report_csv(self._rows) if format_name == "csv"
+            else report_json(self._rows) if format_name == "json"
+            else report_txt(self._rows, group_by_island=self.group_island.isChecked())
+        )
         with open(filename, "w", encoding="utf-8", newline="") as handle:
             handle.write(output)

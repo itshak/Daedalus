@@ -9,10 +9,11 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from collections.abc import Mapping, Sequence
 
 RESOURCES = ("wood", "wine", "marble", "glass", "sulfur")
-_COLUMNS = ("account", "city", "world", *RESOURCES, "capacity", "captured_at", "incomplete")
+_COLUMNS = ("account", "city", "island", "world", *RESOURCES, "capacity", "captured_at", "incomplete")
 
 
 def rows_for_warehouse(
@@ -36,9 +37,15 @@ def rows_for_warehouse(
         if only_220k and total_known < 220_000:
             continue
         capacity = resources.get("capacity")
+        raw_island = city.get("island")
+        island = raw_island if (
+            isinstance(raw_island, str)
+            and re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", raw_island)
+        ) else None
         row: dict[str, object] = {
             "account": account.get("label") or account.get("player") or account.get("id") or "",
             "city": city.get("city_name") or "",
+            "island": island,
             "world": account.get("world") or "",
             **values,
             "capacity": capacity if isinstance(capacity, int) and not isinstance(capacity, bool) and capacity >= 0 else None,
@@ -60,3 +67,38 @@ def report_csv(rows: Sequence[Mapping[str, object]]) -> str:
 
 def report_json(rows: Sequence[Mapping[str, object]]) -> str:
     return json.dumps(list(rows), ensure_ascii=False, indent=2)
+
+
+def report_txt(rows: Sequence[Mapping[str, object]], *, group_by_island: bool = True) -> str:
+    """Readable local report with unknown amounts represented distinctly from zero."""
+    lines = ["Daedalus warehouse report"]
+    if not group_by_island:
+        ordered = [(None, row) for row in rows]
+    else:
+        ordered = sorted(
+            ((str(row.get("island") or "Unknown"), row) for row in rows),
+            key=lambda pair: (
+                str(pair[1].get("world") or ""),
+                pair[0] == "Unknown",
+                pair[0],
+                str(pair[1].get("city") or ""),
+            ),
+        )
+    previous: tuple[str, str] | None = None
+    for island, row in ordered:
+        world = str(row.get("world") or "")
+        heading = (world, island or "")
+        if group_by_island and heading != previous:
+            lines.extend(("", f"World {world or 'Unknown'} | Island {island}"))
+            previous = heading
+        quantities = ", ".join(
+            f"{name}: {row.get(name) if row.get(name) is not None else '—'}"
+            for name in RESOURCES
+        )
+        capacity = row.get("capacity")
+        lines.append(
+            f"- {row.get('city') or 'Unknown city'}"
+            f" [{row.get('account') or 'Unknown account'}]: {quantities}; "
+            f"capacity: {capacity if capacity is not None else '—'}"
+        )
+    return "\n".join(lines).rstrip() + "\n"
