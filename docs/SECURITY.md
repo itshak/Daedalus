@@ -16,4 +16,4 @@ An interactive login fallback may require the user to solve a CAPTCHA. It must n
 
 ## Reporting
 
-Report potential vulnerabilities privately to project maintainers rather than posting tokens, credentials or exploitation details in public issues.
+Report potential vulnerabilities privately using the repository's enabled [GitHub private vulnerability reporting](https://github.com/itshak/Daedalus/security/advisories/new) workflow. Read the [security policy](../SECURITY.md) for supported versions and reporting guidance. Never post tokens, credentials, or exploitation details in public issues.
