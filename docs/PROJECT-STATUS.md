@@ -16,10 +16,11 @@ The following changes passed GitHub's offline Python/engine tests, source-securi
 | `package-native-macos-app` | CI-built, ad-hoc signed `Daedalus.app` preview artifact | [#10](https://github.com/itshak/Daedalus/pull/10) |
 | `connect-existing-ipc` | Opt-in existing-session read-only IPC, city lookup and warehouse snapshots | [#12](https://github.com/itshak/Daedalus/pull/12) |
 | `enable-existing-session-tasks` | Explicit existing-session built-in task start/list/stop and native Tasks UI | [#15](https://github.com/itshak/Daedalus/pull/15) |
+| `controlled-task-dispatch` | Restart-safe task request ledger, engine-side replay suppression, bounded task IDs and manual reconciliation | [#14](https://github.com/itshak/Daedalus/pull/14) |
 
 The completed archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
 
-## Read-only existing-session bridge (current feature milestone)
+## Existing-session read-only bridge (shipped)
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
@@ -33,13 +34,17 @@ The following umbrella changes have unfinished tasks and were deliberately **not
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
 
-## Current integration change
+## Existing-session integration architecture
 
-The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. This reads connected account identities, cities and warehouse amounts without any Gameforge credential restoration. It is separate from the explicitly enabled task-control interface and does not create a competing game login. The full native GUI control and Selenium login/assistance work remain open.
+The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. It reads connected account identities, cities and warehouse amounts without Gameforge credential restoration. A separate explicitly enabled task-control interface can start and stop only managed background tasks. No part of this attachment creates a competing game login; new worker bootstrap and Selenium login/assistance remain open.
 
-## Completed opt-in task-control milestone
+## Completed opt-in task-control milestones
 
-The archived `enable-existing-session-tasks` change adds opt-in built-in IkaBot task start/list/stop against existing in-memory authenticated accounts. The engine owns each session; the controller does not open a second login. Only tasks launched through this explicit Daedalus path can be stopped through its managed Process handles. The native Tasks page has a generic JSON config editor and requires confirmation for each mutation. The implementation passed all required GitHub CI, but **an actual isolated-account integration test remains necessary before production use**. Selenium login restoration and distributed session coordination remain separate unfinished changes.
+PRs #15 and #14 deliver an opt-in, managed IkaBot task lifecycle for already-authenticated in-memory sessions. The engine owns each session; the controller never starts another game login. The native Tasks page requires a checkbox and separate confirmation, supplies a unique UUID4 request ID, and exposes managed-task IDs instead of arbitrary PIDs.
+
+The controller durably records only safe request metadata and configuration hashes, while the engine independently suppresses duplicate UUID dispatches. Ambiguous timeouts are not automatically replayed; they must be inspected and explicitly reconciled. The engine validates built-in task identity, enforces a bounded active task count and terminates newly created children if process-list registration fails. All 17 required/optional CI checks for PR #14 succeeded, including the Mac preview build. Full local offline verification: 134 Daedalus tests and 299 engine tests, with 9 skipped and 107 engine subtests.
+
+**Production limitation:** no real Gameforge account was used by these tests. An isolated-account integration run, secure authentication bootstrap and handoff, browser-assisted recovery, distributed coordination and supervised worker restarts remain necessary before any production cutover.
 
 ## Current source of truth
 
