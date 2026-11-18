@@ -268,3 +268,36 @@ def test_post_recovery_rechecks_world_and_does_not_dispatch_offline(context):
         monitor.resume_verified_task(account.id, ticket["ticket_id"], "alertAttacks", {},
                                      str(uuid.uuid4()), confirmed=True)
     assert ipc.sent == []
+
+
+def test_protected_recovery_resume_endpoint_is_strict_and_single_use(context, tmp_path):
+    account, owner, ipc, controller, broker, monitor, _ = context
+    config = tmp_path / "accounts-resume.toml"
+    config.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s301-en"\n'
+                      'player = "ExamplePlayer"\nlabel = "Synthetic"\nenabled = true\n')
+    app = create_app(accounts_path=config, api_token=TOKEN, session_coordinator=owner,
+                     task_controller=controller, assistance_broker=broker,
+                     recovery_monitor=monitor)
+    url = "/api/v1/accounts/alpha/recovery/fake/resume-task"
+    payload = {"confirmed": True, "task": "alertAttacks", "config": {},
+               "request_id": str(uuid.uuid4())}
+    with TestClient(app) as client:
+        assert client.post(url, json=payload).status_code == 401
+        assert client.post(url, headers=AUTH, json=payload).status_code == 409
+        assert client.post(url, headers=AUTH,
+                           json={**payload, "password": "private"}).status_code == 422
+        assert client.post(url, headers=AUTH,
+                           json={**payload, "confirmed": False}).status_code == 422
+        monitor.observe(account.id, confirmed=True)
+        ipc.online = False
+        monitor.poll_once()
+        ticket = broker.snapshot(account.id)["ticket"]
+        broker.approve(account.id, ticket["ticket_id"], confirmed=True)
+        ipc.online = True
+        monitor.poll_once()
+        url = f"/api/v1/accounts/alpha/recovery/{ticket['ticket_id']}/resume-task"
+        assert client.post(url, headers=AUTH, json=payload).status_code == 200
+        assert len(ipc.sent) == 1
+        assert client.post(url, headers=AUTH,
+                           json={**payload, "request_id": str(uuid.uuid4())}).status_code == 409
+        assert len(ipc.sent) == 1

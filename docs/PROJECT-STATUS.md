@@ -98,7 +98,7 @@ The archived `offline-readiness-doctor` change replaces outdated hardcoded CLI d
 
 ## Verified recovery dispatch guard (internal, not a complete browser flow)
 
-The trusted in-process existing-session monitor now provides a single-use post-recovery dispatch guard: explicit operator approval, the exact worker-verified recovery ticket, a fresh world validation, a new UUIDv4 request and a new secret-free task configuration are required. The approval is consumed before any potentially ambiguous IPC dispatch. This does **not** expose a remote API, create a browser login, replay prior task state, or complete the remaining `unify-authentication` recovery tasks. Real browser login, remote handoff, protected UI approval and end-to-end account verification remain open.
+The trusted in-process existing-session monitor now provides a single-use post-recovery dispatch guard: explicit operator approval, the exact worker-verified recovery ticket, a fresh world validation, a new UUIDv4 request and a new secret-free task configuration are required. The approval is consumed before any potentially ambiguous IPC dispatch. A bearer-protected endpoint now exposes this narrowly scoped explicit new-task operation to a trusted desktop client; it does **not** create a browser login, replay prior task state, or complete the remaining `unify-authentication` recovery tasks. Real browser login, remote handoff, desktop approval UI and end-to-end account verification remain open.
 
 ## One-click native synthetic Mac demo (implementation archived)
 
