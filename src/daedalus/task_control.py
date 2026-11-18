@@ -199,7 +199,9 @@ class TaskController:
         ipc_client: ControlledIPCClient,
         *,
         ledger_path: str | Path | None = None,
+        active_validation: bool = False,
     ) -> None:
+        self._active_validation = active_validation
         self._accounts = {a.id: a for a in accounts}
         if not coordinator.matches_accounts(accounts):
             raise ValueError("Account coordinator and task controller must use identical accounts")
@@ -221,20 +223,53 @@ class TaskController:
             raise TaskUnavailable("Account is disabled")
         return account
 
+    def _is_validated(self, account: Account) -> bool:
+        if self._active_validation:
+            # Requires the extended Daedalus IPC action: an actual read-only
+            # game world GET with no loginLink or session restoration.
+            return self._ipc.validate_account(account)
+        return self._ipc.has_account(account)
+
     def _lease(self, account: Account) -> tuple[OwnedAccountSession, bool]:
         owned = self._owned.get(account.id)
         if owned is not None:
+            if owned.phase is not SessionPhase.AUTHENTICATED:
+                raise TaskUnavailable("Account needs explicit session recovery")
+            if self._active_validation and not self._is_validated(account):
+                owned.transition(SessionPhase.NEEDS_ASSISTANCE)
+                raise TaskUnavailable("Existing game session requires assistance")
             return owned, False
         owned = self._coordinator.acquire(account.id)
         try:
-            if not self._ipc.has_account(account):
-                raise TaskUnavailable("No already-authenticated IkaBot session for this account")
+            if not self._is_validated(account):
+                raise TaskUnavailable("No verified already-authenticated IkaBot session")
             owned.transition(SessionPhase.AUTHENTICATED)
             self._owned[account.id] = owned
             return owned, True
         except BaseException:
             owned.close()
             raise
+
+    def observe_existing(self, account_id: str, *, confirmed: bool) -> dict[str, str]:
+        """Explicitly attach to a verified existing worker; never create a login."""
+        if confirmed is not True:
+            raise ValueError("Explicit monitoring confirmation is required")
+        account = self._account(account_id)
+        with self._mutex:
+            owned = self._owned.get(account.id)
+            if owned is not None and owned.phase is SessionPhase.PAUSED:
+                if not self._is_validated(account):
+                    raise TaskUnavailable("Existing session has not been revalidated")
+                owned.transition(SessionPhase.VALIDATING_SESSION)
+                owned.transition(SessionPhase.AUTHENTICATED)
+            else:
+                self._lease(account)
+            return {"account_id": account.id, "status": "monitoring_existing_session"}
+
+    def owned_sessions(self) -> tuple[OwnedAccountSession, ...]:
+        """Immutable snapshot for the opt-in trusted monitor; no IPC request."""
+        with self._mutex:
+            return tuple(self._owned.values())
 
     def start(
         self, account_id: str, task: str, config: object,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import secrets
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -31,6 +32,7 @@ from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
+from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
 from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
 from daedalus.warehouse import CityWarehouseSnapshot
 
@@ -47,6 +49,7 @@ def create_app(
     task_controller: TaskController | None = None,
     enable_account_editing: bool = False,
     assistance_broker: AssistanceBroker | None = None,
+    recovery_monitor: ExistingSessionRecoveryMonitor | None = None,
     demo_mode: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
@@ -57,7 +60,7 @@ def create_app(
         accounts_path is not None or snapshot_provider is not None
         or session_coordinator is not None or ipc_client is not None
         or task_controller is not None or enable_account_editing
-        or assistance_broker is not None
+        or assistance_broker is not None or recovery_monitor is not None
     ):
         raise ValueError("Synthetic demo cannot connect to real accounts, IPC or task controls")
     if demo_mode:
@@ -77,18 +80,38 @@ def create_app(
         assistance_broker.coordinator is not owner or enable_account_editing
     ):
         raise ValueError("Assistance must use the authoritative fixed account owner")
+    if recovery_monitor is not None and (
+        recovery_monitor.controller is not task_controller
+        or recovery_monitor.broker is not assistance_broker
+        or recovery_monitor.broker.coordinator is not owner
+        or enable_account_editing
+    ):
+        raise ValueError("Recovery monitor must share the opted-in task owner and broker")
     store = AccountMetadataStore(accounts_path) if enable_account_editing else None
     if store is not None:
         saved = store.snapshot()
         if [Account(**row) for row in saved["accounts"]] != configured_accounts:
             raise ValueError("Account metadata and controller configuration differ")
-    # Account workers may use this in-process coordinator later; startup never acquires a lease.
+    @asynccontextmanager
+    async def monitor_lifespan(_app: FastAPI):
+        if recovery_monitor is not None:
+            recovery_monitor.start()
+        try:
+            yield
+        finally:
+            if recovery_monitor is not None:
+                recovery_monitor.stop()
+            if task_controller is not None:
+                task_controller.close()
+
+    # Default startup remains read-only; a monitor never restores a game login.
     app = FastAPI(
         title="Daedalus Read-only API",
         version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=monitor_lifespan if recovery_monitor is not None else None,
     )
 
     def authorized(authorization: str | None = Header(default=None)) -> None:
@@ -183,6 +206,32 @@ def create_app(
         except AssistanceConflict as exc:
             raise HTTPException(status_code=409, detail="Assistance request is stale or busy") from exc
 
+    @app.get("/api/v1/auth-assistance/pending", dependencies=[Depends(authorized)])
+    def pending_assistance() -> dict[str, object]:
+        if recovery_monitor is None:
+            return {"enabled": False, "tickets": []}
+        return recovery_monitor.pending()
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/monitor",
+        dependencies=[Depends(authorized)],
+    )
+    def observe_account(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, str]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if recovery_monitor is None:
+            raise HTTPException(status_code=503, detail="Session monitoring is disabled")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit monitoring confirmation required")
+        try:
+            return recovery_monitor.observe(account_id, confirmed=True)
+        except SessionBusyError as exc:
+            raise HTTPException(status_code=409, detail="Another account session owner is active") from exc
+        except (MonitoringUnavailable, TaskUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="No verified existing IkaBot session") from exc
+
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:
         entries = []
@@ -206,6 +255,7 @@ def create_app(
         return {
             "operations": [item.to_dict() for item in operations],
             "structured_engine_dispatch": task_controller is not None,
+            "session_monitoring": recovery_monitor is not None,
             "synthetic_demo": demo_mode,
         }
 
@@ -249,7 +299,8 @@ def create_app(
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
-        return {"enabled": task_controller is not None, "requires_existing_session": True}
+        return {"enabled": task_controller is not None, "requires_existing_session": True,
+                "session_monitoring": recovery_monitor is not None}
 
     def require_task_controller(account_id: str) -> TaskController:
         if account_id not in account_by_id:

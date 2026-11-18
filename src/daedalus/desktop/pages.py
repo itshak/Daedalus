@@ -136,6 +136,7 @@ class AccountsPage(QWidget):
     account_change_requested = Signal(str, object)
     assistance_check_requested = Signal(str)
     assistance_approve_requested = Signal(str, str)
+    monitor_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -196,6 +197,13 @@ class AccountsPage(QWidget):
         layout.addLayout(assistance_actions)
         self.assistance_status = CaptionLabel("Select an account to check for manual help")
         layout.addWidget(self.assistance_status)
+        self._monitor_enabled = False
+        self.monitor_button = PushButton("Monitor verified session")
+        self.monitor_button.clicked.connect(self._monitor_selected)
+        self.monitor_button.setEnabled(False)
+        layout.addWidget(self.monitor_button)
+        self.monitor_status = CaptionLabel("Existing-session monitoring is disabled")
+        layout.addWidget(self.monitor_status)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         self._accounts = accounts
@@ -237,6 +245,7 @@ class AccountsPage(QWidget):
     def _update_assistance_buttons(self) -> None:
         account_id = self._selected_visible_id()
         self.assistance_check_button.setEnabled(account_id is not None)
+        self.monitor_button.setEnabled(self._monitor_enabled and account_id is not None)
         ticket = self._assistance_ticket
         self.assistance_approve_button.setEnabled(
             account_id is not None
@@ -262,6 +271,26 @@ class AccountsPage(QWidget):
             label = f"Login assistance: {reason} — {state}"
         self.assistance_status.setText(label)
         self._update_assistance_buttons()
+
+    def set_monitoring_enabled(self, enabled: bool) -> None:
+        self._monitor_enabled = enabled
+        self.monitor_status.setText(
+            "Verified session monitoring enabled; no new game login is started"
+            if enabled else "Existing-session monitoring is disabled"
+        )
+        self._update_assistance_buttons()
+
+    def _monitor_selected(self) -> None:
+        account_id = self._selected_visible_id()
+        if not self._monitor_enabled or account_id is None:
+            return
+        if QMessageBox.question(
+            self, "Monitor verified existing IkaBot session",
+            "This explicitly checks the existing account session with a read-only game request "
+            "and holds its local Daedalus ownership lease. No login is created. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes:
+            self.monitor_requested.emit(account_id)
 
     def _check_assistance(self) -> None:
         account_id = self._selected_visible_id()

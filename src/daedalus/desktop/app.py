@@ -99,6 +99,10 @@ class APIWorker(QThread):
                     self.task_payload["accounts"],
                     confirmed=True,
                 )
+            elif self.action == "monitor_attach" and self.account_id:
+                result = self.client.monitor_existing_account(self.account_id, confirmed=True)
+            elif self.action == "assistance_pending":
+                result = self.client.pending_assistance()
             elif self.action == "auth_assistance" and self.account_id:
                 result = self.client.auth_assistance(self.account_id)
             elif (
@@ -156,6 +160,10 @@ class MainWindow(FluentWindow):
         self._pending_client: DaedalusClient | None = None
         self._pending_preferences: tuple[str, str] | None = None
         self._worker: APIWorker | None = None
+        self._seen_assistance_ids: set[str] = set()
+        self._assistance_poll = QTimer(self)
+        self._assistance_poll.setInterval(30_000)
+        self._assistance_poll.timeout.connect(self._poll_pending_assistance)
 
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
@@ -185,6 +193,9 @@ class MainWindow(FluentWindow):
             lambda revision, rows: self._request(
                 "account_config_put", task_payload={"revision": revision, "accounts": rows},
             )
+        )
+        self.accounts_page.monitor_requested.connect(
+            lambda account_id: self._request("monitor_attach", account_id=account_id)
         )
         self.accounts_page.assistance_check_requested.connect(
             lambda account_id: self._request("auth_assistance", account_id=account_id)
@@ -280,6 +291,10 @@ class MainWindow(FluentWindow):
         self.connection_page.remember_checkbox.setChecked(False)
         self._notice("Saved preference cleared", "The current in-memory connection is unchanged.")
 
+    def _poll_pending_assistance(self) -> None:
+        if self.client is not None and self._worker is None:
+            self._launch(self.client, "assistance_pending")
+
     def _request(
         self, action: str, *, account_id: str | None = None,
         task_payload: dict[str, object] | None = None,
@@ -329,6 +344,13 @@ class MainWindow(FluentWindow):
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
+            enabled = bool(payload["capabilities"].get("session_monitoring", False))
+            self._seen_assistance_ids.clear()
+            if enabled:
+                self._assistance_poll.start()
+                QTimer.singleShot(0, self._poll_pending_assistance)
+            else:
+                self._assistance_poll.stop()
             self.accounts_page.set_editable_config(
                 payload.get("account_config", {"enabled": False})
             )
@@ -345,6 +367,27 @@ class MainWindow(FluentWindow):
             logger.info("Account metadata changed after explicit confirmation")
             self._notice("Account metadata saved", "Account metadata updated; refreshing views.")
             QTimer.singleShot(0, lambda: self._request("accounts"))
+        elif action == "monitor_attach":
+            assert isinstance(payload, dict)
+            self._notice(
+                "Session monitoring enabled",
+                "Existing IkaBot session validated; no new login or task was started.",
+            )
+            QTimer.singleShot(0, lambda: self._request("accounts"))
+        elif action == "assistance_pending":
+            assert isinstance(payload, dict)
+            for ticket in payload.get("tickets", []):
+                ticket_id = ticket.get("ticket_id")
+                if (
+                    isinstance(ticket_id, str)
+                    and ticket_id not in self._seen_assistance_ids
+                    and ticket.get("state") == "waiting_operator"
+                ):
+                    self._seen_assistance_ids.add(ticket_id)
+                    self._notice(
+                        "Manual account assistance needed",
+                        "An existing IkaBot session needs attention. Open Accounts to review.",
+                    )
         elif action in {"auth_assistance", "auth_assistance_approve"}:
             assert isinstance(payload, dict)
             self.accounts_page.set_assistance(payload)
@@ -389,6 +432,7 @@ class MainWindow(FluentWindow):
         self.tasks_page.set_capabilities(
             data["operations"], bool(data.get("structured_engine_dispatch", False)),
         )
+        self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
         if action == "connect":
@@ -398,7 +442,8 @@ class MainWindow(FluentWindow):
                 self._pending_client = None
             self.connection_page.set_connected(False)
         logger.warning("Backend %s request failed", action)
-        self._notice("Backend unavailable", error)
+        if action != "assistance_pending":  # Periodic checks must not spam banners.
+            self._notice("Backend unavailable", error)
 
     def _on_worker_finished(self) -> None:
         self._worker = None
@@ -410,6 +455,7 @@ class MainWindow(FluentWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._assistance_poll.stop()
         # Preserve the old GUI's rule: never destroy a live QThread.
         if (
             self._worker is not None

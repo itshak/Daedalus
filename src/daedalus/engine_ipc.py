@@ -26,7 +26,10 @@ from daedalus.warehouse import (
 
 _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
-_ALLOWED = frozenset({"ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing"})
+_ALLOWED = frozenset({
+    "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
+    "validate_session_existing",
+})
 
 
 class EngineIPCUnavailable(RuntimeError):
@@ -109,7 +112,9 @@ class ExistingIPCClient:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
-        if action in {"list_cities_existing", "warehouse_snapshots_existing"} and account is None:
+        if action in {
+            "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing"
+        } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
             raise ValueError("Account is disabled")
@@ -170,6 +175,25 @@ class ExistingIPCClient:
 
     def has_account(self, account: Account) -> bool:
         return sum(_is_exact_identity(row, account) for row in self.list_sessions()) == 1
+
+    def validate_account(self, account: Account) -> bool:
+        """Verify real existing world session by fixed read-only game GET.
+
+        Only enable this explicitly in session monitoring mode. An unrecognized
+        response or old IkaBot IPC server fails closed; this cannot log in.
+        """
+        if not self.has_account(account):
+            return False
+        reply = self.request("validate_session_existing", account=account)
+        if (
+            not isinstance(reply.get("world"), str)
+            or not isinstance(reply.get("username"), str)
+            or reply["world"].casefold() != account.world.casefold()
+            or reply["username"].casefold() != account.player.casefold()
+            or type(reply.get("session_valid")) is not bool
+        ):
+            raise EngineIPCUnavailable("IkaBot session validation reply is invalid")
+        return reply["session_valid"]
 
     def cities(self, account: Account) -> list[dict[str, object]]:
         matches = sum(_is_exact_identity(row, account) for row in self.list_sessions())

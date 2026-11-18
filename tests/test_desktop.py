@@ -363,3 +363,66 @@ def test_synthetic_demo_connect_is_labeled_in_fluent_ui(qt_app):
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_native_monitor_requires_account_selection_opt_in_and_consent(qt_app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = AccountsPage()
+    account = {
+        "id": "alpha", "world": "s301-en", "player": "Example",
+        "enabled": True, "label": "Synthetic", "session_status": "not_connected",
+    }
+    requests = []
+    page.monitor_requested.connect(requests.append)
+    try:
+        page.set_accounts([account])
+        assert not page.monitor_button.isEnabled()
+        page.set_monitoring_enabled(True)
+        assert not page.monitor_button.isEnabled()
+        page.table.selectRow(0)
+        assert page.monitor_button.isEnabled()
+        monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.No)
+        page._monitor_selected()
+        assert requests == []
+        monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.Yes)
+        page._monitor_selected()
+        assert requests == ["alpha"]
+        page.set_monitoring_enabled(False)
+        assert not page.monitor_button.isEnabled()
+        page._monitor_selected()
+        assert requests == ["alpha"]
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()
+
+
+def test_native_assistance_notification_is_nonsecret_and_only_once(qt_app, monkeypatch):
+    window = MainWindow()
+    shown = []
+    monkeypatch.setattr(window, "_notice", lambda title, content: shown.append((title, content)))
+    sample = {"enabled": True, "tickets": [{
+        "account_id": "alpha",
+        "ticket_id": "12345678-1234-4123-8123-123456789abc",
+        "reason": "session_expired", "state": "waiting_operator",
+    }]}
+    try:
+        window._on_completed("assistance_pending", sample)
+        window._on_completed("assistance_pending", sample)
+        assert len(shown) == 1
+        assert shown[0][0] == "Manual account assistance needed"
+        assert "12345678" not in str(shown)
+        assert "session_expired" not in str(shown)
+        window._on_completed("monitor_attach", {
+            "account_id": "alpha", "status": "monitoring_existing_session",
+        })
+        assert shown[-1][0] == "Session monitoring enabled"
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()

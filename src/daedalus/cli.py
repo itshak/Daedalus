@@ -65,6 +65,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
     serve.add_argument(
+        "--monitor-existing-sessions", action="store_true",
+        help="Opt in to read-only validation of managed existing engine sessions (no new login)",
+    )
+    serve.add_argument(
         "--demo", action="store_true",
         help="Run a clearly labeled synthetic read-only desktop demo; no game connection",
     )
@@ -171,16 +175,21 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--enable-task-control requires --connect-existing-ipc")
             if args.task_ledger and not args.enable_task_control:
                 parser.error("--task-ledger requires --enable-task-control")
+            if args.monitor_existing_sessions and not args.enable_task_control:
+                parser.error("--monitor-existing-sessions requires --enable-task-control")
             if args.enable_account_editing and args.enable_task_control:
                 parser.error("--enable-account-editing is incompatible with --enable-task-control")
             if args.demo and (
                 args.accounts_file or args.connect_existing_ipc or args.ipc_descriptor
                 or args.enable_task_control or args.task_ledger or args.enable_account_editing
+                or args.monitor_existing_sessions
             ):
                 parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
             task_controller = None
             owner = None
+            broker = None
+            monitor = None
             if args.connect_existing_ipc:
                 from daedalus.engine_ipc import ControlledIPCClient, ExistingIPCClient
 
@@ -197,11 +206,19 @@ def main(argv: list[str] | None = None) -> int:
                 owner = AccountSessionCoordinator(configured)
                 task_controller = TaskController(
                     configured, owner, ipc, ledger_path=args.task_ledger,
+                    active_validation=args.monitor_existing_sessions,
                 )
+                if args.monitor_existing_sessions:
+                    from daedalus.auth_assistance import AssistanceBroker
+                    from daedalus.session_monitor import ExistingSessionRecoveryMonitor
+
+                    broker = AssistanceBroker(owner)
+                    monitor = ExistingSessionRecoveryMonitor(task_controller, broker)
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
                 enable_account_editing=args.enable_account_editing,
+                assistance_broker=broker, recovery_monitor=monitor,
                 demo_mode=args.demo,
             )
         except (AccountConfigError, AccountEditUnavailable, ValueError, ImportError) as exc:

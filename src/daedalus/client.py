@@ -210,6 +210,46 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid operation registry")
         return data
 
+    def monitor_existing_account(self, account_id: str, *, confirmed: bool) -> dict[str, object]:
+        """Explicitly lease and verify one pre-existing engine session; never login."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or not confirmed:
+            raise ValueError("Valid account and separate monitoring confirmation required")
+        result = self._write(f"accounts/{account_id}/monitor", {"confirmed": True})
+        if result.get("account_id") != account_id or result.get("status") != "monitoring_existing_session":
+            raise APIConnectionError("Backend returned an invalid monitoring receipt")
+        return result
+
+    def pending_assistance(self) -> dict[str, object]:
+        """Only current nonsecret waiting tickets; old servers are read-only."""
+        try:
+            result = self._read("auth-assistance/pending")
+        except APIConnectionError as exc:
+            if exc.status_code == 404:
+                return {"enabled": False, "tickets": []}
+            raise
+        if result.get("enabled") is False and result.get("tickets") == []:
+            return result
+        if result.get("enabled") is not True or not isinstance(result.get("tickets"), list):
+            raise APIConnectionError("Backend returned invalid assistance notification data")
+        tickets = result["tickets"]
+        if len(tickets) > 256:
+            raise APIConnectionError("Backend returned excessive assistance notifications")
+        for ticket in tickets:
+            if not isinstance(ticket, dict) or set(ticket) != {
+                "account_id", "ticket_id", "reason", "state"
+            }:
+                raise APIConnectionError("Backend returned invalid assistance notification")
+            if (
+                not isinstance(ticket["account_id"], str)
+                or not _ACCOUNT_ID.fullmatch(ticket["account_id"])
+                or not isinstance(ticket["ticket_id"], str)
+                or not re.fullmatch(r"[a-f0-9-]{36}", ticket["ticket_id"])
+                or ticket["reason"] not in {"session_expired", "login_required", "manual_challenge"}
+                or ticket["state"] != "waiting_operator"
+            ):
+                raise APIConnectionError("Backend returned invalid assistance notification")
+        return result
+
     def auth_assistance(self, account_id: str) -> dict[str, object]:
         """Read only nonsecret help reason/status; never transfer session data."""
         if not _ACCOUNT_ID.fullmatch(account_id):

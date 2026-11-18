@@ -251,3 +251,58 @@ def test_warehouse_ipc_rejects_arbitrary_island_strings(tmp_path):
         pytest.raises(EngineIPCUnavailable, match="island"),
     ):
         client.warehouses(ALPHA)
+
+
+def test_active_validation_is_fixed_scope_and_nonsecret(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"},
+            ]}
+        if msg["action"] == "validate_session_existing":
+            return {"status": "ok", "world": "s301-en",
+                    "username": "ExamplePlayer", "session_valid": True}
+        return {"status": "error", "error": "Unexpected request"}
+
+    with fake_worker(tmp_path, responder) as (client, requested, _):
+        assert client.validate_account(ALPHA) is True
+    assert [row["action"] for row in requested] == [
+        "list_sessions", "validate_session_existing",
+    ]
+    assert requested[-1] == {
+        "action": "validate_session_existing", "world": "s301-en",
+        "player": "ExamplePlayer",
+    }
+
+
+@pytest.mark.parametrize("invalid", [
+    {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "session_valid": "true"},
+    {"status": "ok", "world": "s301-en", "username": "Other", "session_valid": True},
+    {"status": "ok", "world": "s302-en", "username": "ExamplePlayer", "session_valid": True},
+    {"status": "ok", "world": "s301-en", "username": "ExamplePlayer"},
+])
+def test_active_validation_refuses_malformed_or_cross_account_response(tmp_path, invalid):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"},
+            ]}
+        return invalid
+
+    with fake_worker(tmp_path, responder) as (client, requested, _):
+        with pytest.raises(EngineIPCUnavailable, match="validation reply"):
+            client.validate_account(ALPHA)
+        assert [row["action"] for row in requested] == [
+            "list_sessions", "validate_session_existing",
+        ]
+
+
+def test_active_validation_refuses_missing_existing_session_without_get(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": []}
+        pytest.fail("Should not issue an active validation request")
+
+    with fake_worker(tmp_path, responder) as (client, requested, _):
+        assert client.validate_account(ALPHA) is False
+        assert [item["action"] for item in requested] == ["list_sessions"]
