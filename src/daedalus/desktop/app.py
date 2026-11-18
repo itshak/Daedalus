@@ -16,6 +16,12 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow, InfoBar, InfoBarPosition, NavigationItemPosition
 
 from daedalus.client import APIConnectionError, DaedalusClient
+from daedalus.connection_prefs import (
+    PreferenceError,
+    forget_connection,
+    remember_connection,
+    saved_connection,
+)
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
 from daedalus.desktop.task_page import TasksPage
@@ -129,6 +135,7 @@ class MainWindow(FluentWindow):
         super().__init__()
         self.client: DaedalusClient | None = None
         self._pending_client: DaedalusClient | None = None
+        self._pending_preferences: tuple[str, str] | None = None
         self._worker: APIWorker | None = None
 
         self.accounts_page = AccountsPage(self)
@@ -152,6 +159,8 @@ class MainWindow(FluentWindow):
         header.insertSpacerItem(0, QSpacerItem(40, 36, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         self.connection_page.connect_requested.connect(self._connect)
+        self.connection_page.reconnect_requested.connect(self._reconnect)
+        self.connection_page.forget_requested.connect(self._forget_connection)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
         self.accounts_page.check_engine_requested.connect(
             lambda: self._request("connected_accounts")
@@ -205,7 +214,37 @@ class MainWindow(FluentWindow):
             self._notice("Invalid connection", str(exc))
             return
         self._pending_client = candidate
+        self._pending_preferences = (
+            (url, token) if self.connection_page.remember_checkbox.isChecked() else None
+        )
         self._launch(candidate, "connect")
+
+    def _reconnect(self) -> None:
+        """Explicitly repeat only read-only handshake, never game task dispatch."""
+        if self._worker is not None:
+            self._notice("Request in progress", "Finish the current request first.")
+            return
+        if self.client is not None:
+            self._launch(self.client, "connect")
+            return
+        try:
+            saved = saved_connection()
+        except PreferenceError as exc:
+            self._notice("Cannot retrieve saved connection", str(exc))
+            return
+        if saved is None:
+            self._notice("No saved connection", "Enter a backend URL and bearer token.")
+            return
+        self._connect(*saved)
+
+    def _forget_connection(self) -> None:
+        try:
+            forget_connection()
+        except PreferenceError as exc:
+            self._notice("Unable to forget saved connection", str(exc))
+            return
+        self.connection_page.remember_checkbox.setChecked(False)
+        self._notice("Saved preference cleared", "The current in-memory connection is unchanged.")
 
     def _request(
         self, action: str, *, account_id: str | None = None,
@@ -237,10 +276,18 @@ class MainWindow(FluentWindow):
     def _on_completed(self, action: str, payload: object) -> None:
         if action == "connect":
             assert isinstance(payload, dict)
-            if self.client is not None:
-                self.client.close()
-            self.client = self._pending_client
-            self._pending_client = None
+            if self._pending_client is not None:
+                if self.client is not None and self.client is not self._pending_client:
+                    self.client.close()
+                self.client = self._pending_client
+                self._pending_client = None
+            preferences = self._pending_preferences
+            self._pending_preferences = None
+            if preferences is not None:
+                try:
+                    remember_connection(*preferences)
+                except PreferenceError as exc:
+                    self._notice("Connection not saved", str(exc))
             self.connection_page.set_connected(True)
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
@@ -285,10 +332,12 @@ class MainWindow(FluentWindow):
         )
 
     def _on_failed(self, action: str, error: str) -> None:
-        if action == "connect" and self._pending_client is not None:
-            self._pending_client.close()
-            self._pending_client = None
-            self.connection_page.set_connected(self.client is not None)
+        if action == "connect":
+            self._pending_preferences = None
+            if self._pending_client is not None:
+                self._pending_client.close()
+                self._pending_client = None
+            self.connection_page.set_connected(False)
         logger.warning("Backend %s request failed", action)
         self._notice("Backend unavailable", error)
 

@@ -27,13 +27,13 @@ The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 
 The Accounts page provides an explicit **Check IkaBot sessions** button; only configured identities with a unique matching existing engine session show Attached. The warehouse view can read live data after the backend is explicitly started with `--connect-existing-ipc` against a compatible, already-authenticated engine. Neither operation creates a login; see [existing engine attachment](EXISTING-IPC.md).
 
-Backend requests run in a Qt worker thread. A connection may be replaced without restarting the app. Bearer tokens exist in process memory only; there is no settings file or implicit credentials import.
+Backend requests run in a Qt worker thread. A connection may be replaced without restarting the app. Bearer tokens remain in memory by default. Users may explicitly opt in to saving a validated backend URL in owner-private settings and its bearer token in the operating-system keyring. The GUI also offers user-directed reconnect and Forget saved connection controls. No legacy credentials are imported.
 
 No game login or Selenium browser is launched by the GUI. Warehouse data can now come from the opt-in read-only existing-session IPC bridge when a compatible engine process already holds a valid authenticated session; otherwise the UI displays an explicit unavailable error. The Accounts page can also show which configured accounts have an attached engine session.
 
 ## UI parity still to complete
 
-This is a **foundation**, not a complete port. The existing multi-account edit dialogs, browser login assistant, task-specific configuration forms, durable resume/reconciliation, notifications, persistent GUI settings and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
+This is a **foundation**, not a complete port. The existing multi-account edit dialogs, browser login assistant, task-specific configuration forms, durable resume/reconciliation, notifications, additional preference coverage and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
 
 ## License
 

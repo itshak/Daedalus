@@ -10,7 +10,7 @@ CI has no real game accounts and MUST NOT log in to Gameforge. Dependabot/depend
 
 ## Runtime design
 
-Account identities and encrypted/protected session material are managed by the backend, outside the source tree. Desktop secrets use the operating system's secure credential storage when feasible. Local IPC and remote HTTP APIs require authentication, authorization, rate limiting and least privilege.
+Account identities and encrypted/protected session material are managed by the backend, outside the source tree. Desktop bearer tokens remain in process memory by default; an explicitly selected Remember connection option may store the token only in the OS keyring and the validated URL in a private local file. Failure of a keyring provider must not write a plain-text fallback. Local IPC and remote HTTP APIs require authentication, authorization, rate limiting and least privilege.
 
 An interactive login fallback may require the user to solve a CAPTCHA. It must not try to bypass the challenge. A new game login must coordinate with the existing session owner to prevent displacement.
 

@@ -106,7 +106,7 @@ def test_warehouse_view_preserves_220k_filter_and_unknown_values(qt_app):
         ],
     )
     assert page.table.rowCount() == 2
-    assert page.table.item(1, 5).text() == "—"  # unknown marble is not zero
+    assert page.table.item(1, 4).text() == "—"  # unknown marble is not zero
     page.only_220k.setChecked(True)
     assert page.table.rowCount() == 1
     assert page.table.item(0, 0).text() == "Athens"
@@ -156,6 +156,50 @@ def test_task_page_requires_backend_enablement_before_actions(qt_app):
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_reconnect_with_current_client_only_requests_readonly_handshake(qt_app, monkeypatch):
+    window = MainWindow()
+    actions = []
+    existing = object()
+    window.client = existing
+    monkeypatch.setattr(window, "_launch", lambda client, action: actions.append((client, action)))
+    try:
+        window._reconnect()
+        assert actions == [(existing, "connect")]
+        assert all(action != "task_start" for _, action in actions)
+        window.client = None
+    finally:
+        window.close()
+
+
+def test_saved_connection_is_opt_in_and_never_written_to_text_inputs(qt_app, monkeypatch):
+    import daedalus.desktop.app as module
+
+    window = MainWindow()
+    stored = []
+    token = "synthetic-only-" + ("x" * 32)
+    url = "http://127.0.0.1:8765"
+
+    class FakeClient:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    fake = FakeClient()
+    monkeypatch.setattr(module, "remember_connection", lambda *args: stored.append(args))
+    try:
+        window._pending_client = fake
+        window._pending_preferences = (url, token)
+        window._on_completed("connect", {"accounts": [], "capabilities": {"operations": []}})
+        assert window.client is fake
+        assert stored == [(url, token)]
+        assert window.connection_page.token_input.text() == ""
+        assert token not in window.connection_page.status_label.text()
+    finally:
+        window.close()
 
 
 def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch):

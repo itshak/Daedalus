@@ -55,6 +55,8 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 class ConnectionPage(QWidget):
     connect_requested = Signal(str, str)
+    reconnect_requested = Signal()
+    forget_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -73,6 +75,15 @@ class ConnectionPage(QWidget):
         self.url_input = LineEdit()
         self.url_input.setText("http://127.0.0.1:8765")
         self.url_input.setPlaceholderText("http://127.0.0.1:8765")
+        # Private URL metadata is optional; malformed settings cannot prevent launch.
+        from daedalus.connection_prefs import PreferenceError, load_connection_url
+
+        try:
+            saved_url = load_connection_url()
+        except PreferenceError:
+            saved_url = None
+        if saved_url is not None:
+            self.url_input.setText(saved_url)
         layout.addWidget(self.url_input)
         layout.addWidget(BodyLabel("API bearer token"))
         self.token_input = LineEdit()
@@ -82,6 +93,22 @@ class ConnectionPage(QWidget):
         self.connect_button = PrimaryPushButton("Connect")
         self.connect_button.clicked.connect(self._connect)
         layout.addWidget(self.connect_button)
+
+        self.remember_checkbox = CheckBox("Remember URL and token in OS keychain")
+        self.remember_checkbox.setToolTip(
+            "Off by default. URL is stored in owner-only local settings; the token uses OS keyring."
+        )
+        self.remember_checkbox.setChecked(saved_url is not None)
+        layout.addWidget(self.remember_checkbox)
+
+        connection_actions = QHBoxLayout()
+        self.reconnect_button = PushButton("Reconnect")
+        self.reconnect_button.clicked.connect(self.reconnect_requested.emit)
+        self.forget_button = PushButton("Forget saved connection")
+        self.forget_button.clicked.connect(self.forget_requested.emit)
+        connection_actions.addWidget(self.reconnect_button)
+        connection_actions.addWidget(self.forget_button)
+        layout.addLayout(connection_actions)
         self.status_label = CaptionLabel("Not connected")
         layout.addWidget(self.status_label)
         layout.addStretch(1)
