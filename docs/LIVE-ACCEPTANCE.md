@@ -1,6 +1,6 @@
 # Owner-supervised isolated real-account acceptance
 
-**Status: implementation offline-tested; real Gameforge login and task dispatch have NOT been tested.** This is the test plan for the remaining active OpenSpec proposal `validate-live-authentication`. It does not authorize production cutover or modification of an independently running IkaBot instance.
+**Status: a limited, owner-authorized live smoke passed saved lobby-session renewal, independent world-player attestation, and read-only city/warehouse reporting on one isolated account. Manual browser/CAPTCHA login, live rebind/expiration behavior, and real task dispatch have NOT been accepted.** This is the test plan for the remaining active OpenSpec proposal `validate-live-authentication`. It does not authorize production cutover or modification of an independently running IkaBot instance.
 
 ## 0. Preconditions and hard safety boundaries
 
