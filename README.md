@@ -109,6 +109,10 @@ With a compatible already-authenticated IkaBot engine process on the same host, 
 
 Daedalus includes a host-local OS file lock and authentication-status state machine to prevent duplicate world/player workers **on the same backend host**. The authenticated API reports nonsecret session states for each account. This is groundwork only: **no Gameforge login, browser handoff, or game worker is started** by these components. The lock is not distributed across multiple servers; assign each account to one authoritative backend. See [session ownership and limitations](docs/SESSION-OWNERSHIP.md).
 
+## Safe saved-cookie validation (explicit opt-in; no new login)
+
+Use `daedalus sessions bind-email ACCOUNT_ID` to associate an existing IkaBot saved-user email through the **OS keyring**, then `daedalus sessions probe-saved-cookies ACCOUNT_ID --confirm-read-only-network` to validate old world cookies under the host-local account lease without any lobby loginLink. This performs a genuine read-only world request only when explicitly confirmed; it **never creates or maintains an authenticated game worker**. Use a separate test account and stop unrelated sessions first. See [safe saved-cookie recovery](docs/SAFE-COOKIE-RECOVERY.md).
+
 ## Manual authentication assistance protocol (foundation only)
 
 The repository includes a credential-free, lease-bound acknowledgment protocol for **future** trusted worker login assistance. In the native Accounts view, a selected account can request nonsecret assistance status and an explicit manual-step acknowledgment when a compatible trusted in-process broker is injected into the server. This action does **not** authenticate, transfer a cookie, bypass a CAPTCHA, start a login, or resume any game task. The normal CLI does not enable this broker until an actual supervised engine/browser integration is implemented. See [manual authentication assistance and limitations](docs/AUTH-ASSISTANCE.md).

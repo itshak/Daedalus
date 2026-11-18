@@ -39,6 +39,17 @@ def main(argv: list[str] | None = None) -> int:
     accounts.add_argument("action", choices=["list"], help="List configured accounts")
     accounts.add_argument("--config", help="TOML metadata configuration (no credentials)")
 
+    sessions = subcommands.add_parser(
+        "sessions", help="Manage a private saved-IkaBot account binding; no credentials in TOML"
+    )
+    sessions.add_argument("action", choices=["bind-email", "forget-email", "probe-saved-cookies"])
+    sessions.add_argument("account_id", help="Configured secret-free account ID")
+    sessions.add_argument("--config", help="TOML account metadata path outside repository")
+    sessions.add_argument(
+        "--confirm-read-only-network", action="store_true",
+        help="Required for cookie-only Gameforge GET validation; never requests new login",
+    )
+
     serve = subcommands.add_parser("serve", help="Run the authenticated read-only local API")
     serve.add_argument("--host", default="127.0.0.1", help="Loopback only; use a secure tunnel remotely")
     serve.add_argument("--port", type=_port, default=8765, help="TCP port (default 8765)")
@@ -113,6 +124,40 @@ def main(argv: list[str] | None = None) -> int:
         except AccountConfigError as exc:
             parser.error(str(exc))
         print(json.dumps({"accounts": [account.to_dict() for account in configured]}, ensure_ascii=False))
+    elif args.command == "sessions":
+        from daedalus.saved_session_recovery import (
+            SavedSessionUnavailable,
+            bind_saved_email,
+            probe_saved_cookies,
+            unbind_saved_email,
+        )
+
+        try:
+            configured = load_accounts(args.config)
+            account = next((row for row in configured if row.id == args.account_id), None)
+            if account is None:
+                raise SavedSessionUnavailable("Configured account ID not found")
+            if args.action == "bind-email":
+                import getpass
+
+                # Never put this email in CLI args, logs, Git, TOML or API payloads.
+                email = getpass.getpass("Existing saved IkaBot login email (hidden): ")
+                bind_saved_email(account, email)
+                print(json.dumps({"account_id": account.id, "status": "saved_account_bound"}))
+            elif args.action == "forget-email":
+                unbind_saved_email(account)
+                print(json.dumps({"account_id": account.id, "status": "binding_removed"}))
+            elif args.action == "probe-saved-cookies":
+                if not args.confirm_read_only_network:
+                    parser.error("Probe requires --confirm-read-only-network")
+                from daedalus.account_sessions import AccountSessionCoordinator
+
+                result = probe_saved_cookies(
+                    account, AccountSessionCoordinator(configured), confirmed=True,
+                )
+                print(json.dumps(result))
+        except (AccountConfigError, SavedSessionUnavailable) as exc:
+            parser.error(str(exc))
     elif args.command == "serve":
         if args.host not in {"127.0.0.1", "::1"}:
             parser.error("Only loopback binding is supported; use SSH/Tailscale tunnel for remote use")

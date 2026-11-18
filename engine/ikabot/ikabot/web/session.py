@@ -1778,9 +1778,15 @@ class Session:
         delete_session_data(self)
 
     @classmethod
-    def from_saved(cls, mail=None, world=None, server=None, player=None):
-        """Create an authenticated Session non-interactively using saved credentials/cookies.
-        ``player`` (in-game name) picks one account when the lobby has several on the same world."""
+    def from_saved(cls, mail=None, world=None, server=None, player=None, *, cookies_only=False):
+        """Restore a saved game session without any user interaction.
+
+        With ``cookies_only=True`` (the Daedalus recovery contract), probe
+        ONLY pre-existing per-world cookies. Never consult the lobby or
+        request a new loginLink, since that may rotate another live session.
+        A failed cookie probe raises and MUST NOT be treated as authenticated.
+        ``player`` identifies exactly one saved in-game identity.
+        """
         want_player = str(player).strip().lower() if player else None
         if mail and str(mail).strip() and str(mail).strip() != "default_user":
             matching_path, _ = find_user_file_for_email(mail)
@@ -1869,7 +1875,9 @@ class Session:
             if (
                 not self.__isExpired(html)
                 and not self.__isSessionRotated(html, response=old_resp)
-                and old_resp.status_code != 404
+                and (old_resp.status_code == 200 if cookies_only else old_resp.status_code != 404)
+                and (not cookies_only or urllib.parse.urlsplit(old_resp.url).hostname == self.host)
+                and (not cookies_only or old_s.cookies.get("ikariam") is not None)
             ):
                 requests.cookies.cookiejar_from_dict(
                     cookie_dict, cookiejar=self.s.cookies, overwrite=True
@@ -1893,7 +1901,7 @@ class Session:
             user_data.get("shared", {}).get("lobby", {}).get("gf-token-production")
         )
         lobby_ok = False
-        if gf_token:
+        if gf_token and not cookies_only:
             cookie_obj = requests.cookies.create_cookie(
                 domain=".gameforge.com",
                 name="gf-token-production",
@@ -1905,7 +1913,7 @@ class Session:
             except Exception:
                 lobby_ok = False
 
-        if lobby_ok:
+        if lobby_ok and not cookies_only:
             lobby_headers = {
                 "Host": "lobby.ikariam.gameforge.com",
                 "User-Agent": self.user_agent,
@@ -2133,6 +2141,11 @@ class Session:
             if _try_world_cookies(pdata["cookies"], session_data):
                 return _finalize()
 
+        if cookies_only:
+            raise RuntimeError(
+                "No valid previously saved world cookies match the requested account. "
+                "Manual login recovery is required; no new login was attempted."
+            )
         raise RuntimeError(
             f"Saved session for '{self.mail or 'default_user'}' has expired or has no valid saved cookies for world '{world or ''}'. Please log in interactively first."
         )
