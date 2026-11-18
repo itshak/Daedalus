@@ -29,7 +29,7 @@ The following changes have merged implementation and archived OpenSpec requireme
 | offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
 | cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
 | desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
-| `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, private appearance preferences and grouped exports | [GUI PR](https://github.com/itshak/Daedalus/pulls) |
+| `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, private appearance preferences and grouped exports | [#52](https://github.com/itshak/Daedalus/pull/52) |
 
 The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
