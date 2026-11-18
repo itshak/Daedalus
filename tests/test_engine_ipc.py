@@ -201,3 +201,122 @@ def test_empty_or_bad_warehouse_ipc_data_refused(tmp_path):
         EngineIPCUnavailable, match="numeric"
     ):
         client.warehouses(ALPHA)
+
+
+def test_existing_task_ipc_is_explicit_and_scoped_with_real_loopback_socket(tmp_path):
+    from daedalus.engine_ipc import ExistingTaskIPCClient
+
+    calls = []
+
+    def respond(msg):
+        calls.append({k: v for k, v in msg.items() if k != "authkey"})
+        action = msg["action"]
+        if action == "list_sessions":
+            return {"status": "ok", "sessions": [{"world": ALPHA.world, "player": ALPHA.player}]}
+        if action == "start_task_existing":
+            assert msg["world"] == ALPHA.world
+            assert msg["player"] == ALPHA.player
+            assert msg["task"] == "alertAttacks"
+            return {"status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+                    "task": "alertAttacks", "pid": 81001}
+        if action == "list_managed_tasks":
+            return {"status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+                    "tasks": [{"pid": 81001, "task": "alertAttacks", "status": "running",
+                               "started_at": 1234567890.0}]}
+        if action == "stop_managed_task":
+            assert msg["pid"] == 81001
+            return {"status": "ok", "pid": 81001, "task": "alertAttacks", "state": "stopped"}
+        return {"status": "error", "error": "unknown"}
+
+    with fake_worker(tmp_path, responder=respond) as (readonly, _requests, descriptor):
+        controller = ExistingTaskIPCClient(descriptor)
+        with pytest.raises(ValueError, match="read-only"):
+            readonly.request("start_task_existing")
+        result = controller.start_task(ALPHA, "alertAttacks", {"minutes": 10},
+                                       "12345678-1234-4123-8123-123456789abc")
+        assert result["pid"] == 81001
+        tasks = controller.list_tasks(ALPHA)
+        assert tasks[0]["status"] == "running"
+        stopped = controller.stop_task(ALPHA, 81001)
+        assert stopped == {"pid": 81001, "status": "stopped"}
+        assert [row["action"] for row in calls] == [
+            "list_sessions", "start_task_existing", "list_managed_tasks", "stop_managed_task"
+        ]
+        assert all("email" not in row for row in calls)
+        assert all("authkey" not in row for row in calls)
+
+
+def test_existing_task_ipc_rejects_wrong_identity_and_arbitrary_pid(tmp_path):
+    from daedalus.engine_ipc import ExistingTaskIPCClient
+
+    def respond(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{"world": ALPHA.world, "player": ALPHA.player}]}
+        if msg["action"] == "start_task_existing":
+            return {"status": "ok", "world": "s999-en", "username": ALPHA.player,
+                    "task": "alertAttacks", "pid": 81001}
+        return {"status": "error", "error": "not a controller task"}
+
+    with fake_worker(tmp_path, responder=respond) as (_readonly, _, descriptor):
+        controller = ExistingTaskIPCClient(descriptor)
+        with pytest.raises(EngineIPCUnavailable, match="different account"):
+            controller.start_task(ALPHA, "alertAttacks", {},
+                                  "12345678-1234-4123-8123-123456789abc")
+        with pytest.raises(ValueError, match="valid managed task PID"):
+            controller.stop_task(ALPHA, -1)
+        with pytest.raises(ValueError, match="disabled"):
+            controller.start_task(
+                Account(ALPHA.id, ALPHA.world, ALPHA.player, ALPHA.label, False),
+                "alertAttacks", {}, "12345678-1234-4123-8123-123456789abc"
+            )
+
+
+def test_end_to_end_opt_in_http_api_to_authenticated_synthetic_engine(tmp_path):
+    """Controller HTTP -> real loopback IPC protocol -> synthetic game worker."""
+    from fastapi.testclient import TestClient
+
+    from daedalus.api import create_app
+    from daedalus.engine_ipc import ExistingTaskIPCClient
+
+    accounts_file = tmp_path / "accounts.toml"
+    accounts_file.write_text('schema = 1\n[[accounts]]\nid = "alpha"\n'
+                             'world = "s301-en"\nplayer = "ExamplePlayer"')
+
+    def response(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{"world": ALPHA.world, "player": ALPHA.player}]}
+        if msg["action"] == "start_task_existing":
+            return {"status": "ok", "pid": 81001, "task": msg["task"],
+                    "world": ALPHA.world, "username": ALPHA.player}
+        if msg["action"] == "list_managed_tasks":
+            return {"status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+                    "tasks": [{"pid": 81001, "task": "alertAttacks",
+                               "status": "running", "started_at": 12345.0}]}
+        if msg["action"] == "stop_managed_task":
+            return {"status": "ok", "pid": msg["pid"], "state": "stopped"}
+        return {"status": "error"}
+
+    with fake_worker(tmp_path, responder=response) as (_readonly, requests, descriptor):
+        api = TestClient(create_app(
+            accounts_path=accounts_file,
+            api_token="x" * 48,
+            task_controller=ExistingTaskIPCClient(descriptor),
+        ))
+        auth = {"Authorization": "Bearer " + "x" * 48}
+        assert api.get("/api/v1/task-control", headers=auth).json()["enabled"] is True
+        started = api.post("/api/v1/accounts/alpha/tasks", headers=auth, json={
+            "task": "alertAttacks", "config": {"minutes": 10},
+            "request_id": "12345678-1234-4123-8123-123456789abc",
+        })
+        assert started.status_code == 200, started.text
+        assert started.json()["pid"] == 81001
+        assert api.get("/api/v1/accounts/alpha/tasks", headers=auth).json()["tasks"][0][
+            "status"
+        ] == "running"
+        assert api.delete("/api/v1/accounts/alpha/tasks/81001", headers=auth).json()[
+            "status"
+        ] == "stopped"
+        assert [req["action"] for req in requests] == [
+            "list_sessions", "start_task_existing", "list_managed_tasks", "stop_managed_task"
+        ]
+        assert all("email" not in req and "authkey" not in req for req in requests)

@@ -459,6 +459,10 @@ class IPCServer:
         self._active_requests = 0
         self._running = False
         self._sessions = [default_session] if default_session is not None else []
+        # Only tasks explicitly started through Daedalus are mutable here.
+        # Never stop or list unrelated PID entries from the global processList.
+        self._managed_tasks = {}
+        self._managed_requests = {}
         self._thread = None
 
     @property
@@ -656,6 +660,12 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
+                if action == "start_task_existing":
+                    return self._start_task(request, existing_only=True)
+                if action == "list_managed_tasks":
+                    return self._list_managed_tasks(request)
+                if action == "stop_managed_task":
+                    return self._stop_managed_task(request)
                 return {"status": "error", "error": f"Unknown IPC action: {action!r}"}
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
@@ -756,23 +766,68 @@ class IPCServer:
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "cities": results}
 
-    def _start_task(self, request):
+    def _start_task(self, request, existing_only=False):
         task_name = request.get("task")
         config_dict = request.get("config") or {}
+        if existing_only:
+            import re
+
+            # An untrusted GUI may request ONLY decorated built-in engine
+            # task modules. Never load registered custom-module paths here.
+            func_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "function")
+            if not isinstance(task_name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", task_name):
+                raise ValueError("A built-in IkaBot task name is required")
+            builtin = next((fname[:-3] for fname in os.listdir(func_dir)
+                            if fname.endswith(".py") and fname[:-3].casefold() == task_name.casefold()), None)
+            if builtin is None:
+                raise ValueError("Only built-in IkaBot background tasks can be started")
+            task_name = builtin
+            if not isinstance(config_dict, dict) or "session" in config_dict:
+                raise ValueError("Task configuration must be an object without session values")
+            if len(json.dumps(config_dict, ensure_ascii=False)) > 65536:
+                raise ValueError("Task configuration is too large")
+            session = self._existing_session(request)
+            request_id = request.get("request_id")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", request_id):
+                raise ValueError("Task request must provide a random UUID4 idempotency key")
+            request_fingerprint = (
+                f"s{session.mundo}-{session.servidor}", session.username.casefold(),
+                task_name, json.dumps(config_dict, sort_keys=True, ensure_ascii=False),
+            )
+            if request_id in self._managed_requests:
+                prior_fingerprint, prior_result = self._managed_requests[request_id]
+                if prior_fingerprint != request_fingerprint:
+                    raise ValueError("Task idempotency key was reused for different inputs")
+                return dict(prior_result)
         email = request.get("email")
         world = request.get("world")
         server = request.get("server")
         player = request.get("player")
 
         canonical_name, task_func = _resolve_task(task_name)
+        if existing_only and task_func.__module__ != f"ikabot.function.{task_name}":
+            raise ValueError("Only built-in IkaBot task implementations are allowed")
         clean_config = _validate_task_config(canonical_name, task_func, config_dict)
-        session = self._get_or_create_session(email, world, server, player)
+        if not existing_only:
+            session = self._get_or_create_session(email, world, server, player)
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log
             prepared = prepare(session, **clean_config)
             if prepared is not None:
                 clean_config = _validate_task_config(canonical_name, task_func, prepared)
+
+        if existing_only:
+            active_same_account = sum(
+                entry["world"].casefold() == f"s{session.mundo}-{session.servidor}".casefold()
+                and entry["player"].casefold() == session.username.casefold()
+                and entry["process"].is_alive()
+                for entry in self._managed_tasks.values()
+            )
+            if active_same_account >= 16:
+                raise ValueError("This account has reached the active task limit")
+            if len(self._managed_tasks) >= 128:
+                raise ValueError("Controller task history is full; reconcile before restart")
 
         started = multiprocessing.Event()
         proc = multiprocessing.Process(
@@ -795,17 +850,74 @@ class IPCServer:
             "status": "started",
             "config": clean_config,
         }
-        updateProcessList(session, programprocesslist=[entry])
+        try:
+            updateProcessList(session, programprocesslist=[entry])
+        except Exception:
+            # Never leave a successfully spawned, untracked child if the
+            # engine cannot persist processList metadata for this task.
+            if existing_only and proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=4.0)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=4.0)
+            raise
 
-        return {
+        result = {
             "status": "ok",
             "pid": proc.pid,
             "task": canonical_name,
-            "email": session.mail,
             "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username,
             "host_pid": os.getpid(),
         }
+        if existing_only:
+            self._managed_tasks[proc.pid] = {
+                "process": proc, "task": canonical_name,
+                "world": result["world"], "player": session.username,
+                "started_at": entry["date"],
+            }
+            self._managed_requests[request_id] = (request_fingerprint, dict(result))
+            if len(self._managed_requests) > 512:
+                self._managed_requests.pop(next(iter(self._managed_requests)))
+        else:
+            result["email"] = session.mail
+        return result
+
+
+    def _list_managed_tasks(self, request):
+        """Only child processes launched using start_task_existing are visible."""
+        world = request.get("world")
+        player = request.get("player")
+        if not isinstance(world, str) or not isinstance(player, str) or not world or not player:
+            raise ValueError("World and player are required to inspect tasks")
+        rows = []
+        for pid, entry in self._managed_tasks.items():
+            if entry["world"].casefold() != world.casefold() or entry["player"].casefold() != player.casefold():
+                continue
+            proc = entry["process"]
+            rows.append({"pid": pid, "task": entry["task"],
+                         "status": "running" if proc.is_alive() else "finished",
+                         "started_at": entry["started_at"]})
+        return {"status": "ok", "world": world, "username": player, "tasks": rows}
+
+    def _stop_managed_task(self, request):
+        """Only stop an exact tracked multiprocessing.Process; never kill arbitrary PIDs."""
+        pid = request.get("pid")
+        world, player = request.get("world"), request.get("player")
+        if type(pid) is not int or pid <= 0 or not isinstance(world, str) or not isinstance(player, str):
+            raise ValueError("A task PID and account identity are required")
+        entry = self._managed_tasks.get(pid)
+        if not entry or entry["world"].casefold() != world.casefold() or entry["player"].casefold() != player.casefold():
+            raise ValueError("Task is not managed by this Daedalus controller")
+        proc = entry["process"]
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=4.0)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=4.0)
+        return {"status": "ok", "pid": pid, "task": entry["task"], "state": "stopped"}
 
 
 def send_ipc_request(request, connect_timeout=1.5, read_timeout=120.0):

@@ -256,3 +256,66 @@ def test_readonly_warehouse_provider_uses_existing_ipc_if_explicitly_attached(ac
     assert response.status_code == 200
     assert response.json()["cities"][0]["resources"]["unsecured"]["wood"] == 100
     assert response.json()["cities"][0]["resources"]["unsecured"]["marble"] is None
+
+
+def test_task_control_requires_explicit_enablement_and_authorization(account_file):
+    app = create_app(accounts_path=account_file, api_token=TOKEN)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    body = {"task": "alertAttacks", "config": {"minutes": 10},
+            "request_id": "12345678-1234-4123-8123-123456789abc"}
+    assert client.get("/api/v1/task-control").status_code == 401
+    assert client.get("/api/v1/task-control", headers=auth).json()["enabled"] is False
+    assert client.post("/api/v1/accounts/alpha/tasks", json=body).status_code == 401
+    assert client.post("/api/v1/accounts/alpha/tasks", json=body, headers=auth).status_code == 503
+    assert client.get("/api/v1/accounts/alpha/tasks", headers=auth).status_code == 503
+    assert client.delete("/api/v1/accounts/alpha/tasks/42", headers=auth).status_code == 503
+    assert client.get("/api/v1/health").json()["mode"] == "read_only"
+
+
+def test_explicit_task_control_validates_account_builtin_task_and_request_id(account_file):
+    class MockTaskController:
+        def __init__(self):
+            self.calls = []
+
+        def start_task(self, account, task, config, request_id):
+            self.calls.append((account.id, task, config, request_id))
+            return {"pid": 81001, "task": task, "status": "started", "request_id": request_id}
+
+        def list_tasks(self, account):
+            self.calls.append((account.id, "list"))
+            return [{"pid": 81001, "task": "alertAttacks", "status": "running", "started_at": 1234}]
+
+        def stop_task(self, account, pid):
+            self.calls.append((account.id, "stop", pid))
+            return {"pid": pid, "status": "stopped"}
+
+    mock = MockTaskController()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   task_controller=mock))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    body = {"task": "alertAttacks", "config": {"minutes": 10},
+            "request_id": "12345678-1234-4123-8123-123456789abc"}
+    assert client.get("/api/v1/task-control", headers=auth).json()["enabled"] is True
+    assert client.get("/api/v1/health").json()["mode"] == "task_control"
+    assert client.get("/api/v1/capabilities", headers=auth).json()["structured_engine_dispatch"]
+    for invalid in (
+        {"task": "getStatus", **{key: value for key, value in body.items() if key != "task"}},
+        {**body, "config": {"session": "forged"}},
+        {**body, "request_id": "00000000-0000-1000-8000-000000000000"},
+    ):
+        response = client.post("/api/v1/accounts/alpha/tasks", json=invalid, headers=auth)
+        assert response.status_code == 422, response.text
+    assert mock.calls == []
+    assert client.post("/api/v1/accounts/unknown/tasks", json=body, headers=auth).status_code == 404
+    started = client.post("/api/v1/accounts/alpha/tasks", json=body, headers=auth)
+    assert started.status_code == 200, started.text
+    assert started.json()["pid"] == 81001
+    tasks = client.get("/api/v1/accounts/alpha/tasks", headers=auth)
+    assert tasks.status_code == 200
+    assert tasks.json()["tasks"][0]["status"] == "running"
+    stopped = client.delete("/api/v1/accounts/alpha/tasks/81001", headers=auth)
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "stopped"
+    assert mock.calls[0] == ("alpha", "alertAttacks", {"minutes": 10}, body["request_id"])
+    assert mock.calls[-1] == ("alpha", "stop", 81001)

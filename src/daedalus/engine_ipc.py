@@ -112,11 +112,24 @@ class ExistingIPCClient:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
             raise ValueError("Account is disabled")
+        return self._exchange(action, account=account)
+
+    def _exchange(
+        self, action: str, *, account: Account | None = None,
+        additional: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Private wire method; public request() remains strictly read-only."""
         port, secret = self._descriptor()
-        payload: dict[str, str] = {"action": action, "authkey": secret}
+        payload: dict[str, object] = {"action": action, "authkey": secret}
         if account is not None:
             payload.update(world=account.world, player=account.player)
-        wire = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        if additional is not None:
+            if any(key in additional for key in ("action", "authkey", "world", "player")):
+                raise ValueError("Cannot override IPC authentication or account identity")
+            payload.update(additional)
+        wire = (json.dumps(payload, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+        if len(wire) > 65536:
+            raise ValueError("IPC task request exceeds safe size limit")
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=2.0) as conn:
                 conn.settimeout(8.0)
@@ -246,3 +259,77 @@ class ExistingIPCClient:
                 resources=WarehouseResources(unsecured=values, capacity=capacity),
             ))
         return snapshots
+
+
+class ExistingTaskIPCClient(ExistingIPCClient):
+    """Explicitly enabled task control for already-authenticated sessions only.
+
+    Unlike ExistingIPCClient.request, these mutating calls are exposed only
+    through named operations with account, task, and PID validation.
+    """
+
+    def start_task(
+        self, account: Account, task: str, config: dict[str, object], request_id: str
+    ) -> dict[str, object]:
+        if not account.enabled:
+            raise ValueError("Cannot start tasks on disabled accounts")
+        if not isinstance(task, str) or not task or len(task) > 80:
+            raise ValueError("A task name is required")
+        if not isinstance(config, dict) or "session" in config:
+            raise ValueError("Task configuration must be a JSON object")
+        if not isinstance(request_id, str) or len(request_id) != 36:
+            raise ValueError("A UUID4 idempotency key is required")
+        if not self.has_account(account):
+            raise EngineIPCUnavailable("No unique already-authenticated account session")
+        response = self._exchange(
+            "start_task_existing", account=account,
+            additional={"task": task, "config": config, "request_id": request_id},
+        )
+        self._check_identity(response, account)
+        pid = response.get("pid")
+        if type(pid) is not int or pid <= 0 or response.get("task") != task:
+            raise EngineIPCUnavailable("IkaBot IPC returned invalid task launch data")
+        return {"pid": pid, "task": task, "status": "started", "request_id": request_id}
+
+    @staticmethod
+    def _check_identity(response: dict[str, Any], account: Account) -> None:
+        if (
+            not isinstance(response.get("world"), str)
+            or not isinstance(response.get("username"), str)
+            or response["world"].casefold() != account.world.casefold()
+            or response["username"].casefold() != account.player.casefold()
+        ):
+            raise EngineIPCUnavailable("IkaBot IPC returned a different account identity")
+
+    def list_tasks(self, account: Account) -> list[dict[str, object]]:
+        response = self._exchange("list_managed_tasks", account=account)
+        self._check_identity(response, account)
+        rows = response.get("tasks")
+        if not isinstance(rows, list) or len(rows) > 128:
+            raise EngineIPCUnavailable("IkaBot IPC returned invalid managed task list")
+        results: list[dict[str, object]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Invalid managed task entry")
+            pid, task, status, started = (
+                row.get("pid"), row.get("task"), row.get("status"), row.get("started_at")
+            )
+            if (
+                type(pid) is not int or pid <= 0
+                or not isinstance(task, str) or not task or len(task) > 80
+                or status not in {"running", "finished"}
+                or not isinstance(started, int | float)
+            ):
+                raise EngineIPCUnavailable("Invalid managed task fields")
+            results.append({"pid": pid, "task": task, "status": status, "started_at": started})
+        return results
+
+    def stop_task(self, account: Account, pid: int) -> dict[str, object]:
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("A valid managed task PID is required")
+        response = self._exchange(
+            "stop_managed_task", account=account, additional={"pid": pid}
+        )
+        if response.get("pid") != pid or response.get("state") != "stopped":
+            raise EngineIPCUnavailable("IkaBot IPC returned invalid task stop confirmation")
+        return {"pid": pid, "status": "stopped"}

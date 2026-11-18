@@ -1,6 +1,6 @@
 # Daedalus for Ikariam
 
-**Status: native desktop preview with read-only backend.** Daedalus now includes an adapted PySide6/Fluent desktop shell with Accounts, Warehouses, Operations, Log and Connection pages, a credential-free local multi-account configuration format, an authenticated read-only API, and a task registry. The engine combines public IkaBot 7.7.2 with proposed [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The GUI cannot yet start authenticated game workers, launch tasks or complete browser-assisted login.
+**Status: native desktop with opt-in existing-session task controls.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -33,14 +33,14 @@ The `engine inventory` command reads engine source files through the Python AST,
 
 ## Native Mac GUI preview
 
-The current desktop reuses the Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging patterns from our existing Mac GUI, while replacing direct Selenium data fetching with the Daedalus read-only backend API. It is a **partial migration**, not a release-ready replacement for the existing scraper or bot control application.
+The current desktop reuses Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging from our existing Mac GUI. It uses the Daedalus backend API for reports and, only when explicitly enabled, task operations. It is a **partial migration**, not a release-ready replacement for the existing scraper or bot control application.
 
 ```bash
 python -m pip install -e ".[desktop]"
 daedalus-desktop
 ```
 
-Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, and **Warehouses**. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports. With explicit `--connect-existing-ipc` backend opt-in, it can read real resources through a compatible **already-authenticated** IkaBot session; otherwise the API reports unavailable. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
+Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, **Warehouses**, and the optional **Tasks** page. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports. With explicit `--connect-existing-ipc` backend opt-in, it can read real resources through a compatible **already-authenticated** IkaBot session; otherwise the API reports unavailable. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
 
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
@@ -48,7 +48,7 @@ For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen 
 
 ## Read-only local API
 
-The controller implements metadata, existing-session status, city lookup and optional warehouse reporting—not game task execution or login automation. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
+The controller implements metadata, existing-session status, city lookup and optional warehouse reporting. With a second explicit task-control opt-in, it can also dispatch built-in background tasks to the same already-authenticated IkaBot process; it never creates a login. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
 
 Install the API extra and generate a secret before running it:
 
@@ -58,7 +58,7 @@ export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urls
 daedalus serve --host 127.0.0.1 --port 8765
 ```
 
-With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by merely starting the service.
+With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by **default startup**. Game task execution requires both `--connect-existing-ipc` and `--enable-task-control`, with an already-authenticated compatible engine session, plus operator confirmation in the GUI.
 
 **Optional existing-session bridge:** Start the backend with `--connect-existing-ipc --accounts-file ~/.config/daedalus/accounts.toml` on the same machine/user as a **compatible, already-running** IkaBot IPC server. The Accounts page can check engine attachment and Warehouses can fetch read-only snapshots. This path never creates another Gameforge login. See [the full existing-IPC requirements, precautions and testing instructions](docs/EXISTING-IPC.md). **Do not use the current production bot installation as a test worker.**
 
@@ -72,6 +72,10 @@ openspec list
 
 See [AGENTS.md](AGENTS.md), [implementation and OpenSpec status](docs/PROJECT-STATUS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Normative capability requirements live in [openspec/specs](openspec/specs/); completed change records live in [openspec/changes/archive](openspec/changes/archive/).
 
+## Optional task controls — explicit operator opt-in
+
+With a compatible already-authenticated IkaBot engine process on the same host, run `daedalus serve --connect-existing-ipc --enable-task-control`. The native **Tasks** page offers a built-in background operation list, JSON configuration, explicit start/stop confirmation and status for Daedalus-managed child processes. **The default service has no task mutations.** Existing IkaBot tasks started outside Daedalus cannot be stopped from this page. This is not a substitute for the still-unfinished Selenium login assistant or task persistence. See the complete [task control setup, API and safeguards](docs/TASK-CONTROL.md).
+
 ## Account-session ownership groundwork
 
 Daedalus includes a host-local OS file lock and authentication-status state machine to prevent duplicate world/player workers **on the same backend host**. The authenticated API reports nonsecret session states for each account. This is groundwork only: **no Gameforge login, browser handoff, or game worker is started** by these components. The lock is not distributed across multiple servers; assign each account to one authoritative backend. See [session ownership and limitations](docs/SESSION-OWNERSHIP.md).
@@ -84,20 +88,20 @@ The vendored IkaBot **proposed** CLI supports native task flags such as `--task`
 python -m ikabot --help
 ```
 
-Actual task execution requires an authenticated IkaBot session and explicit account ownership. It must not be tried against production accounts until the session coordination and backend task adapter are ready. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
+Task execution requires an already-authenticated compatible IkaBot session and explicit operator opt-in. Test it in an isolated engine environment rather than restarting production accounts. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
 
 See [the precise upstream merge record](engine/UPSTREAM.md), [the archived OpenSpec CLI/IPC integration change](openspec/changes/archive/2026-11-18-integrate-upstream-cli-ipc/proposal.md) and [current implementation status](docs/PROJECT-STATUS.md).
 
 ## Existing-session-only bridge
 
-Daedalus can now connect **read-only** to an already-running instance of the Daedalus-vendored IkaBot engine that supports the new restricted IPC actions. The **Accounts** view has a **Check IkaBot sessions** button, and **Warehouses** can read exact unsecured-resource totals. The backend never restores a game login for these requests; the connection is explicitly opted into with `daedalus serve --connect-existing-ipc`. This does not yet provide game task start/stop or the Selenium authentication assistant. Read [the bridge setup and limitations](docs/EXISTING-IPC.md).
+Daedalus can now connect **read-only** to an already-running instance of the Daedalus-vendored IkaBot engine that supports the new restricted IPC actions. The **Accounts** view has a **Check IkaBot sessions** button, and **Warehouses** can read exact unsecured-resource totals. The backend never restores a game login for these requests; the connection is explicitly opted into with `daedalus serve --connect-existing-ipc`. Task start/stop is separately available behind `--enable-task-control`; the Selenium login assistant remains unfinished. Read [the bridge setup and limitations](docs/EXISTING-IPC.md).
 
 ## Repository organization
 
 - `src/daedalus/`: application package, local/remote HTTP client, reporting utilities and authenticated read-only API
 - `engine/ikabot/`: public MIT-licensed IkaBot 7.7.2 with proposed, unreleased PR #499 CLI/IPC code
 - `server/`: future supervised account workers, task dispatcher, scheduler and policies; not implemented yet
-- `src/daedalus/desktop/`: reviewed Fluent desktop preview; task launch and login assistance pending
+- `src/daedalus/desktop/`: reviewed Fluent GUI with read-only reporting and opt-in task controls; assisted login pending
 - `openspec/`: normative specifications, architecture decisions and change proposals
 
 ## License and provenance

@@ -2,8 +2,8 @@
 - [x] Record and import clean upstream engine revision with MIT license notices.
 - [ ] Reconcile upstream fixes and modified production authentication code without importing secrets.
 - [x] Test proposed JSON CLI/IPC and batch support with synthetic sessions.
-- [ ] Implement validated task registry and adapter with lifecycle responses.
-- [ ] Verify session isolation and failure paths offline.
+- [x] Implement a validated existing-session task registry adapter with start/list/stop lifecycle responses.
+- [x] Verify existing-session identity isolation, task ownership and failure paths offline.
 - [x] Run lint, package build and OpenSpec validation after the JSON CLI/IPC integration.
 
 ## Completed baseline checks
