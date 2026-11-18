@@ -33,9 +33,15 @@ The following umbrella changes have unfinished tasks and were deliberately **not
 
 - `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
 - `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
-- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; per-task parameter forms and island-grouped reports are delivered; account-editing parity and authenticated worker recovery remain incomplete.
+- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; per-task parameter forms and island-grouped reports are delivered. The new opt-in metadata editor covers basic account create/edit/disable/remove, while full legacy parity and authenticated worker recovery remain incomplete.
 
 Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
+
+## Opt-in account metadata editor (pending merge/archival)
+
+The `account-metadata-editor` change adds a separate confirmed, bearer-protected metadata-only backend mode and native account edit controls. It persists only validated account identifiers, worlds, players, labels and enabled flags with an optimistic generation, owner-only atomic write and local identity-lease check. Editing is incompatible with task dispatch. It does not log into Gameforge or migrate any production bot.
+
+The change remains active until the protected-branch checks, merge and OpenSpec archival complete. See [account editing](ACCOUNT-EDITING.md).
 
 ## Existing-session integration architecture
 

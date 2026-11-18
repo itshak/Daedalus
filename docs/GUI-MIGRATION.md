@@ -25,7 +25,7 @@ The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 - **Log:** local bounded UI diagnostics
 - **Connection:** local or HTTPS/SSH-tunneled API URL and a masked bearer-token field
 
-The Accounts page provides an explicit **Check IkaBot sessions** button; only configured identities with a unique matching existing engine session show Attached. The warehouse view can read live data after the backend is explicitly started with `--connect-existing-ipc` against a compatible, already-authenticated engine. Neither operation creates a login; see [existing engine attachment](EXISTING-IPC.md).
+The Accounts page offers confirmed **Add/Edit/Enable/Disable/Remove** account metadata controls only when the backend is separately started with `--enable-account-editing`; the controls never accept credentials or launch authentication. It also provides an explicit **Check IkaBot sessions** button; only configured identities with a unique matching existing engine session show Attached. The warehouse view can read live data after the backend is explicitly started with `--connect-existing-ipc` against a compatible, already-authenticated engine. Neither operation creates a login; see [existing engine attachment](EXISTING-IPC.md).
 
 Backend requests run in a Qt worker thread. A connection may be replaced without restarting the app. Bearer tokens remain in memory by default. Users may explicitly opt in to saving a validated backend URL in owner-private settings and its bearer token in the operating-system keyring. The GUI also offers user-directed reconnect and Forget saved connection controls. No legacy credentials are imported.
 
@@ -33,7 +33,7 @@ No game login or Selenium browser is launched by the GUI. Warehouse data can now
 
 ## UI parity still to complete
 
-This is a **foundation**, not a complete port. The existing multi-account edit dialogs, browser login assistant, durable resume/reconciliation, notifications, additional preference coverage and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
+This is a **foundation**, not a complete port. Basic account metadata editing is now available in a separate opt-in mode; remaining advanced legacy account dialogs, browser login assistance, durable resume/reconciliation, notifications, additional preference coverage and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
 
 ## License
 
