@@ -640,16 +640,25 @@ class IPCServer:
         from urllib.parse import urlsplit
 
         session = self._existing_session(request)
-        host = f"s{getattr(session, 'mundo', '')}-{getattr(session, 'servidor', '')}.ikariam.gameforge.com"
-        world = f"s{session.mundo}-{session.servidor}"
+        number = str(getattr(session, "mundo", ""))
+        language = str(getattr(session, "servidor", "")).lower()
+        if not re.fullmatch(r"[0-9]{1,6}", number) or not re.fullmatch(r"[a-z]{2,4}", language):
+            raise ValueError("Invalid existing game world identity")
+        host = f"s{number}-{language}.ikariam.gameforge.com"
+        world = f"s{number}-{language}"
         identity = {"world": world, "username": str(session.username)}
         base_url = getattr(session, "urlBase", "")
-        parsed = urlsplit(base_url)
-        if (
-            parsed.scheme != "https" or parsed.hostname != host
-            or parsed.path != "/index.php" or parsed.username or parsed.password
-            or parsed.port not in (None, 443)
-        ):
+        try:
+            parsed = urlsplit(base_url)
+            trusted_url = (
+                parsed.scheme == "https" and parsed.hostname == host
+                and parsed.path == "/index.php" and not parsed.username
+                and not parsed.password and parsed.port in (None, 443)
+                and parsed.query == "" and parsed.fragment == ""
+            )
+        except (ValueError, TypeError, AttributeError):
+            trusted_url = False
+        if not trusted_url:
             return {"status": "ok", **identity, "session_valid": False}
         try:
             response = session.s.get(base_url, timeout=8, verify=config.do_ssl_verify)
