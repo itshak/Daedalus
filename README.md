@@ -169,3 +169,10 @@ Daedalus can now connect **read-only** to an already-running instance of the Dae
 Project-original code is offered under **GPL-3.0-only**. Vendored IkaBot is MIT-licensed; its original [license](engine/ikabot/LICENSE) and notices are preserved. Other dependencies and imported code require license review before distribution. See [docs/UPSTREAM.md](docs/UPSTREAM.md).
 
 This project is independently developed and is not affiliated with Gameforge or the upstream IkaBot maintainers.
+
+### Experimental saved-cookie worker
+
+For explicitly authorized cookie-only startup of one existing authenticated
+IkaBot world session (without lobby login), see
+[the saved-worker guide](docs/SAVED-WORKER.md). This remains an experimental
+path, not a replacement for interactive Gameforge authentication.

@@ -312,3 +312,39 @@ def test_active_validation_rejects_untrusted_session_url_without_network():
     })
     assert result["session_valid"] is False
     session.s.get.assert_not_called()
+
+
+def test_dedicated_ipc_refuses_unverified_or_other_existing_owners():
+    import ikabot.helpers.ipc as ipc
+
+    session = make_session()
+    with patch.object(ipc, "_LOCAL_SERVER", None):
+        with patch.object(ipc, "ping_ipc_server", return_value=True):
+            with patch.object(ipc, "IPCServer") as constructor:
+                with patch.object(ipc, "_StartupLock") as lock:
+                    lock.return_value.__enter__.return_value.acquired = True
+                    with __import__("pytest").raises(RuntimeError, match="already running"):
+                        ipc.start_dedicated_ipc_server(session)
+                constructor.assert_not_called()
+
+    session.logged = False
+    with __import__("pytest").raises(ValueError, match="verified"):
+        ipc.start_dedicated_ipc_server(session)
+
+
+def test_dedicated_ipc_uses_exclusive_authenticated_session():
+    import ikabot.helpers.ipc as ipc
+
+    session = make_session()
+    with patch.object(ipc, "_LOCAL_SERVER", None):
+        with patch.object(ipc, "ping_ipc_server", return_value=False):
+            with patch.object(ipc, "_StartupLock") as lock:
+                lock.return_value.__enter__.return_value.acquired = True
+                with patch.object(ipc, "IPCServer") as constructor:
+                    fake = constructor.return_value
+                    fake.start.return_value = fake
+                    assert ipc.start_dedicated_ipc_server(session) is fake
+                    constructor.assert_called_once_with(default_session=session)
+                    assert ipc._LOCAL_SERVER is fake
+                    with __import__("pytest").raises(RuntimeError, match="already running"):
+                        ipc.start_dedicated_ipc_server(session)
