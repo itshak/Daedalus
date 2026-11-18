@@ -29,7 +29,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"Daedalus {__version__}")
     subcommands = parser.add_subparsers(dest="command")
 
-    subcommands.add_parser("doctor", help="Show offline integration diagnostics")
+    doctor = subcommands.add_parser(
+        "doctor", help="Show truthful offline readiness and optional isolated demo smoke"
+    )
+    doctor.add_argument(
+        "--smoke", action="store_true",
+        help="Check the real API using an in-process synthetic demo; no game network",
+    )
 
     engine = subcommands.add_parser("engine", help="Inspect public IkaBot engine source")
     engine.add_argument("action", choices=["inventory"], help="Inspect available engine operations")
@@ -83,32 +89,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
-        try:
-            count = len(inspect_engine())
-            available = True
-            cli_available = supports_structured_cli()
-        except (EngineNotFoundError, OSError, SyntaxError):
-            count = 0
-            available = False
-            cli_available = False
-        print(
-            json.dumps(
-                {
-                    "project": "Daedalus",
-                    "version": __version__,
-                    "stage": "read-only-controller",
-                    "engine_source_available": available,
-                    "engine_capabilities_found": count,
-                    "engine_cli_available": cli_available,
-                    "engine_integrated": False,
-                    "server_implemented": True,
-                    "server_mode": "read_only",
-                    "desktop_implemented": False,
-                    "live_accounts_configured": False,
-                },
-                sort_keys=True,
-            )
-        )
+        from daedalus.readiness import OfflineSmokeError, offline_readiness, synthetic_smoke
+
+        report = offline_readiness()
+        if args.smoke:
+            try:
+                report["offline_smoke"] = synthetic_smoke()
+            except OfflineSmokeError as exc:
+                report["offline_smoke"] = {"status": "failed", "reason": str(exc)}
+                print(json.dumps(report, sort_keys=True))
+                return 1
+        print(json.dumps(report, sort_keys=True))
     elif args.command == "engine":
         try:
             capabilities = inspect_engine(args.source)
