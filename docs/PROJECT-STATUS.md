@@ -146,3 +146,5 @@ The optional ephemeral human-operated Chromium login assistant is implemented in
 ## Authentication offline scope archived; live integration remains open
 
 The `unify-authentication` OpenSpec change records offline-tested single-owner leases, protected browser and keyring recovery, worker verification, an idle-only dedicated-worker rebind primitive and one-use new-task approval. It does **not** claim a complete remote GUI recovery flow, independently attested server-side player identity, or successful real Gameforge login. Those remaining integration and supervised tests are tracked in the active `validate-live-authentication` change. Archiving the offline implementation is not production authorization.
+
+Offline headless Chromium verification on the development host: `tests/test_browser_recovery.py` **7 passed**, using intercepted synthetic pages; no Gameforge traffic.
