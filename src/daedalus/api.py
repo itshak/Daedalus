@@ -138,6 +138,11 @@ def create_app(
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
 
+    @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
+    def task_control_status() -> dict[str, bool]:
+        """Read-only opt-in status for clients; never exposes task management itself."""
+        return {"enabled": task_controller is not None, "requires_existing_session": True}
+
     def require_task_controller(account_id: str) -> TaskController:
         if account_id not in account_by_id:
             raise HTTPException(status_code=404, detail="Account not found")

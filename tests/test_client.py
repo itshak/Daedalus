@@ -137,3 +137,54 @@ def test_readonly_desktop_client_attached_engine_cities():
         assert client.cities("alpha")[0]["name"] == "Athens"
         with pytest.raises(ValueError):
             client.cities("../invalid")
+
+
+def test_desktop_start_list_stop_use_bearer_and_scoped_json():
+    task_id = "f" * 24
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, request.headers.get("Authorization")))
+        if request.url.path.endswith("/task-control"):
+            return httpx.Response(200, json={"enabled": True, "requires_existing_session": True})
+        if request.method == "POST" and request.url.path.endswith("/tasks"):
+            payload = json.loads(request.content)
+            assert payload == {
+                "task": "alertAttacks", "config": {"minutes": 10},
+                "request_id": "12345678-1234-4123-8123-123456789abc",
+                "confirmed": True,
+            }
+            return httpx.Response(200, json={"task_id": task_id, "pid": 81001, "status": "started"})
+        if request.method == "GET":
+            return httpx.Response(200, json={
+                "engine_tasks": [{"task_id": task_id, "task": "alertAttacks", "status": "running"}],
+                "requests": [],
+            })
+        if request.method == "POST" and request.url.path.endswith("/stop"):
+            return httpx.Response(200, json={"task_id": task_id, "status": "stopped"})
+        return httpx.Response(404)
+
+    with mock_client(handler) as client:
+        assert client.task_control_status()["enabled"]
+        started = client.start_task(
+            "alpha", "alertAttacks", {"minutes": 10},
+            "12345678-1234-4123-8123-123456789abc", confirmed=True,
+        )
+        assert started["task_id"] == task_id
+        assert client.tasks("alpha")["engine_tasks"][0]["task_id"] == task_id
+        assert client.stop_task("alpha", task_id)["status"] == "stopped"
+    assert [entry[0] for entry in seen] == ["GET", "POST", "GET", "POST"]
+    assert all(entry[2] == f"Bearer {TOKEN}" for entry in seen)
+    assert seen[1][1] == "/api/v1/accounts/alpha/tasks"
+
+
+def test_desktop_task_errors_redact_server_replies():
+    body = "sensitive-cookie-do-not-display"
+    with mock_client(lambda request: httpx.Response(503, text=body)) as client:
+        with pytest.raises(APIConnectionError) as error:
+            client.start_task("alpha", "alertAttacks", {},
+                              request_id="12345678-1234-4123-8123-123456789abc", confirmed=True)
+        assert body not in str(error.value)
+        assert error.value.status_code == 503
+        with pytest.raises(ValueError):
+            client.stop_task("alpha", "-1")

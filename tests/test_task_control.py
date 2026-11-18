@@ -29,7 +29,7 @@ class FakeTaskIPC:
     def has_account(self, account):
         return self.online and account.player == "ExamplePlayer"
 
-    def start_managed_task(self, account, task, config):
+    def start_managed_task(self, account, task, config, request_id):
         self.sent.append((account.id, task, config))
         return {"task_id": "f" * 24, "pid": 4242, "task": task, "status": "running"}
 

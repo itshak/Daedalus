@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from daedalus.account_sessions import (
     AccountSessionCoordinator,
@@ -241,7 +242,10 @@ class TaskController:
     ) -> dict[str, object]:
         if not confirmed:
             raise ValueError("Explicit game task confirmation is required")
-        if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
+        if (
+            not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id)
+            or UUID(request_id).version != 4
+        ):
             raise ValueError("A valid UUID request_id is required for idempotency")
         if task not in self._supported:
             raise ValueError("Unsupported engine task")
@@ -256,7 +260,7 @@ class TaskController:
                 return receipt
             try:
                 self._lease(account)
-                started = self._ipc.start_managed_task(account, task, clean)
+                started = self._ipc.start_managed_task(account, task, clean, request_id)
             except BaseException:
                 # Do not retry: the IPC reply may have been lost after game acceptance.
                 self._ledger.finish(account.id, request_id, status="unconfirmed")
@@ -289,7 +293,10 @@ class TaskController:
         """User asserts they inspected engine/game state; no automatic redispatch."""
         if not confirmed:
             raise ValueError("Explicit manual reconciliation confirmation required")
-        if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
+        if (
+            not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id)
+            or UUID(request_id).version != 4
+        ):
             raise ValueError("A valid request ID is required")
         account = self._account(account_id)
         self._ledger.acknowledge(account.id, request_id)

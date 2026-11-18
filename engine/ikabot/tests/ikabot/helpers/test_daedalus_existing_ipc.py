@@ -136,11 +136,13 @@ def test_warehouse_missing_auth_does_not_open_session():
 
 
 def test_managed_task_start_list_and_stop_for_existing_session_only():
-    from ikabot.helpers.decorators import task
-
-    @task("daedalus_synthetic_managed_task")
     def synthetic_task(session, minutes=10):
         pass
+
+    # The existing-session path accepts only built-in IkaBot tasks, never
+    # dynamically registered external functions.
+    synthetic_task.__module__ = "ikabot.function.alertAttacks"
+    synthetic_task.prepare = None
 
     class FakeProcess:
         pid = 42424
@@ -157,7 +159,7 @@ def test_managed_task_start_list_and_stop_for_existing_session_only():
             self.alive = False
 
         def join(self, timeout):
-            assert timeout == 2.0
+            assert timeout == 4.0
 
     proc = FakeProcess()
 
@@ -172,13 +174,15 @@ def test_managed_task_start_list_and_stop_for_existing_session_only():
         patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
         patch("ikabot.helpers.ipc.updateProcessList"),
         patch("ikabot.helpers.ipc.multiprocessing.Process", side_effect=fake_process),
+        patch("ikabot.helpers.ipc._resolve_task", return_value=("alertAttacks", synthetic_task)),
     ):
         started = server.handle_request({
             "action": "start_task_existing", **identity,
-            "task": "daedalus_synthetic_managed_task", "config": {"minutes": 10},
+            "task": "alertAttacks", "config": {"minutes": 10},
+            "request_id": "12345678-1234-4123-8123-123456789abc",
         })
         assert started["status"] == "ok"
-        assert started["task"] == "daedalus_synthetic_managed_task"
+        assert started["task"] == "alertAttacks"
         assert "email" not in started
         assert len(started["task_id"]) == 24
         assert proc.started

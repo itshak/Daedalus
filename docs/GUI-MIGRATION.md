@@ -13,15 +13,15 @@ Reviewed legacy files:
 - `src/ikabot/gui/run_page.py`: warehouse resource table and 220K unsecured-resource filtering
 - `src/ikabot/report.py`: CSV/JSON report/export patterns
 
-Code has been adapted into `src/daedalus/desktop/`, with an independent, read-only HTTP client in `src/daedalus/client.py` and pure reporting utilities in `src/daedalus/reporting.py`. The original scraper, Selenium worker, legacy config.ini, token/cookie storage and private Git history were **not** copied into Daedalus.
+Code has been adapted into `src/daedalus/desktop/`, with an independent, secure HTTP client (read-only by default; mutating calls explicitly gated) in `src/daedalus/client.py` and pure reporting utilities in `src/daedalus/reporting.py`. The original scraper, Selenium worker, legacy config.ini, token/cookie storage and private Git history were **not** copied into Daedalus.
 
 ## Current UI scope
 
 The `daedalus-desktop` entry point opens the Fluent desktop with these pages:
 - **Accounts:** protected metadata and backend-reported session status
 - **Warehouses:** per-account unsecured counts, 220K filter, copy/save CSV and JSON
-- **Operations:** all discovered engine task/menu operations, read-only inventory
-- **Tasks:** opt-in engine background-task selection, JSON configuration, explicit start/stop and manual reconciliation
+- **Operations:** read-only discovery of all built-in tasks/menu operations
+- **Tasks:** opt-in, confirmed built-in background task launch/list/stop through an existing authenticated engine session; generic JSON configuration editor
 - **Log:** local bounded UI diagnostics
 - **Connection:** local or HTTPS/SSH-tunneled API URL and a masked bearer-token field
 
@@ -33,7 +33,7 @@ No game login or Selenium browser is launched by the GUI. Warehouse data can now
 
 ## UI parity still to complete
 
-This is a **foundation**, not a complete port. The existing multi-account edit dialogs, island-grouped text exports, browser login assistant, task-specific generated editors, pause/resume policies, notifications and persistent GUI settings remain future changes. Start/list/stop is now available only via the opt-in controlled-task API, and native .app packaging exists as a CI preview. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
+This is a **foundation**, not a complete port. The existing multi-account edit dialogs, island-grouped text exports, browser login assistant, task-specific configuration forms, durable resume/reconciliation, notifications, persistent GUI settings and notarized distribution remain future changes. The objective remains reusing the original GUI while replacing Selenium-only reporting and bespoke interactive menus with backend APIs.
 
 ## License
 

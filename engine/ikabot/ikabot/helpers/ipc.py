@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import hashlib
 import ast
 import ctypes
 import importlib
@@ -10,11 +11,13 @@ import inspect
 import json
 import multiprocessing
 import os
+import re
 import secrets
 import socket
 import sys
 import threading
 import time
+from uuid import UUID
 
 import psutil
 
@@ -460,6 +463,7 @@ class IPCServer:
         self._running = False
         self._sessions = [default_session] if default_session is not None else []
         self._daedalus_tasks = {}  # only children started by existing-session IPC
+        self._daedalus_requests = {}  # session-scoped UUID4 receipt cache
         self._thread = None
 
     @property
@@ -801,7 +805,10 @@ class IPCServer:
             entry["status"] = "finished" if entry["status"] != "stopped" else "stopped"
         else:
             proc.terminate()
-            proc.join(timeout=2.0)
+            proc.join(timeout=4.0)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=4.0)
             entry["status"] = "stopping" if proc.is_alive() else "stopped"
         return {"status": "ok", "task_id": task_id, "task": entry["task"],
                 "pid": entry["pid"], "task_status": entry["status"]}
@@ -814,13 +821,68 @@ class IPCServer:
         server = request.get("server")
         player = request.get("player")
 
+        if existing_only:
+            # Public CLI custom modules remain usable, but the opt-in GUI path
+            # accepts only built-in @task-decorated engine modules.
+            if not isinstance(task_name, str) or not re.fullmatch(
+                r"[A-Za-z][A-Za-z0-9_]{0,79}", task_name
+            ):
+                raise ValueError("A built-in IkaBot task name is required")
+            builtin_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "function")
+            builtin = next(
+                (fname[:-3] for fname in os.listdir(builtin_dir)
+                 if fname.endswith(".py") and fname[:-3].casefold() == task_name.casefold()),
+                None,
+            )
+            if builtin is None:
+                raise ValueError("Only built-in engine background tasks can be started")
+            task_name = builtin
+            if not isinstance(request.get("config"), dict) or "session" in request["config"]:
+                raise ValueError("Task config must be a JSON object without session values")
+            try:
+                canonical_config = json.dumps(
+                    request["config"], sort_keys=True, ensure_ascii=False, allow_nan=False,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Task config must contain finite JSON values") from exc
+            if len(canonical_config.encode("utf-8")) > 16384:
+                raise ValueError("Task config exceeds safe size limit")
+            session = self._existing_session(request)
+            request_id = request.get("request_id")
+            if not isinstance(request_id, str) or not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                request_id,
+            ) or str(UUID(request_id)) != request_id:
+                raise ValueError("Task request requires a canonical UUID4 idempotency key")
+            fingerprint = (
+                f"s{session.mundo}-{session.servidor}".casefold(), session.username.casefold(),
+                task_name, hashlib.sha256(canonical_config.encode("utf-8")).hexdigest(),
+            )
+            prior = self._daedalus_requests.get(request_id)
+            if prior is not None:
+                if prior[0] != fingerprint:
+                    raise ValueError("Task request ID was reused with different inputs")
+                return dict(prior[1])
+
         canonical_name, task_func = _resolve_task(task_name)
+        if existing_only and task_func.__module__ != f"ikabot.function.{canonical_name}":
+            raise ValueError("Only built-in IkaBot task implementations are allowed")
         clean_config = _validate_task_config(canonical_name, task_func, config_dict)
-        session = self._existing_session(request) if existing_only else self._get_or_create_session(
-            email, world, server, player
-        )
-        if existing_only and len(self._daedalus_tasks) >= 256:
-            raise ValueError("Managed task registry has reached its safety limit")
+        if not existing_only:
+            session = self._get_or_create_session(email, world, server, player)
+        if existing_only:
+            active_same_account = sum(
+                entry["world"].casefold() == fingerprint[0]
+                and entry["player"].casefold() == fingerprint[1]
+                and entry["process"].is_alive()
+                for entry in self._daedalus_tasks.values()
+            )
+            if active_same_account >= 16:
+                raise ValueError("Account has reached the active task safety limit")
+            if len(self._daedalus_tasks) >= 256:
+                raise ValueError("Managed task registry has reached its safety limit")
+            if len(self._daedalus_requests) >= 2048:
+                raise ValueError("Task receipt cache is full; manual recovery is required")
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log
@@ -849,7 +911,18 @@ class IPCServer:
             "status": "started",
             "config": clean_config,
         }
-        updateProcessList(session, programprocesslist=[entry])
+        try:
+            updateProcessList(session, programprocesslist=[entry])
+        except Exception:
+            # An untracked process could continue performing game actions
+            # while the controller mistakenly considers a retry safe.
+            if existing_only and proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=4.0)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=4.0)
+            raise
 
         response = {
             "status": "ok", "pid": proc.pid, "task": canonical_name,
@@ -864,6 +937,7 @@ class IPCServer:
                 "status": "running", "started_at": time.time(),
             }
             response["task_id"] = task_id
+            self._daedalus_requests[request_id] = (fingerprint, dict(response))
         else:
             # Keep the original upstream CLI response intact.
             response["email"] = session.mail

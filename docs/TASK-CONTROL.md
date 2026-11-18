@@ -32,7 +32,7 @@ Not all upstream operations have complete auto-generated forms yet. The JSON con
 - **No second login:** `start_task_existing` refuses missing/ambiguous sessions without calling `Session.from_saved`
 - **Backend authorization:** all task endpoints require the same strong Daedalus bearer token as account snapshots
 - **Explicit user confirmation:** the GUI requires a checkbox and a confirmation dialog; the API requires `confirmed: true`
-- **Idempotency and durable metadata:** SQLite stores only account ID, request ID, task name, configuration *hash*, engine-managed task ID, PID and status. It does **not** store task arguments, cookies, credentials or browser sessions
+- **Idempotency and durable metadata:** the controller forwards its request UUID to the engine for a second independent replay check; SQLite stores only account ID, request ID, task name, configuration *hash*, engine-managed task ID, PID and status. It does **not** store task arguments, cookies, credentials or browser sessions
 - **Conservative unknown outcome:** if IPC fails during launch, the request becomes `unconfirmed` and is never automatically replayed. New requests for that account are blocked until an operator checks engine and game state and explicitly acknowledges the uncertain request
 - **Task-specific stop:** only in-memory child processes launched and registered by this IkaBot IPC owner can be stopped; unrelated tasks are never selected by PID
 - **No automatic task relaunch:** restarting the controller or a browser never causes any game operation to replay

@@ -87,7 +87,7 @@ def test_mutating_actions_are_restricted_to_opted_in_transport(tmp_path):
         assert calls == []
 
         controlled = ControlledIPCClient(path)
-        receipt = controlled.start_managed_task(ACCOUNT, "alertAttacks", {"minutes": 20})
+        receipt = controlled.start_managed_task(ACCOUNT, "alertAttacks", {"minutes": 20}, "12345678-1234-4123-8123-123456789abc")
         assert receipt == {"task_id": "f" * 24, "pid": 4242,
                            "task": "alertAttacks", "status": "running"}
         assert controlled.list_managed_tasks(ACCOUNT)[0]["task_id"] == "f" * 24
@@ -106,7 +106,7 @@ def test_invalid_managed_task_id_cannot_trigger_socket(tmp_path):
         with pytest.raises(ValueError):
             client.stop_managed_task(ACCOUNT, "../123")
         with pytest.raises(ValueError):
-            client.start_managed_task(ACCOUNT, "bad/task", {})
+            client.start_managed_task(ACCOUNT, "bad/task", {}, "12345678-1234-4123-8123-123456789abc")
         assert calls == []
 
 
@@ -117,7 +117,7 @@ def test_fake_engine_error_is_redacted_before_http_layer(tmp_path):
     ) as (path, _calls):
         client = ControlledIPCClient(path)
         with pytest.raises(EngineIPCUnavailable) as result:
-            client.start_managed_task(ACCOUNT, "alertAttacks", {})
+            client.start_managed_task(ACCOUNT, "alertAttacks", {}, "12345678-1234-4123-8123-123456789abc")
         assert "sensitive-engine" not in str(result.value)
 
 
@@ -129,4 +129,4 @@ def test_wrong_account_in_task_receipt_is_rejected(tmp_path):
     ) as (path, _calls):
         client = ControlledIPCClient(path)
         with pytest.raises(EngineIPCUnavailable, match="receipt"):
-            client.start_managed_task(ACCOUNT, "alertAttacks", {})
+            client.start_managed_task(ACCOUNT, "alertAttacks", {}, "12345678-1234-4123-8123-123456789abc")

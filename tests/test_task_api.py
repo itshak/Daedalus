@@ -32,7 +32,7 @@ class MockIPC:
         self.calls.append(("verify", account.id))
         return True
 
-    def start_managed_task(self, account, task, config):
+    def start_managed_task(self, account, task, config, request_id):
         self.calls.append(("start", account.id, task, config))
         if self.fail_once:
             self.fail_once = False

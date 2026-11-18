@@ -99,6 +99,9 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid task receipt")
         return data
 
+    def task_control_status(self) -> dict[str, object]:
+        return self._read("task-control")
+
     def start_task(
         self, account_id: str, task: str, config: dict[str, object],
         request_id: str, *, confirmed: bool,

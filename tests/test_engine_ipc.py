@@ -201,3 +201,36 @@ def test_empty_or_bad_warehouse_ipc_data_refused(tmp_path):
         EngineIPCUnavailable, match="numeric"
     ):
         client.warehouses(ALPHA)
+
+
+def test_current_task_transport_rejects_old_pid_action_names(tmp_path):
+    """The legacy PID API is gone; only the ID-scoped control transport remains."""
+    from daedalus.engine_ipc import ControlledIPCClient
+
+    calls = []
+    task_id = "f" * 24
+
+    def respond(msg):
+        calls.append(msg["action"])
+        if msg["action"] == "start_task_existing":
+            return {"status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+                    "task_id": task_id, "pid": 81001}
+        if msg["action"] == "list_tasks_existing":
+            return {"status": "ok", "world": ALPHA.world, "player": ALPHA.player,
+                    "tasks": [{"task_id": task_id, "task": "alertAttacks",
+                               "status": "running", "pid": 81001}]}
+        if msg["action"] == "stop_task_existing":
+            return {"status": "ok", "task_id": task_id, "task_status": "stopped"}
+        return {"status": "error", "error": "unknown"}
+
+    with fake_worker(tmp_path, responder=respond) as (readonly, _requests, descriptor):
+        controller = ControlledIPCClient(descriptor)
+        with pytest.raises(ValueError, match="read-only"):
+            readonly.request("stop_managed_task")
+        receipt = controller.start_managed_task(ALPHA, "alertAttacks", {"minutes": 10}, "12345678-1234-4123-8123-123456789abc")
+        assert receipt["task_id"] == task_id
+        assert controller.list_managed_tasks(ALPHA)[0]["task_id"] == task_id
+        assert controller.stop_managed_task(ALPHA, task_id)["status"] == "stopped"
+        with pytest.raises(ValueError):
+            controller.stop_managed_task(ALPHA, "-1")
+        assert calls == ["start_task_existing", "list_tasks_existing", "stop_task_existing"]

@@ -266,15 +266,20 @@ class ControlledIPCClient(ExistingIPCClient):
         return {"world": account.world, "player": account.player}
 
     def start_managed_task(
-        self, account: Account, task: str, config: dict[str, object]
+        self, account: Account, task: str, config: dict[str, object], request_id: str
     ) -> dict[str, object]:
         if not isinstance(task, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", task):
             raise ValueError("Invalid engine task name")
         if not isinstance(config, dict):
             raise TypeError("Task configuration must be a JSON object")
+        if not isinstance(request_id, str) or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            request_id,
+        ):
+            raise ValueError("A valid UUID4 idempotency key is required")
         response = self._exchange(
             {"action": "start_task_existing", **self._identity(account),
-             "task": task, "config": config},
+             "task": task, "config": config, "request_id": request_id},
             read_timeout=120.0,
         )
         task_id, pid = response.get("task_id"), response.get("pid")
