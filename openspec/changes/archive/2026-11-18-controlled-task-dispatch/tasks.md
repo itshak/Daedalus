@@ -20,5 +20,5 @@
 ## Verification and release
 - [x] Add engine, API, SQLite, socket and native Qt synthetic tests.
 - [x] Run complete offline suites, lint, OpenSpec, build and credential guard.
-- [ ] Confirm protected branch GitHub CI including native macOS app build.
-- [ ] Merge as itshak, then complete tasks and archive OpenSpec with updated permanent specifications.
+- [x] Confirm protected branch GitHub CI including native macOS app build (17 successful checks on PR #14).
+- [x] Merge as itshak through PR #14, then complete tasks and archive OpenSpec with updated permanent specifications.
