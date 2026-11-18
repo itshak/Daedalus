@@ -160,6 +160,7 @@ class MainWindow(FluentWindow):
         self._pending_client: DaedalusClient | None = None
         self._pending_preferences: tuple[str, str] | None = None
         self._worker: APIWorker | None = None
+        self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
         self._assistance_poll = QTimer(self)
         self._assistance_poll.setInterval(30_000)
@@ -186,6 +187,7 @@ class MainWindow(FluentWindow):
         header.insertSpacerItem(0, QSpacerItem(40, 36, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         self.connection_page.connect_requested.connect(self._connect)
+        self.connection_page.demo_requested.connect(self._start_offline_demo)
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
@@ -248,6 +250,24 @@ class MainWindow(FluentWindow):
         if sys.platform != "darwin":
             return super().systemTitleBarRect(size)
         return QRect(0, 0 if self.isFullScreen() else 8, 75, size.height())
+
+    def _start_offline_demo(self) -> None:
+        """Explicit local demonstration; never imports real session data."""
+        if self._worker is not None:
+            self._notice("Request in progress", "Finish the backend request first.")
+            return
+        try:
+            from daedalus.desktop.demo_backend import EmbeddedDemoServer, OfflineDemoUnavailable
+
+            if self._embedded_demo is None:
+                self._embedded_demo = EmbeddedDemoServer()
+            self._embedded_demo.start()
+        except (OfflineDemoUnavailable, ImportError) as exc:
+            self._notice("Offline demo unavailable", str(exc))
+            return
+        # Temporary demo bearer tokens must never enter persistent preferences.
+        self.connection_page.remember_checkbox.setChecked(False)
+        self._connect(self._embedded_demo.url, self._embedded_demo.token)
 
     def _connect(self, url: str, token: str) -> None:
         if self._worker is not None:
@@ -471,5 +491,13 @@ class MainWindow(FluentWindow):
         if self._pending_client is not None:
             self._pending_client.close()
             self._pending_client = None
+        if self._embedded_demo is not None:
+            from daedalus.desktop.demo_backend import OfflineDemoUnavailable
+
+            try:
+                self._embedded_demo.stop()
+            except OfflineDemoUnavailable:
+                logger.warning("Ephemeral local demo backend shutdown was incomplete")
+            self._embedded_demo = None
         logger.removeHandler(self._log_handler)
         super().closeEvent(event)

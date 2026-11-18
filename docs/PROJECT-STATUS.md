@@ -96,6 +96,10 @@ The archived private-world-cookie-handoff change adds an optional hidden termina
 
 The archived `offline-readiness-doctor` change replaces outdated hardcoded CLI diagnostics with preview-accurate feature and optional-dependency reports, and adds an isolated in-process FastAPI synthetic smoke test. Live accounts, real game integration and production readiness are not claimed. PR #38 passed protected CI and merged on 2026-11-18; requirements archived. See [offline test readiness](TEST-READINESS.md).
 
+## One-click native synthetic Mac demo (pending protected CI and merge)
+
+The active `desktop-oneclick-synthetic` change makes the packaged native app able to start its own isolated loopback-only fake backend after an explicit click and connect without manually supplying an API token. Test data stays fictional; no Gameforge login or task execution is involved. See [one-click demo](ONECLICK-DEMO.md). Protected macOS packaging and CI must pass before this is archived.
+
 ## Existing-session integration architecture
 
 The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. It reads connected account identities, cities and warehouse amounts without Gameforge credential restoration. A separate explicitly enabled task-control interface can start and stop only managed background tasks. No part of this attachment creates a competing game login; new worker bootstrap and Selenium login/assistance remain open.

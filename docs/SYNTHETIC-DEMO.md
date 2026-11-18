@@ -9,6 +9,10 @@ IkaBot engine process or any production credentials.
 The API, native window, connection label and warehouse page visibly identify
 the synthetic mode. This is not a live automation demonstration.
 
+## Easiest: one click in the native Mac preview
+
+Open the app, switch to **Connection**, and press **Try offline demo — no game login**. The GUI starts an ephemeral synthetic-only local backend and connects itself without pasting any bearer token. The backend stops when you close the native app. See [one-click demo](ONECLICK-DEMO.md). The manual two-terminal steps below remain available for standalone backend testing.
+
 ## Start a local synthetic backend
 
 In a separate terminal, after installing the project and extras:
