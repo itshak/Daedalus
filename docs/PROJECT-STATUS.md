@@ -34,6 +34,14 @@ The completed archive folders are dated `2026-11-18`. Their checkboxes reflect *
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
+## Experimental cookie-only worker bootstrap (pending integration validation)
+
+The opt-in single-account worker can start a dedicated IPC server from a
+previously saved and exactly verified world session, retain the account lease
+and optionally hand it to the existing task controller. It cannot initiate
+Gameforge login or CAPTCHA, and no live account validation has been performed.
+See [saved worker](SAVED-WORKER.md). This is not production readiness.
+
 ## Still active
 
 The following umbrella changes have unfinished tasks and were deliberately **not archived**:

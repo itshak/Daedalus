@@ -250,6 +250,29 @@ class TaskController:
             owned.close()
             raise
 
+    def adopt_verified_saved_worker(
+        self, account_id: str, lease: OwnedAccountSession,
+    ) -> None:
+        """Share the same lease held by an explicitly restored local worker.
+
+        Never treat an arbitrary lease or an IPC identity claim as evidence
+        of ownership. The same in-process coordinator must own the exact
+        authenticated account and the protected IPC must confirm the worker.
+        """
+        with self._mutex:
+            account = self._account(account_id)
+            if (
+                lease.account != account
+                or lease._coordinator is not self._coordinator
+                or self._coordinator._active.get(account_id) is not lease
+                or lease.phase is not SessionPhase.AUTHENTICATED
+                or account_id in self._owned
+            ):
+                raise TaskUnavailable("Worker lease is not a verified local account owner")
+            if not self._is_validated(account):
+                raise TaskUnavailable("Restored session does not match protected engine IPC")
+            self._owned[account_id] = lease
+
     def observe_existing(self, account_id: str, *, confirmed: bool) -> dict[str, str]:
         """Explicitly attach to a verified existing worker; never create a login."""
         if confirmed is not True:
