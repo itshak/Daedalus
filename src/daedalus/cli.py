@@ -42,7 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     sessions = subcommands.add_parser(
         "sessions", help="Manage a private saved-IkaBot account binding; no credentials in TOML"
     )
-    sessions.add_argument("action", choices=["bind-email", "forget-email", "probe-saved-cookies"])
+    sessions.add_argument("action", choices=[
+        "bind-email", "forget-email", "probe-saved-cookies",
+        "bind-world-cookie", "forget-world-cookie",
+    ])
     sessions.add_argument("account_id", help="Configured secret-free account ID")
     sessions.add_argument("--config", help="TOML account metadata path outside repository")
     sessions.add_argument(
@@ -132,8 +135,10 @@ def main(argv: list[str] | None = None) -> int:
         from daedalus.saved_session_recovery import (
             SavedSessionUnavailable,
             bind_saved_email,
+            bind_world_cookie,
             probe_saved_cookies,
             unbind_saved_email,
+            unbind_world_cookie,
         )
 
         try:
@@ -143,7 +148,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise SavedSessionUnavailable("Configured account ID not found")
             if args.action == "bind-email":
                 import getpass
+                import sys
 
+                if not sys.stdin.isatty():
+                    parser.error("Protected account binding requires an interactive terminal")
                 # Never put this email in CLI args, logs, Git, TOML or API payloads.
                 email = getpass.getpass("Existing saved IkaBot login email (hidden): ")
                 bind_saved_email(account, email)
@@ -151,6 +159,27 @@ def main(argv: list[str] | None = None) -> int:
             elif args.action == "forget-email":
                 unbind_saved_email(account)
                 print(json.dumps({"account_id": account.id, "status": "binding_removed"}))
+            elif args.action == "forget-world-cookie":
+                unbind_world_cookie(account)
+                print(json.dumps({"account_id": account.id, "status": "world_cookie_removed"}))
+            elif args.action == "bind-world-cookie":
+                import getpass
+                import sys
+
+                if not args.confirm_read_only_network:
+                    parser.error("Import requires --confirm-read-only-network")
+                if not sys.stdin.isatty():
+                    parser.error("World cookie import requires an interactive terminal")
+                from daedalus.account_sessions import AccountSessionCoordinator
+
+                # Only accept the secret through an echo-free local TTY, never
+                # as a CLI flag, HTTP argument, logfile or environment variable.
+                cookie = getpass.getpass("Existing browser ikariam cookie (hidden): ")
+                result = bind_world_cookie(
+                    account, AccountSessionCoordinator(configured), cookie,
+                    confirmed=True,
+                )
+                print(json.dumps(result))
             elif args.action == "probe-saved-cookies":
                 if not args.confirm_read_only_network:
                     parser.error("Probe requires --confirm-read-only-network")

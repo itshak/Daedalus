@@ -69,3 +69,7 @@ The `safe-saved-session-recovery` change adds a **Daedalus-specific** optional `
 ## Existing-session validation IPC overlay
 
 The separate Daedalus-maintained existing-session-recovery-monitor change adds validate_session_existing. It selects an exact existing in-memory world/player only, performs a fixed world-host read-only GET and returns only the world/player and boolean validity. No Gameforge login, Session.from_saved, raw HTML, hidden action token or cookie is transferred. This is not part of upstream stable IkaBot. See [controller monitor limitations](../docs/EXISTING-SESSION-MONITOR.md).
+
+## Optional private world-cookie handoff overlay
+
+The Daedalus-maintained private-world-cookie-handoff change extends the explicit safe Session.from_saved cookies-only mode with world_cookie_override, an in-memory-only cookie obtained from the user's OS keyring after a confirmed local browser-cookie import. The default upstream CLI and login path remain unchanged, and this override is refused without cookies-only mode or exact world/player selectors. It never calls the lobby loginLink path or writes the imported cookie into upstream saved-session JSON. This is not a stable upstream feature; see [local cookie handoff](../docs/PRIVATE-WORLD-COOKIE-HANDOFF.md).

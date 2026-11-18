@@ -1126,7 +1126,10 @@ class Session:
             self.__update_proxy(obj=old_s, sessionData=sessionData)
             try:
                 # make a request to check the connection
-                old_resp = old_s.get(self.urlBase, verify=config.do_ssl_verify)
+                get_options = {"verify": config.do_ssl_verify}
+                if cookies_only:
+                    get_options["timeout"] = 12
+                old_resp = old_s.get(self.urlBase, **get_options)
                 html = old_resp.text
             except Exception:
                 self.__proxy_error()
@@ -1778,7 +1781,10 @@ class Session:
         delete_session_data(self)
 
     @classmethod
-    def from_saved(cls, mail=None, world=None, server=None, player=None, *, cookies_only=False):
+    def from_saved(
+        cls, mail=None, world=None, server=None, player=None, *,
+        cookies_only=False, world_cookie_override=None,
+    ):
         """Restore a saved game session without any user interaction.
 
         With ``cookies_only=True`` (the Daedalus recovery contract), probe
@@ -1787,6 +1793,19 @@ class Session:
         A failed cookie probe raises and MUST NOT be treated as authenticated.
         ``player`` identifies exactly one saved in-game identity.
         """
+        if world_cookie_override is not None:
+            if not cookies_only:
+                raise ValueError("Manual world cookie requires cookies-only recovery")
+            if (
+                not isinstance(world_cookie_override, str)
+                or not 16 <= len(world_cookie_override) <= 4096
+                or not world_cookie_override.isascii()
+                or not world_cookie_override.isprintable()
+                or any(char in world_cookie_override for char in " ;\\")
+            ):
+                raise ValueError("Invalid protected world cookie")
+            if not player or not world:
+                raise ValueError("Manual world cookie requires exact world and player")
         want_player = str(player).strip().lower() if player else None
         if mail and str(mail).strip() and str(mail).strip() != "default_user":
             matching_path, _ = find_user_file_for_email(mail)
@@ -1866,7 +1885,10 @@ class Session:
             )
             self.__update_proxy(obj=old_s, sessionData=session_data)
             try:
-                old_resp = old_s.get(self.urlBase, verify=config.do_ssl_verify)
+                get_options = {"verify": config.do_ssl_verify}
+                if cookies_only:
+                    get_options["timeout"] = 12
+                old_resp = old_s.get(self.urlBase, **get_options)
                 html = old_resp.text
             except Exception as exc:
                 raise RuntimeError(f"Network/proxy error connecting to {self.host}: {exc}")
@@ -1877,6 +1899,9 @@ class Session:
                 and not self.__isSessionRotated(html, response=old_resp)
                 and (old_resp.status_code == 200 if cookies_only else old_resp.status_code != 404)
                 and (not cookies_only or urllib.parse.urlsplit(old_resp.url).hostname == self.host)
+                and (not cookies_only or urllib.parse.urlsplit(old_resp.url).scheme == "https")
+                and (not cookies_only or urllib.parse.urlsplit(old_resp.url).path == "/index.php")
+                and (not cookies_only or "actionRequest" in html)
                 and (not cookies_only or old_s.cookies.get("ikariam") is not None)
             ):
                 requests.cookies.cookiejar_from_dict(
@@ -2138,7 +2163,10 @@ class Session:
             self.urlBase = f"https://{self.host}/index.php?"
             self.headers = _world_headers()
             session_data = self.getSessionData()
-            if _try_world_cookies(pdata["cookies"], session_data):
+            saved_cookies = dict(pdata["cookies"])
+            if world_cookie_override is not None:
+                saved_cookies["ikariam"] = world_cookie_override
+            if _try_world_cookies(saved_cookies, session_data):
                 return _finalize()
 
         if cookies_only:
