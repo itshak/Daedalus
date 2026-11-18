@@ -22,6 +22,7 @@ from daedalus.connection_prefs import (
     remember_connection,
     saved_connection,
 )
+from daedalus.desktop.branding import application_icon
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
 from daedalus.desktop.task_page import TasksPage
@@ -195,6 +196,7 @@ class MainWindow(FluentWindow):
         logger.setLevel(logging.INFO)
 
         self.setWindowTitle("Daedalus for Ikariam")
+        self.setWindowIcon(application_icon())
         self.resize(1130, 780)
         logger.info("Desktop ready; connect to a local or protected remote backend")
 

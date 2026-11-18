@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import platform
 import subprocess
 import sys
@@ -40,6 +41,11 @@ def build_command(
         APP_NAME,
         "--osx-bundle-identifier",
         BUNDLE_IDENTIFIER,
+        "--icon",
+        str(ROOT / "assets" / "brand" / "app-icons" / "macos" / "Daedalus.icns"),
+        "--add-data",
+        str(ROOT / "src" / "daedalus" / "desktop" / "resources")
+        + os.pathsep + "daedalus/desktop/resources",
         "--distpath",
         str(output_dir),
         "--workpath",

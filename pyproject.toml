@@ -36,6 +36,9 @@ daedalus-desktop = "daedalus.desktop:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+daedalus = ["desktop/resources/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

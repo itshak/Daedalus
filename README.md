@@ -1,5 +1,11 @@
 # Daedalus for Ikariam
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/svg/daedalus-horizontal-dark.svg">
+  <img alt="Daedalus winged-D logo" src="assets/brand/svg/daedalus-horizontal-light.svg" width="500">
+</picture>
+
+
 **Status: native desktop with opt-in existing-session task controls.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
@@ -30,6 +36,8 @@ daedalus accounts list --config docs/examples/accounts.toml
 ```
 
 The `engine inventory` command reads engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots or execute tasks**. The upstream CLI/IPC proposal is included, and Daedalus now has an **opt-in existing-session-only read bridge** for city and warehouse data. The controller still cannot create authenticated workers or launch tasks.
+
+See [brand assets and app icons](assets/brand/README.md), including light/dark SVG, macOS ICNS, Windows ICO, and web/mobile exports.
 
 ## Native Mac GUI preview
 

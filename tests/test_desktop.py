@@ -36,6 +36,7 @@ def test_full_fluent_navigation_constructs_without_backend(qt_app):
     window = MainWindow()
     try:
         assert window.windowTitle() == "Daedalus for Ikariam"
+        assert not window.windowIcon().isNull()
         assert window.client is None
         assert isinstance(window.accounts_page, AccountsPage)
         assert isinstance(window.warehouses_page, WarehousesPage)
