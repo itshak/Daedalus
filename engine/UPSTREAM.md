@@ -60,3 +60,7 @@ An isolated master+PR #499 merged checkout passed:
 All tests used a sandbox HOME and synthetic data, with no production account authentication.
 
 The CLI/IPC patchset is upstream code under review and may change before merging into upstream master. Future upgrades must reconcile this branch with master and re-run the offline suite.
+
+## Daedalus safe cookie-only recovery overlay
+
+The `safe-saved-session-recovery` change adds a **Daedalus-specific** optional `Session.from_saved(..., cookies_only=True)` pathway. It bypasses lobby token/loginLink/blackbox flows, checks only existing world cookies against the exact world, requires a successful world-host HTTP 200 and rejects invalid cookies without a new Gameforge login. The old upstream CLI and `from_saved` default semantics are kept; this option is not represented as an upstream IkaBot stable feature. Daedalus's local `sessions probe-saved-cookies` command uses the explicit mode under an account lease, with the saved-user email association held in the OS keyring rather than source. No game tests execute in CI. See [recovery setup](../docs/SAFE-COOKIE-RECOVERY.md).

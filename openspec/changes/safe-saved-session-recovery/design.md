@@ -1,0 +1,9 @@
+# Design — restore only existing world cookies
+
+The engine extension is strictly opt-in: `Session.from_saved(mail, world, player, cookies_only=True)`. It bypasses the lobby-token check, any blackbox generation and all Gameforge lobby login-link requests. It selects one explicit world/player in the user's pre-existing private IkaBot cookie store, attempts only a world GET, and requires a successful HTTP 200 response on the expected world host with the saved `ikariam` cookie. Redirects, expiry pages, unavailable cookies or account mismatch fail without fallback login. The engine's original default behavior is retained for its upstream standalone CLI.
+
+Daedalus `sessions bind-email` uses a masked terminal prompt to store the saved-user reference in the operating system keyring. Keys include account ID, world and player digest, so a metadata identity edit invalidates the old association. The actual engine cookie store stays with IkaBot; Daedalus never copies cookie values. `sessions forget-email` removes a binding.
+
+`sessions probe-saved-cookies --confirm-read-only-network` checks that the account is enabled, has a canonical world selector such as `s301-en`, matches its configured coordinator and has a keyring association. It then holds the existing host-local world/player lease while probing, independently checks the returned session's world/player/logged state and closes the transient HTTP client in every case. The result is one nonsecret status string. Errors are redacted.
+
+The probe makes a read-only request to an actual game world **only when the operator explicitly invokes it**. It is therefore not a test to run against a production account that may have a non-Daedalus active game client: the host-local lease cannot coordinate that legacy client. No automated CI test contacts Gameforge. A future supervisor can reuse this bounded restoration API but must keep its lease for the full owned session and reconcile tasks.
