@@ -286,3 +286,52 @@ def test_native_account_metadata_editor_is_opt_in_and_confirmed(qt_app, monkeypa
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_login_assistance_requires_selected_account_and_separate_consent(qt_app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = AccountsPage()
+    row = {
+        "id": "alpha", "world": "s301-en", "player": "Alice",
+        "label": "Alice", "enabled": True, "session_status": "needs_assistance",
+    }
+    page.set_accounts([row])
+    seen_checks = []
+    seen_approvals = []
+    page.assistance_check_requested.connect(seen_checks.append)
+    page.assistance_approve_requested.connect(
+        lambda account_id, ticket_id: seen_approvals.append((account_id, ticket_id))
+    )
+    ticket_id = "12345678-1234-4123-8123-123456789abc"
+    try:
+        assert not page.assistance_check_button.isEnabled()
+        assert not page.assistance_approve_button.isEnabled()
+        page.table.selectRow(0)
+        assert page.assistance_check_button.isEnabled()
+        page._check_assistance()
+        assert seen_checks == ["alpha"]
+        page.set_assistance({"enabled": True, "account_id": "alpha", "ticket": {
+            "ticket_id": ticket_id, "reason": "manual_challenge",
+            "state": "waiting_operator",
+        }})
+        assert page.assistance_approve_button.isEnabled()
+        monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.No)
+        page._approve_assistance()
+        assert seen_approvals == []
+        monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.Yes)
+        page._approve_assistance()
+        assert seen_approvals == [("alpha", ticket_id)]
+        page.set_assistance({"enabled": True, "account_id": "alpha", "ticket": {
+            "ticket_id": ticket_id, "reason": "manual_challenge",
+            "state": "operator_ready",
+        }})
+        assert not page.assistance_approve_button.isEnabled()
+        page.set_assistance({"enabled": False, "account_id": "alpha", "ticket": None})
+        assert "not enabled" in page.assistance_status.text()
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()

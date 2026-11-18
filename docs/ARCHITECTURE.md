@@ -22,7 +22,7 @@ One authenticated game session per account/world/player
 
 - No new parallel game-protocol implementation in the controller.
 - The explicit `--connect-existing-ipc` attachment reads cities and warehouse spans from a compatible already-authenticated engine without creating a login. A separate `--enable-task-control` flag permits validated built-in background task start/list/stop on this existing session. Durable session supervision and Selenium login restoration are still planned work.
-- One account session owner; browser-assisted login is coordinated through the owner.
+- One account session owner; browser-assisted login is coordinated through the owner. A new optional in-process manual-help ticket broker allows only a trusted worker to verify the session after operator acknowledgment; **real browser/worker integration remains unimplemented**.
 - Desktop API is transport-independent and not tied to tmux.
 - Bot workers run under a process supervisor; tmux is for diagnostic access only.
 - State-changing operations use idempotency keys and reconcile observed game state after interruptions.

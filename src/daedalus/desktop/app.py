@@ -99,6 +99,15 @@ class APIWorker(QThread):
                     self.task_payload["accounts"],
                     confirmed=True,
                 )
+            elif self.action == "auth_assistance" and self.account_id:
+                result = self.client.auth_assistance(self.account_id)
+            elif (
+                self.action == "auth_assistance_approve"
+                and self.account_id and self.task_payload
+            ):
+                result = self.client.approve_auth_assistance(
+                    self.account_id, str(self.task_payload["ticket_id"]), confirmed=True,
+                )
             elif self.action == "connected_accounts":
                 result = self.client.connected_accounts()
             elif self.action == "capabilities":
@@ -175,6 +184,15 @@ class MainWindow(FluentWindow):
         self.accounts_page.account_change_requested.connect(
             lambda revision, rows: self._request(
                 "account_config_put", task_payload={"revision": revision, "accounts": rows},
+            )
+        )
+        self.accounts_page.assistance_check_requested.connect(
+            lambda account_id: self._request("auth_assistance", account_id=account_id)
+        )
+        self.accounts_page.assistance_approve_requested.connect(
+            lambda account_id, ticket_id: self._request(
+                "auth_assistance_approve", account_id=account_id,
+                task_payload={"ticket_id": ticket_id},
             )
         )
         self.accounts_page.check_engine_requested.connect(
@@ -323,6 +341,15 @@ class MainWindow(FluentWindow):
             logger.info("Account metadata changed after explicit confirmation")
             self._notice("Account metadata saved", "Account metadata updated; refreshing views.")
             QTimer.singleShot(0, lambda: self._request("accounts"))
+        elif action in {"auth_assistance", "auth_assistance_approve"}:
+            assert isinstance(payload, dict)
+            self.accounts_page.set_assistance(payload)
+            if action == "auth_assistance_approve":
+                logger.info("Operator completed manual step; worker validation still required")
+                self._notice(
+                    "Assistance acknowledged",
+                    "The game worker still must validate authentication before resuming.",
+                )
         elif action == "connected_accounts":
             assert isinstance(payload, list)
             self.accounts_page.set_connected_ids(payload)

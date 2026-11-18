@@ -24,6 +24,10 @@ Existing read-only endpoints remain bearer-protected. The server can optionally 
 
 A future worker adapter **MUST** acquire the lease before authentication, keep it for the entire game session (including a CAPTCHA wait and suspended task recovery), and release it only after the engine process has definitively stopped. Before remote execution is enabled, a single authoritative backend must be assigned to each account, with a restart/reconciliation policy.
 
+## Human assistance acknowledgment protocol
+
+An optional in-process `AssistanceBroker` can report a nonsecret, lease-bound manual assistance ticket through the bearer-protected controller API. The native Accounts page can acknowledge a completed human step, but it cannot assert authentication; only the same trusted worker with the held lease may verify the real session and advance the state. Expired tickets pause the owner without dropping the lease. This currently has synthetic tests only, with no production browser/worker integration. See [manual login assistance](AUTH-ASSISTANCE.md).
+
 ## Test boundaries
 
 Automated tests use only fake account identities, mock state transitions and OS locks. A test spawns a second interpreter to verify that an existing local lease blocks another process. No fixture contains real game credentials.

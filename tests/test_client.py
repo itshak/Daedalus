@@ -234,3 +234,53 @@ def test_account_editing_client_recognizes_old_backend_and_redacts_rejection():
             client.replace_account_config("a" * 64, [], confirmed=True)
         assert error.value.status_code == 409
         assert secret not in str(error.value)
+
+
+def test_assistance_client_reads_nonsecret_status_and_confirms_only_manual_step():
+    from uuid import uuid4
+
+    ticket_id = str(uuid4())
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, request.headers.get("Authorization")))
+        if request.method == "GET":
+            return httpx.Response(200, json={"enabled": True, "account_id": "alpha", "ticket": {
+                "ticket_id": ticket_id, "reason": "manual_challenge",
+                "state": "waiting_operator",
+            }})
+        assert json.loads(request.content) == {"confirmed": True}
+        return httpx.Response(200, json={"enabled": True, "account_id": "alpha", "ticket": {
+            "ticket_id": ticket_id, "reason": "manual_challenge",
+            "state": "operator_ready",
+        }})
+
+    with mock_client(handler) as client:
+        assert client.auth_assistance("alpha")["ticket"]["reason"] == "manual_challenge"
+        assert client.approve_auth_assistance("alpha", ticket_id, confirmed=True)["ticket"][
+            "state"
+        ] == "operator_ready"
+        with pytest.raises(ValueError):
+            client.approve_auth_assistance("alpha", ticket_id, confirmed=False)
+        with pytest.raises(ValueError):
+            client.approve_auth_assistance("alpha", "invalid", confirmed=True)
+        with pytest.raises(ValueError):
+            client.auth_assistance("../bad")
+    assert [item[0] for item in seen] == ["GET", "POST"]
+    assert all(item[2] == f"Bearer {TOKEN}" for item in seen)
+
+
+def test_assistance_client_handles_unsupported_and_redacted_errors():
+    secret = "private-session-cookie"
+
+    def handler(request):
+        return httpx.Response(404 if request.method == "GET" else 409, text=secret)
+
+    with mock_client(handler) as client:
+        assert client.auth_assistance("alpha")["enabled"] is False
+        with pytest.raises(APIConnectionError) as error:
+            client.approve_auth_assistance(
+                "alpha", "12345678-1234-4123-8123-123456789abc", confirmed=True,
+            )
+        assert error.value.status_code == 409
+        assert secret not in str(error.value)

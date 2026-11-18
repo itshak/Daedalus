@@ -210,6 +210,44 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid operation registry")
         return data
 
+    def auth_assistance(self, account_id: str) -> dict[str, object]:
+        """Read only nonsecret help reason/status; never transfer session data."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        try:
+            response = self._read(f"accounts/{account_id}/auth-assistance")
+        except APIConnectionError as exc:
+            if exc.status_code == 404:
+                return {"enabled": False, "account_id": account_id, "ticket": None}
+            raise
+        if response.get("enabled") is True:
+            ticket = response.get("ticket")
+            if ticket is not None and (
+                not isinstance(ticket, dict)
+                or not isinstance(ticket.get("ticket_id"), str)
+                or not isinstance(ticket.get("state"), str)
+                or not isinstance(ticket.get("reason"), str)
+            ):
+                raise APIConnectionError("Backend returned invalid assistance status")
+        return response
+
+    def approve_auth_assistance(
+        self, account_id: str, ticket_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if not confirmed or not isinstance(ticket_id, str):
+            raise ValueError("Explicit confirmation and valid ticket are required")
+        import uuid
+
+        try:
+            uuid.UUID(ticket_id)
+        except ValueError as exc:
+            raise ValueError("Invalid assistance ticket") from exc
+        return self._write(f"accounts/{account_id}/auth-assistance/{ticket_id}/approve", {
+            "confirmed": True,
+        })
+
     def account_session(self, account_id: str) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
