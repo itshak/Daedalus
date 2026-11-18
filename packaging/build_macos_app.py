@@ -48,6 +48,8 @@ def build_command(
         str(spec_dir),
         "--collect-all",
         "qfluentwidgets",
+        "--collect-all",
+        "keyring",
         "--collect-submodules",
         "qframelesswindow",
         "--hidden-import",
