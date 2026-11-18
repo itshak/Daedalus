@@ -40,9 +40,12 @@ class TasksPage(QWidget):
     stop_requested = Signal(str, str)
     reconcile_requested = Signal(str, str)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("tasks_page")
+        if workflow not in {None, "wine", "construction"}:
+            raise ValueError("Unsupported native task workflow")
+        self._workflow = workflow
+        self.setObjectName("tasks_page" if workflow is None else f"{workflow}_page")
         self._account_ids: list[str] = []
         self._task_names: list[str] = []
         self._dispatch_enabled = False
@@ -53,7 +56,18 @@ class TasksPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
-        layout.addWidget(SubtitleLabel("Engine tasks"))
+        title = (
+            "Wine automation" if workflow == "wine" else
+            "Construction automation" if workflow == "construction" else
+            "Engine tasks"
+        )
+        layout.addWidget(SubtitleLabel(title))
+        if workflow is not None:
+            layout.addWidget(CaptionLabel(
+                "Registered background tasks for this workflow use the same validated "
+                "parameter forms, existing authenticated engine session and separate "
+                "confirmation as the Tasks view. Interactive-only operations are read-only."
+            ))
         self.status_label = CaptionLabel(
             "Task control disabled. Enable it explicitly on your private backend."
         )
@@ -158,7 +172,14 @@ class TasksPage(QWidget):
         self._dispatch_enabled = enabled
         self._task_names = sorted(
             str(item["name"]) for item in operations
-            if item.get("kind") == "background_task" and item.get("name")
+            if (
+                item.get("kind") == "background_task"
+                and item.get("name")
+                and (
+                    self._workflow is None
+                    or self._workflow in str(item["name"]).casefold()
+                )
+            )
         )
         self._config_fields_by_task = {}
         for item in operations:
@@ -191,7 +212,10 @@ class TasksPage(QWidget):
         self._selected_task_changed()
         self.status_label.setText(
             "Task control enabled on this backend. Every start requires confirmation."
-            if enabled else "Task control disabled; restart backend with explicit opt-in."
+            if enabled and self._task_names else
+            "No compatible background tasks registered for this workflow."
+            if enabled and self._workflow is not None else
+            "Task control disabled; restart backend with explicit opt-in."
         )
         self._clear()
         self._set_controls()

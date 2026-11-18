@@ -13,7 +13,14 @@ import sys
 from PySide6.QtCore import QObject, QRect, QSize, QThread, QTimer, Signal
 from PySide6.QtWidgets import QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import FluentWindow, InfoBar, InfoBarPosition, NavigationItemPosition
+from qfluentwidgets import (
+    FluentWindow,
+    InfoBar,
+    InfoBarPosition,
+    NavigationItemPosition,
+    Theme,
+    setTheme,
+)
 
 from daedalus.client import APIConnectionError, DaedalusClient
 from daedalus.connection_prefs import (
@@ -22,10 +29,17 @@ from daedalus.connection_prefs import (
     remember_connection,
     saved_connection,
 )
+from daedalus.desktop.appearance_page import AppearancePage
 from daedalus.desktop.branding import application_icon
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
 from daedalus.desktop.task_page import TasksPage
+from daedalus.gui_preferences import (
+    GuiPreferenceError,
+    GuiPreferences,
+    load_gui_preferences,
+    save_gui_preferences,
+)
 
 logger = logging.getLogger("daedalus.desktop")
 
@@ -121,6 +135,24 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.warehouses(self.account_id),
                 }
+            elif self.action == "warehouses_batch" and self.task_payload is not None:
+                ids = self.task_payload.get("account_ids")
+                if (
+                    not isinstance(ids, list) or not 1 <= len(ids) <= 32
+                    or any(not isinstance(aid, str) for aid in ids)
+                    or len(set(ids)) != len(ids)
+                ):
+                    raise ValueError("Select between 1 and 32 distinct report accounts")
+                result = []
+                for aid in ids:
+                    try:
+                        result.append({
+                            "account_id": aid,
+                            "cities": self.client.warehouses(aid),
+                        })
+                    except APIConnectionError:
+                        # Never forward game backend bodies/credentials to a report.
+                        result.append({"account_id": aid, "error": True})
             elif self.action == "task_list" and self.account_id:
                 result = self.client.tasks(self.account_id)
             elif self.action == "task_start" and self.account_id and self.task_payload:
@@ -162,6 +194,13 @@ class MainWindow(FluentWindow):
         self._worker: APIWorker | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
+        self._active_backend_url: str | None = None
+        self._syncing_report_preferences = False
+        try:
+            self._gui_preferences = load_gui_preferences()
+        except GuiPreferenceError:
+            self._gui_preferences = GuiPreferences()
+            logger.warning("Unsafe or invalid local GUI settings; using safe defaults")
         self._assistance_poll = QTimer(self)
         self._assistance_poll.setInterval(30_000)
         self._assistance_poll.timeout.connect(self._poll_pending_assistance)
@@ -170,14 +209,28 @@ class MainWindow(FluentWindow):
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
         self.tasks_page = TasksPage(self)
+        self.wine_page = TasksPage(self, workflow="wine")
+        self.construction_page = TasksPage(self, workflow="construction")
+        self._task_views = (self.tasks_page, self.wine_page, self.construction_page)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
+        self.appearance_page = AppearancePage(self)
+        self.appearance_page.set_preferences(self._gui_preferences)
+        self.warehouses_page.set_display_preferences(
+            only_220k=self._gui_preferences.only_220k,
+            group_by_island=self._gui_preferences.group_by_island,
+        )
 
         self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
         self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
+        self.addSubInterface(self.wine_page, FIF.PLAY, "Wine")
+        self.addSubInterface(self.construction_page, FIF.EDIT, "Construction")
         self.addSubInterface(self.operations_page, FIF.PLAY, "Operations")
         self.addSubInterface(self.tasks_page, FIF.EDIT, "Tasks")
         self.addSubInterface(self.log_page, FIF.DOCUMENT, "Log")
+        self.addSubInterface(
+            self.appearance_page, FIF.SETTING, "Appearance", NavigationItemPosition.BOTTOM
+        )
         self.addSubInterface(
             self.connection_page, FIF.SETTING, "Connection", NavigationItemPosition.BOTTOM
         )
@@ -190,6 +243,8 @@ class MainWindow(FluentWindow):
         self.connection_page.demo_requested.connect(self._start_offline_demo)
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
+        self.accounts_page.report_selection_changed.connect(self._on_report_selection_changed)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
         self.accounts_page.account_change_requested.connect(
             lambda revision, rows: self._request(
@@ -215,25 +270,29 @@ class MainWindow(FluentWindow):
         self.warehouses_page.load_requested.connect(
             lambda account_id: self._request("warehouses", account_id=account_id)
         )
-        self.tasks_page.refresh_requested.connect(
-            lambda account_id: self._request("task_list", account_id=account_id)
+        self.warehouses_page.load_selected_requested.connect(
+            lambda ids: self._request("warehouses_batch", task_payload={"account_ids": ids})
         )
-        self.tasks_page.launch_requested.connect(
-            lambda aid, name, config, rid: self._request(
-                "task_start", account_id=aid,
-                task_payload={"task": name, "config": config, "request_id": rid},
+        for view in self._task_views:
+            view.refresh_requested.connect(
+                lambda account_id: self._request("task_list", account_id=account_id)
             )
-        )
-        self.tasks_page.stop_requested.connect(
-            lambda aid, task_id: self._request(
-                "task_stop", account_id=aid, task_payload={"task_id": task_id},
+            view.launch_requested.connect(
+                lambda aid, name, config, rid: self._request(
+                    "task_start", account_id=aid,
+                    task_payload={"task": name, "config": config, "request_id": rid},
+                )
             )
-        )
-        self.tasks_page.reconcile_requested.connect(
-            lambda aid, rid: self._request(
-                "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+            view.stop_requested.connect(
+                lambda aid, task_id: self._request(
+                    "task_stop", account_id=aid, task_payload={"task_id": task_id},
+                )
             )
-        )
+            view.reconcile_requested.connect(
+                lambda aid, rid: self._request(
+                    "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+                )
+            )
 
         self._log_handler = QtLogHandler(self.log_page.log_view)
         self._log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
@@ -250,6 +309,39 @@ class MainWindow(FluentWindow):
         if sys.platform != "darwin":
             return super().systemTitleBarRect(size)
         return QRect(0, 0 if self.isFullScreen() else 8, 75, size.height())
+
+    def _save_gui_preferences(self) -> None:
+        try:
+            save_gui_preferences(self._gui_preferences)
+        except GuiPreferenceError as exc:
+            self._notice("GUI preference not saved", str(exc))
+
+    def _on_appearance_changed(self, values: dict[str, object]) -> None:
+        theme = values.get("theme")
+        if theme not in {"auto", "light", "dark"}:
+            return
+        self._gui_preferences.theme = str(theme)
+        self._gui_preferences.only_220k = values.get("only_220k") is True
+        self._gui_preferences.group_by_island = values.get("group_by_island") is True
+        setTheme({"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}[theme])
+        self.warehouses_page.set_display_preferences(
+            only_220k=self._gui_preferences.only_220k,
+            group_by_island=self._gui_preferences.group_by_island,
+        )
+        self._save_gui_preferences()
+
+    def _on_report_selection_changed(self, selected: list[str]) -> None:
+        self.warehouses_page.set_selected_accounts(selected)
+        if self._syncing_report_preferences or self._active_backend_url is None:
+            return
+        try:
+            self._gui_preferences.set_excluded(
+                self._active_backend_url, self.accounts_page.report_exclusions(),
+            )
+        except (ValueError, GuiPreferenceError):
+            self._notice("Invalid report selection", "Unable to save selected accounts")
+            return
+        self._save_gui_preferences()
 
     def _start_offline_demo(self) -> None:
         """Explicit local demonstration; never imports real session data."""
@@ -361,8 +453,19 @@ class MainWindow(FluentWindow):
             demo = bool(health.get("synthetic_demo") is True)
             self.connection_page.set_connected(True, demo=demo)
             self.warehouses_page.set_demo(demo)
+            self.warehouses_page.clear_reports()
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
-            self._show_accounts(payload["accounts"])
+            # Report selection must never leak across remote backends.
+            self._syncing_report_preferences = True
+            try:
+                self._active_backend_url = getattr(self.client, "_server", None)
+                excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
+                self.accounts_page.set_report_exclusions(excluded)
+                self.accounts_page.set_connected_ids(None)
+                self._show_accounts(payload["accounts"])
+            finally:
+                self._syncing_report_preferences = False
+            self._on_report_selection_changed(self.accounts_page.selected_report_account_ids())
             self._show_capabilities(payload["capabilities"])
             enabled = bool(payload["capabilities"].get("session_monitoring", False))
             self._seen_assistance_ids.clear()
@@ -428,9 +531,18 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.warehouses_page.set_snapshots(payload["account_id"], payload["cities"])
             logger.info("Warehouse snapshot report updated")
+        elif action == "warehouses_batch":
+            assert isinstance(payload, list)
+            self.warehouses_page.set_batch_snapshots(payload)
+            logger.info("Multi-account warehouse report updated")
         elif action == "task_list":
             assert isinstance(payload, dict)
-            self.tasks_page.set_tasks(payload)
+            account_id = payload.get("account_id")
+            for view in self._task_views:
+                if account_id == view.selected_account_id() or (
+                    account_id is None and view is self.tasks_page
+                ):
+                    view.set_tasks(payload)
             logger.info("Managed tasks refreshed")
         elif action in {"task_start", "task_stop", "task_reconcile"}:
             assert isinstance(payload, dict)
@@ -444,14 +556,21 @@ class MainWindow(FluentWindow):
         assert isinstance(data, list)
         self.accounts_page.set_accounts(data)
         self.warehouses_page.set_accounts(data)
-        self.tasks_page.set_accounts(data)
+        # Refresh inclusion *after* the warehouse account map is replaced.
+        # This also handles accounts newly created via metadata editing.
+        self.warehouses_page.set_selected_accounts(
+            self.accounts_page.selected_report_account_ids()
+        )
+        for view in self._task_views:
+            view.set_accounts(data)
 
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
         self.operations_page.set_operations(data["operations"])
-        self.tasks_page.set_capabilities(
-            data["operations"], bool(data.get("structured_engine_dispatch", False)),
-        )
+        for view in self._task_views:
+            view.set_capabilities(
+                data["operations"], bool(data.get("structured_engine_dispatch", False)),
+            )
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
@@ -460,7 +579,7 @@ class MainWindow(FluentWindow):
             if self._pending_client is not None:
                 self._pending_client.close()
                 self._pending_client = None
-            self.connection_page.set_connected(False)
+            self.connection_page.set_connected(self.client is not None)
         logger.warning("Backend %s request failed", action)
         if action != "assistance_pending":  # Periodic checks must not spam banners.
             self._notice("Backend unavailable", error)

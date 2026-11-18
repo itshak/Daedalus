@@ -165,7 +165,7 @@ Daedalus can now connect **read-only** to an already-running instance of the Dae
 - `src/daedalus/`: application package, local/remote HTTP client, reporting utilities and authenticated read-only API
 - `engine/ikabot/`: public MIT-licensed IkaBot 7.7.2 with proposed, unreleased PR #499 CLI/IPC code
 - `server/`: future supervised account workers, task dispatcher, scheduler and policies; not implemented yet
-- `src/daedalus/desktop/`: reviewed Fluent GUI with read-only reporting and opt-in task controls; assisted login pending
+- `src/daedalus/desktop/`: reviewed Fluent GUI with multi-account reports, dedicated Wine/Construction task views, private appearance preferences and opt-in task controls; remote recovery and live acceptance pending
 - `openspec/`: normative specifications, architecture decisions and change proposals
 
 ## License and provenance

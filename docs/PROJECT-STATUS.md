@@ -29,6 +29,7 @@ The following changes have merged implementation and archived OpenSpec requireme
 | offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
 | cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
 | desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
+| `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, dedicated Wine/Construction workflows, private appearance and grouped exports | [#52](https://github.com/itshak/Daedalus/pull/52) |
 
 The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
@@ -42,26 +43,34 @@ PR #41 merged the opt-in single-account worker: it can start a dedicated IPC ser
 
 ## Still active
 
-The following umbrella changes have unfinished tasks and were deliberately **not archived** (the legacy GUI source/license review is complete; full parity is not):
+Two umbrella changes remain **open**. Owner-supervised authentication acceptance
+will be performed only when the app is ready for real-account testing:
 
-- `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
-- `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
-- `migrate-native-desktop`: the user-confirmed native GUI, account/report/task pages, live snapshots through existing sessions and basic macOS packaging work; per-task parameter forms and island-grouped reports are delivered. The new opt-in metadata editor covers basic account create/edit/disable/remove, while full legacy parity and authenticated worker recovery remain incomplete.
+- `import-public-ikabot-engine`: upstream and experimental IPC are integrated,
+  but private production-authentication differences still need a reviewed,
+  nonsecret file-by-file reconciliation.
+- `validate-live-authentication`: protected desktop/browser recovery UX,
+  independent player identity attestation and live account/worker acceptance
+  remain unfinished. Offline `unify-authentication` was archived without
+  claiming production authorization.
 
-Do **not** mark these changes as entirely done, or claim real game automation is available, until their outstanding tests and features are delivered.
+`migrate-native-desktop` is archived for its completed **nonsecret** GUI scope.
+Original credential/password and Selenium automation controls were not imported.
+Live authentication, notarization and binary-license approval remain separate gates.
 
 ### Remaining OpenSpec completion gates
 
-As of the reviewed source and license audit, **6 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
+**6 unchecked tasks across 2 active changes** remain. Synthetic GUI tests do not
+validate live workflows.
 
-| Active change | Remaining gate | Evidence needed before checking off |
+| Active change | Remaining gate | Evidence required |
 | --- | --- | --- |
-| `import-public-ikabot-engine` | Reconcile production authentication modifications with upstream without private material | File-by-file reviewed diff, explicit license/provenance and isolated engine regression tests |
-| `migrate-native-desktop` | Finish advanced legacy GUI parity | Implemented UI workflows and native desktop regression tests, with no credential leakage |
-| `unify-authentication` | Safe browser login and manual CAPTCHA assistance | User-authorized manual browser flow, explicit consent, safe secret handling and mocked failure tests |
-| `unify-authentication` | Validated remote handoff or protected remote-browser fallback | Threat model, authenticated transport, host-local ownership and no secret exposure to controller |
-| `unify-authentication` | Secure user-approved task resume after real browser recovery | Verified identity, replay protection, explicit per-task approval and crash/retry tests |
-| `unify-authentication` | Complete end-to-end recovery verification | Offline failure matrix, secret scan, strict OpenSpec, protected CI and isolated-account validation |
+| `import-public-ikabot-engine` | Reconcile production authentication modifications | File-by-file provenance, license review and isolated engine regression tests |
+| `validate-live-authentication` | Wire desktop UX to host-only human recovery flow | Synthetic UI/API tests; no HTTP cookie transfer |
+| `validate-live-authentication` | Independently attest recovered server-side player identity | Synthetic negative tests and no unverified binding |
+| `validate-live-authentication` | Supervise real browser/CAPTCHA and saved-cookie flows | Owner-approved isolated real-account results |
+| `validate-live-authentication` | Validate worker rebind, expiry, recovery and explicit task dispatch | No duplicated real game operations |
+| `validate-live-authentication` | Reconcile results, CI, docs and cutover | Owner's successful real test and approval |
 
 The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
 
