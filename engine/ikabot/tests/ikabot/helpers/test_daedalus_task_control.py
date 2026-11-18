@@ -100,19 +100,19 @@ def test_start_list_stop_managed_child(prepared):
     assert "email" not in start
     assert len(FakeProcess.created) == 1
     update.assert_called_once()
-    listed = engine.handle_request({"action": "list_managed_tasks", **_ACCOUNT})
+    listed = engine.handle_request({"action": "list_tasks_existing", **_ACCOUNT})
     assert listed["tasks"][0]["pid"] == start["pid"]
     assert listed["tasks"][0]["status"] == "running"
     assert "config" not in str(listed)
     stopped = engine.handle_request({
-        "action": "stop_managed_task", **_ACCOUNT, "pid": start["pid"]
+        "action": "stop_task_existing", **_ACCOUNT, "task_id": start["task_id"]
     })
     assert stopped["status"] == "ok"
-    assert stopped["state"] == "stopped"
+    assert stopped["task_status"] == "stopped"
     assert FakeProcess.created[0].terminated
-    assert engine.handle_request({"action": "list_managed_tasks", **_ACCOUNT})["tasks"][0][
+    assert engine.handle_request({"action": "list_tasks_existing", **_ACCOUNT})["tasks"][0][
         "status"
-    ] == "finished"
+    ] == "stopped"
 
 
 def test_repeated_idempotency_key_does_not_duplicate_task(prepared):
@@ -148,18 +148,18 @@ def test_cannot_stop_or_list_another_accounts_tasks(prepared):
     engine, _ = prepared
     start = engine.handle_request(command())
     bad_stop = engine.handle_request({
-        "action": "stop_managed_task", "world": "s302-en", "player": "OtherPlayer",
-        "pid": start["pid"],
+        "action": "stop_task_existing", "world": "s302-en", "player": "OtherPlayer",
+        "task_id": start["task_id"],
     })
     assert bad_stop["status"] == "error"
     assert FakeProcess.created[0].active
     other = engine.handle_request({
-        "action": "list_managed_tasks", "world": "s302-en", "player": "OtherPlayer"
+        "action": "list_tasks_existing", "world": "s302-en", "player": "OtherPlayer"
     })
     assert other["status"] == "ok"
     assert other["tasks"] == []
     arbitrary = engine.handle_request({
-        "action": "stop_managed_task", **_ACCOUNT, "pid": 123456789
+        "action": "stop_task_existing", **_ACCOUNT, "task_id": "0" * 24
     })
     assert arbitrary["status"] == "error"
     assert FakeProcess.created[0].active
@@ -179,7 +179,7 @@ def test_process_list_failure_terminates_new_child_instead_of_orphaning(prepared
     assert response["status"] == "error"
     assert len(FakeProcess.created) == 1
     assert FakeProcess.created[0].terminated is True
-    assert engine._managed_tasks == {}
+    assert engine._daedalus_tasks == {}
 
 
 def test_builtin_name_must_resolve_to_builtin_module(prepared):

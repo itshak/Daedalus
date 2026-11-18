@@ -259,63 +259,75 @@ def test_readonly_warehouse_provider_uses_existing_ipc_if_explicitly_attached(ac
 
 
 def test_task_control_requires_explicit_enablement_and_authorization(account_file):
-    app = create_app(accounts_path=account_file, api_token=TOKEN)
-    client = TestClient(app)
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN))
     auth = {"Authorization": f"Bearer {TOKEN}"}
-    body = {"task": "alertAttacks", "config": {"minutes": 10},
-            "request_id": "12345678-1234-4123-8123-123456789abc"}
+    body = {
+        "task": "alertAttacks", "config": {"minutes": 10},
+        "request_id": "12345678-1234-4123-8123-123456789abc", "confirmed": True,
+    }
     assert client.get("/api/v1/task-control").status_code == 401
     assert client.get("/api/v1/task-control", headers=auth).json()["enabled"] is False
     assert client.post("/api/v1/accounts/alpha/tasks", json=body).status_code == 401
     assert client.post("/api/v1/accounts/alpha/tasks", json=body, headers=auth).status_code == 503
     assert client.get("/api/v1/accounts/alpha/tasks", headers=auth).status_code == 503
-    assert client.delete("/api/v1/accounts/alpha/tasks/42", headers=auth).status_code == 503
+    assert client.post("/api/v1/accounts/alpha/tasks/" + "f"*24 + "/stop",
+                       headers=auth).status_code == 503
     assert client.get("/api/v1/health").json()["mode"] == "read_only"
 
 
-def test_explicit_task_control_validates_account_builtin_task_and_request_id(account_file):
+def test_new_task_contract_routes_keep_account_and_confirmation_scoped(account_file):
+    task_id = "f"*24
+
     class MockTaskController:
         def __init__(self):
             self.calls = []
 
-        def start_task(self, account, task, config, request_id):
-            self.calls.append((account.id, task, config, request_id))
-            return {"pid": 81001, "task": task, "status": "started", "request_id": request_id}
+        def start(self, account_id, task, config, request_id, *, confirmed):
+            self.calls.append(("start", account_id, task, config, request_id, confirmed))
+            if not confirmed:
+                raise ValueError("Explicit confirmation is required")
+            return {"task_id": task_id, "status": "started", "request_id": request_id}
 
-        def list_tasks(self, account):
-            self.calls.append((account.id, "list"))
-            return [{"pid": 81001, "task": "alertAttacks", "status": "running", "started_at": 1234}]
+        def list_tasks(self, account_id):
+            self.calls.append(("list", account_id))
+            return {"account_id": account_id, "engine_tasks": [
+                {"task_id": task_id, "task": "alertAttacks", "status": "running"}
+            ], "requests": []}
 
-        def stop_task(self, account, pid):
-            self.calls.append((account.id, "stop", pid))
-            return {"pid": pid, "status": "stopped"}
+        def stop(self, account_id, selected_task):
+            self.calls.append(("stop", account_id, selected_task))
+            return {"task_id": selected_task, "status": "stopped"}
+
+        def acknowledge_uncertain_request(self, account_id, request_id, *, confirmed):
+            self.calls.append(("ack", account_id, request_id, confirmed))
+            return {"request_id": request_id, "status": "operator_reconciled"}
 
     mock = MockTaskController()
-    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
-                                   task_controller=mock))
+    client = TestClient(create_app(
+        accounts_path=account_file, api_token=TOKEN, task_controller=mock,
+    ))
     auth = {"Authorization": f"Bearer {TOKEN}"}
-    body = {"task": "alertAttacks", "config": {"minutes": 10},
-            "request_id": "12345678-1234-4123-8123-123456789abc"}
+    body = {
+        "task": "alertAttacks", "config": {"minutes": 10},
+        "request_id": "12345678-1234-4123-8123-123456789abc",
+    }
     assert client.get("/api/v1/task-control", headers=auth).json()["enabled"] is True
-    assert client.get("/api/v1/health").json()["mode"] == "task_control"
+    assert client.get("/api/v1/health").json()["mode"] == "task_control_opt_in"
     assert client.get("/api/v1/capabilities", headers=auth).json()["structured_engine_dispatch"]
-    for invalid in (
-        {"task": "getStatus", **{key: value for key, value in body.items() if key != "task"}},
-        {**body, "config": {"session": "forged"}},
-        {**body, "request_id": "00000000-0000-1000-8000-000000000000"},
-    ):
-        response = client.post("/api/v1/accounts/alpha/tasks", json=invalid, headers=auth)
-        assert response.status_code == 422, response.text
-    assert mock.calls == []
-    assert client.post("/api/v1/accounts/unknown/tasks", json=body, headers=auth).status_code == 404
-    started = client.post("/api/v1/accounts/alpha/tasks", json=body, headers=auth)
+    assert client.post("/api/v1/accounts/alpha/tasks", json=body,
+                       headers=auth).status_code == 422
+    assert client.post("/api/v1/accounts/unknown/tasks", json={**body, "confirmed": True},
+                       headers=auth).status_code == 404
+    started = client.post("/api/v1/accounts/alpha/tasks",
+                          json={**body, "confirmed": True}, headers=auth)
     assert started.status_code == 200, started.text
-    assert started.json()["pid"] == 81001
+    assert started.json()["task_id"] == task_id
     tasks = client.get("/api/v1/accounts/alpha/tasks", headers=auth)
     assert tasks.status_code == 200
-    assert tasks.json()["tasks"][0]["status"] == "running"
-    stopped = client.delete("/api/v1/accounts/alpha/tasks/81001", headers=auth)
+    assert tasks.json()["engine_tasks"][0]["status"] == "running"
+    stopped = client.post(f"/api/v1/accounts/alpha/tasks/{task_id}/stop", headers=auth)
     assert stopped.status_code == 200
     assert stopped.json()["status"] == "stopped"
-    assert mock.calls[0] == ("alpha", "alertAttacks", {"minutes": 10}, body["request_id"])
-    assert mock.calls[-1] == ("alpha", "stop", 81001)
+    assert mock.calls[-1] == ("stop", "alpha", task_id)
+    assert mock.calls[1] == ("start", "alpha", "alertAttacks", {"minutes": 10},
+                            body["request_id"], True)

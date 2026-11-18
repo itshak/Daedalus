@@ -133,3 +133,88 @@ def test_warehouse_missing_auth_does_not_open_session():
             {"action": "warehouse_snapshots_existing", "world": "s301-en", "player": "ExamplePlayer"}
         )
     assert resp["status"] == "error"
+
+
+def test_managed_task_start_list_and_stop_for_existing_session_only():
+    def synthetic_task(session, minutes=10):
+        pass
+
+    # The existing-session path accepts only built-in IkaBot tasks, never
+    # dynamically registered external functions.
+    synthetic_task.__module__ = "ikabot.function.alertAttacks"
+    synthetic_task.prepare = None
+
+    class FakeProcess:
+        pid = 42424
+        alive = True
+        started = False
+
+        def start(self):
+            self.started = True
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.alive = False
+
+        def join(self, timeout):
+            assert timeout == 4.0
+
+    proc = FakeProcess()
+
+    def fake_process(*_args, **kwargs):
+        kwargs["args"][3].set()
+        return proc
+
+    session = make_session()
+    server = IPCServer(default_session=session)
+    identity = {"world": "s301-en", "player": "ExamplePlayer"}
+    with (
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
+        patch("ikabot.helpers.ipc.updateProcessList"),
+        patch("ikabot.helpers.ipc.multiprocessing.Process", side_effect=fake_process),
+        patch("ikabot.helpers.ipc._resolve_task", return_value=("alertAttacks", synthetic_task)),
+    ):
+        started = server.handle_request({
+            "action": "start_task_existing", **identity,
+            "task": "alertAttacks", "config": {"minutes": 10},
+            "request_id": "12345678-1234-4123-8123-123456789abc",
+        })
+        assert started["status"] == "ok"
+        assert started["task"] == "alertAttacks"
+        assert "email" not in started
+        assert len(started["task_id"]) == 24
+        assert proc.started
+        task_id = started["task_id"]
+
+        listed = server.handle_request({"action": "list_tasks_existing", **identity})
+        assert listed["tasks"][0]["task_id"] == task_id
+        assert listed["tasks"][0]["status"] == "running"
+        assert listed["tasks"][0]["pid"] == proc.pid
+
+        unauthorized = server.handle_request({
+            "action": "stop_task_existing", "world": "s301-en", "player": "OtherPlayer",
+            "task_id": task_id,
+        })
+        assert unauthorized["status"] == "error"
+        assert proc.alive
+        stopped = server.handle_request({
+            "action": "stop_task_existing", **identity, "task_id": task_id,
+        })
+        assert stopped["status"] == "ok"
+        assert stopped["task_status"] == "stopped"
+        assert not proc.alive
+        listed = server.handle_request({"action": "list_tasks_existing", **identity})
+        assert listed["tasks"][0]["status"] == "stopped"
+
+
+def test_managed_task_never_creates_missing_session():
+    server = IPCServer()
+    with patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")):
+        response = server.handle_request({
+            "action": "start_task_existing", "world": "s301-en", "player": "ExamplePlayer",
+            "task": "alertAttacks", "config": {"minutes": 10},
+        })
+    assert response["status"] == "error"
+    assert server._daedalus_tasks == {}

@@ -1,7 +1,8 @@
 """Native Fluent control center. Adapted from the user's original Mac main window.
 
-Read-only dashboards are the default. Explicitly enabled task start/stop
-uses an existing authenticated IkaBot session; no Selenium login is started.
+The read-only views remain safe by default. An explicitly enabled backend can
+accept user-confirmed task start/stop actions through existing-session IPC.
+No Selenium login or new game worker is started from this desktop shell.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtCore import QObject, QRect, QSize, QThread, Signal
+from PySide6.QtCore import QObject, QRect, QSize, QThread, QTimer, Signal
 from PySide6.QtWidgets import QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow, InfoBar, InfoBarPosition, NavigationItemPosition
@@ -17,7 +18,7 @@ from qfluentwidgets import FluentWindow, InfoBar, InfoBarPosition, NavigationIte
 from daedalus.client import APIConnectionError, DaedalusClient
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
-from daedalus.desktop.tasks_page import TaskControlPage
+from daedalus.desktop.task_page import TasksPage
 
 logger = logging.getLogger("daedalus.desktop")
 
@@ -63,14 +64,14 @@ class APIWorker(QThread):
         action: str,
         *,
         account_id: str | None = None,
-        parameters: dict[str, object] | None = None,
+        task_payload: dict[str, object] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.client = client
         self.action = action
         self.account_id = account_id
-        self.parameters = parameters or {}
+        self.task_payload = task_payload
 
     def run(self) -> None:
         try:
@@ -79,7 +80,6 @@ class APIWorker(QThread):
                     "health": self.client.health(),
                     "accounts": self.client.accounts(),
                     "capabilities": self.client.capabilities(),
-                    "task_control": self.client.task_control_status(),
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
@@ -92,23 +92,30 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.warehouses(self.account_id),
                 }
-            elif self.action == "tasks" and self.account_id:
-                result = {
-                    "account_id": self.account_id,
-                    "tasks": self.client.tasks(self.account_id),
-                }
-            elif self.action == "start_task" and self.account_id:
+            elif self.action == "task_list" and self.account_id:
+                result = self.client.tasks(self.account_id)
+            elif self.action == "task_start" and self.account_id and self.task_payload:
+                payload = self.task_payload
                 result = self.client.start_task(
                     self.account_id,
-                    self.parameters["task"],
-                    self.parameters["config"],
+                    str(payload["task"]),
+                    payload["config"],
+                    str(payload["request_id"]),
+                    confirmed=True,
                 )
-            elif self.action == "stop_task" and self.account_id:
-                result = self.client.stop_task(self.account_id, self.parameters["pid"])
+            elif self.action == "task_stop" and self.account_id and self.task_payload:
+                result = self.client.stop_task(self.account_id, str(self.task_payload["task_id"]))
+                result["account_id"] = self.account_id
+            elif self.action == "task_reconcile" and self.account_id and self.task_payload:
+                result = self.client.acknowledge_task(
+                    self.account_id,
+                    str(self.task_payload["request_id"]),
+                    confirmed=True,
+                )
             else:
                 raise ValueError("Unsupported desktop API request")
             self.completed.emit(self.action, result)
-        except (APIConnectionError, ValueError, TypeError) as exc:
+        except (APIConnectionError, ValueError) as exc:
             self.failed.emit(self.action, str(exc))
         except Exception:  # noqa: BLE001 - catch worker faults without exposing private details
             # Never surface arbitrary transport or game-session exceptions to the UI.
@@ -123,19 +130,18 @@ class MainWindow(FluentWindow):
         self.client: DaedalusClient | None = None
         self._pending_client: DaedalusClient | None = None
         self._worker: APIWorker | None = None
-        self._pending_task_refresh: str | None = None
 
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
-        self.tasks_page = TaskControlPage(self)
+        self.tasks_page = TasksPage(self)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
 
         self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
         self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
         self.addSubInterface(self.operations_page, FIF.PLAY, "Operations")
-        self.addSubInterface(self.tasks_page, FIF.ROBOT, "Tasks")
+        self.addSubInterface(self.tasks_page, FIF.EDIT, "Tasks")
         self.addSubInterface(self.log_page, FIF.DOCUMENT, "Log")
         self.addSubInterface(
             self.connection_page, FIF.SETTING, "Connection", NavigationItemPosition.BOTTOM
@@ -151,22 +157,27 @@ class MainWindow(FluentWindow):
             lambda: self._request("connected_accounts")
         )
         self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
-        self.tasks_page.refresh_requested.connect(
-            lambda account_id: self._request("tasks", account_id=account_id)
+        self.warehouses_page.load_requested.connect(
+            lambda account_id: self._request("warehouses", account_id=account_id)
         )
-        self.tasks_page.start_requested.connect(
-            lambda account_id, task, config: self._request(
-                "start_task", account_id=account_id,
-                parameters={"task": task, "config": config},
+        self.tasks_page.refresh_requested.connect(
+            lambda account_id: self._request("task_list", account_id=account_id)
+        )
+        self.tasks_page.launch_requested.connect(
+            lambda aid, name, config, rid: self._request(
+                "task_start", account_id=aid,
+                task_payload={"task": name, "config": config, "request_id": rid},
             )
         )
         self.tasks_page.stop_requested.connect(
-            lambda account_id, pid: self._request(
-                "stop_task", account_id=account_id, parameters={"pid": pid},
+            lambda aid, task_id: self._request(
+                "task_stop", account_id=aid, task_payload={"task_id": task_id},
             )
         )
-        self.warehouses_page.load_requested.connect(
-            lambda account_id: self._request("warehouses", account_id=account_id)
+        self.tasks_page.reconcile_requested.connect(
+            lambda aid, rid: self._request(
+                "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+            )
         )
 
         self._log_handler = QtLogHandler(self.log_page.log_view)
@@ -198,7 +209,7 @@ class MainWindow(FluentWindow):
 
     def _request(
         self, action: str, *, account_id: str | None = None,
-        parameters: dict[str, object] | None = None,
+        task_payload: dict[str, object] | None = None,
     ) -> None:
         if self.client is None:
             self._notice("Not connected", "Connect to a Daedalus backend first.")
@@ -206,15 +217,14 @@ class MainWindow(FluentWindow):
         if self._worker is not None:
             self._notice("Request in progress", "Another backend request is still running.")
             return
-        self._launch(self.client, action, account_id=account_id, parameters=parameters)
+        self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
     def _launch(
-        self, client: DaedalusClient, action: str, *,
-        account_id: str | None = None,
-        parameters: dict[str, object] | None = None,
+        self, client: DaedalusClient, action: str, *, account_id: str | None = None,
+        task_payload: dict[str, object] | None = None,
     ) -> None:
         worker = APIWorker(
-            client, action, account_id=account_id, parameters=parameters, parent=self
+            client, action, account_id=account_id, task_payload=task_payload, parent=self,
         )
         self._worker = worker
         self.connection_page.connect_button.setEnabled(False)
@@ -234,7 +244,6 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True)
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
-            self.tasks_page.set_enabled(payload["task_control"].get("enabled") is True)
             logger.info("Connected to Daedalus API")
         elif action == "accounts":
             self._show_accounts(payload)
@@ -250,14 +259,17 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.warehouses_page.set_snapshots(payload["account_id"], payload["cities"])
             logger.info("Warehouse snapshot report updated")
-        elif action == "tasks":
+        elif action == "task_list":
             assert isinstance(payload, dict)
-            self.tasks_page.set_tasks(payload["tasks"])
-            logger.info("Managed task status refreshed")
-        elif action in {"start_task", "stop_task"}:
+            self.tasks_page.set_tasks(payload)
+            logger.info("Managed tasks refreshed")
+        elif action in {"task_start", "task_stop", "task_reconcile"}:
             assert isinstance(payload, dict)
-            self._pending_task_refresh = self.tasks_page.selected_account_id()
-            logger.info("Managed task action acknowledged: %s", action)
+            logger.info("Task operation acknowledged: %s", action)
+            self._notice("Task operation accepted", str(payload.get("status", "Complete")))
+            account_id = payload.get("account_id")
+            if isinstance(account_id, str):
+                QTimer.singleShot(0, lambda: self._request("task_list", account_id=account_id))
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
@@ -268,7 +280,9 @@ class MainWindow(FluentWindow):
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
         self.operations_page.set_operations(data["operations"])
-        self.tasks_page.set_operations(data["operations"])
+        self.tasks_page.set_capabilities(
+            data["operations"], bool(data.get("structured_engine_dispatch", False)),
+        )
 
     def _on_failed(self, action: str, error: str) -> None:
         if action == "connect" and self._pending_client is not None:
@@ -281,10 +295,6 @@ class MainWindow(FluentWindow):
     def _on_worker_finished(self) -> None:
         self._worker = None
         self.connection_page.connect_button.setEnabled(True)
-        account_id = self._pending_task_refresh
-        self._pending_task_refresh = None
-        if account_id is not None:
-            self._request("tasks", account_id=account_id)
 
     def _notice(self, title: str, message: str) -> None:
         InfoBar.warning(

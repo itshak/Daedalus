@@ -32,6 +32,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,desktop]"
       - name: Verify headless GUI layouts and nonsecret dashboard behavior
-        run: python -m pytest -q tests/test_desktop.py
+        run: python -m pytest -q tests/test_desktop.py tests/test_task_page.py
       - name: Confirm desktop CLI is installed
         run: python -c "from daedalus.desktop import main; assert callable(main)"

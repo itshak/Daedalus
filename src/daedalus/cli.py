@@ -50,8 +50,9 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--ipc-descriptor", help="Owner-only IkaBot IPC discovery file")
     serve.add_argument(
         "--enable-task-control", action="store_true",
-        help="Allow start/stop of built-in tasks on already-authenticated IkaBot accounts",
+        help="Opt in to authorized start/list/stop of existing-session IkaBot tasks",
     )
+    serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
 
     args = parser.parse_args(argv)
 
@@ -112,21 +113,33 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.ipc_descriptor and not args.connect_existing_ipc:
                 parser.error("--ipc-descriptor requires --connect-existing-ipc")
-            ipc = None
-            if args.connect_existing_ipc:
-                from daedalus.engine_ipc import ExistingIPCClient
-
-                ipc = ExistingIPCClient(args.ipc_descriptor)
             if args.enable_task_control and not args.connect_existing_ipc:
                 parser.error("--enable-task-control requires --connect-existing-ipc")
+            if args.task_ledger and not args.enable_task_control:
+                parser.error("--task-ledger requires --enable-task-control")
+            ipc = None
             task_controller = None
-            if args.enable_task_control:
-                from daedalus.engine_ipc import ExistingTaskIPCClient
+            owner = None
+            if args.connect_existing_ipc:
+                from daedalus.engine_ipc import ControlledIPCClient, ExistingIPCClient
 
-                task_controller = ExistingTaskIPCClient(args.ipc_descriptor)
+                ipc = (
+                    ControlledIPCClient(args.ipc_descriptor)
+                    if args.enable_task_control
+                    else ExistingIPCClient(args.ipc_descriptor)
+                )
+            if args.enable_task_control:
+                from daedalus.account_sessions import AccountSessionCoordinator
+                from daedalus.task_control import TaskController
+
+                configured = load_accounts(args.accounts_file)
+                owner = AccountSessionCoordinator(configured)
+                task_controller = TaskController(
+                    configured, owner, ipc, ledger_path=args.task_ledger,
+                )
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
-                task_controller=task_controller,
+                session_coordinator=owner, task_controller=task_controller,
             )
         except (AccountConfigError, ValueError, ImportError) as exc:
             parser.error(str(exc))

@@ -1,6 +1,6 @@
 # Account session ownership — implementation baseline
 
-Daedalus now contains a **host-local account lease** and an explicit authentication state machine. This is infrastructure for account workers; it **does not yet start an IkaBot game worker, authenticate to Gameforge, capture a token, or solve a CAPTCHA**.
+Daedalus now contains a **host-local account lease** and an explicit authentication state machine. This is infrastructure for account workers. The separate opt-in task controller can start background task child processes **only within a compatible already-authenticated IkaBot engine session**. Neither component creates a new Gameforge login, captures a token, or solves a CAPTCHA.
 
 ## Why the lock is keyed by world and player
 
