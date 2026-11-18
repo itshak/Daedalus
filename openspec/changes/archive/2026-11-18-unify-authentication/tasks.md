@@ -10,5 +10,5 @@
 - [x] Document a protected host-local graphical remote-desktop fallback without API cookie transfer; no unattended remote handoff is claimed.
 - [x] Add opt-in existing-session expiration detection, GUI notification and worker revalidation (no automatic task resume).
 - [x] Add an internal single-use worker-verified recovery dispatch gate and a bearer-protected new-task API, with synthetic negative-path tests (not a browser-recovery workflow).
-- [ ] Add secure, user-approved task resume after verified real browser recovery.
-- [ ] Test recovery offline, scan secrets, validate OpenSpec.
+- [x] Add a single-use, user-approved NEW task dispatch after the authoritative worker independently verifies the recovered existing session; do not replay a previous task (synthetic tests).
+- [x] Test recovery offline, scan secrets through protected CI, and validate OpenSpec (live tests deferred to `validate-live-authentication`).

@@ -141,3 +141,8 @@ The native Mac GUI has been successfully launched by the project owner. GitHub A
 ## Authentication progress (2026-11-18)
 
 The optional ephemeral human-operated Chromium login assistant is implemented in `src/daedalus/browser_recovery.py` and documented in [browser recovery](BROWSER-RECOVERY.md). It keeps world cookies out of the API and checks a matching engine session before keyring persistence. Host-local graphical remote-desktop fallback avoids copying session secrets across machines. Synthetic browser tests do not prove Gameforge compatibility. **A running worker cannot yet receive and validate a replacement world cookie in-place**, so the full `unify-authentication` proposal remains active until that secure engine-side handoff and offline regression tests are delivered. Do not mistake a verified cookie saved for future cookie-only startup for a recovered existing worker.
+
+
+## Authentication offline scope archived; live integration remains open
+
+The `unify-authentication` OpenSpec change records offline-tested single-owner leases, protected browser and keyring recovery, worker verification, an idle-only dedicated-worker rebind primitive and one-use new-task approval. It does **not** claim a complete remote GUI recovery flow, independently attested server-side player identity, or successful real Gameforge login. Those remaining integration and supervised tests are tracked in the active `validate-live-authentication` change. Archiving the offline implementation is not production authorization.
