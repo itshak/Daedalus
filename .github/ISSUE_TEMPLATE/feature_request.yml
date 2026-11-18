@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a UI, API, documentation, or workflow enhancement
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the project status and open OpenSpec changes before proposing a feature. Do not include real game credentials or personal account data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the expected user-facing behavior, including safety implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility
+      description: Optional alternative approaches, upstream dependencies, or API changes.

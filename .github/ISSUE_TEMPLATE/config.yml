@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/itshak/Daedalus/security/advisories/new
+    about: Security reports must not be posted publicly.
+  - name: Support and troubleshooting
+    url: https://github.com/itshak/Daedalus/blob/main/SUPPORT.md
+    about: Check setup steps, synthetic demo instructions, and support policy.
