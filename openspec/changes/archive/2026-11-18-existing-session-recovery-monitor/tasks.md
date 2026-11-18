@@ -4,5 +4,5 @@
 - [x] Tie nonsecret assistance tickets to trusted worker-side revalidation and prohibit automatic task replay.
 - [x] Add native UI monitoring confirmation, safe notification polling and bearer-authenticated API/client contracts.
 - [x] Add offline fake IPC/socket/HTTP/Qt session loss, consent, renewal and secret-isolation tests.
-- [ ] Run full Daedalus/engine suites, lint, strict OpenSpec, package and macOS CI.
-- [ ] Merge as itshak; mark verified tasks complete, archive and synchronize canonical specs/docs.
+- [x] Run full Daedalus/engine suites, lint, strict OpenSpec, package and macOS CI.
+- [x] Merge as itshak; mark verified tasks complete, archive and synchronize canonical specs/docs.
