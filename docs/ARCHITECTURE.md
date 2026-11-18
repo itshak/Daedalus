@@ -21,6 +21,7 @@ One authenticated game session per account/world/player
 ## Invariants
 
 - No new parallel game-protocol implementation in the controller.
+- The explicit `--demo` mode is a **synthetic, isolated offline preview**: it cannot read real account files, attach IPC or control game tasks and visibly labels all sample data. It is not a way to simulate real authentication.
 - The explicit `--connect-existing-ipc` attachment reads cities and warehouse spans from a compatible already-authenticated engine without creating a login. A separate `--enable-task-control` flag permits validated built-in background task start/list/stop on this existing session. Durable session supervision and Selenium login restoration are still planned work.
 - One account session owner; browser-assisted login is coordinated through the owner. A new optional in-process manual-help ticket broker allows only a trusted worker to verify the session after operator acknowledgment; **real browser/worker integration remains unimplemented**.
 - Desktop API is transport-independent and not tied to tmux.

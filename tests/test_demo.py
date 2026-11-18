@@ -75,6 +75,7 @@ def test_demo_never_executes_mutations_or_attaches_ipc():
     {"ipc_client": object()},
     {"task_controller": object()},
     {"enable_account_editing": True},
+    {"assistance_broker": object()},
 ])
 def test_demo_refuses_any_real_data_source_or_engine_control(kwargs):
     with pytest.raises(ValueError, match="Synthetic demo"):
