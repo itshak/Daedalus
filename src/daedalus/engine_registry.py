@@ -23,6 +23,7 @@ class EngineCapability:
     module: str
     menu_codes: tuple[int, ...]
     parameters: tuple[str, ...]
+    config_fields: tuple[dict[str, object], ...] = ()
     structured_cli: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -84,8 +85,55 @@ def _module_imports(command_line: ast.Module) -> dict[str, str]:
     return modules
 
 
-def _native_tasks(function_path: Path) -> dict[str, tuple[str, tuple[str, ...]]]:
-    tasks: dict[str, tuple[str, tuple[str, ...]]] = {}
+def _task_parameter_fields(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[dict[str, object], ...]:
+    """Infer conservative UI metadata from literals; never evaluate source code."""
+    fields: list[dict[str, object]] = []
+    positional = [*fn.args.posonlyargs, *fn.args.args]
+    defaults: list[ast.expr | None] = [
+        None
+    ] * (len(positional) - len(fn.args.defaults)) + list(fn.args.defaults)
+    parameters = list(zip(positional, defaults, strict=True))
+    parameters += list(zip(fn.args.kwonlyargs, fn.args.kw_defaults, strict=True))
+    for arg, default in parameters:
+        if arg.arg == "session":
+            continue
+        field: dict[str, object] = {"name": arg.arg, "required": default is None}
+        hint = arg.annotation.id if isinstance(arg.annotation, ast.Name) else None
+        type_name = {
+            "int": "integer", "float": "number", "bool": "boolean", "str": "text",
+        }.get(hint, "json")
+        if default is not None:
+            try:
+                value = ast.literal_eval(default)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                value = None
+            if type(value) is bool:
+                type_name = "boolean"
+                field["default"] = value
+            elif type(value) is int and abs(value) <= 10**12:
+                type_name = "integer"
+                field["default"] = value
+            elif type(value) is float and abs(value) <= 10**12:
+                type_name = "number"
+                field["default"] = value
+            elif type(value) is str and len(value) <= 200:
+                type_name = "text"
+                field["default"] = value
+            elif (
+                value is None and isinstance(default, ast.Constant)
+                and default.value is None
+            ):
+                # Runtime defaults are not evaluated or fabricated.
+                field["default"] = None
+        field["type"] = type_name
+        fields.append(field)
+    return tuple(fields)
+
+
+def _native_tasks(
+    function_path: Path,
+) -> dict[str, tuple[str, tuple[str, ...], tuple[dict[str, object], ...]]]:
+    tasks: dict[str, tuple[str, tuple[str, ...], tuple[dict[str, object], ...]]] = {}
     for path in sorted(function_path.glob("*.py")):
         tree = _parse(path)
         for fn in tree.body:
@@ -101,8 +149,12 @@ def _native_tasks(function_path: Path) -> dict[str, tuple[str, tuple[str, ...]]]
                     and isinstance(decorator.args[0].value, str)
                 ):
                     name = decorator.args[0].value
-                    params = tuple(arg.arg for arg in fn.args.args if arg.arg != "session")
-                    tasks[name] = (f"ikabot.function.{path.stem}", params)
+                    fields = _task_parameter_fields(fn)
+                    tasks[name] = (
+                        f"ikabot.function.{path.stem}",
+                        tuple(str(field["name"]) for field in fields),
+                        fields,
+                    )
     return tasks
 
 
@@ -143,6 +195,7 @@ def inspect_engine(source: str | Path | None = None) -> list[EngineCapability]:
                 module=task[0] if task else imports.get(name, "unknown"),
                 menu_codes=tuple(sorted(menu.get(name, []))),
                 parameters=task[1] if task else (),
+                config_fields=task[2] if task else (),
                 # Individual tasks remain unvalidated for Daedalus dispatch,
                 # even though the candidate engine has a JSON CLI launcher.
                 structured_cli=False,
