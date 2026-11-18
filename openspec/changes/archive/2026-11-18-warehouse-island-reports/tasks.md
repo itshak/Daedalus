@@ -3,5 +3,5 @@
 - [x] Add grouped TXT export and island label to warehouse report model.
 - [x] Port island grouping and TXT save/copy affordances into the native GUI.
 - [x] Add offline engine, IPC, reporting and headless Qt verification.
-- [ ] Run lint, all Daedalus/engine tests, strict OpenSpec, package checks and macOS CI.
-- [ ] Merge as itshak and archive the verified change with canonical specs.
+- [x] Run lint, all Daedalus/engine tests, strict OpenSpec, package checks and macOS CI (17 PR #18 CI checks passed).
+- [x] Merge as itshak through PR #18 and archive the verified change with canonical specs.
