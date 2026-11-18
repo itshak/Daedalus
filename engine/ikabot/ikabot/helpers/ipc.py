@@ -639,6 +639,8 @@ class IPCServer:
         """
         from urllib.parse import urlsplit
 
+        from ikabot.helpers.serverIdentity import attest_player_from_world_html
+
         session = self._existing_session(request)
         number = str(getattr(session, "mundo", ""))
         language = str(getattr(session, "servidor", "")).lower()
@@ -659,9 +661,16 @@ class IPCServer:
         except (ValueError, TypeError, AttributeError):
             trusted_url = False
         if not trusted_url:
-            return {"status": "ok", **identity, "session_valid": False}
+            return {
+                "status": "ok", **identity, "session_valid": False,
+                "player_attested": False,
+            }
         try:
-            response = session.s.get(base_url, timeout=8, verify=config.do_ssl_verify)
+            # Never follow world-host redirects into lobby URLs with session
+            # cookies. SSL validation cannot be disabled for this attestation.
+            response = session.s.get(
+                base_url, timeout=8, verify=True, allow_redirects=False,
+            )
             text = response.text
             destination = urlsplit(str(response.url))
             # A valid city page includes its actionRequest marker. A bare 200
@@ -677,9 +686,18 @@ class IPCServer:
                 and not session.isExpired(text)
                 and "lobby.ikariam.gameforge.com" not in text
             )
+            attested = (
+                bool(valid)
+                and attest_player_from_world_html(text, str(session.username))
+            )
         except (OSError, ValueError, TypeError, AttributeError):
             valid = False
-        return {"status": "ok", **identity, "session_valid": bool(valid)}
+            attested = False
+        return {
+            "status": "ok", **identity,
+            "session_valid": bool(valid and attested),
+            "player_attested": bool(attested),
+        }
 
     def _list_existing_sessions(self):
         """Nonsecret in-memory identities, without saved-session restoration."""

@@ -261,7 +261,8 @@ def test_active_validation_is_fixed_scope_and_nonsecret(tmp_path):
             ]}
         if msg["action"] == "validate_session_existing":
             return {"status": "ok", "world": "s301-en",
-                    "username": "ExamplePlayer", "session_valid": True}
+                    "username": "ExamplePlayer", "session_valid": True,
+                    "player_attested": True}
         return {"status": "error", "error": "Unexpected request"}
 
     with fake_worker(tmp_path, responder) as (client, requested, _):
@@ -276,6 +277,9 @@ def test_active_validation_is_fixed_scope_and_nonsecret(tmp_path):
 
 
 @pytest.mark.parametrize("invalid", [
+    {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "session_valid": True},
+    {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+     "session_valid": True, "player_attested": False},
     {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "session_valid": "true"},
     {"status": "ok", "world": "s301-en", "username": "Other", "session_valid": True},
     {"status": "ok", "world": "s302-en", "username": "ExamplePlayer", "session_valid": True},

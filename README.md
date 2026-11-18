@@ -14,7 +14,10 @@
   </p>
 </div>
 
-**Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
+**Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. Optional human-assisted Playwright Chromium recovery, protected host-only
+cookie staging and lease-held dedicated-worker rebind are implemented but
+**not yet verified against a real Gameforge account**. Automatic unattended
+login, generic legacy-worker hot-swap and production cutover remain unsupported.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -51,7 +54,8 @@ See [brand assets and app icons](assets/brand/README.md), including light/dark S
 
 ## Native Mac GUI preview
 
-The current desktop reuses Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging from our existing Mac GUI. It uses the Daedalus backend API for reports and, only when explicitly enabled, task operations. It is a **partial migration**, not a release-ready replacement for the existing scraper or bot control application.
+The current desktop reuses Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging from our existing Mac GUI. It uses the Daedalus backend API for reports and, only when explicitly enabled, task operations. The reviewed native GUI migration is implemented, but this is still a
+**pre-alpha integration preview**, not a production-ready replacement.
 
 ```bash
 python -m pip install -e ".[desktop]"
@@ -127,6 +131,24 @@ Use `daedalus sessions bind-email ACCOUNT_ID` to associate an existing IkaBot sa
 ## Optional monitoring of verified existing IkaBot sessions
 
 Use the --monitor-existing-sessions flag together with --connect-existing-ipc and --enable-task-control only against a compatible already-authenticated IkaBot session on the same host. In Accounts, explicitly confirm Monitor verified session for one account; the backend holds its own host-local lease and checks a fixed read-only world URL. If the session expires, new task starts are blocked and the native desktop receives a nonsecret manual-help notification. Only a trusted worker may validate again. No new login is created and tasks are never automatically replayed. See [existing-session monitoring](docs/EXISTING-SESSION-MONITOR.md).
+
+## Isolated real-account test candidate (live acceptance still open)
+
+The native Accounts page now offers **Host recovery instructions**,
+**Prepare idle worker recovery**, manual-completion acknowledgment and
+**Verify staged cookie and rebind worker**. The visible login/CAPTCHA must
+occur on the authoritative host under the existing dedicated worker's OS
+user; a new cookie stays in a separate protected keyring slot until verified
+against the live game-world response. The API transmits no credentials,
+browser profile or cookie, and neither worker rebind nor UI refresh repeats
+any game task.
+
+**This implementation passed synthetic tests, not real Gameforge account
+validation.** See the
+[owner-supervised isolated test guide](docs/LIVE-ACCEPTANCE.md), use a separate
+authorized account, and keep the current production bot undisturbed. Three
+owner-supervised OpenSpec acceptance tasks remain open until the actual
+workflow is validated and explicit production approval is given.
 
 ## Local manual browser-cookie handoff (no remote secret transport)
 

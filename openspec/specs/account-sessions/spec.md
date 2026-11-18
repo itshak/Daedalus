@@ -227,3 +227,52 @@ The controller SHALL reject a post-recovery task request unless the same trusted
 - **GIVEN** a previously verified recovery ticket
 - **WHEN** the read-only game-world validation no longer succeeds
 - **THEN** the controller SHALL reject task dispatch without consuming an unverified game session
+
+
+### Requirement: Exact server-side player attestation before accepting a world cookie
+
+Daedalus SHALL accept a cookies-only IkaBot session only after a TLS-verified,
+nonredirecting game-world response contains an independently recognizable
+current-player identity matching the configured world/player. Neither locally
+saved IkaBot usernames, caller-supplied identities nor successful HTTP status
+alone MAY count as an independent player attestation. The engine SHALL expose
+only nonsecret validation booleans over its protected IPC interface, and the
+controller SHALL reject older IPC responses that lack proof of attestation.
+
+#### Scenario: Game session belongs to another player
+- **GIVEN** a saved account named for the configured player and an authenticated world cookie
+- **WHEN** the fresh game-world page attests another current player
+- **THEN** the cookie-only restore and existing-worker task validation SHALL fail without starting or replaying tasks
+
+#### Scenario: Game-page layout changes or identity is ambiguous
+- **WHEN** the game response lacks a recognized current-player marker or contains conflicting identities
+- **THEN** the controller SHALL not mark the session authenticated, and human review SHALL be required rather than bypassing attestation
+
+### Requirement: Host-local staged browser recovery for one dedicated worker
+
+An opt-in remote desktop SHALL present trusted-host manual browser recovery
+instructions without transmitting session secrets, cookie material, login
+links or browser profiles through the controller API. On a single explicitly
+owned dedicated worker, the controller SHALL accept only confirmed nonsecret
+preparation and assistance-ticket acknowledgment. A new browser cookie SHALL
+be staged in a distinct protected keyring slot on that worker host, treated
+as unverified until the worker independently validates the current server
+identity. Worker replacement SHALL be rejected when tasks are active or
+uncertain, SHALL retain the existing world/player lease, and SHALL NOT
+automatically replay any game task.
+
+#### Scenario: Operator initiates recovery from a remote desktop
+- **GIVEN** one authenticated, idle, authoritative dedicated worker
+- **WHEN** the user explicitly prepares recovery in the desktop and completes the browser challenge on the worker host
+- **THEN** only the lease-holder SHALL verify and rebind the staged cookie after the ticket is approved
+- **AND** no world cookie SHALL cross the desktop/backend API
+
+#### Scenario: Missing staging or unverified replacement
+- **GIVEN** a current human assistance ticket for an existing dedicated worker
+- **WHEN** a remote rebind is approved without a staged cookie or with a mismatched server player
+- **THEN** no worker rebind success SHALL be returned and no prior game task SHALL be replayed
+
+#### Scenario: Running or uncertain operation
+- **GIVEN** an active managed game task or ambiguous previous dispatch
+- **WHEN** the user requests a new recovery attempt
+- **THEN** the backend SHALL refuse to replace its worker until the user reconciles the outstanding game state

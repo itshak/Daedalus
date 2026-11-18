@@ -119,6 +119,20 @@ class APIWorker(QThread):
                 result = self.client.pending_assistance()
             elif self.action == "auth_assistance" and self.account_id:
                 result = self.client.auth_assistance(self.account_id)
+            elif self.action == "recovery_guide" and self.account_id:
+                result = self.client.recovery_guide(self.account_id)
+            elif self.action == "recovery_prepare" and self.account_id:
+                result = self.client.prepare_dedicated_recovery(
+                    self.account_id, confirmed=True,
+                )
+            elif (
+                self.action == "worker_rebind"
+                and self.account_id and self.task_payload
+            ):
+                result = self.client.rebind_dedicated_worker(
+                    self.account_id, str(self.task_payload["ticket_id"]),
+                    confirmed=True,
+                )
             elif (
                 self.action == "auth_assistance_approve"
                 and self.account_id and self.task_payload
@@ -192,6 +206,9 @@ class MainWindow(FluentWindow):
         self._pending_client: DaedalusClient | None = None
         self._pending_preferences: tuple[str, str] | None = None
         self._worker: APIWorker | None = None
+        # Follow-up API reads run only after QThread.finished. A zero-delay
+        # timer fired from completed may race with finished and be discarded.
+        self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
         self._active_backend_url: str | None = None
@@ -256,6 +273,20 @@ class MainWindow(FluentWindow):
         )
         self.accounts_page.assistance_check_requested.connect(
             lambda account_id: self._request("auth_assistance", account_id=account_id)
+        )
+        self.accounts_page.recovery_guide_requested.connect(
+            lambda account_id: self._request("recovery_guide", account_id=account_id)
+        )
+        self.accounts_page.recovery_prepare_requested.connect(
+            lambda account_id: self._request(
+                "recovery_prepare", account_id=account_id,
+            )
+        )
+        self.accounts_page.rebind_requested.connect(
+            lambda account_id, ticket_id: self._request(
+                "worker_rebind", account_id=account_id,
+                task_payload={"ticket_id": ticket_id},
+            )
         )
         self.accounts_page.assistance_approve_requested.connect(
             lambda account_id, ticket_id: self._request(
@@ -520,6 +551,39 @@ class MainWindow(FluentWindow):
                     "Assistance acknowledged",
                     "The game worker still must validate authentication before resuming.",
                 )
+                account_id = payload.get("account_id")
+                if isinstance(account_id, str):
+                    self._recovery_followup = ("recovery_guide", account_id)
+        elif action == "recovery_guide":
+            assert isinstance(payload, dict)
+            self.accounts_page.set_recovery_guide(payload)
+        elif action == "recovery_prepare":
+            assert isinstance(payload, dict)
+            self._notice(
+                "Dedicated worker recovery prepared",
+                "New tasks are paused. Complete human login only on the "
+                "authoritative worker host, then acknowledge the manual step.",
+            )
+            account_id = payload.get("account_id")
+            if isinstance(account_id, str):
+                # Render the returned safe broker ticket immediately. The
+                # worker is still completing this request; queue only one
+                # follow-up, rather than dropping a concurrent second fetch.
+                self.accounts_page.set_assistance({
+                    "enabled": True,
+                    "account_id": account_id,
+                    "ticket": payload.get("ticket"),
+                })
+                self._recovery_followup = ("recovery_guide", account_id)
+        elif action == "worker_rebind":
+            assert isinstance(payload, dict)
+            logger.info("Dedicated worker rebind completed after host-only game attestation")
+            self._notice(
+                "Recovered worker verified",
+                "Authoritative worker confirmed the game-world player. "
+                "Old tasks were not replayed.",
+            )
+            self._recovery_followup = ("accounts", "")
         elif action == "connected_accounts":
             assert isinstance(payload, list)
             self.accounts_page.set_connected_ids(payload)
@@ -574,6 +638,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        # Never reuse a recovery refresh across a failed or changed backend.
+        self._recovery_followup = None
         if action == "connect":
             self._pending_preferences = None
             if self._pending_client is not None:
@@ -587,6 +653,10 @@ class MainWindow(FluentWindow):
     def _on_worker_finished(self) -> None:
         self._worker = None
         self.connection_page.connect_button.setEnabled(True)
+        followup, self._recovery_followup = self._recovery_followup, None
+        if followup is not None and self.client is not None:
+            action, account_id = followup
+            self._request(action, account_id=account_id or None)
 
     def _notice(self, title: str, message: str) -> None:
         InfoBar.warning(

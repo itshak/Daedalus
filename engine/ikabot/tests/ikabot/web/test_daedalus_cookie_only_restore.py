@@ -35,7 +35,8 @@ def prepared_saved_session():
 def _response(
     host="s301-en.ikariam.gameforge.com",
     status=200,
-    html='<div>City overview</div><input name="actionRequest" value="fake"/>',
+    html='<div>City overview</div><span id="avatarName">ExamplePlayer</span>'
+         '<input name="actionRequest" value="fake"/>',
 ):
     return MagicMock(
         url=f"https://{host}/index.php?",
@@ -52,6 +53,8 @@ def test_cookies_only_restores_exact_identity_without_lobby(prepared_saved_sessi
         visited.append((url, kwargs))
         assert url == "https://s301-en.ikariam.gameforge.com/index.php?"
         assert kwargs.get("timeout") == 12
+        assert kwargs.get("verify") is True
+        assert kwargs.get("allow_redirects") is False
         return _response()
 
     with (
@@ -76,6 +79,8 @@ def test_cookies_only_restores_exact_identity_without_lobby(prepared_saved_sessi
     _response(html='<a class="logout" href="?logout">Please log in</a>'),
     _response(html="index.php?logout"),
     _response(html="<div>Public page without a game action token</div>"),
+    _response(html='<span id="avatarName">OtherPlayer</span>'
+                    '<input name="actionRequest" value="fake"/>'),
 ])
 def test_cookie_only_rejects_failed_world_validation_without_new_login(
     prepared_saved_session, response,

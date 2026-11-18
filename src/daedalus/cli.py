@@ -51,7 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     sessions.add_argument("action", choices=[
         "bind-email", "forget-email", "probe-saved-cookies",
         "bind-world-cookie", "forget-world-cookie", "assist-browser-login",
-        "assist-playwright-login",
+        "assist-playwright-login", "stage-world-cookie", "stage-playwright-login",
+        "discard-staged-cookie",
     ])
     sessions.add_argument("account_id", help="Configured secret-free account ID")
     sessions.add_argument("--config", help="TOML account metadata path outside repository")
@@ -137,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
             assisted_browser_cookie_login,
             bind_saved_email,
             bind_world_cookie,
+            discard_staged_world_cookie,
             probe_saved_cookies,
+            stage_world_cookie,
             unbind_saved_email,
             unbind_world_cookie,
         )
@@ -218,6 +221,43 @@ def main(argv: list[str] | None = None) -> int:
                     account, AccountSessionCoordinator(configured), confirmed=True,
                     human_confirm=operator_confirm,
                 )
+                print(json.dumps(result))
+            elif args.action == "stage-world-cookie":
+                import getpass
+                import sys
+
+                if not args.confirm_read_only_network:
+                    parser.error("Staging requires explicit --confirm-read-only-network consent")
+                if not sys.stdin.isatty():
+                    parser.error("Cookie staging must happen on the authorized host's terminal")
+                cookie = getpass.getpass(
+                    "Unverified world ikariam cookie for existing worker (hidden): "
+                )
+                result = stage_world_cookie(account, cookie, confirmed=True)
+                print(json.dumps(result))
+            elif args.action == "stage-playwright-login":
+                import sys
+
+                from daedalus.browser_recovery import stage_with_human_browser
+
+                if not args.confirm_read_only_network:
+                    parser.error("Browser staging requires --confirm-read-only-network")
+                if not sys.stdin.isatty():
+                    parser.error("Browser staging requires a graphical terminal on the worker host")
+
+                def stage_confirm() -> bool:
+                    print(
+                        "Complete the official browser login/CAPTCHA on THIS worker host; "
+                        "the cookie will be staged UNVERIFIED until the worker confirms it."
+                    )
+                    return input("Type YES after opening your exact game world: ") == "YES"
+
+                result = stage_with_human_browser(
+                    account, confirmed=True, human_confirm=stage_confirm,
+                )
+                print(json.dumps(result))
+            elif args.action == "discard-staged-cookie":
+                result = discard_staged_world_cookie(account)
                 print(json.dumps(result))
             elif args.action == "probe-saved-cookies":
                 if not args.confirm_read_only_network:
@@ -315,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
                 session_coordinator=owner, task_controller=task_controller,
                 enable_account_editing=args.enable_account_editing,
                 assistance_broker=broker, recovery_monitor=monitor,
-                demo_mode=args.demo,
+                saved_worker=worker, demo_mode=args.demo,
             )
         except (
             AccountConfigError, AccountEditUnavailable, SessionBusyError,

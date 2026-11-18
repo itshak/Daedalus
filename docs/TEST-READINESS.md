@@ -7,7 +7,17 @@ python -m pip install -e ".[server,client]"
 daedalus doctor
 ```
 
-The JSON distinguishes implemented code from installed dependencies. It identifies engine/CLI, native desktop, opt-in existing-session IPC/task/monitor support and the absent new-worker bootstrap/automatic browser login. `live_accounts_configured: null` means **not inspected**. A preview is not production-ready because a diagnostic passes.
+The JSON distinguishes implemented code from installed dependencies.
+It identifies engine/CLI, native desktop, opt-in existing-session
+IPC/task/monitor support, explicit single-account cookie-only worker bootstrap,
+host-local staged browser recovery, dedicated-worker remote approval and
+independent game-world player attestation. The diagnostics still report
+`automatic_browser_authentication_implemented: false`,
+`real_world_player_attestation_tested: null` and
+`production_ready: false`. A null live-account field means **not inspected**,
+not success. The OS keyring and Playwright browser dependencies must be
+installed on the worker host separately. A passing diagnostic cannot
+authorize production cutover.
 
 To test the backend without a game login:
 

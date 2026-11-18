@@ -246,7 +246,8 @@ def test_active_session_validation_reads_exact_world_without_login():
     session.s.get.return_value = MagicMock(
         status_code=200,
         url="https://s301-en.ikariam.gameforge.com/index.php?",
-        text='<div id="gameHeader">Ikariam</div><input name="actionRequest" value="private"/>',
+        text='<div id="gameHeader">Ikariam</div><span id="avatarName">ExamplePlayer</span>'
+             '<input name="actionRequest" value="private"/>',
     )
     server = IPCServer(default_session=session)
     with patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("new login!")):
@@ -256,13 +257,13 @@ def test_active_session_validation_reads_exact_world_without_login():
         })
     assert response == {
         "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
-        "session_valid": True,
+        "session_valid": True, "player_attested": True,
     }
     assert "actionRequest" not in str(response)
     assert "private" not in str(response)
     session.s.get.assert_called_once_with(
         "https://s301-en.ikariam.gameforge.com/index.php?",
-        timeout=8, verify=True,
+        timeout=8, verify=True, allow_redirects=False,
     )
 
 
@@ -286,7 +287,7 @@ def test_active_validation_rejects_expired_redirect_and_unexpected_html():
         })
         assert result == {
             "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
-            "session_valid": False,
+            "session_valid": False, "player_attested": False,
         }
 
 

@@ -90,3 +90,26 @@ unconfirmed web server, extra Gameforge login or task replay has been ported.
 This is a separately maintained Daedalus overlay, **not** upstream-author
 code or evidence of live compatibility. The existing public CLI contract
 and browser-assisted authentication boundary are retained.
+
+
+## Daedalus independent world-page identity attestation (2026-11-18)
+
+The maintained `helpers/serverIdentity.py` extension and the cookies-only
+`Session.from_saved`/`validate_session_existing` overlay now require a
+recognizable current-player marker on a TLS-verified, **nonredirecting**
+game-world response. A saved IkaBot username, a selected lobby entry, an HTTP
+200 response or an actionRequest token on its own cannot prove the cookie
+belongs to the configured player. The engine rejects missing, ambiguous or
+other-player identities and the Daedalus controller rejects IPC validation
+replies that lack a typed `player_attested` boolean. The only IPC outputs are
+nonsecret world/player names and booleans; raw HTML, cookies and page tokens
+never cross the IPC boundary.
+
+The optional remote Mac controller can now approve **host-only** staging and
+rebind of one existing Daedalus-owned dedicated worker, but never uploads
+cookies or launches a remote browser. The original public IkaBot CLI and
+default non-cookies-only saved-session path are unchanged. The new parser
+has only been verified with synthetic markup; live Gameforge compatibility is
+pending explicit owner-supervised testing under
+`openspec/changes/validate-live-authentication`. A changed website layout
+must fail closed until carefully reviewed, not bypass the safety check.

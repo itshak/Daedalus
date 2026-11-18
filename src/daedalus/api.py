@@ -32,6 +32,7 @@ from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
+from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
 from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
 from daedalus.warehouse import CityWarehouseSnapshot
@@ -50,6 +51,7 @@ def create_app(
     enable_account_editing: bool = False,
     assistance_broker: AssistanceBroker | None = None,
     recovery_monitor: ExistingSessionRecoveryMonitor | None = None,
+    saved_worker: SavedCookieWorker | None = None,
     demo_mode: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
@@ -61,6 +63,7 @@ def create_app(
         or session_coordinator is not None or ipc_client is not None
         or task_controller is not None or enable_account_editing
         or assistance_broker is not None or recovery_monitor is not None
+        or saved_worker is not None
     ):
         raise ValueError("Synthetic demo cannot connect to real accounts, IPC or task controls")
     if demo_mode:
@@ -87,6 +90,15 @@ def create_app(
         or enable_account_editing
     ):
         raise ValueError("Recovery monitor must share the opted-in task owner and broker")
+    if saved_worker is not None:
+        if (
+            saved_worker.coordinator is not owner
+            or saved_worker.account.id not in account_by_id
+            or account_by_id[saved_worker.account.id] != saved_worker.account
+        ):
+            raise ValueError("Dedicated saved worker must be the configured authoritative owner")
+        if recovery_monitor is not None:
+            recovery_monitor.attach_dedicated_worker(saved_worker)
     store = AccountMetadataStore(accounts_path) if enable_account_editing else None
     if store is not None:
         saved = store.snapshot()
@@ -205,6 +217,92 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid assistance request") from exc
         except AssistanceConflict as exc:
             raise HTTPException(status_code=409, detail="Assistance request is stale or busy") from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/recovery-guide",
+        dependencies=[Depends(authorized)],
+    )
+    def recovery_guide(account_id: str) -> dict[str, object]:
+        """Only a fixed nonsecret host-local workflow, never browser control.
+
+        Neither a URL of the authenticated browser nor any cookie, token,
+        credential, profile or arbitrary command is sent over HTTP.
+        """
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        ticket = None
+        if assistance_broker is not None:
+            try:
+                ticket = assistance_broker.snapshot(account_id)["ticket"]
+            except AssistanceConflict as exc:
+                raise HTTPException(status_code=409, detail="Recovery session changed") from exc
+        dedicated = bool(
+            recovery_monitor is not None and saved_worker is not None
+            and saved_worker.account.id == account_id
+        )
+        return {
+            "enabled": recovery_monitor is not None,
+            "account_id": account_id,
+            "mode": "host_local_only",
+            "requires_trusted_host_session": True,
+            "allow_http_cookie_transfer": False,
+            "dedicated_rebind_supported": dedicated,
+            "session_status": owner.status(account_id),
+            "ticket": ticket,
+        }
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/recovery/prepare",
+        dependencies=[Depends(authorized)],
+    )
+    def prepare_dedicated_recovery(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit preparation consent required")
+        if recovery_monitor is None or saved_worker is None:
+            raise HTTPException(status_code=503, detail="Dedicated recovery is disabled")
+        try:
+            return recovery_monitor.prepare_dedicated_recovery(
+                account_id, confirmed=True,
+            )
+        except (MonitoringUnavailable, AssistanceConflict, ValueError) as exc:
+            raise HTTPException(
+                status_code=409, detail="Dedicated worker is not safely idle or owned",
+            ) from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/recovery/{ticket_id}/rebind-worker",
+        dependencies=[Depends(authorized)],
+    )
+    def rebind_dedicated_worker(
+        account_id: str, ticket_id: str,
+        payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, str]:
+        """Approve only a SAME-HOST staged cookie under existing worker lease.
+
+        The endpoint cannot upload credentials or browser cookies; a host-only
+        interactive command must stage them before this request is accepted.
+        """
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit recovery consent required")
+        if recovery_monitor is None or saved_worker is None:
+            raise HTTPException(status_code=503, detail="Dedicated recovery is disabled")
+        try:
+            return recovery_monitor.rebind_dedicated_worker(
+                account_id, ticket_id, confirmed=True,
+            )
+        except (MonitoringUnavailable, AssistanceConflict, ValueError) as exc:
+            raise HTTPException(
+                status_code=409, detail="Host-local staged recovery is unavailable or unverified",
+            ) from exc
 
     @app.get("/api/v1/auth-assistance/pending", dependencies=[Depends(authorized)])
     def pending_assistance() -> dict[str, object]:

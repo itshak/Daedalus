@@ -1889,6 +1889,11 @@ class Session:
             }
 
         def _try_world_cookies(cookie_dict, session_data):
+            # This is a fresh world-host attestation, not a claim from saved
+            # session metadata. The fail-closed check is only for Daedalus's
+            # explicit cookies-only mode; leave upstream legacy login intact.
+            from ikabot.helpers.serverIdentity import attest_player_from_world_html
+
             old_s = requests.Session()
             old_s.headers.clear()
             old_s.headers.update(self.headers)
@@ -1899,7 +1904,11 @@ class Session:
             try:
                 get_options = {"verify": config.do_ssl_verify}
                 if cookies_only:
-                    get_options["timeout"] = 12
+                    get_options.update({
+                        "timeout": 12,
+                        "verify": True,
+                        "allow_redirects": False,
+                    })
                 old_resp = old_s.get(self.urlBase, **get_options)
                 html = old_resp.text
             except Exception as exc:
@@ -1914,6 +1923,7 @@ class Session:
                 and (not cookies_only or urllib.parse.urlsplit(old_resp.url).scheme == "https")
                 and (not cookies_only or urllib.parse.urlsplit(old_resp.url).path == "/index.php")
                 and (not cookies_only or "actionRequest" in html)
+                and (not cookies_only or attest_player_from_world_html(html, self.username))
                 and (not cookies_only or old_s.cookies.get("ikariam") is not None)
             ):
                 requests.cookies.cookiejar_from_dict(

@@ -7,3 +7,9 @@ Production cutover SHALL require a supervised real-account test confirming that 
 - **GIVEN** an isolated, explicitly authorized account and one authoritative worker host
 - **WHEN** the owner performs a browser login or manual challenge and requests recovery
 - **THEN** the worker SHALL validate the game-world session and independently attest the configured player before any new user-approved task is dispatched
+
+
+#### Scenario: Passing offline tests cannot authorize production
+- **GIVEN** synthetic browser, IPC, GUI and server-side identity regression tests pass
+- **WHEN** no actual isolated Gameforge account has completed the owner-supervised recovery and task trial
+- **THEN** the real-account acceptance change SHALL remain active and production cutover SHALL remain unauthorized
