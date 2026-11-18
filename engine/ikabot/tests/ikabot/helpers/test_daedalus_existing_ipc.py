@@ -237,3 +237,78 @@ def test_managed_task_never_creates_missing_session():
         })
     assert response["status"] == "error"
     assert server._daedalus_tasks == {}
+
+
+def test_active_session_validation_reads_exact_world_without_login():
+    session = make_session()
+    session.urlBase = "https://s301-en.ikariam.gameforge.com/index.php?"
+    session.isExpired.return_value = False
+    session.s.get.return_value = MagicMock(
+        status_code=200,
+        url="https://s301-en.ikariam.gameforge.com/index.php?",
+        text='<div id="gameHeader">Ikariam</div><input name="actionRequest" value="private"/>',
+    )
+    server = IPCServer(default_session=session)
+    with patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("new login!")):
+        response = server.handle_request({
+            "action": "validate_session_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+    assert response == {
+        "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+        "session_valid": True,
+    }
+    assert "actionRequest" not in str(response)
+    assert "private" not in str(response)
+    session.s.get.assert_called_once_with(
+        "https://s301-en.ikariam.gameforge.com/index.php?",
+        timeout=8, verify=True,
+    )
+
+
+def test_active_validation_rejects_expired_redirect_and_unexpected_html():
+    for status_code, url, html in [
+        (401, "https://s301-en.ikariam.gameforge.com/index.php?", "actionRequest"),
+        (200, "https://lobby.ikariam.gameforge.com/", "actionRequest"),
+        (200, "https://s301-en.ikariam.gameforge.com/index.php?", "Please sign in"),
+        (200, "https://s301-en.ikariam.gameforge.com/index.php?", "actionRequest index.php?logout"),
+    ]:
+        session = make_session()
+        session.urlBase = "https://s301-en.ikariam.gameforge.com/index.php?"
+        session.isExpired.return_value = False
+        session.s.get.return_value = MagicMock(
+            status_code=status_code, url=url, text=html,
+        )
+        server = IPCServer(default_session=session)
+        result = server.handle_request({
+            "action": "validate_session_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        })
+        assert result == {
+            "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+            "session_valid": False,
+        }
+
+
+def test_active_validation_wrong_identity_never_touches_game_network():
+    session = make_session()
+    session.urlBase = "https://s301-en.ikariam.gameforge.com/index.php?"
+    server = IPCServer(default_session=session)
+    with patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")):
+        response = server.handle_request({
+            "action": "validate_session_existing", "world": "s301-en", "player": "Other",
+        })
+    assert response["status"] == "error"
+    session.s.get.assert_not_called()
+
+
+def test_active_validation_rejects_untrusted_session_url_without_network():
+    session = make_session()
+    session.urlBase = "https://example.invalid/"
+    server = IPCServer(default_session=session)
+    result = server.handle_request({
+        "action": "validate_session_existing", "world": "s301-en",
+        "player": "ExamplePlayer",
+    })
+    assert result["session_valid"] is False
+    session.s.get.assert_not_called()

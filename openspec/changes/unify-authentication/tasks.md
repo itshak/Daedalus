@@ -5,5 +5,6 @@
 - [x] Add a safe cookie-only probe of previously saved sessions (no lobby loginLink or automatic account worker).
 - [ ] Port safe browser login and manual CAPTCHA assistance without credentials.
 - [ ] Implement validated remote handoff or protected remote-browser fallback.
-- [ ] Add GUI notification, approval and task-resume flow.
+- [x] Add opt-in existing-session expiration detection, GUI notification and worker revalidation (no automatic task resume).
+- [ ] Add secure, user-approved task resume after verified real browser recovery.
 - [ ] Test recovery offline, scan secrets, validate OpenSpec.

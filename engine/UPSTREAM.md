@@ -64,3 +64,8 @@ The CLI/IPC patchset is upstream code under review and may change before merging
 ## Daedalus safe cookie-only recovery overlay
 
 The `safe-saved-session-recovery` change adds a **Daedalus-specific** optional `Session.from_saved(..., cookies_only=True)` pathway. It bypasses lobby token/loginLink/blackbox flows, checks only existing world cookies against the exact world, requires a successful world-host HTTP 200 and rejects invalid cookies without a new Gameforge login. The old upstream CLI and `from_saved` default semantics are kept; this option is not represented as an upstream IkaBot stable feature. Daedalus's local `sessions probe-saved-cookies` command uses the explicit mode under an account lease, with the saved-user email association held in the OS keyring rather than source. No game tests execute in CI. See [recovery setup](../docs/SAFE-COOKIE-RECOVERY.md).
+
+
+## Existing-session validation IPC overlay
+
+The separate Daedalus-maintained existing-session-recovery-monitor change adds validate_session_existing. It selects an exact existing in-memory world/player only, performs a fixed world-host read-only GET and returns only the world/player and boolean validity. No Gameforge login, Session.from_saved, raw HTML, hidden action token or cookie is transferred. This is not part of upstream stable IkaBot. See [controller monitor limitations](../docs/EXISTING-SESSION-MONITOR.md).

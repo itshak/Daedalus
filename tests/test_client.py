@@ -284,3 +284,64 @@ def test_assistance_client_handles_unsupported_and_redacted_errors():
             )
         assert error.value.status_code == 409
         assert secret not in str(error.value)
+
+
+def test_monitoring_client_uses_bearer_and_separate_confirmation():
+    import uuid
+
+    ticket_id = str(uuid.uuid4())
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, request.headers.get("Authorization")))
+        if request.method == "GET":
+            return httpx.Response(200, json={
+                "enabled": True,
+                "tickets": [{
+                    "account_id": "alpha", "ticket_id": ticket_id,
+                    "reason": "session_expired", "state": "waiting_operator",
+                }],
+            })
+        assert json.loads(request.content) == {"confirmed": True}
+        return httpx.Response(200, json={
+            "account_id": "alpha", "status": "monitoring_existing_session",
+        })
+
+    with mock_client(handler) as client:
+        assert client.pending_assistance()["tickets"][0]["ticket_id"] == ticket_id
+        assert client.monitor_existing_account("alpha", confirmed=True)["status"] == (
+            "monitoring_existing_session"
+        )
+        with pytest.raises(ValueError):
+            client.monitor_existing_account("alpha", confirmed=False)
+        with pytest.raises(ValueError):
+            client.monitor_existing_account("../other", confirmed=True)
+    assert [row[0] for row in seen] == ["GET", "POST"]
+    assert all(row[2] == f"Bearer {TOKEN}" for row in seen)
+
+
+def test_monitor_client_detects_cross_account_notifications_and_error_redacts():
+    fake_secret = "private_game_cookie"
+
+    def invalid(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={
+                "enabled": True, "tickets": [{
+                    "account_id": "alpha", "ticket_id": fake_secret,
+                    "reason": "session_expired", "state": "waiting_operator",
+                }],
+            })
+        return httpx.Response(409, text=fake_secret)
+
+    with mock_client(invalid) as client:
+        with pytest.raises(APIConnectionError, match="invalid assistance notification"):
+            client.pending_assistance()
+        with pytest.raises(APIConnectionError) as err:
+            client.monitor_existing_account("alpha", confirmed=True)
+        assert err.value.status_code == 409
+        assert fake_secret not in str(err.value)
+
+
+def test_monitoring_client_graceful_fallback_on_older_backend():
+    with mock_client(lambda _req: httpx.Response(404)) as client:
+        assert client.pending_assistance() == {"enabled": False, "tickets": []}

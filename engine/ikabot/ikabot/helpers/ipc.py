@@ -631,6 +631,56 @@ class IPCServer:
             raise ValueError("No unique already-authenticated game session matches")
         return matches[0]
 
+    def _validate_session_existing(self, request):
+        """Read-only validation of an already owned world session, never a login.
+
+        The fixed game-world GET returns only a boolean to Daedalus. No HTML,
+        cookies, redirect destinations, loginLink or action tokens cross IPC.
+        """
+        from urllib.parse import urlsplit
+
+        session = self._existing_session(request)
+        number = str(getattr(session, "mundo", ""))
+        language = str(getattr(session, "servidor", "")).lower()
+        if not re.fullmatch(r"[0-9]{1,6}", number) or not re.fullmatch(r"[a-z]{2,4}", language):
+            raise ValueError("Invalid existing game world identity")
+        host = f"s{number}-{language}.ikariam.gameforge.com"
+        world = f"s{number}-{language}"
+        identity = {"world": world, "username": str(session.username)}
+        base_url = getattr(session, "urlBase", "")
+        try:
+            parsed = urlsplit(base_url)
+            trusted_url = (
+                parsed.scheme == "https" and parsed.hostname == host
+                and parsed.path == "/index.php" and not parsed.username
+                and not parsed.password and parsed.port in (None, 443)
+                and parsed.query == "" and parsed.fragment == ""
+            )
+        except (ValueError, TypeError, AttributeError):
+            trusted_url = False
+        if not trusted_url:
+            return {"status": "ok", **identity, "session_valid": False}
+        try:
+            response = session.s.get(base_url, timeout=8, verify=config.do_ssl_verify)
+            text = response.text
+            destination = urlsplit(str(response.url))
+            # A valid city page includes its actionRequest marker. A bare 200
+            # lobby or marketing/login page must never count as authenticated.
+            valid = (
+                response.status_code == 200
+                and destination.scheme == "https"
+                and destination.hostname == host
+                and destination.path == "/index.php"
+                and isinstance(text, str)
+                and "actionRequest" in text
+                and "index.php?logout" not in text
+                and not session.isExpired(text)
+                and "lobby.ikariam.gameforge.com" not in text
+            )
+        except (OSError, ValueError, TypeError, AttributeError):
+            valid = False
+        return {"status": "ok", **identity, "session_valid": bool(valid)}
+
     def _list_existing_sessions(self):
         """Nonsecret in-memory identities, without saved-session restoration."""
         sessions = []
@@ -657,6 +707,8 @@ class IPCServer:
                     return self._list_cities(request)
                 if action == "list_sessions":
                     return self._list_existing_sessions()
+                if action == "validate_session_existing":
+                    return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
                 if action == "warehouse_snapshots_existing":
