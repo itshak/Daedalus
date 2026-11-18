@@ -15,6 +15,7 @@ from daedalus.account_sessions import AccountSessionCoordinator, SessionBusyErro
 from daedalus.accounts import Account
 
 _SERVICE = "io.github.itshak.daedalus.saved-account-reference"
+_COOKIE_SERVICE = "io.github.itshak.daedalus.world-cookie"
 _EMAIL = re.compile(r"[^\s@]{1,120}@[^\s@]{1,120}\.[^\s@]{2,63}\Z")
 _WORLD = re.compile(r"s([0-9]{1,6})-([a-z]{2,4})\Z", re.IGNORECASE)
 
@@ -34,11 +35,37 @@ def _store(provided: CredentialStore | None) -> CredentialStore:
         return provided
     try:
         import keyring
-        return keyring
     except ImportError as exc:
         raise SavedSessionUnavailable(
             "Install Daedalus recovery extras to enable OS-keyring bindings"
         ) from exc
+
+    # Some optional keyring packages provide unencrypted plain-text or file
+    # storage. World cookies must never fall back to such a provider.
+    safe_backends = (
+        "keyring.backends.macOS", "keyring.backends.Windows",
+        "keyring.backends.SecretService", "keyring.backends.kwallet",
+        "keyring.backends.libsecret",
+    )
+
+    def backend_is_safe(backend: object) -> bool:
+        qualified = type(backend).__module__
+        if qualified.startswith(safe_backends):
+            return True
+        if qualified == "keyring.backends.chainer":
+            members = getattr(backend, "backends", ())
+            return bool(members) and all(backend_is_safe(member) for member in members)
+        return False
+
+    try:
+        backend = keyring.get_keyring()
+    except Exception as exc:
+        raise SavedSessionUnavailable("No protected OS keyring is available") from exc
+    if not backend_is_safe(backend):
+        raise SavedSessionUnavailable(
+            "A protected operating-system credential backend is required"
+        )
+    return keyring
 
 
 def _account_key(account: Account) -> str:
@@ -94,16 +121,46 @@ def _email_binding(
     return value
 
 
-def _real_restore(account: Account, email: str) -> object:
+def _validated_world_cookie(value: object) -> str:
+    if (
+        not isinstance(value, str) or not 16 <= len(value) <= 4096
+        or not value.isascii() or not value.isprintable()
+        or any(char in value for char in " ;\\")
+    ):
+        raise SavedSessionUnavailable("A valid browser world cookie is required")
+    return value
+
+
+def _world_cookie_binding(
+    account: Account, credential_store: CredentialStore | None,
+) -> str | None:
+    try:
+        value = _store(credential_store).get_password(
+            _COOKIE_SERVICE, _account_key(account),
+        )
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to access protected world cookie") from exc
+    if value is None:
+        return None
+    return _validated_world_cookie(value)
+
+
+def _real_restore(
+    account: Account, email: str, world_cookie: str | None = None,
+) -> object:
     try:
         from ikabot.web.session import Session
     except ImportError as exc:
         raise SavedSessionUnavailable("Install the vendored IkaBot engine to probe saved cookies") from exc
     # Only the Daedalus-maintained, cookie-only engine overlay may be used.
     # This mode cannot issue a lobby loginLink or launch a new Gameforge login.
-    return Session.from_saved(
-        mail=email, world=account.world, player=account.player, cookies_only=True,
-    )
+    options: dict[str, object] = {
+        "mail": email, "world": account.world,
+        "player": account.player, "cookies_only": True,
+    }
+    if world_cookie is not None:
+        options["world_cookie_override"] = _validated_world_cookie(world_cookie)
+    return Session.from_saved(**options)
 
 
 def verify_restored_identity(session: object, account: Account) -> None:
@@ -149,12 +206,19 @@ def probe_saved_cookies(
             "Explicit canonical world identifier required, for example s301-en"
         )
     email = _email_binding(account, credential_store)
+    current_cookie = (
+        _world_cookie_binding(account, credential_store)
+        if restore is _real_restore else None
+    )
     try:
         with coordinator.acquire(account.id):
             session = None
             try:
                 try:
-                    session = restore(account, email)
+                    if restore is _real_restore:
+                        session = _real_restore(account, email, current_cookie)
+                    else:
+                        session = restore(account, email)
                 except SavedSessionUnavailable:
                     raise
                 except Exception as exc:
@@ -180,3 +244,51 @@ def probe_saved_cookies(
         raise SavedSessionUnavailable(
             "Another Daedalus worker currently owns this account on the host"
         ) from exc
+
+
+
+def bind_world_cookie(
+    account: Account,
+    coordinator: AccountSessionCoordinator,
+    value: str,
+    *,
+    confirmed: bool,
+    credential_store: CredentialStore | None = None,
+    restore: Callable[[Account, str, str], object] | None = None,
+) -> dict[str, str]:
+    """Import one manually obtained browser world cookie locally, with consent.
+
+    The browser or trusted human must first complete interactive login and
+    CAPTCHA. This function performs only a cookie-authenticated read-only game
+    GET, verifies exact identity, closes it and saves the cookie in OS keyring
+    after success. It never sends the cookie over Daedalus HTTP or stdout.
+    """
+    if confirmed is not True:
+        raise SavedSessionUnavailable("Import requires explicit network confirmation")
+    cookie = _validated_world_cookie(value)
+    if restore is None:
+        restore = lambda a, email, secret: _real_restore(a, email, secret)
+    # All account identity, lease, exact world and saved-email prerequisites
+    # are enforced by the ordinary confirmed validation mechanism.
+    probe_saved_cookies(
+        account, coordinator, confirmed=True, credential_store=credential_store,
+        restore=lambda a, email: restore(a, email, cookie),
+    )
+    try:
+        _store(credential_store).set_password(_COOKIE_SERVICE, _account_key(account), cookie)
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to store verified world cookie in keyring") from exc
+    return {"account_id": account.id, "status": "world_cookie_bound"}
+
+
+def unbind_world_cookie(
+    account: Account, *, credential_store: CredentialStore | None = None,
+) -> None:
+    """Forget only the exact current account/world/player cookie reference."""
+    try:
+        provider = _store(credential_store)
+        key = _account_key(account)
+        if provider.get_password(_COOKIE_SERVICE, key) is not None:
+            provider.delete_password(_COOKIE_SERVICE, key)
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to remove protected world cookie") from exc

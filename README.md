@@ -117,6 +117,10 @@ Use `daedalus sessions bind-email ACCOUNT_ID` to associate an existing IkaBot sa
 
 Use the --monitor-existing-sessions flag together with --connect-existing-ipc and --enable-task-control only against a compatible already-authenticated IkaBot session on the same host. In Accounts, explicitly confirm Monitor verified session for one account; the backend holds its own host-local lease and checks a fixed read-only world URL. If the session expires, new task starts are blocked and the native desktop receives a nonsecret manual-help notification. Only a trusted worker may validate again. No new login is created and tasks are never automatically replayed. See [existing-session monitoring](docs/EXISTING-SESSION-MONITOR.md).
 
+## Local manual browser-cookie handoff (no remote secret transport)
+
+For an existing IkaBot saved account, a separately authorized local operator can copy an already authenticated world cookie from their own browser and use the hidden terminal action -- daedalus sessions bind-world-cookie ACCOUNT_ID --confirm-read-only-network -- to verify the exact world/player and store it only in the OS keyring. The original browser/CAPTCHA login is completed manually; this does not create a new login, start IkaBot, update an already running worker or send cookies through the controller API. See [local browser-cookie handoff](docs/PRIVATE-WORLD-COOKIE-HANDOFF.md).
+
 ## Manual authentication assistance protocol (foundation only)
 
 The repository includes a credential-free, lease-bound acknowledgment protocol for **future** trusted worker login assistance. In the native Accounts view, a selected account can request nonsecret assistance status and an explicit manual-step acknowledgment when a compatible trusted in-process broker is injected into the server. This action does **not** authenticate, transfer a cookie, bypass a CAPTCHA, start a login, or resume any game task. The normal CLI does not enable this broker until an actual supervised engine/browser integration is implemented. See [manual authentication assistance and limitations](docs/AUTH-ASSISTANCE.md).
