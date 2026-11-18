@@ -131,3 +131,34 @@ def test_playwright_adapter_accepts_only_exact_secure_world_cookie():
     adapter = PlaywrightHumanBrowser()
     adapter._context = FakeContext()
     assert adapter.world_cookie("s301-en.ikariam.gameforge.com") == "Z" * 48
+
+
+def test_playwright_real_chromium_cookie_isolation_offline():
+    """Runs only in the optional browser CI job; synthetic pages, no network."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import Error, sync_playwright
+
+    with sync_playwright() as api:
+        try:
+            browser = api.chromium.launch(headless=True)
+        except Error as exc:
+            pytest.skip(f"Chromium is not installed: {type(exc).__name__}")
+        try:
+            context = browser.new_context()
+            context.route("**/*", lambda route: route.fulfill(
+                status=200, content_type="text/html", body="<html>synthetic offline</html>"
+            ))
+            page = context.new_page()
+            page.goto("https://s301-en.ikariam.gameforge.com/")
+            context.add_cookies([
+                {"name": "ikariam", "value": "S" * 48,
+                 "url": "https://s301-en.ikariam.gameforge.com/", "secure": True},
+                {"name": "ikariam", "value": "T" * 48,
+                 "url": "https://s302-en.ikariam.gameforge.com/", "secure": True},
+            ])
+            adapter = PlaywrightHumanBrowser()
+            adapter._context = context
+            assert adapter.world_cookie("s301-en.ikariam.gameforge.com") == "S" * 48
+            assert adapter.world_cookie("s302-en.ikariam.gameforge.com") == "T" * 48
+        finally:
+            browser.close()
