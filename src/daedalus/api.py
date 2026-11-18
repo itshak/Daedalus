@@ -27,6 +27,7 @@ from daedalus.account_sessions import (
     SessionPhase,
 )
 from daedalus.accounts import Account, AccountConfigError, load_accounts
+from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
@@ -44,6 +45,7 @@ def create_app(
     ipc_client: ExistingIPCClient | None = None,
     task_controller: TaskController | None = None,
     enable_account_editing: bool = False,
+    assistance_broker: AssistanceBroker | None = None,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
@@ -59,6 +61,10 @@ def create_app(
         raise ValueError("Session coordinator and configuration must contain the same accounts")
     if enable_account_editing and task_controller is not None:
         raise ValueError("Account editing and task dispatch cannot run together")
+    if assistance_broker is not None and (
+        assistance_broker.coordinator is not owner or enable_account_editing
+    ):
+        raise ValueError("Assistance must use the authoritative fixed account owner")
     store = AccountMetadataStore(accounts_path) if enable_account_editing else None
     if store is not None:
         saved = store.snapshot()
@@ -126,6 +132,40 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except AccountEditUnavailable as exc:
             raise HTTPException(status_code=503, detail="Account metadata cannot be edited safely") from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/auth-assistance",
+        dependencies=[Depends(authorized)],
+    )
+    def auth_assistance_status(account_id: str) -> dict[str, object]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if assistance_broker is None:
+            return {"enabled": False, "account_id": account_id, "ticket": None}
+        try:
+            return assistance_broker.snapshot(account_id)
+        except AssistanceConflict as exc:
+            raise HTTPException(status_code=409, detail="Session ownership changed") from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/auth-assistance/{ticket_id}/approve",
+        dependencies=[Depends(authorized)],
+    )
+    def approve_auth_assistance(
+        account_id: str, ticket_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if assistance_broker is None:
+            raise HTTPException(status_code=503, detail="Manual assistance is not available")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit human confirmation is required")
+        try:
+            return assistance_broker.approve(account_id, ticket_id, confirmed=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid assistance request") from exc
+        except AssistanceConflict as exc:
+            raise HTTPException(status_code=409, detail="Assistance request is stale or busy") from exc
 
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:

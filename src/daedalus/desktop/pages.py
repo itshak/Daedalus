@@ -130,6 +130,8 @@ class AccountsPage(QWidget):
     refresh_requested = Signal()
     check_engine_requested = Signal()
     account_change_requested = Signal(str, object)
+    assistance_check_requested = Signal(str)
+    assistance_approve_requested = Signal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -174,10 +176,29 @@ class AccountsPage(QWidget):
         layout.addLayout(editor_actions)
         self.editor_status = CaptionLabel("Account editing is disabled on this backend")
         layout.addWidget(self.editor_status)
+        assistance_actions = QHBoxLayout()
+        self.assistance_check_button = PushButton("Check login assistance")
+        self.assistance_approve_button = PushButton("Confirm manual step complete")
+        self.assistance_check_button.clicked.connect(self._check_assistance)
+        self.assistance_approve_button.clicked.connect(self._approve_assistance)
+        self.assistance_check_button.setEnabled(False)
+        self.assistance_approve_button.setEnabled(False)
+        self._assistance_account_id: str | None = None
+        self._assistance_ticket: dict[str, object] | None = None
+        self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
+        assistance_actions.addWidget(self.assistance_check_button)
+        assistance_actions.addWidget(self.assistance_approve_button)
+        assistance_actions.addStretch(1)
+        layout.addLayout(assistance_actions)
+        self.assistance_status = CaptionLabel("Select an account to check for manual help")
+        layout.addWidget(self.assistance_status)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         self._accounts = accounts
+        self._assistance_ticket = None
+        self._assistance_account_id = None
         self._render()
+        self._update_assistance_buttons()
 
     def set_connected_ids(self, account_ids: list[str]) -> None:
         self._connected_ids = set(account_ids)
@@ -200,6 +221,67 @@ class AccountsPage(QWidget):
                 for acc in self._accounts
             ],
         )
+
+    def _selected_visible_id(self) -> str | None:
+        index = self.table.currentRow()
+        if 0 <= index < len(self._accounts):
+            selected = self._accounts[index].get("id")
+            if isinstance(selected, str):
+                return selected
+        return None
+
+    def _update_assistance_buttons(self) -> None:
+        account_id = self._selected_visible_id()
+        self.assistance_check_button.setEnabled(account_id is not None)
+        ticket = self._assistance_ticket
+        self.assistance_approve_button.setEnabled(
+            account_id is not None
+            and account_id == self._assistance_account_id
+            and isinstance(ticket, dict)
+            and ticket.get("state") == "waiting_operator"
+        )
+
+    def set_assistance(self, data: dict[str, object]) -> None:
+        account_id = data.get("account_id")
+        if not isinstance(account_id, str):
+            return
+        ticket = data.get("ticket")
+        self._assistance_account_id = account_id
+        self._assistance_ticket = ticket if isinstance(ticket, dict) else None
+        if data.get("enabled") is not True:
+            label = "Login assistance is not enabled on this backend"
+        elif self._assistance_ticket is None:
+            label = "No pending manual login assistance for this account"
+        else:
+            reason = str(self._assistance_ticket.get("reason", ""))
+            state = str(self._assistance_ticket.get("state", ""))
+            label = f"Login assistance: {reason} — {state}"
+        self.assistance_status.setText(label)
+        self._update_assistance_buttons()
+
+    def _check_assistance(self) -> None:
+        account_id = self._selected_visible_id()
+        if account_id is not None:
+            self.assistance_check_requested.emit(account_id)
+
+    def _approve_assistance(self) -> None:
+        account_id = self._selected_visible_id()
+        ticket = self._assistance_ticket
+        if (
+            account_id is None or account_id != self._assistance_account_id
+            or not isinstance(ticket, dict) or ticket.get("state") != "waiting_operator"
+        ):
+            return
+        ticket_id = ticket.get("ticket_id")
+        if not isinstance(ticket_id, str):
+            return
+        if QMessageBox.question(
+            self, "Confirm manual login step",
+            "Confirm only that you finished the manual step in the trusted browser. "
+            "The game worker still must independently validate authentication.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes:
+            self.assistance_approve_requested.emit(account_id, ticket_id)
 
     def set_editable_config(self, data: dict[str, object]) -> None:
         """Enable editing only after the authenticated backend opts in."""
