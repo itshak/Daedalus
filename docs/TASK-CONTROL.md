@@ -24,7 +24,7 @@ Launch `daedalus-desktop` and connect to the backend. The **Tasks** view lists r
 
 The GUI generates a unique idempotency request ID per intentional launch. After starting, **Refresh tasks** reads engine-managed child-process status and the backend's durable request history. **Stop selected task** only targets a child launched through this Daedalus-specific IPC interface. It never kills an arbitrary OS PID.
 
-Not all upstream operations have complete auto-generated forms yet. The JSON configuration field is a first usable generic editor; task-specific validated forms remain a separate active OpenSpec task.
+The Tasks page now derives typed parameter controls from public engine source signatures for every registered background task. Use Build JSON from parameters to review the resulting configuration before confirming. Complex or unknown parameter types retain a JSON value field and the advanced JSON editor; the engine remains responsible for checking all game-specific values.
 
 ## Safety and restart behavior
 

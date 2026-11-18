@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 
@@ -123,3 +124,74 @@ def test_uncertain_task_request_needs_manual_review(page, monkeypatch):
     page.reconcile_requested.connect(lambda *args: emitted.append(args))
     page._reconcile()
     assert emitted == [("alpha", rid)]
+
+
+def test_parameter_form_generates_json_but_requires_explicit_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    record = next(cap for cap in inspect_engine() if cap.name == "alertAttacks")
+    page.set_capabilities([record.to_dict()], enabled=True)
+    assert "minutes" in page._form_inputs
+    assert page.build_json_button.isEnabled()
+    widget = page._form_inputs["minutes"]
+    assert widget.placeholderText() == "Default: 20"
+
+    emitted = []
+    warnings = []
+    page.launch_requested.connect(lambda *args: emitted.append(args))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+
+    widget.setText("42")
+    assert page._form_dirty is True
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert emitted == [] and warnings
+
+    page._build_config_from_form()
+    assert json.loads(page.config_editor.toPlainText()) == {"minutes": 42}
+    assert page._form_dirty is False
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert emitted[0][2] == {"minutes": 42}
+
+
+def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    record = next(cap for cap in inspect_engine() if cap.name == "alertLowWine")
+    page.set_capabilities([record.to_dict()], enabled=True)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
+    page._build_config_from_form()
+    assert warnings
+    assert page.config_editor.toPlainText() == "{}"
+    page._form_inputs["hours"].setText("4")
+    page._form_inputs["auto_transfer"].setChecked(True)
+    page._form_inputs["transfer_amount"].setText("1500")
+    page._build_config_from_form()
+    assert json.loads(page.config_editor.toPlainText()) == {
+        "hours": 4, "auto_transfer": True, "transfer_amount": 1500,
+    }
+
+    page._form_inputs["hours"].setText("NaN")
+    page._build_config_from_form()
+    assert warnings
+    assert '"hours": 4' in page.config_editor.toPlainText()
+
+
+def test_switching_tasks_clears_previous_task_configuration_and_confirmation(page):
+    from daedalus.engine_registry import inspect_engine
+
+    operations = [
+        cap.to_dict() for cap in inspect_engine()
+        if cap.name in {"alertAttacks", "alertLowWine"}
+    ]
+    page.set_capabilities(operations, enabled=True)
+    page._form_inputs["minutes"].setText("15")
+    page._build_config_from_form()
+    page.confirm_box.setChecked(True)
+    page.task_combo.setCurrentIndex(1)
+    assert page.config_editor.toPlainText() == "{}"
+    assert not page.confirm_box.isChecked()
+    assert "hours" in page._form_inputs

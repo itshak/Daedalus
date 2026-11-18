@@ -7,5 +7,5 @@
 - [x] Implement UI filtering and CSV/JSON exports with null distinct from zero, using backend snapshot contract.
 - [x] Wire warehouse snapshots through the opt-in compatible existing-session IPC provider.
 - [x] Add a dedicated Tasks workflow page with a generic JSON configuration editor and managed start/stop controls.
-- [ ] Implement task-specific config forms for native background operations.
+- [x] Implement task-specific parameter forms for native background operations (with advanced JSON fallback).
 - [x] Test native GUI and .app packaging in macOS CI and validate OpenSpec.
