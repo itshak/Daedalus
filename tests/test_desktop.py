@@ -335,3 +335,31 @@ def test_login_assistance_requires_selected_account_and_separate_consent(qt_app,
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_synthetic_demo_connect_is_labeled_in_fluent_ui(qt_app):
+    window = MainWindow()
+    try:
+        window._on_completed("connect", {
+            "health": {"mode": "synthetic_demo", "synthetic_demo": True},
+            "accounts": [{
+                "id": "demo_alpha", "world": "s999-en", "player": "DemoExplorer",
+                "label": "DEMO — Explorer", "enabled": True,
+                "session_status": "not_connected", "synthetic": True,
+            }],
+            "capabilities": {"operations": [], "structured_engine_dispatch": False,
+                             "synthetic_demo": True},
+            "account_config": {"enabled": False, "revision": None, "accounts": []},
+        })
+        assert "SYNTHETIC DEMO" in window.windowTitle()
+        assert "SYNTHETIC DEMO" in window.connection_page.status_label.text()
+        assert "SYNTHETIC DEMO" in window.warehouses_page.demo_note.text()
+        assert not window.accounts_page.create_button.isEnabled()
+        assert not window.tasks_page.start_button.isEnabled()
+        assert window.accounts_page.table.item(0, 0).text().startswith("DEMO")
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()

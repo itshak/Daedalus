@@ -120,8 +120,12 @@ class ConnectionPage(QWidget):
     def _connect(self) -> None:
         self.connect_requested.emit(self.url_input.text().strip(), self.token_input.text())
 
-    def set_connected(self, connected: bool) -> None:
-        self.status_label.setText("Connected to Daedalus backend" if connected else "Not connected")
+    def set_connected(self, connected: bool, *, demo: bool = False) -> None:
+        self.status_label.setText(
+            "SYNTHETIC DEMO connected — no real game accounts or sessions"
+            if connected and demo else
+            "Connected to Daedalus backend" if connected else "Not connected"
+        )
         if connected:
             self.token_input.clear()
 
@@ -462,6 +466,8 @@ class WarehousesPage(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
         layout.addWidget(SubtitleLabel("Warehouses"))
+        self.demo_note = CaptionLabel("")
+        layout.addWidget(self.demo_note)
         layout.addWidget(
             CaptionLabel(
                 "Unsecured resources from the IkaBot session. Unknown values display as —, not zero."
@@ -506,6 +512,12 @@ class WarehousesPage(QWidget):
             actions.addWidget(button)
         actions.addStretch(1)
         layout.addLayout(actions)
+
+    def set_demo(self, enabled: bool) -> None:
+        self.demo_note.setText(
+            "SYNTHETIC DEMO — sample amounts only; no real account resources"
+            if enabled else ""
+        )
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         previous = self.selected_account_id()

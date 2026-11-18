@@ -322,7 +322,11 @@ class MainWindow(FluentWindow):
                     remember_connection(*preferences)
                 except PreferenceError as exc:
                     self._notice("Connection not saved", str(exc))
-            self.connection_page.set_connected(True)
+            health = payload.get("health") or {}
+            demo = bool(health.get("synthetic_demo") is True)
+            self.connection_page.set_connected(True, demo=demo)
+            self.warehouses_page.set_demo(demo)
+            self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
             self.accounts_page.set_editable_config(

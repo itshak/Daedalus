@@ -28,6 +28,7 @@ from daedalus.account_sessions import (
 )
 from daedalus.accounts import Account, AccountConfigError, load_accounts
 from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
+from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
@@ -46,12 +47,23 @@ def create_app(
     task_controller: TaskController | None = None,
     enable_account_editing: bool = False,
     assistance_broker: AssistanceBroker | None = None,
+    demo_mode: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("DAEDALUS_API_TOKEN must be a secret of at least 32 characters")
-    if enable_account_editing and accounts_path is not None and not Path(accounts_path).expanduser().exists():
+    if demo_mode and (
+        accounts_path is not None or snapshot_provider is not None
+        or session_coordinator is not None or ipc_client is not None
+        or task_controller is not None or enable_account_editing
+        or assistance_broker is not None
+    ):
+        raise ValueError("Synthetic demo cannot connect to real accounts, IPC or task controls")
+    if demo_mode:
+        configured_accounts: list[Account] = demo_accounts()
+        snapshot_provider = demo_warehouses
+    elif enable_account_editing and accounts_path is not None and not Path(accounts_path).expanduser().exists():
         configured_accounts: list[Account] = []
     else:
         configured_accounts = load_accounts(accounts_path)
@@ -96,7 +108,11 @@ def create_app(
         return {
             "service": "daedalus",
             "version": __version__,
-            "mode": "task_control_opt_in" if task_controller is not None else "read_only",
+            "mode": (
+                "synthetic_demo" if demo_mode else
+                "task_control_opt_in" if task_controller is not None else "read_only"
+            ),
+            "synthetic_demo": demo_mode,
             "authenticated_workers": sum(
                 owner.status(account.id) == SessionPhase.AUTHENTICATED.value
                 for account in configured_accounts
@@ -173,6 +189,8 @@ def create_app(
         for account in configured_accounts:
             entry = account.to_dict()
             entry["session_status"] = owner.status(account.id)
+            if demo_mode:
+                entry["synthetic"] = True
             entries.append(entry)
         return {"accounts": entries}
 
@@ -188,6 +206,7 @@ def create_app(
         return {
             "operations": [item.to_dict() for item in operations],
             "structured_engine_dispatch": task_controller is not None,
+            "synthetic_demo": demo_mode,
         }
 
     @app.get("/api/v1/engine/connected-accounts", dependencies=[Depends(authorized)])
@@ -216,6 +235,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="Account not found")
         if not account.enabled:
             raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode:
+            return {"account_id": account_id, "cities": demo_cities(account_id),
+                    "synthetic_demo": True}
         if ipc_client is None:
             raise HTTPException(status_code=503, detail="Existing IPC attachment is disabled")
         try:
@@ -308,6 +330,8 @@ def create_app(
         except Exception as exc:
             # Do not expose session internals or authentication material to clients.
             raise HTTPException(status_code=503, detail="Warehouse snapshots unavailable") from exc
-        return {"account_id": account_id, "cities": [snapshot.to_dict() for snapshot in snapshots]}
+        return {"account_id": account_id,
+                "cities": [snapshot.to_dict() for snapshot in snapshots],
+                "synthetic_demo": demo_mode}
 
     return app
