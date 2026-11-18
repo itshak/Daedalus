@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible Daedalus defect using synthetic or sanitized data
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Never include real usernames, account IDs, tokens, cookies, credentials, screenshots of private sessions, or production logs. For security vulnerabilities, use the private Report a vulnerability link on the Security tab.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Explain the actual behavior and what you expected.
+      placeholder: The synthetic demo shows...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Prefer an offline synthetic demo or minimal reproducible example.
+      placeholder: |
+        1. Install the desktop extra...
+        2. Run the synthetic demo...
+        3. Open the Accounts page...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Daedalus version or commit
+      placeholder: 0.1.0a0 / commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system, Python and GUI versions
+      placeholder: macOS 15, Python 3.12, PySide6 ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Optional. Remove all private information before sharing.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I have removed real accounts, tokens, cookies, credentials, and private logs.
+          required: true

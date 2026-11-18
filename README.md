@@ -1,13 +1,24 @@
-# Daedalus for Ikariam
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/png/daedalus-logo-dark-1600.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/brand/png/daedalus-logo-light-1600.png">
+    <img src="assets/brand/png/daedalus-logo-light-1600.png" width="700" alt="Daedalus: golden sun and winged D emblem, with the DAEDALUS name beneath">
+  </picture>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/svg/daedalus-horizontal-dark.svg">
-  <img alt="Daedalus winged-D logo" src="assets/brand/svg/daedalus-horizontal-light.svg" width="500">
-</picture>
+  <p><strong>Daedalus for Ikariam — open-source, desktop-first IkaBot control center</strong></p>
+
+  <p>
+    <a href="https://github.com/itshak/Daedalus/actions/workflows/ci.yml"><img alt="CI workflow" src="https://github.com/itshak/Daedalus/actions/workflows/ci.yml/badge.svg"></a>
+    <a href="LICENSE"><img alt="GPL-3.0-only license" src="https://img.shields.io/badge/license-GPL--3.0--only-blue"></a>
+    <img alt="Pre-alpha status" src="https://img.shields.io/badge/status-pre--alpha-orange">
+  </p>
+</div>
 
 **Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
+
+**Project links:** [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Support](SUPPORT.md) · [Implementation status](docs/PROJECT-STATUS.md). This project is experimental and is not yet ready to replace an existing production bot installation.
 
 ## Principles
 
