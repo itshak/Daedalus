@@ -44,14 +44,17 @@ PR #41 merged the opt-in single-account worker: it can start a dedicated IPC ser
 
 ## Still active
 
-One umbrella change remains **open**. Its owner-supervised live-account
-acceptance is explicitly deferred until the complete app can be tested:
+One umbrella change remains **open** for owner-supervised **real-account**
+acceptance, although its two offline implementation tasks (the host-only
+desktop recovery integration and independent server player attestation)
+have passed synthetic tests.
 
-- `validate-live-authentication`: native desktop-to-authoritative-host
-  browser recovery UX, independent server-side player attestation, and
-  owner-supervised real-account/worker acceptance remain unfinished. The
-  offline authentication foundations and public/production engine source
-  reconciliation are already archived, **without production authorization**.
+- `validate-live-authentication`: the native desktop now prepares one idle
+  owned worker, guides a human to the authoritative host, acknowledges a
+  nonsecret assistance ticket, and confirms independently verified rebind.
+  The backend stores staged cookies solely in that host's OS keyring.
+  The engine now requires recognizable server-rendered player identity on
+  fresh TLS-validated game-world responses. This is **not a real account test**.
 
 `migrate-native-desktop` and `import-public-ikabot-engine` are archived for their
 reviewed, nonsecret scopes. The production engine comparison reviewed six
@@ -62,16 +65,24 @@ rejected automatic credentials and unconfirmed task/server start. See
 
 ### Remaining OpenSpec completion gates
 
-**5 unchecked tasks across 1 active change** remain. None can be declared
-ready from the synthetic source-audit and GUI tests alone.
+**3 unchecked acceptance tasks across 1 active change** remain. All require
+owner-approved live testing or explicit cutover approval. CI cannot substitute.
 
 | Active change | Remaining gate | Evidence required |
 | --- | --- | --- |
-| `validate-live-authentication` | Wire desktop UX to host-only human recovery flow | Synthetic UI/API tests; no HTTP cookie transfer |
-| `validate-live-authentication` | Independently attest recovered server-side player identity | Synthetic negative tests and no unverified binding |
 | `validate-live-authentication` | Supervise real browser/CAPTCHA and saved-cookie flows | Owner-approved isolated real-account results |
-| `validate-live-authentication` | Validate worker rebind, expiry, recovery and explicit task dispatch | No duplicated real game operations |
-| `validate-live-authentication` | Reconcile results, CI, docs and cutover | Owner's successful real test and approval |
+| `validate-live-authentication` | Validate worker rebind, expiry, recovery and explicit task dispatch | No duplicate real game operations |
+| `validate-live-authentication` | Reconcile real findings and authorize cutover | Owner's sanitized acceptance and explicit approval |
+
+The offline implementation now has synthetic native Qt, API, browser-cookie,
+engine IPC and negative player-attestation coverage. The maintained IkaBot
+engine rejects cookies when the world page lacks a recognized current-player
+marker, contradicts the saved player, or redirects elsewhere. That may
+prevent real-world authentication if Gameforge's present markup has changed:
+unrecognized layout deliberately **fails closed**. Follow the
+[owner-supervised acceptance plan](LIVE-ACCEPTANCE.md) and
+[host-local recovery guide](BROWSER-RECOVERY.md). Production cutover is not
+approved by a green PR.
 
 The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
 

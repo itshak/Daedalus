@@ -21,6 +21,7 @@ from daedalus.saved_session_recovery import (
     _require_cookie_account,
     _validated_world_cookie,
     _verify_and_save_world_cookie,
+    stage_world_cookie,
 )
 
 _WORLD = re.compile(r"s[0-9]{1,6}-[a-z]{2,4}\Z", re.IGNORECASE)
@@ -130,3 +131,44 @@ def recover_with_human_browser(
                     )
     except SessionBusyError as exc:
         raise SavedSessionUnavailable("Another worker owns this account on the host") from exc
+
+
+def stage_with_human_browser(
+    account: Account,
+    *,
+    confirmed: bool,
+    human_confirm: Callable[[], bool],
+    browser: HumanBrowser | None = None,
+    credential_store: CredentialStore | None = None,
+) -> dict[str, str]:
+    """Host-local human browser handoff while the existing worker owns its lease.
+
+    No Gameforge validation or authentication state assertion is made here.
+    Only the authoritative already-leased worker may verify and promote the
+    staged cookie after an independent game-world player attestation. This
+    avoids starting a competing worker or transferring a cookie over HTTP.
+    """
+    if confirmed is not True:
+        raise SavedSessionUnavailable("Explicit staging consent is required")
+    if not account.enabled or _WORLD.fullmatch(account.world) is None:
+        raise SavedSessionUnavailable("An enabled account and exact world are required")
+    _email_binding(account, credential_store)
+    world_host = f"{account.world.casefold()}.ikariam.gameforge.com"
+    client = browser or PlaywrightHumanBrowser()
+    try:
+        client.open("https://lobby.ikariam.gameforge.com/", "https://" + world_host + "/")
+        if human_confirm() is not True:
+            raise SavedSessionUnavailable("The operator did not confirm the manual login")
+        cookie = client.world_cookie(world_host)
+        if cookie is None:
+            raise SavedSessionUnavailable("No exact secure world cookie found")
+        return stage_world_cookie(
+            account, cookie, confirmed=True, credential_store=credential_store,
+        )
+    finally:
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 - no browser details may leak
+            logging.getLogger("daedalus.browser_recovery").warning(
+                "Staging browser cleanup was incomplete"
+            )

@@ -18,10 +18,15 @@ from daedalus.account_sessions import (
 )
 from daedalus.accounts import Account
 from daedalus.saved_session_recovery import (
+    _COOKIE_SERVICE,
+    _STAGED_COOKIE_SERVICE,
     CredentialStore,
     SavedSessionUnavailable,
+    _account_key,
     _email_binding,
     _real_restore,
+    _staged_world_cookie_binding,
+    _store,
     _world_cookie_binding,
     verify_restored_identity,
 )
@@ -105,11 +110,15 @@ class SavedCookieWorker:
                 "manual recovery may be required"
             ) from exc
 
-    def recover_from_verified_cookie(self, controller, *, confirmed: bool) -> dict[str, str]:
+    def recover_from_verified_cookie(
+        self, controller, *, confirmed: bool, require_staged: bool = False,
+    ) -> dict[str, str]:
         """Rebind an idle dedicated worker without releasing its identity lease.
 
-        The operator must have already imported and engine-verified a fresh
-        world cookie into this host's keyring. No task is replayed. Reject
+        The operator may stage a fresh, UNVERIFIED world cookie via a
+        protected host-local browser/TTY. The worker verifies it against the
+        exact game world/player before promoting it to its verified keyring
+        slot. No task is replayed. The remote path requires staging and rejects
         running or uncertain tasks before replacing the IPC session.
         """
         if confirmed is not True:
@@ -139,9 +148,26 @@ class SavedCookieWorker:
             candidate = None
             try:
                 email = _email_binding(self.account, self._credentials)
-                cookie = _world_cookie_binding(self.account, self._credentials)
+                staged = _staged_world_cookie_binding(self.account, self._credentials)
+                if require_staged and staged is None:
+                    raise SavedWorkerUnavailable(
+                        "Host-local verified-browser staging is required before rebind"
+                    )
+                cookie = staged if staged is not None else _world_cookie_binding(
+                    self.account, self._credentials,
+                )
                 candidate = self._restore(self.account, email, cookie)
                 verify_restored_identity(candidate, self.account)
+                # The real maintained engine's cookies-only restore has
+                # already independently attested the server-rendered player.
+                # Promote only after validation, before replacing the IPC
+                # owner; a keyring failure must leave the old worker intact.
+                if staged is not None:
+                    _store(self._credentials).set_password(
+                        _COOKIE_SERVICE, _account_key(self.account), staged,
+                    )
+            except SavedWorkerUnavailable:
+                raise
             except Exception as exc:
                 if candidate is not None:
                     http = getattr(candidate, "s", None)
@@ -177,6 +203,13 @@ class SavedCookieWorker:
                         old_http.close()
                     except OSError:
                         logger.warning("Previous session cleanup was incomplete")
+                if staged is not None:
+                    try:
+                        _store(self._credentials).delete_password(
+                            _STAGED_COOKIE_SERVICE, _account_key(self.account),
+                        )
+                    except Exception:  # noqa: BLE001 - verified worker remains authoritative
+                        logger.warning("Unverified staged-cookie cleanup is incomplete")
                 if self.lease.phase is SessionPhase.PAUSED:
                     self.lease.transition(SessionPhase.VALIDATING_SESSION)
                 if self.lease.phase is SessionPhase.VALIDATING_SESSION:

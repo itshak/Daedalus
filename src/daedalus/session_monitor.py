@@ -66,6 +66,125 @@ class ExistingSessionRecoveryMonitor:
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
         self._consumed_recovery_tickets: set[str] = set()
+        self._consumed_rebind_tickets: set[str] = set()
+        self._dedicated_worker = None
+
+    def attach_dedicated_worker(self, worker) -> None:
+        """Bind only the exact existing worker sharing this monitor's lease."""
+        with self._lock, self.controller._mutex:
+            if (
+                self._dedicated_worker is not None
+                or worker.coordinator is not self.broker.coordinator
+                or worker.lease is None or worker.lease._closed
+                or worker.lease not in self.controller.owned_sessions()
+                or worker.lease.account != worker.account
+            ):
+                raise ValueError("Monitor requires an exact authoritative dedicated worker")
+            self._dedicated_worker = worker
+
+    def prepare_dedicated_recovery(
+        self, account_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        """Voluntary operator-supervised pause of one *idle* owned worker.
+
+        This does not contact Gameforge, start an IPC worker or grant login
+        authority. It generates only a short-lived nonsecret assistance ticket
+        and blocks new work until a separately verified rebind succeeds.
+        """
+        if confirmed is not True:
+            raise MonitoringUnavailable("Explicit preparation approval required")
+        with self._lock, self.controller._mutex:
+            worker = self._dedicated_worker
+            if (
+                worker is None or worker.account.id != account_id
+                or worker.lease is None or worker.lease._closed
+                or worker.lease not in self.controller.owned_sessions()
+                or worker.lease.phase not in {
+                    SessionPhase.AUTHENTICATED, SessionPhase.NEEDS_ASSISTANCE,
+                }
+            ):
+                raise MonitoringUnavailable("A matching active dedicated worker is required")
+            try:
+                status = self.controller.list_tasks(account_id)
+                if any(
+                    task.get("status") in {"running", "stopping"}
+                    for task in status["engine_tasks"]
+                ) or any(
+                    item.get("status") in {"dispatching", "unconfirmed"}
+                    for item in status["requests"]
+                ):
+                    raise MonitoringUnavailable(
+                        "Running and uncertain tasks require manual reconciliation"
+                    )
+            except MonitoringUnavailable:
+                raise
+            except Exception as exc:
+                raise MonitoringUnavailable("Cannot safely inspect active game tasks") from exc
+            try:
+                ticket = self.broker.request(
+                    worker.lease, AssistanceReason.MANUAL_CHALLENGE,
+                )
+            except AssistanceConflict as exc:
+                raise MonitoringUnavailable("Recovery is already pending for this worker") from exc
+            return {
+                "account_id": account_id, "status": "manual_recovery_prepared",
+                "ticket": ticket,
+            }
+
+    def rebind_dedicated_worker(
+        self, account_id: str, ticket_id: str, *, confirmed: bool,
+    ) -> dict[str, str]:
+        """Explicit remote nonsecret approval for a host-staged cookie only.
+
+        Staging occurs exclusively through a same-OS-user graphical browser
+        or hidden local terminal. No credential, cookie, URL, loginLink or
+        browser automation command is accepted via HTTP. The old IPC owner
+        remains in place until candidate verification succeeds.
+        """
+        if confirmed is not True:
+            raise MonitoringUnavailable("Explicit dedicated-worker rebind approval required")
+        with self._lock, self.controller._mutex:
+            worker = self._dedicated_worker
+            if (
+                worker is None or worker.account.id != account_id
+                or worker.lease is None or worker.lease._closed
+                or worker.lease not in self.controller.owned_sessions()
+                or ticket_id in self._consumed_rebind_tickets
+            ):
+                raise MonitoringUnavailable("No matching authoritative dedicated worker")
+            ticket = self.broker.snapshot(account_id)["ticket"]
+            if (
+                not isinstance(ticket, dict)
+                or ticket.get("ticket_id") != ticket_id
+                or ticket.get("state") != AssistanceState.READY.value
+                or worker.lease.phase is not SessionPhase.ASSISTED_LOGIN
+            ):
+                raise MonitoringUnavailable("A fresh approved operator recovery is required")
+            self.broker.begin_validation(worker.lease, ticket_id)
+            try:
+                worker.recover_from_verified_cookie(
+                    self.controller, confirmed=True, require_staged=True,
+                )
+                valid = self._session_valid(worker.account)
+            except Exception as exc:
+                # Never announce recovery when restoring or replacing IPC
+                # failed. The worker keeps the account lease if IPC is unsafe.
+                try:
+                    self.broker.complete_validation(
+                        worker.lease, ticket_id, valid=False,
+                    )
+                except (AssistanceConflict, ValueError):
+                    logger.warning("Uncertain dedicated worker retains account ownership")
+                raise MonitoringUnavailable(
+                    "Host-local worker recovery was not independently verified"
+                ) from exc
+            self.broker.complete_validation(worker.lease, ticket_id, valid=valid)
+            if not valid:
+                raise MonitoringUnavailable(
+                    "Recovered worker failed fresh server-side player attestation"
+                )
+            self._consumed_rebind_tickets.add(ticket_id)
+            return {"account_id": account_id, "status": "worker_recovered_verified"}
 
     def observe(self, account_id: str, *, confirmed: bool) -> dict[str, str]:
         """Operator-confirmed lease attachment; never a new Gameforge login."""
@@ -100,6 +219,15 @@ class ExistingSessionRecoveryMonitor:
                     elif phase is SessionPhase.ASSISTED_LOGIN:
                         ticket = self.broker.snapshot(account.id)["ticket"]
                         if ticket is not None and ticket["state"] == AssistanceState.READY.value:
+                            if (
+                                self._dedicated_worker is not None
+                                and self._dedicated_worker.lease is owned
+                            ):
+                                # The old requests.Session cannot inherit a
+                                # separate browser's new cookie. Wait for the
+                                # operator's explicit host-local staged rebind.
+                                statuses.append(MonitorStatus(account.id, owned.phase.value))
+                                continue
                             self.broker.begin_validation(owned, ticket["ticket_id"])
                             valid = self._session_valid(account)
                             self.broker.complete_validation(

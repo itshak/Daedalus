@@ -143,6 +143,9 @@ class AccountsPage(QWidget):
     account_change_requested = Signal(str, object)
     assistance_check_requested = Signal(str)
     assistance_approve_requested = Signal(str, str)
+    recovery_guide_requested = Signal(str)
+    recovery_prepare_requested = Signal(str)
+    rebind_requested = Signal(str, str)
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -213,6 +216,22 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_approve_button)
         assistance_actions.addStretch(1)
         layout.addLayout(assistance_actions)
+        recovery_actions = QHBoxLayout()
+        self.recovery_guide_button = PushButton("Host recovery instructions")
+        self.recovery_prepare_button = PushButton("Prepare idle worker recovery")
+        self.rebind_button = PushButton("Verify staged cookie and rebind worker")
+        self.recovery_guide_button.setEnabled(False)
+        self.recovery_prepare_button.setEnabled(False)
+        self.rebind_button.setEnabled(False)
+        self.recovery_guide_button.clicked.connect(self._request_recovery_guide)
+        self.recovery_prepare_button.clicked.connect(self._prepare_worker_recovery)
+        self.rebind_button.clicked.connect(self._request_worker_rebind)
+        self._recovery_guide: dict[str, object] | None = None
+        recovery_actions.addWidget(self.recovery_guide_button)
+        recovery_actions.addWidget(self.recovery_prepare_button)
+        recovery_actions.addWidget(self.rebind_button)
+        recovery_actions.addStretch(1)
+        layout.addLayout(recovery_actions)
         self.assistance_status = CaptionLabel("Select an account to check for manual help")
         layout.addWidget(self.assistance_status)
         self._monitor_enabled = False
@@ -227,6 +246,7 @@ class AccountsPage(QWidget):
         self._accounts = accounts
         self._assistance_ticket = None
         self._assistance_account_id = None
+        self._recovery_guide = None
         # Removed accounts no longer need a persisted exclusion.
         self._excluded_report_ids.intersection_update(
             str(account["id"]) for account in accounts if isinstance(account.get("id"), str)
@@ -337,7 +357,34 @@ class AccountsPage(QWidget):
     def _update_assistance_buttons(self) -> None:
         account_id = self._selected_visible_id()
         self.assistance_check_button.setEnabled(account_id is not None)
+        self.recovery_guide_button.setEnabled(account_id is not None)
         self.monitor_button.setEnabled(self._monitor_enabled and account_id is not None)
+        guide = self._recovery_guide
+        self.recovery_prepare_button.setEnabled(
+            account_id is not None
+            and isinstance(guide, dict)
+            and guide.get("account_id") == account_id
+            and guide.get("enabled") is True
+            and guide.get("dedicated_rebind_supported") is True
+            and guide.get("session_status") in {
+                "authenticated", "needs_assistance",
+            }
+            and not (
+                isinstance(guide.get("ticket"), dict)
+                and guide["ticket"].get("state") in {
+                    "waiting_operator", "operator_ready", "validating_session",
+                }
+            )
+        )
+        self.rebind_button.setEnabled(
+            account_id is not None
+            and isinstance(guide, dict)
+            and guide.get("account_id") == account_id
+            and guide.get("enabled") is True
+            and guide.get("dedicated_rebind_supported") is True
+            and isinstance(guide.get("ticket"), dict)
+            and guide["ticket"].get("state") == "operator_ready"
+        )
         ticket = self._assistance_ticket
         self.assistance_approve_button.setEnabled(
             account_id is not None
@@ -363,6 +410,101 @@ class AccountsPage(QWidget):
             label = f"Login assistance: {reason} — {state}"
         self.assistance_status.setText(label)
         self._update_assistance_buttons()
+
+    def set_recovery_guide(self, guide: dict[str, object]) -> None:
+        """Display fixed local instructions only; never render remote text as a command."""
+        account_id = guide.get("account_id")
+        if not isinstance(account_id, str) or account_id != self._selected_visible_id():
+            return
+        self._recovery_guide = guide
+        self._update_assistance_buttons()
+        # These are locally authored commands, with only the API-validated ID.
+        # Running this GUI on a different Mac must NEVER operate its own keyring.
+        steps = (
+            "Use a trusted graphical remote desktop to the AUTHORITATIVE WORKER HOST, "
+            "under the SAME OS user that runs Daedalus. Do not run these on this "
+            "client Mac if the worker is elsewhere.\n\n"
+            "For first-time provisioning with no active worker:\n"
+            f"daedalus sessions bind-email {account_id} --config /private/accounts.toml\n"
+            f"daedalus sessions assist-playwright-login {account_id} "
+            "--config /private/accounts.toml --confirm-read-only-network\n\n"
+            "If an existing dedicated worker owns the account lease:\n"
+            f"daedalus sessions stage-playwright-login {account_id} "
+            "--config /private/accounts.toml --confirm-read-only-network\n"
+            "Alternatively, stage only a manually copied world cookie with "
+            "'stage-world-cookie' using the same flags and a hidden terminal prompt.\n"
+            "If the existing worker is healthy, first press 'Prepare idle worker recovery' "
+            "to pause it safely and create a short-lived assistance ticket. "
+            "After staging, return here: confirm the manual assistance ticket, "
+            "then press 'Verify staged cookie and rebind worker'.\n\n"
+            "Only the worker can independently verify the game-world player. "
+            "Never paste a cookie or password into the desktop, backend URL, "
+            "GitHub, an API request, or a public browser session."
+        )
+        if guide.get("enabled") is not True:
+            steps += "\n\nThis backend has NOT enabled monitored recovery."
+        elif guide.get("dedicated_rebind_supported") is not True:
+            steps += (
+                "\n\nThis backend cannot hot-rebind an attached dedicated worker. "
+                "Use an isolated test deployment and do not replace a production owner."
+            )
+        QMessageBox.information(self, "Trusted-host human recovery", steps)
+
+    def _request_recovery_guide(self) -> None:
+        account_id = self._selected_visible_id()
+        if account_id is not None:
+            self.recovery_guide_requested.emit(account_id)
+
+    def _prepare_worker_recovery(self) -> None:
+        account_id = self._selected_visible_id()
+        guide = self._recovery_guide
+        if (
+            account_id is None or not isinstance(guide, dict)
+            or guide.get("account_id") != account_id
+            or guide.get("enabled") is not True
+            or guide.get("dedicated_rebind_supported") is not True
+            or guide.get("session_status") not in {
+                "authenticated", "needs_assistance",
+            }
+            or not self.recovery_prepare_button.isEnabled()
+        ):
+            return
+        if QMessageBox.question(
+            self, "Pause idle dedicated worker for human recovery",
+            "This explicitly pauses new tasks for the selected dedicated "
+            "worker and creates a short-lived manual assistance ticket. "
+            "The backend refuses when any task is running or uncertain. "
+            "No game login, cookie transfer or automatic task restart occurs. "
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes:
+            self.recovery_prepare_requested.emit(account_id)
+
+    def _request_worker_rebind(self) -> None:
+        account_id = self._selected_visible_id()
+        guide = self._recovery_guide
+        if (
+            account_id is None or not isinstance(guide, dict)
+            or guide.get("account_id") != account_id
+            or guide.get("dedicated_rebind_supported") is not True
+            or not isinstance(guide.get("ticket"), dict)
+            or guide["ticket"].get("state") != "operator_ready"
+        ):
+            return
+        ticket_id = guide["ticket"].get("ticket_id")
+        if not isinstance(ticket_id, str):
+            return
+        if QMessageBox.question(
+            self, "Confirm authoritative-host worker rebind",
+            "Have you ALREADY staged a new world cookie in the protected keyring "
+            "of the SAME authoritative worker host, using its trusted graphical "
+            "terminal? This may stop and replace the dedicated IPC worker. All "
+            "existing running/uncertain tasks must first be reconciled. "
+            "The backend will validate the exact world and player; no task is "
+            "automatically restarted. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes:
+            self.rebind_requested.emit(account_id, ticket_id)
 
     def set_monitoring_enabled(self, enabled: bool) -> None:
         self._monitor_enabled = enabled

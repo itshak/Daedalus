@@ -16,6 +16,10 @@ from daedalus.accounts import Account
 
 _SERVICE = "io.github.itshak.daedalus.saved-account-reference"
 _COOKIE_SERVICE = "io.github.itshak.daedalus.world-cookie"
+# A new browser cookie must not be considered verified until the already
+# leased authoritative worker validates it. This second keyring slot is local
+# to the same OS user and is never returned by the controller API.
+_STAGED_COOKIE_SERVICE = "io.github.itshak.daedalus.pending-world-cookie"
 _EMAIL = re.compile(r"[^\s@]{1,120}@[^\s@]{1,120}\.[^\s@]{2,63}\Z")
 _WORLD = re.compile(r"s([0-9]{1,6})-([a-z]{2,4})\Z", re.IGNORECASE)
 
@@ -129,6 +133,57 @@ def _validated_world_cookie(value: object) -> str:
     ):
         raise SavedSessionUnavailable("A valid browser world cookie is required")
     return value
+
+
+def stage_world_cookie(
+    account: Account, value: str, *, confirmed: bool,
+    credential_store: CredentialStore | None = None,
+) -> dict[str, str]:
+    """Host-local, hidden-input staging for an already-owned worker.
+
+    No lease is acquired and no game request is issued. A staged cookie is
+    UNVERIFIED and cannot start a saved worker; only the existing worker's
+    explicit, lease-held recovery may validate and promote it.
+    """
+    if confirmed is not True:
+        raise SavedSessionUnavailable("Explicit local staging consent is required")
+    if not account.enabled or _WORLD.fullmatch(account.world) is None:
+        raise SavedSessionUnavailable("An enabled exact world/player is required")
+    _email_binding(account, credential_store)
+    cookie = _validated_world_cookie(value)
+    try:
+        _store(credential_store).set_password(
+            _STAGED_COOKIE_SERVICE, _account_key(account), cookie,
+        )
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to stage a protected world cookie") from exc
+    return {"account_id": account.id, "status": "world_cookie_staged_unverified"}
+
+
+def _staged_world_cookie_binding(
+    account: Account, credential_store: CredentialStore | None,
+) -> str | None:
+    try:
+        value = _store(credential_store).get_password(
+            _STAGED_COOKIE_SERVICE, _account_key(account),
+        )
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to read a protected staged cookie") from exc
+    return _validated_world_cookie(value) if value is not None else None
+
+
+def discard_staged_world_cookie(
+    account: Account, *, credential_store: CredentialStore | None = None,
+) -> dict[str, str]:
+    """Only an explicit host-local action can clear a pending cookie."""
+    try:
+        provider = _store(credential_store)
+        key = _account_key(account)
+        if provider.get_password(_STAGED_COOKIE_SERVICE, key) is not None:
+            provider.delete_password(_STAGED_COOKIE_SERVICE, key)
+    except Exception as exc:
+        raise SavedSessionUnavailable("Unable to clear the staged world cookie") from exc
+    return {"account_id": account.id, "status": "staged_cookie_discarded"}
 
 
 def _world_cookie_binding(

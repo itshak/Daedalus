@@ -288,6 +288,98 @@ class DaedalusClient:
             "confirmed": True,
         })
 
+    def recovery_guide(self, account_id: str) -> dict[str, object]:
+        """Read only strictly typed host-local recovery metadata, never secrets."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        try:
+            guide = self._read(f"accounts/{account_id}/recovery-guide")
+        except APIConnectionError as exc:
+            if exc.status_code == 404:
+                return {
+                    "enabled": False, "account_id": account_id,
+                    "mode": "host_local_only",
+                    "requires_trusted_host_session": True,
+                    "allow_http_cookie_transfer": False,
+                    "dedicated_rebind_supported": False,
+                    "session_status": "not_connected", "ticket": None,
+                }
+            raise
+        if (
+            guide.get("account_id") != account_id
+            or type(guide.get("enabled")) is not bool
+            or guide.get("mode") != "host_local_only"
+            or guide.get("requires_trusted_host_session") is not True
+            or guide.get("allow_http_cookie_transfer") is not False
+            or type(guide.get("dedicated_rebind_supported")) is not bool
+            or guide.get("session_status") not in {
+                "not_connected", "validating_session", "authenticated",
+                "needs_assistance", "assisted_login", "validating_handoff",
+                "paused", "failed",
+            }
+        ):
+            raise APIConnectionError("Untrusted or invalid host-local recovery metadata")
+        ticket = guide.get("ticket")
+        if ticket is not None and (
+            not isinstance(ticket, dict)
+            or set(ticket) != {"ticket_id", "reason", "state"}
+            or not isinstance(ticket["ticket_id"], str)
+            or not re.fullmatch(r"[0-9a-f-]{36}", ticket["ticket_id"])
+            or ticket["reason"] not in {
+                "session_expired", "login_required", "manual_challenge",
+            }
+            or ticket["state"] not in {
+                "waiting_operator", "operator_ready", "validating_session",
+                "verified_by_worker", "retry_required", "expired",
+            }
+        ):
+            raise APIConnectionError("Invalid recovery assistance ticket")
+        return guide
+
+    def prepare_dedicated_recovery(
+        self, account_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or not confirmed:
+            raise ValueError("Exact account and separate preparation consent required")
+        receipt = self._write(
+            f"accounts/{account_id}/recovery/prepare", {"confirmed": True},
+        )
+        ticket = receipt.get("ticket")
+        if (
+            receipt.get("account_id") != account_id
+            or receipt.get("status") != "manual_recovery_prepared"
+            or not isinstance(ticket, dict)
+            or ticket.get("state") != "waiting_operator"
+            or not isinstance(ticket.get("ticket_id"), str)
+            or not re.fullmatch(r"[a-f0-9-]{36}", ticket["ticket_id"])
+        ):
+            raise APIConnectionError("Backend did not prepare a safe dedicated recovery")
+        return receipt
+
+    def rebind_dedicated_worker(
+        self, account_id: str, ticket_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        """Only approve a SAME-HOST staged rebind; no cookie/body arguments."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or not confirmed:
+            raise ValueError("Exact account and separate operator consent required")
+        import uuid
+
+        try:
+            if str(uuid.UUID(ticket_id)) != ticket_id:
+                raise ValueError("Invalid recovery ticket")
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Invalid recovery ticket") from exc
+        receipt = self._write(
+            f"accounts/{account_id}/recovery/{ticket_id}/rebind-worker",
+            {"confirmed": True},
+        )
+        if (
+            receipt.get("account_id") != account_id
+            or receipt.get("status") != "worker_recovered_verified"
+        ):
+            raise APIConnectionError("Backend did not verify the recovered worker")
+        return receipt
+
     def account_session(self, account_id: str) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")

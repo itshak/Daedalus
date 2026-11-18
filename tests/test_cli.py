@@ -26,6 +26,11 @@ def test_doctor_is_offline_and_honest(capsys):
     assert result["new_worker_bootstrap_implemented"] is True
     assert result["new_worker_bootstrap_scope"] == "explicit_single_account_saved_cookies_only"
     assert result["automatic_browser_authentication_implemented"] is False
+    assert result["host_local_browser_staging_implemented"] is True
+    assert result["dedicated_worker_remote_rebind_opt_in"] is True
+    assert result["server_page_player_attestation_implemented"] is True
+    assert result["real_world_player_attestation_tested"] is None
+    assert result["cookie_upload_api_supported"] is False
     assert result["production_ready"] is False
     assert result["network_requests_performed"] == 0
     assert result["engine_source_available"] is True

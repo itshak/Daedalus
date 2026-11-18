@@ -191,9 +191,14 @@ class ExistingIPCClient:
             or reply["world"].casefold() != account.world.casefold()
             or reply["username"].casefold() != account.player.casefold()
             or type(reply.get("session_valid")) is not bool
+            or type(reply.get("player_attested")) is not bool
+            or (reply["session_valid"] and not reply["player_attested"])
         ):
             raise EngineIPCUnavailable("IkaBot session validation reply is invalid")
-        return reply["session_valid"]
+        # The boolean must come from a current world-server page, not from
+        # session.username or saved-account metadata alone. Older IPC workers
+        # lacking explicit attestation are deliberately incompatible.
+        return reply["session_valid"] and reply["player_attested"]
 
     def cities(self, account: Account) -> list[dict[str, object]]:
         matches = sum(_is_exact_identity(row, account) for row in self.list_sessions())
