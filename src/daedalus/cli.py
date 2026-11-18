@@ -54,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
     serve.add_argument(
+        "--demo", action="store_true",
+        help="Run a clearly labeled synthetic read-only desktop demo; no game connection",
+    )
+    serve.add_argument(
         "--enable-account-editing", action="store_true",
         help="Opt in to protected metadata-only account editing (not task control)",
     )
@@ -124,6 +128,11 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--task-ledger requires --enable-task-control")
             if args.enable_account_editing and args.enable_task_control:
                 parser.error("--enable-account-editing is incompatible with --enable-task-control")
+            if args.demo and (
+                args.accounts_file or args.connect_existing_ipc or args.ipc_descriptor
+                or args.enable_task_control or args.task_ledger or args.enable_account_editing
+            ):
+                parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
             task_controller = None
             owner = None
@@ -148,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
                 enable_account_editing=args.enable_account_editing,
+                demo_mode=args.demo,
             )
         except (AccountConfigError, AccountEditUnavailable, ValueError, ImportError) as exc:
             parser.error(str(exc))

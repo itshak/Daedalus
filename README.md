@@ -53,6 +53,26 @@ For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen 
 
 **Mac .app preview:** On a Mac, install `.[desktop,macos-build]` and run `python packaging/build_macos_app.py --output-dir dist --adhoc-sign` to create `dist/Daedalus.app` without installing it. The CI build uploads an ad-hoc signed preview archive; it is **not notarized**. Details: [macOS packaging](docs/MACOS-BUILD.md).
 
+## Synthetic Mac desktop demo (no live game session)
+
+To explore the complete native connection/accounts/warehouse reporting and
+export views without any real Ikariam account, start a **separately opted-in**
+synthetic backend. It never opens a game login, reads private account files or
+enables task mutations:
+
+```bash
+python -m pip install -e ".[server,desktop]"
+export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+daedalus serve --demo
+# In another terminal: daedalus-desktop
+```
+
+Connect the desktop to `http://127.0.0.1:8765` with the same generated
+bearer token. The window, Connection and Warehouses pages display
+**SYNTHETIC DEMO** to distinguish sample accounts and resources from real
+game observations. Demo mode rejects real account files, IPC connections,
+task execution and metadata editing. See [synthetic Mac demo walkthrough](docs/SYNTHETIC-DEMO.md).
+
 ## Read-only local API
 
 The controller implements metadata, existing-session status, city lookup and optional warehouse reporting. With a second explicit task-control opt-in, it can also dispatch built-in background tasks to the same already-authenticated IkaBot process; it never creates a login. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
