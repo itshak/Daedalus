@@ -55,6 +55,7 @@ def offline_readiness() -> dict[str, object]:
         "synthetic_demo_available": True,
         "existing_session_ipc_opt_in": True,
         "existing_session_task_control_opt_in": True,
+        "saved_cookie_worker_bootstrap_opt_in": True,
         "session_monitoring_opt_in": True,
         "new_worker_bootstrap_implemented": True,
         "new_worker_bootstrap_scope": "explicit_single_account_saved_cookies_only",
