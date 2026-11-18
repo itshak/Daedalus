@@ -121,6 +121,10 @@ Use the --monitor-existing-sessions flag together with --connect-existing-ipc an
 
 For an existing IkaBot saved account, a separately authorized local operator can copy an already authenticated world cookie from their own browser and use the hidden terminal action -- daedalus sessions bind-world-cookie ACCOUNT_ID --confirm-read-only-network -- to verify the exact world/player and store it only in the OS keyring. The original browser/CAPTCHA login is completed manually; this does not create a new login, start IkaBot, update an already running worker or send cookies through the controller API. See [local browser-cookie handoff](docs/PRIVATE-WORLD-COOKIE-HANDOFF.md).
 
+## Offline readiness check and synthetic API smoke
+
+Run `daedalus doctor` to see installed preview capabilities and the dependencies actually present. The report marks live account status as not inspected, and does not claim new-worker bootstrap, automatic browser login or production readiness. Use `daedalus doctor --smoke` after installing server/client test dependencies to check the real API routes in-process with only fictional demo data, without Gameforge or an external TCP socket. See [offline readiness instructions](docs/TEST-READINESS.md).
+
 ## Manual authentication assistance protocol (foundation only)
 
 The repository includes a credential-free, lease-bound acknowledgment protocol for **future** trusted worker login assistance. In the native Accounts view, a selected account can request nonsecret assistance status and an explicit manual-step acknowledgment when a compatible trusted in-process broker is injected into the server. This action does **not** authenticate, transfer a cookie, bypass a CAPTCHA, start a login, or resume any game task. The normal CLI does not enable this broker until an actual supervised engine/browser integration is implemented. See [manual authentication assistance and limitations](docs/AUTH-ASSISTANCE.md).
