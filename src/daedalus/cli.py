@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     sessions.add_argument("action", choices=[
         "bind-email", "forget-email", "probe-saved-cookies",
         "bind-world-cookie", "forget-world-cookie", "assist-browser-login",
+        "assist-playwright-login",
     ])
     sessions.add_argument("account_id", help="Configured secret-free account ID")
     sessions.add_argument("--config", help="TOML account metadata path outside repository")
@@ -196,6 +197,26 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 result = assisted_browser_cookie_login(
                     account, AccountSessionCoordinator(configured), confirmed=True,
+                )
+                print(json.dumps(result))
+            elif args.action == "assist-playwright-login":
+                import sys
+
+                from daedalus.account_sessions import AccountSessionCoordinator
+                from daedalus.browser_recovery import recover_with_human_browser
+
+                if not args.confirm_read_only_network:
+                    parser.error("Browser recovery requires --confirm-read-only-network")
+                if not sys.stdin.isatty():
+                    parser.error("Browser recovery requires an interactive local terminal")
+
+                def operator_confirm() -> bool:
+                    print("Complete login and any CAPTCHA in the visible browser yourself.")
+                    return input("Type YES after opening the selected game world: ") == "YES"
+
+                result = recover_with_human_browser(
+                    account, AccountSessionCoordinator(configured), confirmed=True,
+                    human_confirm=operator_confirm,
                 )
                 print(json.dumps(result))
             elif args.action == "probe-saved-cookies":

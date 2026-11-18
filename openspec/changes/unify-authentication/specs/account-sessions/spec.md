@@ -27,3 +27,16 @@ A user-approved local browser recovery SHALL acquire the exact account/world/pla
 - **GIVEN** an existing host-local owner holding the account lease
 - **WHEN** the operator requests a second browser-assisted recovery
 - **THEN** the application SHALL reject it before opening a browser or prompting for a cookie
+
+### Requirement: Ephemeral browser recovery without credentials
+An explicitly approved local recovery SHALL launch a nonpersistent visible browser, leave authentication and challenges to the human operator, and extract only a secure cookie scoped to the exact configured game-world host after operator confirmation. The account owner lease SHALL remain held through browser closure and successful worker-side identity validation. A remote operator MAY use a protected graphical session on the authoritative host, but SHALL NOT send session secrets over the controller API.
+
+#### Scenario: Human completes a challenge in an ephemeral browser
+- **GIVEN** an enabled account, protected keyring binding and no conflicting owner
+- **WHEN** the operator completes the visible browser login and explicitly confirms the world page is ready
+- **THEN** Daedalus SHALL accept only the exact world-host cookie and SHALL store it only after engine verification
+
+#### Scenario: World cookie does not match the expected account
+- **GIVEN** a browser with no secure cookie for the configured world or a worker reporting a different player
+- **WHEN** the operator attempts recovery
+- **THEN** the application SHALL reject the handoff, close the ephemeral browser and retain the previous keyring binding
