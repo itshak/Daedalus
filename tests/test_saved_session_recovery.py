@@ -506,3 +506,21 @@ def test_assisted_browser_failed_open_does_not_prompt_for_secret(setup):
             read_cookie=lambda: pytest.fail("No secret prompt expected"),
         )
     assert owner.status(account.id) == "not_connected"
+
+
+def test_browser_assistance_cli_is_opt_in_and_requires_local_tty(tmp_path, monkeypatch, capsys):
+    from daedalus.cli import main
+
+    path = tmp_path / "accounts.toml"
+    path.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s301-en"\n'
+                    'player = "ExamplePlayer"\n')
+    argv = ["sessions", "assist-browser-login", "alpha", "--config", str(path)]
+    with pytest.raises(SystemExit) as missing_consent:
+        main(argv)
+    assert missing_consent.value.code == 2
+    assert "confirm-read-only-network" in capsys.readouterr().err
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    with pytest.raises(SystemExit) as not_local:
+        main([*argv, "--confirm-read-only-network"])
+    assert not_local.value.code == 2
+    assert "interactive local terminal" in capsys.readouterr().err
