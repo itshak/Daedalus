@@ -222,3 +222,49 @@ def test_cli_requires_two_explicit_flags_for_monitoring(capsys):
             main(["serve", *option_set])
         assert error.value.code == 2
         assert "--monitor-existing-sessions" in capsys.readouterr().err
+
+
+def test_post_recovery_dispatch_needs_verified_single_use_ticket(context):
+    account, _owner, ipc, _controller, broker, monitor, _ = context
+    rid = str(uuid.uuid4())
+    with pytest.raises(MonitoringUnavailable, match="approval"):
+        monitor.resume_verified_task(account.id, "not-ready", "alertAttacks", {}, rid,
+                                     confirmed=False)
+    with pytest.raises(MonitoringUnavailable, match="verified"):
+        monitor.resume_verified_task(account.id, "not-ready", "alertAttacks", {}, rid,
+                                     confirmed=True)
+    monitor.observe(account.id, confirmed=True)
+    ipc.online = False
+    monitor.poll_once()
+    ticket = broker.snapshot(account.id)["ticket"]
+    with pytest.raises(MonitoringUnavailable, match="verified"):
+        monitor.resume_verified_task(account.id, ticket["ticket_id"], "alertAttacks", {}, rid,
+                                     confirmed=True)
+    broker.approve(account.id, ticket["ticket_id"], confirmed=True)
+    ipc.online = True
+    monitor.poll_once()
+    assert broker.snapshot(account.id)["ticket"]["state"] == "verified_by_worker"
+    result = monitor.resume_verified_task(account.id, ticket["ticket_id"],
+                                          "alertAttacks", {}, rid, confirmed=True)
+    assert result["status"] == "started"
+    assert len(ipc.sent) == 1
+    with pytest.raises(MonitoringUnavailable, match="verified"):
+        monitor.resume_verified_task(account.id, ticket["ticket_id"], "alertAttacks", {},
+                                     str(uuid.uuid4()), confirmed=True)
+    assert len(ipc.sent) == 1
+
+
+def test_post_recovery_rechecks_world_and_does_not_dispatch_offline(context):
+    account, _owner, ipc, _controller, broker, monitor, _ = context
+    monitor.observe(account.id, confirmed=True)
+    ipc.online = False
+    monitor.poll_once()
+    ticket = broker.snapshot(account.id)["ticket"]
+    broker.approve(account.id, ticket["ticket_id"], confirmed=True)
+    ipc.online = True
+    monitor.poll_once()
+    ipc.online = False
+    with pytest.raises(MonitoringUnavailable, match="no longer valid"):
+        monitor.resume_verified_task(account.id, ticket["ticket_id"], "alertAttacks", {},
+                                     str(uuid.uuid4()), confirmed=True)
+    assert ipc.sent == []

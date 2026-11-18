@@ -96,6 +96,10 @@ The archived private-world-cookie-handoff change adds an optional hidden termina
 
 The archived `offline-readiness-doctor` change replaces outdated hardcoded CLI diagnostics with preview-accurate feature and optional-dependency reports, and adds an isolated in-process FastAPI synthetic smoke test. Live accounts, real game integration and production readiness are not claimed. PR #38 passed protected CI and merged on 2026-11-18; requirements archived. See [offline test readiness](TEST-READINESS.md).
 
+## Verified recovery dispatch guard (internal, not a complete browser flow)
+
+The trusted in-process existing-session monitor now provides a single-use post-recovery dispatch guard: explicit operator approval, the exact worker-verified recovery ticket, a fresh world validation, a new UUIDv4 request and a new secret-free task configuration are required. The approval is consumed before any potentially ambiguous IPC dispatch. This does **not** expose a remote API, create a browser login, replay prior task state, or complete the remaining `unify-authentication` recovery tasks. Real browser login, remote handoff, protected UI approval and end-to-end account verification remain open.
+
 ## One-click native synthetic Mac demo (implementation archived)
 
 The archived `desktop-oneclick-synthetic` change adds an explicit Connection-page action that starts a temporary loopback-only synthetic backend and connects with an in-memory token. Data stays fictional, task control is disabled and closing the app stops the demo. The full local regression run completed with 609 passing Python tests, 9 skipped, and 107 passing subtests; strict OpenSpec and isolated wheel build also passed. The protected native macOS packaging/smoke checks remain mandatory merge gates, not evidence of live Gameforge login. See [one-click demo](ONECLICK-DEMO.md).
