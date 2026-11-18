@@ -188,3 +188,49 @@ def test_desktop_task_errors_redact_server_replies():
         assert error.value.status_code == 503
         with pytest.raises(ValueError):
             client.stop_task("alpha", "-1")
+
+
+def test_account_config_client_uses_authorized_revision_and_confirmation():
+    import hashlib
+
+    revision = hashlib.sha256(b"synthetic").hexdigest()
+    rows = [{"id": "alpha", "world": "s301-en", "player": "Example",
+             "label": "Example", "enabled": True}]
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, request.headers.get("Authorization")))
+        if request.method == "GET":
+            return httpx.Response(200, json={
+                "enabled": True, "revision": revision, "accounts": rows,
+            })
+        assert json.loads(request.content) == {
+            "revision": revision, "accounts": rows, "confirmed": True,
+        }
+        return httpx.Response(200, json={
+            "enabled": True, "revision": "a" * 64, "accounts": rows,
+        })
+
+    with mock_client(handler) as client:
+        assert client.account_config()["revision"] == revision
+        assert client.replace_account_config(revision, rows, confirmed=True)["revision"] == "a" * 64
+        with pytest.raises(ValueError):
+            client.replace_account_config(revision, rows, confirmed=False)
+    assert [method for method, _, _ in seen] == ["GET", "PUT"]
+    assert all(token == f"Bearer {TOKEN}" for _, _, token in seen)
+
+
+def test_account_editing_client_recognizes_old_backend_and_redacts_rejection():
+    secret = "cookie-private-should-not-appear"
+
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(404, text=secret)
+        return httpx.Response(409, text=secret)
+
+    with mock_client(handler) as client:
+        assert client.account_config()["enabled"] is False
+        with pytest.raises(APIConnectionError) as error:
+            client.replace_account_config("a" * 64, [], confirmed=True)
+        assert error.value.status_code == 409
+        assert secret not in str(error.value)

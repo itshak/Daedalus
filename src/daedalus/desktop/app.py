@@ -87,9 +87,18 @@ class APIWorker(QThread):
                     "health": self.client.health(),
                     "accounts": self.client.accounts(),
                     "capabilities": self.client.capabilities(),
+                    "account_config": self.client.account_config(),
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "account_config":
+                result = self.client.account_config()
+            elif self.action == "account_config_put" and self.task_payload:
+                result = self.client.replace_account_config(
+                    str(self.task_payload["revision"]),
+                    self.task_payload["accounts"],
+                    confirmed=True,
+                )
             elif self.action == "connected_accounts":
                 result = self.client.connected_accounts()
             elif self.action == "capabilities":
@@ -163,6 +172,11 @@ class MainWindow(FluentWindow):
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
+        self.accounts_page.account_change_requested.connect(
+            lambda revision, rows: self._request(
+                "account_config_put", task_payload={"revision": revision, "accounts": rows},
+            )
+        )
         self.accounts_page.check_engine_requested.connect(
             lambda: self._request("connected_accounts")
         )
@@ -293,10 +307,22 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True)
             self._show_accounts(payload["accounts"])
             self._show_capabilities(payload["capabilities"])
+            self.accounts_page.set_editable_config(
+                payload.get("account_config", {"enabled": False})
+            )
             logger.info("Connected to Daedalus API")
         elif action == "accounts":
             self._show_accounts(payload)
             logger.info("Accounts refreshed")
+        elif action == "account_config":
+            assert isinstance(payload, dict)
+            self.accounts_page.set_editable_config(payload)
+        elif action == "account_config_put":
+            assert isinstance(payload, dict)
+            self.accounts_page.set_editable_config(payload)
+            logger.info("Account metadata changed after explicit confirmation")
+            self._notice("Account metadata saved", "Account metadata updated; refreshing views.")
+            QTimer.singleShot(0, lambda: self._request("accounts"))
         elif action == "connected_accounts":
             assert isinstance(payload, list)
             self.accounts_page.set_connected_ids(payload)

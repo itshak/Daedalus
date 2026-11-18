@@ -9,10 +9,14 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
+    QMessageBox,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -125,6 +129,7 @@ class ConnectionPage(QWidget):
 class AccountsPage(QWidget):
     refresh_requested = Signal()
     check_engine_requested = Signal()
+    account_change_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -147,8 +152,28 @@ class AccountsPage(QWidget):
         ))
         self._accounts: list[dict[str, object]] = []
         self._connected_ids: set[str] | None = None
+        self._edit_revision: str | None = None
+        self._editable_accounts: list[dict[str, object]] = []
         self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot"])
         layout.addWidget(self.table, 1)
+        editor_actions = QHBoxLayout()
+        self.create_button = PushButton("Add account")
+        self.edit_button = PushButton("Edit selected")
+        self.toggle_button = PushButton("Enable / Disable")
+        self.remove_button = PushButton("Remove selected")
+        for button, callback in (
+            (self.create_button, self._create),
+            (self.edit_button, self._edit),
+            (self.toggle_button, self._toggle),
+            (self.remove_button, self._remove),
+        ):
+            button.clicked.connect(callback)
+            button.setEnabled(False)
+            editor_actions.addWidget(button)
+        editor_actions.addStretch(1)
+        layout.addLayout(editor_actions)
+        self.editor_status = CaptionLabel("Account editing is disabled on this backend")
+        layout.addWidget(self.editor_status)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         self._accounts = accounts
@@ -175,6 +200,112 @@ class AccountsPage(QWidget):
                 for acc in self._accounts
             ],
         )
+
+    def set_editable_config(self, data: dict[str, object]) -> None:
+        """Enable editing only after the authenticated backend opts in."""
+        enabled = (
+            data.get("enabled") is True
+            and isinstance(data.get("revision"), str)
+            and isinstance(data.get("accounts"), list)
+        )
+        self._edit_revision = str(data["revision"]) if enabled else None
+        self._editable_accounts = [
+            dict(row) for row in data["accounts"] if isinstance(row, dict)
+        ] if enabled else []
+        for button in (
+            self.create_button, self.edit_button, self.toggle_button, self.remove_button,
+        ):
+            button.setEnabled(enabled)
+        self.editor_status.setText(
+            "Metadata-only editing enabled; changes require confirmation"
+            if enabled else "Account editing is disabled on this backend"
+        )
+
+    def _selected_account(self) -> tuple[int, dict[str, object]] | None:
+        index = self.table.currentRow()
+        if index < 0 or index >= len(self._accounts):
+            return None
+        account_id = self._accounts[index].get("id")
+        for position, item in enumerate(self._editable_accounts):
+            if item.get("id") == account_id:
+                return position, item
+        return None
+
+    def _metadata_dialog(
+        self, existing: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit account metadata" if existing else "Add account metadata")
+        layout = QFormLayout(dialog)
+        fields = {}
+        for key, title in (
+            ("id", "Account ID"), ("world", "World"), ("player", "Player"), ("label", "Label"),
+        ):
+            widget = QLineEdit(dialog)
+            widget.setText(str(existing.get(key, "")) if existing else "")
+            fields[key] = widget
+            layout.addRow(title, widget)
+        enabled = CheckBox("Enabled")
+        enabled.setChecked(bool(existing.get("enabled", True)) if existing else True)
+        layout.addRow(enabled)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        result: dict[str, object] = {key: field.text().strip() for key, field in fields.items()}
+        result["enabled"] = enabled.isChecked()
+        if any(not result[key] for key in fields):
+            QMessageBox.warning(self, "Incomplete account", "All account fields are required.")
+            return None
+        return result
+
+    def _propose(self, rows: list[dict[str, object]], message: str) -> None:
+        if self._edit_revision is None:
+            return
+        if QMessageBox.question(
+            self, "Confirm account metadata change",
+            message + "\n\nOnly account metadata will change; no game login is performed.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) == QMessageBox.Yes:
+            self.account_change_requested.emit(self._edit_revision, rows)
+
+    def _create(self) -> None:
+        if self._edit_revision is None:
+            return
+        new = self._metadata_dialog()
+        if new is not None:
+            self._propose([*self._editable_accounts, new], "Add this account?")
+
+    def _edit(self) -> None:
+        selected = self._selected_account()
+        if selected is None:
+            return
+        index, existing = selected
+        edited = self._metadata_dialog(existing)
+        if edited is not None:
+            rows = [dict(row) for row in self._editable_accounts]
+            rows[index] = edited
+            self._propose(rows, "Save changes to the selected account?")
+
+    def _toggle(self) -> None:
+        selected = self._selected_account()
+        if selected is None:
+            return
+        index, existing = selected
+        rows = [dict(row) for row in self._editable_accounts]
+        rows[index]["enabled"] = not bool(existing.get("enabled"))
+        self._propose(rows, "Change the selected account's enabled state?")
+
+    def _remove(self) -> None:
+        selected = self._selected_account()
+        if selected is None:
+            return
+        index, _ = selected
+        rows = [dict(row) for i, row in enumerate(self._editable_accounts) if i != index]
+        self._propose(rows, "Remove the selected account metadata record?")
 
 
 class OperationsPage(QWidget):

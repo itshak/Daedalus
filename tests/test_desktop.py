@@ -241,3 +241,48 @@ def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch
         from PySide6.QtCore import QCoreApplication, QEvent
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qt_app.processEvents()
+
+
+def test_native_account_metadata_editor_is_opt_in_and_confirmed(qt_app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = AccountsPage()
+    current = {
+        "id": "alpha", "world": "s301-en", "player": "Example",
+        "label": "Example", "enabled": True,
+    }
+    page.set_accounts([{**current, "session_status": "not_connected"}])
+    assert not page.create_button.isEnabled()
+    assert not page.toggle_button.isEnabled()
+    seen = []
+    page.account_change_requested.connect(lambda revision, rows: seen.append((revision, rows)))
+    try:
+        page.set_editable_config({
+            "enabled": True, "revision": "a" * 64, "accounts": [current],
+        })
+        assert page.create_button.isEnabled()
+        assert page.toggle_button.isEnabled()
+        page.table.selectRow(0)
+        monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.No)
+        page._toggle()
+        assert seen == []  # Denial never triggers backend mutation.
+        monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.Yes)
+        page._toggle()
+        assert seen == [("a" * 64, [{**current, "enabled": False}])]
+        monkeypatch.setattr(page, "_metadata_dialog", lambda existing=None: {
+            "id": "beta", "world": "s302-en", "player": "Second",
+            "label": "Second", "enabled": True,
+        })
+        page._create()
+        assert len(seen[-1][1]) == 2
+        page._remove()
+        assert seen[-1][1] == []
+        page.set_editable_config({"enabled": False, "revision": None, "accounts": []})
+        assert not page.create_button.isEnabled()
+        assert not page.toggle_button.isEnabled()
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()

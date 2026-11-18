@@ -13,7 +13,8 @@ import hashlib
 import os
 import threading
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from typing import Self
@@ -233,3 +234,45 @@ class AccountSessionCoordinator:
     @property
     def account_ids(self) -> frozenset[str]:
         return frozenset(self._accounts)
+
+    @contextmanager
+    def metadata_change_guard(self, new_accounts: Sequence[Account]) -> Iterator[None]:
+        """Hold old/new identity leases while metadata is atomically replaced.
+
+        A separate local authenticated IkaBot worker prevents edits even if this
+        controller has no in-process sessions. No game operation is started.
+        """
+        with self._mutex:
+            if self._active:
+                raise SessionBusyError("Cannot edit account metadata while a session is active")
+            self._ensure_private_directory()
+            identities = {_identity_key(a) for a in self._accounts.values()}
+            identities.update(_identity_key(a) for a in new_accounts)
+            held: list[FileLock] = []
+            try:
+                for identity in sorted(identities):
+                    path = self._state_dir / f"{identity}.lock"
+                    if path.is_symlink():
+                        raise SessionBusyError("Session lock path must be a real file")
+                    lock = FileLock(str(path))
+                    try:
+                        lock.acquire(timeout=0)
+                    except Timeout as exc:
+                        raise SessionBusyError(
+                            "Cannot edit metadata while an account session is active"
+                        ) from exc
+                    held.append(lock)
+                    if os.name != "nt":
+                        os.chmod(path, 0o600)
+                yield
+            finally:
+                for lock in reversed(held):
+                    lock.release()
+
+    def replace_accounts(self, accounts: Sequence[Account]) -> None:
+        """Install metadata only after a guarded, successfully persisted update."""
+        with self._mutex:
+            if self._active:
+                raise SessionBusyError("Account session is active")
+            validated = AccountSessionCoordinator(accounts, state_dir=self._state_dir)
+            self._accounts = validated._accounts

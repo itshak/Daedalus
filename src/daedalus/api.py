@@ -16,12 +16,17 @@ from typing import Annotated
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 
 from daedalus import __version__
+from daedalus.account_editor import (
+    AccountEditConflict,
+    AccountEditUnavailable,
+    AccountMetadataStore,
+)
 from daedalus.account_sessions import (
     AccountSessionCoordinator,
     SessionBusyError,
     SessionPhase,
 )
-from daedalus.accounts import Account, load_accounts
+from daedalus.accounts import Account, AccountConfigError, load_accounts
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
@@ -38,16 +43,27 @@ def create_app(
     session_coordinator: AccountSessionCoordinator | None = None,
     ipc_client: ExistingIPCClient | None = None,
     task_controller: TaskController | None = None,
+    enable_account_editing: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
     token = api_token if api_token is not None else os.environ.get("DAEDALUS_API_TOKEN")
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("DAEDALUS_API_TOKEN must be a secret of at least 32 characters")
-    configured_accounts: list[Account] = load_accounts(accounts_path)
+    if enable_account_editing and accounts_path is not None and not Path(accounts_path).expanduser().exists():
+        configured_accounts: list[Account] = []
+    else:
+        configured_accounts = load_accounts(accounts_path)
     account_by_id = {account.id: account for account in configured_accounts}
     owner = session_coordinator or AccountSessionCoordinator(configured_accounts)
     if not owner.matches_accounts(configured_accounts):
         raise ValueError("Session coordinator and configuration must contain the same accounts")
+    if enable_account_editing and task_controller is not None:
+        raise ValueError("Account editing and task dispatch cannot run together")
+    store = AccountMetadataStore(accounts_path) if enable_account_editing else None
+    if store is not None:
+        saved = store.snapshot()
+        if [Account(**row) for row in saved["accounts"]] != configured_accounts:
+            raise ValueError("Account metadata and controller configuration differ")
     # Account workers may use this in-process coordinator later; startup never acquires a lease.
     app = FastAPI(
         title="Daedalus Read-only API",
@@ -80,6 +96,36 @@ def create_app(
                 for account in configured_accounts
             ),
         }
+
+    @app.get("/api/v1/account-config", dependencies=[Depends(authorized)])
+    def account_config() -> dict[str, object]:
+        if store is None:
+            return {"enabled": False, "revision": None, "accounts": []}
+        try:
+            return store.snapshot()
+        except (AccountConfigError, AccountEditUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="Account metadata is unavailable") from exc
+
+    @app.put("/api/v1/account-config", dependencies=[Depends(authorized)])
+    def update_account_config(payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        nonlocal configured_accounts, account_by_id
+        if store is None:
+            raise HTTPException(status_code=503, detail="Account editing is disabled")
+        if payload.keys() != {"revision", "accounts", "confirmed"} or payload["confirmed"] is not True:
+            raise HTTPException(status_code=422, detail="Explicit confirmation and valid metadata are required")
+        try:
+            with owner._mutex:
+                result = store.update(payload["revision"], payload["accounts"], owner)
+                updated = [Account(**row) for row in result["accounts"]]
+                configured_accounts = updated
+                account_by_id = {account.id: account for account in updated}
+            return result
+        except (SessionBusyError, AccountEditConflict) as exc:
+            raise HTTPException(status_code=409, detail="Account configuration is busy or changed") from exc
+        except AccountConfigError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except AccountEditUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Account metadata cannot be edited safely") from exc
 
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:

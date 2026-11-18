@@ -53,6 +53,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Opt in to authorized start/list/stop of existing-session IkaBot tasks",
     )
     serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
+    serve.add_argument(
+        "--enable-account-editing", action="store_true",
+        help="Opt in to protected metadata-only account editing (not task control)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -109,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.host not in {"127.0.0.1", "::1"}:
             parser.error("Only loopback binding is supported; use SSH/Tailscale tunnel for remote use")
         try:
+            from daedalus.account_editor import AccountEditUnavailable
             from daedalus.api import create_app
 
             if args.ipc_descriptor and not args.connect_existing_ipc:
@@ -117,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--enable-task-control requires --connect-existing-ipc")
             if args.task_ledger and not args.enable_task_control:
                 parser.error("--task-ledger requires --enable-task-control")
+            if args.enable_account_editing and args.enable_task_control:
+                parser.error("--enable-account-editing is incompatible with --enable-task-control")
             ipc = None
             task_controller = None
             owner = None
@@ -140,8 +147,9 @@ def main(argv: list[str] | None = None) -> int:
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
+                enable_account_editing=args.enable_account_editing,
             )
-        except (AccountConfigError, ValueError, ImportError) as exc:
+        except (AccountConfigError, AccountEditUnavailable, ValueError, ImportError) as exc:
             parser.error(str(exc))
         try:
             import uvicorn
