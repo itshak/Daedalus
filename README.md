@@ -5,8 +5,7 @@
   <img alt="Daedalus winged-D logo" src="assets/brand/svg/daedalus-horizontal-light.svg" width="500">
 </picture>
 
-
-**Status: native desktop with opt-in existing-session task controls.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
+**Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The Selenium browser-assisted login and durable worker supervisor still remain to be implemented.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -35,7 +34,7 @@ daedalus engine inventory
 daedalus accounts list --config docs/examples/accounts.toml
 ```
 
-The `engine inventory` command reads engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots or execute tasks**. The upstream CLI/IPC proposal is included, and Daedalus now has an **opt-in existing-session-only read bridge** for city and warehouse data. The controller still cannot create authenticated workers or launch tasks.
+The `engine inventory` command reads engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots or execute tasks**. The upstream CLI/IPC proposal is included, and Daedalus now has an **opt-in existing-session-only read bridge** for city and warehouse data. The controller cannot create new authenticated game workers; already-authenticated compatible workers can run explicitly confirmed built-in tasks only in opt-in task mode.
 
 See [brand assets and app icons](assets/brand/README.md), including light/dark SVG, macOS ICNS, Windows ICO, and web/mobile exports.
 
@@ -48,7 +47,7 @@ python -m pip install -e ".[desktop]"
 daedalus-desktop
 ```
 
-Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, **Warehouses**, and the optional **Tasks** page. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports. With explicit `--connect-existing-ipc` backend opt-in, it can read real resources through a compatible **already-authenticated** IkaBot session; otherwise the API reports unavailable. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
+Open **Connection**, enter the backend URL and the bearer token from the local backend (see below). Then explore **Accounts**, the 46-operation read-only **Operations** inventory, **Warehouses**, and the optional **Tasks** page. With a separately opted-in editing backend, the **Accounts** page also has confirmed metadata editing controls. The warehouse tab preserves the 220K unsecured-resource filter and CSV/JSON exports. With explicit `--connect-existing-ipc` backend opt-in, it can read real resources through a compatible **already-authenticated** IkaBot session; otherwise the API reports unavailable. The token input is masked and kept in memory, not written to application settings. Remote connections require HTTPS or a protected SSH loopback tunnel.
 
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
@@ -67,6 +66,8 @@ daedalus serve --host 127.0.0.1 --port 8765
 ```
 
 With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by **default startup**. Game task execution requires both `--connect-existing-ipc` and `--enable-task-control`, with an already-authenticated compatible engine session, plus operator confirmation in the GUI.
+
+**Optional account metadata editor:** Start an editing-only backend with `daedalus serve --enable-account-editing`. The Accounts page can add/edit/enable/disable/remove secret-free account records, each requiring confirmation. It uses owner-only atomic TOML, optimistic revisions and account-lease checks. `--enable-account-editing` is incompatible with `--enable-task-control`; neither editing nor read-only startup performs game login. See [account editing setup and limitations](docs/ACCOUNT-EDITING.md).
 
 **Optional existing-session bridge:** Start the backend with `--connect-existing-ipc --accounts-file ~/.config/daedalus/accounts.toml` on the same machine/user as a **compatible, already-running** IkaBot IPC server. The Accounts page can check engine attachment and Warehouses can fetch read-only snapshots. This path never creates another Gameforge login. See [the full existing-IPC requirements, precautions and testing instructions](docs/EXISTING-IPC.md). **Do not use the current production bot installation as a test worker.**
 

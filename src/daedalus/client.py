@@ -99,6 +99,44 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid task receipt")
         return data
 
+    def account_config(self) -> dict[str, object]:
+        """Read safe account metadata editor status and optimistic generation."""
+        try:
+            result = self._read("account-config")
+        except APIConnectionError as exc:
+            if exc.status_code == 404:  # older read-only backend
+                return {"enabled": False, "revision": None, "accounts": []}
+            raise
+        if result.get("enabled") is True and (
+            not isinstance(result.get("revision"), str)
+            or not isinstance(result.get("accounts"), list)
+        ):
+            raise APIConnectionError("Backend returned invalid editable account configuration")
+        return result
+
+    def replace_account_config(
+        self, revision: str, accounts: list[dict[str, object]], *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not confirmed or not re.fullmatch(r"[0-9a-f]{64}", revision):
+            raise ValueError("An explicit confirmation and valid revision are required")
+        if not isinstance(accounts, list):
+            raise TypeError("Invalid account records")
+        try:
+            response = self._http.put("/api/v1/account-config", json={
+                "revision": revision, "accounts": accounts, "confirmed": True,
+            })
+        except httpx.RequestError as exc:
+            raise APIConnectionError("Cannot connect to Daedalus backend") from exc
+        if response.status_code != 200:
+            raise APIConnectionError("Account metadata change was rejected", response.status_code)
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid metadata JSON") from exc
+        if not isinstance(result, dict) or result.get("enabled") is not True:
+            raise APIConnectionError("Backend returned invalid metadata receipt")
+        return result
+
     def task_control_status(self) -> dict[str, object]:
         return self._read("task-control")
 

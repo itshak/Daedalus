@@ -44,3 +44,13 @@ def test_engine_inventory_json_is_offline(capsys):
     assert capabilities["constructionList"]["menu_codes"] == [1]
     assert capabilities["resourceTransportManager"]["kind"] == "background_task"
     assert capabilities["distributeResources"]["parameters"]
+
+
+def test_account_editing_is_exclusive_with_task_dispatch(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as error:
+        main(["serve", "--connect-existing-ipc", "--enable-task-control",
+              "--enable-account-editing"])
+    assert error.value.code == 2
+    assert "incompatible with --enable-task-control" in capsys.readouterr().err
