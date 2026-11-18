@@ -176,3 +176,9 @@ For explicitly authorized cookie-only startup of one existing authenticated
 IkaBot world session (without lobby login), see
 [the saved-worker guide](docs/SAVED-WORKER.md). This remains an experimental
 path, not a replacement for interactive Gameforge authentication.
+
+## OpenSpec and production scope
+
+The normative, maintained requirements are in [OpenSpec capabilities](openspec/specs/), and completed milestones are preserved under [archived changes](openspec/changes/archive/). Active umbrella changes remain open while their unchecked tasks are genuinely unfinished; they are **not** silently marked complete. The detailed [status and remaining work](docs/PROJECT-STATUS.md) identifies those gaps.
+
+The [saved-cookie worker](docs/SAVED-WORKER.md) is an explicitly opted-in, single-account bootstrap from **previously authenticated** cookies. It does not provide a fresh Gameforge login, browser/CAPTCHA handoff, unattended recovery or live-account certification. The [synthetic demo](docs/SYNTHETIC-DEMO.md) remains the safe first test.
