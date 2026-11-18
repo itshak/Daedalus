@@ -67,3 +67,22 @@ The CLI SHALL prompt for a world cookie only in an interactive echo-disabled loc
 #### Scenario: Failed cookie re-import
 - **WHEN** a newly supplied cookie cannot validate the world/player
 - **THEN** the previous verified cookie SHALL remain unchanged in protected storage
+
+### Requirement: Saved-cookie worker never transports private authentication material
+The controller API, metadata file and CLI arguments SHALL NOT contain saved account email, Gameforge tokens, cookies or credentials. The worker SHALL resolve its saved identity locally from a protected OS keyring, SHALL use only the engine's validated cookie-only world request and SHALL close IPC/session/lease on failure and shutdown.
+
+#### Scenario: Worker restore raises a private error
+- **WHEN** saved cookie restoration raises an exception containing sensitive data
+- **THEN** the external CLI surfaces a sanitized failure without exposing that data
+
+### Requirement: Embedded synthetic demo cannot access production accounts or persist its token
+
+The one-click demo SHALL use only `create_app(demo_mode=True)`, SHALL bind only an OS-selected loopback IPv4 port, SHALL require an in-memory random bearer token even on local HTTP, and SHALL NOT read real account/IPC/credential stores or persist the demo token to a keyring, repository, URL or configuration file.
+
+#### Scenario: Unauthorized request to local demo port
+- **WHEN** a local request lacks the temporary bearer token
+- **THEN** the demo SHALL reject protected account and warehouse routes
+
+#### Scenario: Remember connection was enabled
+- **WHEN** a user selects the demo action after enabling Remember connection
+- **THEN** the UI SHALL explicitly disable persistence for the ephemeral demo token

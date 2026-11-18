@@ -4,7 +4,7 @@ Last reviewed: **2026-11-18**. The public repository's default branch is `main`.
 
 ## Complete and archived
 
-The following changes passed GitHub's offline Python/engine tests, source-security checks, package build, strict OpenSpec validation and relevant native macOS checks before being merged. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
+The following changes have merged implementation and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
@@ -27,24 +27,22 @@ The following changes passed GitHub's offline Python/engine tests, source-securi
 | existing-session-recovery-monitor | Opt-in verified in-memory session monitoring, nonsecret manual-assistance notifications, worker revalidation and no task replay | [#33](https://github.com/itshak/Daedalus/pull/33) |
 | private-world-cookie-handoff | Local hidden-input world-cookie validation and OS keyring binding, no remote cookie transfer | [#35](https://github.com/itshak/Daedalus/pull/35) |
 | offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
+| cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
+| desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
 
-The completed archive folders are dated `2026-11-18`. Their checkboxes reflect **observed** successful CI and prior merges, not projected work.
+The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
 ## Existing-session read-only bridge (shipped)
 
 The completed `connect-existing-ipc` change was merged through PR #12, verified in offline CI, and archived with its requirements added to the permanent capability specifications. It has not been tested against any production Gameforge account; no existing account session was changed.
 
-## Experimental cookie-only worker bootstrap (pending integration validation)
+## Experimental cookie-only worker bootstrap (merged; live validation pending)
 
-The opt-in single-account worker can start a dedicated IPC server from a
-previously saved and exactly verified world session, retain the account lease
-and optionally hand it to the existing task controller. It cannot initiate
-Gameforge login or CAPTCHA, and no live account validation has been performed.
-See [saved worker](SAVED-WORKER.md). This is not production readiness.
+PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA, and no live account validation has been performed. See [saved worker](SAVED-WORKER.md). This is not production readiness.
 
 ## Still active
 
-The following umbrella changes have unfinished tasks and were deliberately **not archived**:
+The following umbrella changes have unfinished tasks and were deliberately **not archived** (the legacy GUI source/license review is complete; full parity is not):
 
 - `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
 - `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
@@ -54,12 +52,11 @@ Do **not** mark these changes as entirely done, or claim real game automation is
 
 ### Remaining OpenSpec completion gates
 
-As of this audit, **7 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
+As of the reviewed source and license audit, **6 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
 
 | Active change | Remaining gate | Evidence needed before checking off |
 | --- | --- | --- |
 | `import-public-ikabot-engine` | Reconcile production authentication modifications with upstream without private material | File-by-file reviewed diff, explicit license/provenance and isolated engine regression tests |
-| `migrate-native-desktop` | Finish legacy GUI source and dependency license audit | Source inventory, attribution/compatibility review and binary redistribution decision |
 | `migrate-native-desktop` | Finish advanced legacy GUI parity | Implemented UI workflows and native desktop regression tests, with no credential leakage |
 | `unify-authentication` | Safe browser login and manual CAPTCHA assistance | User-authorized manual browser flow, explicit consent, safe secret handling and mocked failure tests |
 | `unify-authentication` | Validated remote handoff or protected remote-browser fallback | Threat model, authenticated transport, host-local ownership and no secret exposure to controller |
@@ -99,6 +96,10 @@ The archived private-world-cookie-handoff change adds an optional hidden termina
 
 The archived `offline-readiness-doctor` change replaces outdated hardcoded CLI diagnostics with preview-accurate feature and optional-dependency reports, and adds an isolated in-process FastAPI synthetic smoke test. Live accounts, real game integration and production readiness are not claimed. PR #38 passed protected CI and merged on 2026-11-18; requirements archived. See [offline test readiness](TEST-READINESS.md).
 
+## One-click native synthetic Mac demo (implementation archived)
+
+The archived `desktop-oneclick-synthetic` change adds an explicit Connection-page action that starts a temporary loopback-only synthetic backend and connects with an in-memory token. Data stays fictional, task control is disabled and closing the app stops the demo. The full local regression run completed with 609 passing Python tests, 9 skipped, and 107 passing subtests; strict OpenSpec and isolated wheel build also passed. The protected native macOS packaging/smoke checks remain mandatory merge gates, not evidence of live Gameforge login. See [one-click demo](ONECLICK-DEMO.md).
+
 ## Existing-session integration architecture
 
 The archived `connect-existing-ipc` change delivers an **opt-in read-only bridge** to compatible already-authenticated IkaBot sessions. It reads connected account identities, cities and warehouse amounts without Gameforge credential restoration. A separate explicitly enabled task-control interface can start and stop only managed background tasks. No part of this attachment creates a competing game login; new worker bootstrap and Selenium login/assistance remain open.
@@ -130,4 +131,4 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 ## Release and production status
 
-The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend currently does **not** bootstrap new authenticated game workers or provide Selenium handoff; it does support explicitly opted-in start/list/stop on existing sessions. No real production accounts have been migrated.
+The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend can explicitly bootstrap **one** already-authenticated saved-cookie world session, but cannot perform new Gameforge lobby login, Selenium handoff, or unattended worker recovery. It supports separately opted-in start/list/stop on verified existing sessions. No real production accounts have been migrated.

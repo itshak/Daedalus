@@ -1,0 +1,7 @@
+# Design: one process, an ephemeral localhost demo server, no real credentials
+
+The user explicitly clicks Try offline demo in the native Connection page. The desktop creates an `EmbeddedDemoServer` holding a random bearer token only in memory. It binds a socket to 127.0.0.1 with OS-assigned port 0, starts Uvicorn in a daemon thread against `create_app(demo_mode=True)`, and waits briefly for server startup. It does not inspect saved account metadata, keyring data, IPC, real game cookies, or Gameforge. The service advertises itself to the existing `DaedalusClient` only after it starts.
+
+The UI unchecks Remember connection before calling its existing async connect action; the token is never printed, persisted, placed in a URL, or passed as a CLI parameter. The desktop displays a SYNTHETIC DEMO title, badge-free connection status and warehouse note on successful API handshake. If restarted during the same window lifecycle, the same server/token is reused. The UI closes its API client and shuts down the daemon when the window closes, reporting only sanitized cleanup failures.
+
+The desktop package includes FastAPI, filelock and Uvicorn dependencies and PyInstaller collects the Uvicorn protocol modules in the macOS preview. No production signing or Apple notarization is claimed. Unit tests use real loopback sockets and synthetic data only, while protected macOS Qt UI and app-build jobs test compatibility.

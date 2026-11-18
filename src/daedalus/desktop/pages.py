@@ -59,6 +59,7 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 class ConnectionPage(QWidget):
     connect_requested = Signal(str, str)
+    demo_requested = Signal()
     reconnect_requested = Signal()
     forget_requested = Signal()
 
@@ -97,6 +98,12 @@ class ConnectionPage(QWidget):
         self.connect_button = PrimaryPushButton("Connect")
         self.connect_button.clicked.connect(self._connect)
         layout.addWidget(self.connect_button)
+        self.demo_button = PushButton("Try offline demo — no game login")
+        self.demo_button.clicked.connect(self.demo_requested.emit)
+        self.demo_button.setToolTip(
+            "Start a temporary synthetic backend on loopback; no saved accounts are accessed"
+        )
+        layout.addWidget(self.demo_button)
 
         self.remember_checkbox = CheckBox("Remember URL and token in OS keychain")
         self.remember_checkbox.setToolTip(
