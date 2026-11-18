@@ -14,6 +14,6 @@
 - [x] Add API, IPC wire and Qt synthetic tests.
 
 ## Verification
-- [ ] Run full Daedalus/engine tests, lint, source guard and strict OpenSpec.
-- [ ] Confirm passing GitHub CI and Mac app build.
-- [ ] Merge via itshak, archive completed change and sync canonical specs.
+- [x] Run full Daedalus/engine tests, lint, source guard and strict OpenSpec.
+- [x] Confirm passing GitHub CI and Mac app build.
+- [x] Merge via itshak, archive completed change and sync canonical specs.
