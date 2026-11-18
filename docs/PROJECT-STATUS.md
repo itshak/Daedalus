@@ -28,6 +28,7 @@ The following changes have merged implementation and archived OpenSpec requireme
 | private-world-cookie-handoff | Local hidden-input world-cookie validation and OS keyring binding, no remote cookie transfer | [#35](https://github.com/itshak/Daedalus/pull/35) |
 | offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
 | cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
+| desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
 
 The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
 
@@ -41,7 +42,7 @@ PR #41 merged the opt-in single-account worker: it can start a dedicated IPC ser
 
 ## Still active
 
-The following umbrella changes have unfinished tasks and were deliberately **not archived**:
+The following umbrella changes have unfinished tasks and were deliberately **not archived** (the legacy GUI source/license review is complete; full parity is not):
 
 - `import-public-ikabot-engine`: the clean engine and experimental CLI plus existing-session task adapter are integrated; production authentication differences and durable worker recovery remain incomplete
 - `unify-authentication`: the existing browser/Selenium login restoration has been inventoried, and host-local lease/state foundations exist; a secure handoff, manual CAPTCHA assistance and real worker recovery still require implementation and tests
@@ -51,12 +52,11 @@ Do **not** mark these changes as entirely done, or claim real game automation is
 
 ### Remaining OpenSpec completion gates
 
-As of this audit, **7 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
+As of the reviewed source and license audit, **6 unchecked tasks across 3 active umbrella changes** remain. This is the concrete backlog; none should be marked complete or archived on documentation alone.
 
 | Active change | Remaining gate | Evidence needed before checking off |
 | --- | --- | --- |
 | `import-public-ikabot-engine` | Reconcile production authentication modifications with upstream without private material | File-by-file reviewed diff, explicit license/provenance and isolated engine regression tests |
-| `migrate-native-desktop` | Finish legacy GUI source and dependency license audit | Source inventory, attribution/compatibility review and binary redistribution decision |
 | `migrate-native-desktop` | Finish advanced legacy GUI parity | Implemented UI workflows and native desktop regression tests, with no credential leakage |
 | `unify-authentication` | Safe browser login and manual CAPTCHA assistance | User-authorized manual browser flow, explicit consent, safe secret handling and mocked failure tests |
 | `unify-authentication` | Validated remote handoff or protected remote-browser fallback | Threat model, authenticated transport, host-local ownership and no secret exposure to controller |
@@ -96,9 +96,9 @@ The archived private-world-cookie-handoff change adds an optional hidden termina
 
 The archived `offline-readiness-doctor` change replaces outdated hardcoded CLI diagnostics with preview-accurate feature and optional-dependency reports, and adds an isolated in-process FastAPI synthetic smoke test. Live accounts, real game integration and production readiness are not claimed. PR #38 passed protected CI and merged on 2026-11-18; requirements archived. See [offline test readiness](TEST-READINESS.md).
 
-## One-click native synthetic Mac demo (pending protected CI and merge)
+## One-click native synthetic Mac demo (implementation archived)
 
-The active `desktop-oneclick-synthetic` change makes the packaged native app able to start its own isolated loopback-only fake backend after an explicit click and connect without manually supplying an API token. Test data stays fictional; no Gameforge login or task execution is involved. See [one-click demo](ONECLICK-DEMO.md). Protected macOS packaging and CI must pass before this is archived.
+The archived `desktop-oneclick-synthetic` change adds an explicit Connection-page action that starts a temporary loopback-only synthetic backend and connects with an in-memory token. Data stays fictional, task control is disabled and closing the app stops the demo. The full local regression run completed with 609 passing Python tests, 9 skipped, and 107 passing subtests; strict OpenSpec and isolated wheel build also passed. The protected native macOS packaging/smoke checks remain mandatory merge gates, not evidence of live Gameforge login. See [one-click demo](ONECLICK-DEMO.md).
 
 ## Existing-session integration architecture
 
