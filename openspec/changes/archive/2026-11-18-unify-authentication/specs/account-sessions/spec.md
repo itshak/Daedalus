@@ -53,3 +53,15 @@ A dedicated cookie-only worker SHALL allow a user-approved replacement of its se
 - **GIVEN** an unresolved task dispatch or active engine task
 - **WHEN** recovery is requested
 - **THEN** the worker SHALL refuse session replacement without stopping its existing IPC endpoint
+### Requirement: Explicit new-task dispatch after verified recovery
+The controller SHALL reject a post-recovery task request unless the same trusted worker has validated its game session, the operator explicitly approves a new task, and a fresh idempotency key and secret-free configuration are supplied. A successful approval SHALL be single-use, and an ambiguous dispatch SHALL NOT be automatically replayed.
+
+#### Scenario: Operator attempts to reuse recovery approval
+- **GIVEN** a trusted worker has validated a recovered session and dispatched one approved task
+- **WHEN** the client submits a different task request with the same recovery ticket
+- **THEN** the controller SHALL reject it without another game operation
+
+#### Scenario: Recovery session expires before dispatch
+- **GIVEN** a previously verified recovery ticket
+- **WHEN** the read-only game-world validation no longer succeeds
+- **THEN** the controller SHALL reject task dispatch without consuming an unverified game session
