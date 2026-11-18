@@ -8,5 +8,6 @@
 - [ ] Complete browser login integration and manual CAPTCHA recovery across local/remote workers without credentials.
 - [ ] Implement validated remote handoff or protected remote-browser fallback.
 - [x] Add opt-in existing-session expiration detection, GUI notification and worker revalidation (no automatic task resume).
+- [x] Add an internal single-use worker-verified recovery dispatch gate and a bearer-protected new-task API, with synthetic negative-path tests (not a browser-recovery workflow).
 - [ ] Add secure, user-approved task resume after verified real browser recovery.
 - [ ] Test recovery offline, scan secrets, validate OpenSpec.
