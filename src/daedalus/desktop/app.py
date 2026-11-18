@@ -209,6 +209,9 @@ class MainWindow(FluentWindow):
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
         self.tasks_page = TasksPage(self)
+        self.wine_page = TasksPage(self, workflow="wine")
+        self.construction_page = TasksPage(self, workflow="construction")
+        self._task_views = (self.tasks_page, self.wine_page, self.construction_page)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
         self.appearance_page = AppearancePage(self)
@@ -220,6 +223,8 @@ class MainWindow(FluentWindow):
 
         self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
         self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
+        self.addSubInterface(self.wine_page, FIF.PLAY, "Wine")
+        self.addSubInterface(self.construction_page, FIF.EDIT, "Construction")
         self.addSubInterface(self.operations_page, FIF.PLAY, "Operations")
         self.addSubInterface(self.tasks_page, FIF.EDIT, "Tasks")
         self.addSubInterface(self.log_page, FIF.DOCUMENT, "Log")
@@ -268,25 +273,26 @@ class MainWindow(FluentWindow):
         self.warehouses_page.load_selected_requested.connect(
             lambda ids: self._request("warehouses_batch", task_payload={"account_ids": ids})
         )
-        self.tasks_page.refresh_requested.connect(
-            lambda account_id: self._request("task_list", account_id=account_id)
-        )
-        self.tasks_page.launch_requested.connect(
-            lambda aid, name, config, rid: self._request(
-                "task_start", account_id=aid,
-                task_payload={"task": name, "config": config, "request_id": rid},
+        for view in self._task_views:
+            view.refresh_requested.connect(
+                lambda account_id: self._request("task_list", account_id=account_id)
             )
-        )
-        self.tasks_page.stop_requested.connect(
-            lambda aid, task_id: self._request(
-                "task_stop", account_id=aid, task_payload={"task_id": task_id},
+            view.launch_requested.connect(
+                lambda aid, name, config, rid: self._request(
+                    "task_start", account_id=aid,
+                    task_payload={"task": name, "config": config, "request_id": rid},
+                )
             )
-        )
-        self.tasks_page.reconcile_requested.connect(
-            lambda aid, rid: self._request(
-                "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+            view.stop_requested.connect(
+                lambda aid, task_id: self._request(
+                    "task_stop", account_id=aid, task_payload={"task_id": task_id},
+                )
             )
-        )
+            view.reconcile_requested.connect(
+                lambda aid, rid: self._request(
+                    "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+                )
+            )
 
         self._log_handler = QtLogHandler(self.log_page.log_view)
         self._log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
@@ -531,7 +537,12 @@ class MainWindow(FluentWindow):
             logger.info("Multi-account warehouse report updated")
         elif action == "task_list":
             assert isinstance(payload, dict)
-            self.tasks_page.set_tasks(payload)
+            account_id = payload.get("account_id")
+            for view in self._task_views:
+                if account_id == view.selected_account_id() or (
+                    account_id is None and view is self.tasks_page
+                ):
+                    view.set_tasks(payload)
             logger.info("Managed tasks refreshed")
         elif action in {"task_start", "task_stop", "task_reconcile"}:
             assert isinstance(payload, dict)
@@ -550,14 +561,16 @@ class MainWindow(FluentWindow):
         self.warehouses_page.set_selected_accounts(
             self.accounts_page.selected_report_account_ids()
         )
-        self.tasks_page.set_accounts(data)
+        for view in self._task_views:
+            view.set_accounts(data)
 
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
         self.operations_page.set_operations(data["operations"])
-        self.tasks_page.set_capabilities(
-            data["operations"], bool(data.get("structured_engine_dispatch", False)),
-        )
+        for view in self._task_views:
+            view.set_capabilities(
+                data["operations"], bool(data.get("structured_engine_dispatch", False)),
+            )
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:

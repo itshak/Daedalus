@@ -13,4 +13,5 @@
 ## Final GUI parity evidence (2026-11-18)
 - [x] Offline native Qt regression tests cover report-selection refresh, multi-account read-only queries, explicit partial failures, persistent appearance settings and backend isolation.
 - [x] Secure settings tests cover schema/version restrictions, owner-only atomic storage, symlink rejection, per-backend scope hashing and credential-free contents.
+- [x] Provide dedicated Wine and Construction task workflow pages with typed registered background-task forms and the original backend safety checks.
 - [x] Preserve historical browser/credential separation: GUI never imports the legacy Selenium runner, passwords, profile data, or token stores; live recovery is tracked in `validate-live-authentication`.

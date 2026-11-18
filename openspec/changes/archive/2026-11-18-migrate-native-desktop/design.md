@@ -26,3 +26,12 @@ The remaining legacy password/browser fields and live Selenium recovery are
 **not** desktop-migration parity: they are owned by `validate-live-authentication`.
 Notarization and binary dependency-license compliance remain release gates,
 not evidence of production authentication.
+
+### Dedicated reviewed task workflows
+The native navigation has dedicated **Wine** and **Construction** pages,
+which select only matching, registered *background* engine task capabilities.
+They reuse the same account selector, typed configuration form, explicit
+permission checkbox, second start confirmation, nonsecret managed task
+inspection, targeted stop and request reconciliation as generic Tasks.
+Interactive-only commands are never silently made executable. Backend
+authorization and task-execution state remain authoritative on every page.

@@ -47,6 +47,11 @@ account/report/settings interactions, backed by a single Daedalus API client:
   validated island, Copy CSV, **Copy by island**, and TXT/CSV/JSON exports.
   Partial backend failures remain conspicuous; successful rows can still be
   copied or saved without pretending failed accounts returned zero.
+- **Wine and Construction:** dedicated Fluent pages for backend-registered
+  background tasks, reusing the same typed parameter forms, read-only status
+  inspection, explicit account selection, manual reconciliation and separate
+  operator confirmations as the generic Tasks page. Interactive-only engine
+  menu operations are not exposed as executable actions.
 - **Appearance:** System/Light/Dark themes, 220K default and island grouping
   default, stored in a separate versioned owner-private
   `~/.config/daedalus/gui.json` file (or `XDG_CONFIG_HOME`).

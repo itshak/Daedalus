@@ -13,7 +13,7 @@ Reviewed on **2026-11-18** against the owner's private `itshak/ikabot` source tr
 | `gui/settings_page.py`, `settings.py` | Browser options, debug, credentials and theme | `Connection` and local-only `Appearance` pages, versioned GUI preferences | Password and browser settings excluded pending security review |
 | `gui/worker.py`, `browser.py`, `login.py`, `runner.py` | Local Selenium/browser-backed game login, scraping and manual steps | Lease/state protocol, saved-cookie validation, explicit existing-session task worker | Real browser assistance, protected remote handoff and validated task resume are still incomplete |
 
-The current Daedalus Tasks page also offers managed IkaBot task controls and reviewed typed task parameters absent from the legacy GUI.
+The Daedalus Tasks page and dedicated Wine/Construction workflow pages offer managed IkaBot task controls and reviewed typed task parameters absent from the legacy GUI. Only backend-registered background tasks can launch, with explicit operator confirmation.
 
 ## Ownership and license findings
 

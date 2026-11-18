@@ -22,6 +22,15 @@ def qt_app():
     yield application
 
 
+def _dispose(widget, app: QApplication) -> None:
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    widget.close()
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+
+
 
 def test_native_report_account_selection_preserves_choices_without_task_dispatch(qt_app):
     from PySide6.QtCore import Qt
@@ -49,7 +58,7 @@ def test_native_report_account_selection_preserves_choices_without_task_dispatch
         assert selected[-1] == ["beta"]
         assert writes == []
     finally:
-        page.close()
+        _dispose(page, qt_app)
 
 
 def test_native_multi_account_warehouse_export_explicit_partial_failures(qt_app):
@@ -89,7 +98,7 @@ def test_native_multi_account_warehouse_export_explicit_partial_failures(qt_app)
         assert not page.copy_button.isEnabled()
         assert page.table.rowCount() == 0
     finally:
-        page.close()
+        _dispose(page, qt_app)
 
 
 def test_batch_worker_uses_only_readonly_existing_session_snapshot_calls(qt_app):
@@ -154,7 +163,7 @@ def test_native_appearance_preferences_and_scoped_selection(qt_app, monkeypatch)
         assert window._gui_preferences.excluded_for("https://two.example") == set()
         assert persisted
     finally:
-        window.close()
+        _dispose(window, qt_app)
 
 
 def test_account_refresh_rebinds_report_selection_to_new_backend_accounts(qt_app, monkeypatch):
@@ -175,4 +184,85 @@ def test_account_refresh_rebinds_report_selection_to_new_backend_accounts(qt_app
         assert window.warehouses_page._included_ids == ["beta"]
         assert "alpha" not in window.warehouses_page._accounts
     finally:
-        window.close()
+        _dispose(window, qt_app)
+
+
+
+def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from daedalus.desktop.task_page import TasksPage
+
+    all_operations = [
+        {"name": "alertLowWine", "kind": "background_task", "config_fields": [
+            {"name": "threshold", "type": "integer", "required": True}
+        ]},
+        {"name": "constructionList", "kind": "background_task", "config_fields": []},
+        {"name": "constructBuilding", "kind": "interactive_menu"},
+        {"name": "alertAttacks", "kind": "background_task"},
+    ]
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.Yes)
+    for kind, expected in (("wine", "alertLowWine"), ("construction", "constructionList")):
+        seen = []
+        page = TasksPage(workflow=kind)
+        try:
+            page.launch_requested.connect(lambda *args, captured=seen: captured.append(args))
+            page.set_accounts([{
+                "id": "alpha", "player": "Example", "world": "s1-en", "enabled": True,
+            }])
+            page.set_capabilities(all_operations, enabled=False)
+            assert page._task_names == [expected]
+            assert not page.start_button.isEnabled()
+            page._start()
+            assert seen == []
+            page.set_capabilities(all_operations, enabled=True)
+            assert page._task_names == [expected]
+            assert page.start_button.isEnabled()
+            if kind == "wine":
+                page._form_inputs["threshold"].setText("1000")
+                page._build_config_from_form()
+                assert '"threshold": 1000' in page.config_editor.toPlainText()
+            page.confirm_box.setChecked(True)
+            page._start()
+            assert seen[-1][0:2] == ("alpha", expected)
+            assert seen[-1][2] == ({"threshold": 1000} if kind == "wine" else {})
+            assert "constructBuilding" not in page._task_names
+        finally:
+            _dispose(page, qt_app)
+
+
+def test_native_navigation_exposes_readonly_gated_workflow_pages(qt_app, monkeypatch):
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        assert window.wine_page.objectName() == "wine_page"
+        assert window.construction_page.objectName() == "construction_page"
+        assert window.wine_page._workflow == "wine"
+        operations = [
+            {"name": "alertLowWine", "kind": "background_task"},
+            {"name": "constructionList", "kind": "background_task"},
+        ]
+        window._show_accounts([{
+            "id": "alpha", "player": "Example", "world": "s1-en", "enabled": True,
+        }])
+        window._show_capabilities({"operations": operations, "structured_engine_dispatch": False})
+        assert window.wine_page._task_names == ["alertLowWine"]
+        assert window.construction_page._task_names == ["constructionList"]
+        assert not window.wine_page.start_button.isEnabled()
+        assert not window.construction_page.start_button.isEnabled()
+        window._show_capabilities({"operations": operations, "structured_engine_dispatch": True})
+        assert window.wine_page.start_button.isEnabled()
+        assert window.construction_page.start_button.isEnabled()
+        window._on_completed("task_list", {
+            "account_id": "alpha", "engine_tasks": [
+                {"task": "alertLowWine", "status": "running", "pid": 1001,
+                 "task_id": "a" * 24},
+            ], "requests": [],
+        })
+        assert window.wine_page.task_table.rowCount() == 1
+        assert window.construction_page.task_table.rowCount() == 1
+    finally:
+        _dispose(window, qt_app)

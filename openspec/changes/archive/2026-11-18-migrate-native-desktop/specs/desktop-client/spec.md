@@ -48,3 +48,25 @@ in addition to exporting TXT, CSV and JSON.
 - **GIVEN** typed resource snapshots with validated island coordinates
 - **WHEN** the operator uses Copy by island
 - **THEN** the clipboard holds grouped human-readable text without converting unknown resource amounts to zero
+
+
+### Requirement: Dedicated native Wine and Construction workflows
+The desktop SHALL offer dedicated Wine and Construction pages as convenient
+entry points to registered compatible background engine tasks. These pages
+MUST reuse the generic Tasks page's typed forms, backend capability gating,
+operator confirmations, task status and targeted stop/reconciliation safeguards.
+
+#### Scenario: Wine and construction task discovery
+- **GIVEN** a compatible backend advertises alertLowWine, constructionList and an interactive-only constructBuilding command
+- **WHEN** the user opens the Wine or Construction page
+- **THEN** the respective page offers only registered background tasks for that workflow, with their validated parameter inputs; interactive-only operations remain read-only
+
+#### Scenario: Disabled task execution on dedicated pages
+- **GIVEN** the backend has not opted into structured engine task dispatch
+- **WHEN** an operator opens either dedicated page
+- **THEN** neither page can start, stop or acknowledge a game task
+
+#### Scenario: Authorized task dispatch from dedicated page
+- **GIVEN** the backend has enabled a registered background task
+- **WHEN** the operator reviews its configuration, checks authorization and confirms start
+- **THEN** the page calls the same authenticated API and replay-safe dispatch as generic Tasks without creating an independent login or game worker
