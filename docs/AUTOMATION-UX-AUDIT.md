@@ -22,7 +22,7 @@ A row with **Designed, pending engine data** represents a *specified* UI but not
 | Cities | `constructBuilding` | One-shot building/level selector with cost preview | Designed; interactive-only adapter pending |
 | Cities | `research` | Academy city list, experiments, crystal cost and cooldown | **Partial: actual city multi-select; experiment planner pending** |
 | Cities | `tavernManager` | City list, check recurrence, wine balance/notifications | **Partial: city multi-select and interval; wine preview pending** |
-| Cities | `loginDaily` | Actual city reward destinations and collection switches | Designed; reward eligibility pending |
+| Cities | `loginDaily` | Actual city reward destinations and collection switches | **Partial: 3 actual-city pickers, favour checkboxes and collection toggle; reward eligibility preview pending** |
 | Cities | `activateMiracle` | Wonder/island selector, repetitions, cooldown | Designed; wonders data pending |
 | Cities | `activateShrine` | Gods/shrines table with mode, count and timing | Designed; faith data pending |
 | Cities | `modifyProduction` | Workers slider + hourly production forecast per city | Designed; interactive-only adapter pending |
