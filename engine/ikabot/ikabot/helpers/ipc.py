@@ -840,7 +840,8 @@ class IPCServer:
                 "name": title[:100],
                 "level": level,
                 "busy": item.get("isBusy") is True,
-                "can_upgrade": item.get("canUpgrade") is True,
+                "can_upgrade": item.get("isMaxLevel") is not True,
+                "can_upgrade_now": item.get("canUpgrade") is True,
             })
         if len(buildings) > 80 or len({item["position"] for item in buildings}) != len(buildings):
             raise ValueError("Invalid building inventory")
