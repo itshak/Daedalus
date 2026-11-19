@@ -1,6 +1,6 @@
 # Daedalus native Mac quick start (guided preview)
 
-The native application is a controller for a private authenticated Daedalus backend. It is not a browser, a Gameforge password manager, or a separate game bot on your Mac. Only the authoritative Linux worker talks to Ikariam. No task starts merely by connecting or opening a page.
+The native application controls an authenticated Daedalus backend. Its Mac Selenium browser signs into Gameforge automatically when needed; the authoritative Linux worker alone owns game tasks and independently verifies sessions. No game automation starts merely by connecting or opening a page.
 
 ## Connect directly over HTTPS — no SSH needed
 
@@ -14,9 +14,56 @@ An existing local backend can still be reached through `http://127.0.0.1:8765` f
 
 Server operators: see [private-origin HTTPS deployment](REMOTE-HTTPS.md). The service can remain bound to `127.0.0.1` while the gateway supplies a publicly trusted certificate and HTTPS address.
 
-## Sign in on the Mac (native browser)
+## Automatic headless Gameforge sign-in (the prior warehouse-bot workflow)
 
-From **Accounts**, select the world/player and click **Sign in on this Mac**. An isolated native Gameforge browser opens in the app. Complete your Gameforge login and any MFA/CAPTCHA yourself, open the selected world, then approve **Verify session on server**. The session is encrypted for a one-time HTTPS handoff; the backend independently checks the game-world player before it will accept the cookie. No host-side browser, VNC or SSH is involved. If the button is disabled, the currently connected backend has not yet been started with the optional `--enable-native-browser-login` flag, or the account is disabled. Do not restart a production worker while it has uncertain tasks. See [native Mac login and acceptance boundaries](NATIVE-MAC-LOGIN.md).
+**The normal path is now automatic Selenium Chrome, not a manual Gameforge browser.**
+This is adapted from the original local warehouse bot in
+[itshak/ikabot](https://github.com/itshak/ikabot): restore the previously saved
+world session when available, otherwise enter Gameforge lobby using stored
+email/password, select the game's play/world entry, and detect the exact-world
+authenticated city UI. Selenium starts with **headless Chrome**. A visible
+Chrome window is opened **only when an actual CAPTCHA is detected**, so the user
+can solve it; Selenium resumes navigation itself. A wrong password, missing
+browser, timeout or world mismatch does *not* open a random visible browser.
+CAPTCHA is never solved or bypassed by software.
+
+In Daedalus **Accounts**, select **Sign in automatically (headless)**, **Sign in
+all accounts**, or **Choose sign-in accounts…**. The **Warehouses → All accounts**
+button also checks which accounts lack verified sessions and attempts headless
+sign-in for those accounts before collecting **one combined warehouse report**.
+Already authenticated accounts require no new login. Existing island grouping,
+220K filter, native Print preview and CSV/JSON/TXT exports remain unchanged.
+All attempts are account-scoped, proceed sequentially and report errors
+independently rather than aborting a full multi-account report.
+
+On the first use, Daedalus tries an exact account alias match in the previous
+local bot's owner-owned `~/.ikabot/config.ini` and an unexpired, exact-world
+session in `~/.ikabot/tokens.json`. Neither source is changed or copied into
+Daedalus settings. Otherwise you supply your Gameforge email/password **once**
+through a secure Mac form, and can save them to **macOS Keychain**, bound to
+the exact backend HTTPS origin, account ID and world. Subsequently those
+credentials are reused automatically and no password input is needed until
+they are unavailable or changed. They never leave the Mac for the Daedalus API.
+
+After login, the Mac extracts **only the exact world's secure `ikariam`
+cookie** and uses the existing single-use, account/world/player-bound
+X25519/AES-GCM handoff. The authoritative backend independently verifies the
+game identity, respects active task/uncertain-request ownership and accepts
+or rejects the new session. It does not start game tasks. For emergencies,
+**Manual browser fallback** is available under Advanced recovery; it is not
+the ordinary sign-in flow.
+
+**Scope and acceptance:** This requires a trusted HTTPS Daedalus connection,
+backend native browser handoff enabled, Chrome/Selenium on the Mac and
+account-scoped Gameforge credentials or a matching legacy configuration.
+Source code and synthetic tests do not establish that a live Gameforge
+CAPTCHA, 2FA prompt or world selection currently succeeds. The owner will
+perform actual account tests separately; no live credentials or game traffic
+were used during implementation.
+
+## Advanced manual browser fallback
+
+For exceptional situations, expand Advanced recovery in Accounts, select the world/player and click **Manual browser fallback**. An isolated native Gameforge browser opens in the app. Complete your Gameforge login and any MFA/CAPTCHA yourself, open the selected world, then approve **Verify session on server**. The session is encrypted for a one-time HTTPS handoff; the backend independently checks the game-world player before it will accept the cookie. No host-side browser, VNC or SSH is involved. If the button is disabled, the currently connected backend has not yet been started with the optional `--enable-native-browser-login` flag, or the account is disabled. Do not restart a production worker while it has uncertain tasks. See [native Mac login and acceptance boundaries](NATIVE-MAC-LOGIN.md).
 
 ## Find and manage accounts
 

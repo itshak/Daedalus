@@ -35,3 +35,18 @@ The workflow intentionally does **not** release automatically, notarize, attach 
 ## Native browser requirements
 
 The ad-hoc signed preview now bundles `PySide6.QtWebEngineCore`, `PySide6.QtWebEngineWidgets`, `QtWebEngineProcess`, resource files, and the `cryptography` implementation used for one-use encrypted session handoff. The macOS CI build verifies the modules and helper process are present. Native Qt tests use synthetic Gameforge accounts and no live login; macOS real CAPTCHA and binary execution still require owner acceptance. Browser profile data is off-the-record and not packed into the application artifact.
+
+
+## Automatic Gameforge Selenium support (headless default)
+
+The macOS preview now includes `selenium`, `undetected-chromedriver`
+and `webdriver-manager` in `daedalus[desktop]` and the PyInstaller bundle.
+Google Chrome or a compatible ChromeDriver is still needed on the Mac,
+and first-use driver provisioning may require access to its official
+distribution endpoints. The app uses headless Chrome for normal login and
+opens visible Chrome **only** when a Gameforge CAPTCHA is detected.
+The original warehouse bot's legacy config/session files are read only
+for explicitly selected accounts and never bundled into the installer.
+The app passes only an encrypted world-cookie handoff to the backend;
+no automated CAPTCHA solving is implemented. macOS packaging CI is
+synthetic and does not log into Gameforge.

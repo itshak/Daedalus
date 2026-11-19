@@ -36,6 +36,15 @@ from daedalus.desktop.design_system import NAV_ICONS
 from daedalus.desktop.home_page import HomePage
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, WarehousesPage
+from daedalus.desktop.selenium_auth import GameforgeCredentials
+from daedalus.desktop.selenium_credentials import (
+    LoginCredentialError,
+    get_saved_login,
+    legacy_warehouse_login,
+    remember_login,
+)
+from daedalus.desktop.selenium_credentials_dialog import SeleniumCredentialsDialog
+from daedalus.desktop.selenium_worker import SeleniumLoginWorker
 from daedalus.desktop.ssh_tunnel import (
     LocalSSHTunnel,
     SSHConnectionUnavailable,
@@ -396,6 +405,18 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
+        self._selenium_worker: SeleniumLoginWorker | None = None
+        self._automatic_login_active = False
+        self._automatic_login_cancelled = False
+        self._automatic_login_queue: list[str] = []
+        self._automatic_login_current: str | None = None
+        self._automatic_login_credentials: GameforgeCredentials | None = None
+        self._automatic_login_save_credentials = False
+        self._automatic_login_challenge: dict[str, object] | None = None
+        self._automatic_login_pending_advance = False
+        self._automatic_login_successes = 0
+        self._automatic_login_failures = 0
+        self._automatic_login_report: tuple[str, list[str]] | None = None
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
@@ -484,6 +505,8 @@ class MainWindow(FluentWindow):
             lambda account_id: self._request("recovery_guide", account_id=account_id)
         )
         self.accounts_page.native_browser_login_requested.connect(self._begin_native_browser_login)
+        self.accounts_page.automatic_login_requested.connect(self._begin_automatic_logins)
+        self.accounts_page.automatic_login_cancel_requested.connect(self._cancel_automatic_logins)
         self.accounts_page.recovery_prepare_requested.connect(
             lambda account_id: self._request(
                 "recovery_prepare", account_id=account_id,
@@ -517,13 +540,13 @@ class MainWindow(FluentWindow):
             lambda: self._request("capabilities")
         )
         self.warehouses_page.load_requested.connect(
-            lambda account_id: self._request("warehouses", account_id=account_id)
+            lambda aid: self._request_warehouse_scope("warehouses", [aid])
         )
         self.warehouses_page.load_selected_requested.connect(
-            lambda ids: self._request("warehouses_batch", task_payload={"account_ids": ids})
+            lambda ids: self._request_warehouse_scope("warehouses_batch", ids)
         )
         self.warehouses_page.load_all_requested.connect(
-            lambda ids: self._request("warehouses_all", task_payload={"account_ids": ids})
+            lambda ids: self._request_warehouse_scope("warehouses_all", ids)
         )
         self.warehouses_page.report_scope_changed.connect(
             lambda ids: self.accounts_page.set_report_exclusions(
@@ -666,6 +689,272 @@ class MainWindow(FluentWindow):
         account_id = self.tasks_page.selected_account_id()
         if account_id:
             self._request_task_refresh(account_id)
+
+    def _request_warehouse_scope(self, action: str, account_ids: list[str]) -> None:
+        """All-account Run behaves like the old warehouse bot: login first if needed."""
+        if self.client is None or self._worker is not None or self._automatic_login_active:
+            self._notice("Please finish the current request", "Warehouse refresh can be repeated safely.")
+            return
+        ids = list(dict.fromkeys(account_ids))
+        if not ids or action not in {"warehouses", "warehouses_batch", "warehouses_all"}:
+            return
+        pending = [
+            aid for aid in ids
+            if (record := self.accounts_page.account_record(aid))
+            and record.get("enabled") is True
+            and record.get("session_status") != "authenticated"
+        ]
+        if (pending and isinstance(self._active_backend_url, str)
+                and self._active_backend_url.startswith("https://")
+                and self.accounts_page._native_browser_login_enabled):
+            self._automatic_login_report = (action, ids)
+            self._begin_automatic_logins(pending)
+            return
+        self._perform_warehouse_scope(action, ids)
+
+    def _perform_warehouse_scope(self, action: str, account_ids: list[str]) -> None:
+        if action == "warehouses":
+            self._request(action, account_id=account_ids[0])
+        else:
+            self._request(action, task_payload={"account_ids": account_ids})
+
+    def _begin_automatic_logins(self, ids: list[str]) -> None:
+        """Mac-keychain-backed, headless-first Selenium sign-in for a chosen cohort.
+
+        A sign-in click or Load warehouses click is the consent. The backend
+        still requires a separate one-time account-scoped handoff confirmation.
+        """
+        if (self.client is None or self._worker is not None
+                or self._selenium_worker is not None or self._automatic_login_active):
+            self._notice("Sign-in busy", "Finish the active Daedalus request first.")
+            return
+        if (not isinstance(self._active_backend_url, str)
+                or not self._active_backend_url.startswith("https://")
+                or not self.accounts_page._native_browser_login_enabled):
+            self._notice(
+                "Automatic login unavailable",
+                "Connect to a secure HTTPS backend with native session handoff enabled.",
+            )
+            return
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 100:
+            return
+        self._automatic_login_queue = []
+        for aid in dict.fromkeys(ids):
+            record = self.accounts_page.account_record(aid) if isinstance(aid, str) else None
+            if (record and record.get("enabled") is True
+                    and record.get("session_status") != "authenticated"
+                    and isinstance(record.get("world"), str)
+                    and isinstance(record.get("player"), str)):
+                self._automatic_login_queue.append(aid)
+        self._automatic_login_cancelled = False
+        self._automatic_login_successes = 0
+        self._automatic_login_failures = 0
+        self._automatic_login_active = bool(self._automatic_login_queue)
+        if not self._automatic_login_active:
+            self.accounts_page.auto_login_status.setText(
+                "All chosen accounts already have verified sessions; no login needed."
+            )
+            report, self._automatic_login_report = self._automatic_login_report, None
+            if report is not None:
+                self._perform_warehouse_scope(*report)
+            return
+        self.accounts_page.set_automatic_login_busy(
+            True, f"Starting headless Chrome for {len(self._automatic_login_queue)} accounts…"
+        )
+        self._advance_automatic_login()
+
+    def _advance_automatic_login(self) -> None:
+        if not self._automatic_login_active or self._worker is not None:
+            return
+        if self._automatic_login_cancelled:
+            self._automatic_login_queue.clear()
+        while self._automatic_login_queue:
+            aid = self._automatic_login_queue.pop(0)
+            record = self.accounts_page.account_record(aid)
+            if not record or record.get("enabled") is not True:
+                self._automatic_login_failures += 1
+                continue
+            world = str(record.get("world") or "")
+            origin = str(self._active_backend_url)
+            credentials = None
+            save_credentials = False
+            try:
+                credentials = get_saved_login(origin, aid, world)
+                if credentials is None:
+                    # Exact-alias reuse from the old local IkaBot warehouse bot,
+                    # never a whole-file migration or guessed account mapping.
+                    credentials = legacy_warehouse_login(record)
+                    save_credentials = credentials is not None
+            except LoginCredentialError:
+                self._notice("Mac Keychain unavailable", "Unlock macOS Keychain to reuse saved login.")
+            if credentials is None:
+                dialog = SeleniumCredentialsDialog(
+                    player=str(record["player"]), world=world, parent=self,
+                )
+                if dialog.exec() != QDialog.Accepted:
+                    dialog.discard()
+                    dialog.deleteLater()
+                    self._automatic_login_failures += 1
+                    continue
+                try:
+                    credentials = dialog.credentials()
+                    save_credentials = dialog.remember.isChecked()
+                finally:
+                    dialog.discard()
+                    dialog.deleteLater()
+            self._automatic_login_current = aid
+            self._automatic_login_credentials = credentials
+            self._automatic_login_save_credentials = save_credentials
+            self.accounts_page.set_automatic_login_busy(
+                True, f"Signing in {record.get('label') or record.get('player')} "
+                "with headless Selenium Chrome…",
+            )
+            self._request("native_login_start", account_id=aid)
+            return
+        self._finish_automatic_logins()
+
+    def _finish_automatic_logins(self) -> None:
+        succeeded = self._automatic_login_successes
+        failures = self._automatic_login_failures
+        cancelled = self._automatic_login_cancelled
+        self._automatic_login_active = False
+        self._automatic_login_cancelled = False
+        self._automatic_login_queue.clear()
+        self._automatic_login_current = None
+        self._automatic_login_credentials = None
+        self._automatic_login_challenge = None
+        self.accounts_page.set_automatic_login_busy(
+            False,
+            f"Automatic sign-in {'cancelled' if cancelled else 'finished'}: "
+            f"{succeeded} verified, {failures} unavailable. "
+            "Unverified accounts remain unavailable; no game tasks were started.",
+        )
+        report, self._automatic_login_report = self._automatic_login_report, None
+        if report is not None and not cancelled:
+            self.switchTo(self.warehouses_page)
+            # A successful login binds the verified cookie; a separate
+            # authoritative worker is still needed to obtain snapshots.
+            # Always ask the backend for a partial read-only result rather
+            # than claiming all newly bound cookies are active workers.
+            self._recovery_followup = ("accounts", "")
+            self._perform_warehouse_scope(*report)
+        elif self.client is not None and self._worker is None:
+            self._request("accounts")
+
+    def _cancel_automatic_logins(self) -> None:
+        if not self._automatic_login_active:
+            return
+        self._automatic_login_cancelled = True
+        self._automatic_login_queue.clear()
+        self._automatic_login_report = None
+        self.accounts_page.set_automatic_login_busy(
+            True, "Cancelling Selenium login and discarding any unverified session…"
+        )
+        if self._selenium_worker is not None:
+            self._selenium_worker.cancel()
+        elif self._worker is None:
+            self._finish_automatic_logins()
+
+    def _launch_headless_selenium(self, challenge: dict[str, object]) -> None:
+        aid = self._automatic_login_current
+        record = self.accounts_page.account_record(aid) if aid else None
+        if (self._automatic_login_cancelled or not self._automatic_login_active
+                or record is None or challenge.get("account_id") != aid
+                or record.get("world") != challenge.get("world")
+                or self._automatic_login_credentials is None):
+            self._cancel_selenium_handoff(challenge)
+            return
+        self._automatic_login_challenge = challenge
+        worker = SeleniumLoginWorker(
+            str(record["world"]), self._automatic_login_credentials, self
+        )
+        self._selenium_worker = worker
+        worker.stage_changed.connect(self._selenium_progress)
+        worker.cookie_ready.connect(self._selenium_success)
+        worker.login_failed.connect(self._selenium_failure)
+        worker.finished.connect(self._selenium_finished)
+        worker.start()
+
+    def _selenium_progress(self, stage: str) -> None:
+        descriptions = {
+            "headless_login": "Logging in automatically in headless Chrome…",
+            "opening_visible_captcha": (
+                "A CAPTCHA was detected. Opening visible Chrome only for that challenge…"
+            ),
+            "captcha_required": (
+                "CAPTCHA needs you: complete the challenge in visible Chrome. "
+                "Selenium continues automatically afterward."
+            ),
+            "captcha_resolved": "CAPTCHA solved. Selenium is opening the selected game world…",
+            "visible_captcha_login": "Continuing the headless attempt in temporary visible Chrome…",
+        }
+        message = descriptions.get(stage)
+        if message:
+            self.accounts_page.set_automatic_login_busy(True, message)
+        if stage == "captcha_required":
+            self._notice("Gameforge CAPTCHA", "Complete it in the visible Chrome window; no password entry needed.")
+
+    def _selenium_success(self, cookie: str) -> None:
+        challenge = self._automatic_login_challenge
+        aid = self._automatic_login_current
+        record = self.accounts_page.account_record(aid) if aid else None
+        if not challenge or not record or not self._automatic_login_credentials:
+            return
+        if self._automatic_login_cancelled:
+            self._cancel_selenium_handoff(challenge)
+            return
+        try:
+            account = Account(
+                str(record["id"]), str(record["world"]), str(record["player"]),
+                str(record.get("label") or record["player"]), True,
+            )
+            envelope = encrypt_mac_world_session(
+                challenge, account, cookie,
+                email=self._automatic_login_credentials.email,
+            )
+        except (NativeHandoffUnavailable, ValueError):
+            self._notice("Gameforge session invalid", "World cookie was rejected before transmission.")
+            self._cancel_selenium_handoff(challenge)
+            return
+        self.accounts_page.set_automatic_login_busy(
+            True, "Headless sign-in complete. Waiting for independent server player verification…"
+        )
+        self._request(
+            "native_login_complete", account_id=aid,
+            task_payload={"ticket_id": challenge["ticket_id"], "envelope": envelope},
+        )
+
+    def _selenium_failure(self, reason: str) -> None:
+        self._notice("Automatic sign-in unsuccessful", reason)
+        if self._automatic_login_challenge is not None:
+            self._cancel_selenium_handoff(self._automatic_login_challenge)
+
+    def _selenium_finished(self) -> None:
+        worker = self._selenium_worker
+        self._selenium_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        # The Selenium finished signal and HTTP cancellation response can
+        # arrive in either order. Advance exactly once after BOTH are idle.
+        if self._worker is None and self._automatic_login_pending_advance:
+            self._automatic_login_pending_advance = False
+            QTimer.singleShot(0, self._advance_automatic_login)
+
+    def _cancel_selenium_handoff(self, challenge: dict[str, object]) -> None:
+        aid, ticket = challenge.get("account_id"), challenge.get("ticket_id")
+        if isinstance(aid, str) and isinstance(ticket, str):
+            self._request("native_login_cancel", account_id=aid,
+                          task_payload={"ticket_id": ticket})
+        else:
+            self._automatic_login_failures += 1
+            self._reset_automatic_attempt()
+            self._automatic_login_pending_advance = True
+
+    def _reset_automatic_attempt(self) -> None:
+        self._automatic_login_current = None
+        self._automatic_login_credentials = None
+        self._automatic_login_challenge = None
+        self._automatic_login_save_credentials = False
 
     def _begin_native_browser_login(self, account_id: str) -> None:
         if self.client is None or self._worker is not None:
@@ -1130,6 +1419,29 @@ class MainWindow(FluentWindow):
             logger.info("One-time Mac browser login prepared; no game action started")
         elif action == "native_login_complete":
             assert isinstance(payload, dict)
+            automatic_result = (
+                self._automatic_login_active
+                and payload.get("account_id") == self._automatic_login_current
+            )
+            if automatic_result:
+                if self._automatic_login_save_credentials:
+                    creds = self._automatic_login_credentials
+                    record = self.accounts_page.account_record(self._automatic_login_current)
+                    if creds is not None and record is not None:
+                        try:
+                            remember_login(
+                                str(self._active_backend_url), str(record["id"]),
+                                str(record["world"]), creds,
+                            )
+                        except LoginCredentialError:
+                            self._notice(
+                                "Gameforge login not remembered",
+                                "Unlock macOS Keychain. The server verified the session, "
+                                "but future automatic logins need saved credentials.",
+                            )
+                self._automatic_login_successes += 1
+                self._reset_automatic_attempt()
+                self._automatic_login_pending_advance = True
             if payload.get("status") == "worker_recovered_verified":
                 self._notice(
                     "Game session verified",
@@ -1142,8 +1454,16 @@ class MainWindow(FluentWindow):
                     "The server stored a verified world session in its OS keyring. "
                     "Start or attach a dedicated worker before running tasks.",
                 )
-            self._recovery_followup = ("accounts", "")
+            # The cohort queue must advance before refreshing account status:
+            # a refresh launched here consumes the only APIWorker slot and
+            # strands the next Selenium account in a busy state.
+            if not automatic_result:
+                self._recovery_followup = ("accounts", "")
         elif action == "native_login_cancel":
+            if self._automatic_login_active and self._automatic_login_current:
+                self._automatic_login_failures += 1
+                self._reset_automatic_attempt()
+                self._automatic_login_pending_advance = True
             self._notice(
                 "Mac browser login cancelled",
                 "No new session was imported. A dedicated worker may remain "
@@ -1293,6 +1613,11 @@ class MainWindow(FluentWindow):
         self._recovery_followup = None
         if action == "native_login_start":
             self._pending_native_login_challenge = None
+        if (action in {"native_login_start", "native_login_complete", "native_login_cancel"}
+                and self._automatic_login_active and self._automatic_login_current):
+            self._automatic_login_failures += 1
+            self._reset_automatic_attempt()
+            self._automatic_login_pending_advance = True
         if action == "task_preflight":
             worker = self._worker
             request = getattr(worker, "task_payload", None)
@@ -1368,7 +1693,10 @@ class MainWindow(FluentWindow):
             self._pending_native_login_challenge, None
         )
         if challenge is not None and self.client is not None:
-            QTimer.singleShot(0, lambda: self._open_native_browser_login(challenge))
+            if self._automatic_login_active:
+                QTimer.singleShot(0, lambda: self._launch_headless_selenium(challenge))
+            else:
+                QTimer.singleShot(0, lambda: self._open_native_browser_login(challenge))
             return
         followup, self._recovery_followup = self._recovery_followup, None
         if followup is not None and self.client is not None:
@@ -1382,7 +1710,11 @@ class MainWindow(FluentWindow):
             ids = self._pending_batch_status
             self._pending_batch_status = None
             self._request("task_list_batch", task_payload={"account_ids": ids})
-        if self._worker is None:
+        if (self._worker is None and self._selenium_worker is None
+                and self._automatic_login_pending_advance):
+            self._automatic_login_pending_advance = False
+            QTimer.singleShot(0, self._advance_automatic_login)
+        if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
     def _notice(self, title: str, message: str) -> None:
@@ -1392,6 +1724,16 @@ class MainWindow(FluentWindow):
 
     def closeEvent(self, event) -> None:
         self._assistance_poll.stop()
+        # Never destroy a live Selenium QThread/Chrome driver while Gameforge
+        # may still own an active challenge. Request cooperative cancellation.
+        if self._selenium_worker is not None and self._selenium_worker.isRunning():
+            self._selenium_worker.cancel()
+            event.ignore()
+            self._notice(
+                "Selenium login stopping",
+                "Chrome is closing. Close Daedalus after automatic login stops.",
+            )
+            return
         # Preserve the old GUI's rule: never destroy a live QThread.
         if (
             self._worker is not None

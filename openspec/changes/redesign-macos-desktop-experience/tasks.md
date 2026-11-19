@@ -25,9 +25,18 @@ This change now contains merged implementation plus continued UX hardening. Chec
 - [ ] 2.2 Redesign the connected Connection screen as status/details/reconnect/forget plus Advanced SSH fallback; test missing/untrusted TLS, unauthorized token, unavailable keyring and trusted SSH fail-closed handling.
 - [ ] 2.3 Replace simple Home action grid with an account-scoped Overview showing truthful backend/worker health, quick actions, summaries and source/refresh/empty/partial states.
 - [ ] 2.4 Redesign Accounts as an accessible master/detail workspace with clear account identity, session status and contextual primary action while preserving account create/edit/enable/disable/remove rules and confirmations.
-- [ ] 2.5 Implement a guided Sign in on this Mac dialog/sheet with explicit account/world, manual CAPTCHA expectations, one-use challenge progress, cancel, timeout and independently verified success; never surface secret material.
+- [x] 2.5 Implement a guided first-use Gameforge credential/Keychain flow and secure one-use challenge with exact account/world, cancellation, CAPTCHA assistance only on detected challenge and independent server verification (offline synthetic coverage).
 - [ ] 2.6 Move manual assistance, monitoring and host-side recovery into separated permission-gated secondary flows with verified lease/status handling, stale-ticket guards and no implicit worker authentication.
 - [ ] 2.7 Add offscreen synthetic UI coverage for disconnected, read-only, demo, unverified, paused, needs assistance, worker-busy and multiactive account states; ensure zero accidental game requests.
+
+## Owner correction — automatic headless Selenium is the default login flow
+
+- [x] Reuse the original local IkaBot warehouse bot's Selenium Chrome selectors and restore/login/play/world sequence, without a second backend engine owner.
+- [x] Run headless by default, expose a browser only for a detected user CAPTCHA and never automatically solve a challenge; sanitize login errors.
+- [x] Reuse exact-matched old `config.ini` credentials and `tokens.json` sessions without modifying or uploading the sources; persist new account/world HTTPS-origin login credentials only in Keychain.
+- [x] Wire all/selected/individual sign-in to Accounts and auto-recover missing sessions before one-click all-account warehouse report; preserve the encrypted one-use independent world/player server attestation.
+- [x] Add offline Selenium/Fluent GUI/auth-migration/packaging regression tests and rewrite the Mac sign-in guide. No live Gameforge traffic or tests were performed.
+- [ ] Owner tests current Gameforge login, real CAPTCHA and macOS Keychain persistence, reviews screenshot/VoiceOver and accepts release (separate issue #60; not claimed complete).
 
 ## Phase 3 — coherent automations and operation-specific UX
 

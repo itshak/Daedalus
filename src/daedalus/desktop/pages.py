@@ -275,6 +275,8 @@ class AccountsPage(QWidget):
     recovery_prepare_requested = Signal(str)
     rebind_requested = Signal(str, str)
     native_browser_login_requested = Signal(str)
+    automatic_login_requested = Signal(object)
+    automatic_login_cancel_requested = Signal()
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -389,21 +391,44 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_approve_button)
         advanced_wrap.addLayout(assistance_actions)
         native_login_actions = QVBoxLayout()
-        self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
+        self.auto_login_button = PrimaryPushButton("Sign in automatically (headless)")
+        self.auto_login_button.setToolTip(
+            "Use stored Gameforge login in headless Selenium Chrome; "
+            "a browser window appears only when a CAPTCHA needs you"
+        )
+        self.auto_login_button.clicked.connect(self._auto_this)
+        native_login_actions.addWidget(self.auto_login_button)
+        self.auto_login_all_button = PushButton("Sign in all accounts")
+        self.auto_login_all_button.clicked.connect(self._auto_all)
+        native_login_actions.addWidget(self.auto_login_all_button)
+        self.auto_login_selected_button = PushButton("Choose sign-in accounts…")
+        self.auto_login_selected_button.clicked.connect(self._auto_selected)
+        native_login_actions.addWidget(self.auto_login_selected_button)
+        self.auto_login_status = CaptionLabel(
+            "Headless Selenium uses macOS Keychain credentials and reuses verified "
+            "sessions. Only an actual CAPTCHA opens visible Chrome."
+        )
+        self.auto_login_status.setWordWrap(True)
+        native_login_actions.addWidget(self.auto_login_status)
+        self.auto_cancel_button = PushButton("Cancel automatic sign-in")
+        self.auto_cancel_button.setEnabled(False)
+        self.auto_cancel_button.clicked.connect(self.automatic_login_cancel_requested.emit)
+        native_login_actions.addWidget(self.auto_cancel_button)
+        self.native_browser_login_button = PushButton("Manual browser fallback")
         self.native_browser_login_button.setToolTip(
-            "Human Gameforge browser login on this Mac; encrypted one-time handoff "
-            "to your verified backend worker"
+            "Advanced fallback only: open an interactive browser to sign in manually"
         )
         self.native_browser_login_button.setEnabled(False)
         self.native_browser_login_button.clicked.connect(self._native_browser_login)
-        native_login_actions.addWidget(self.native_browser_login_button)
+        advanced_wrap.addWidget(self.native_browser_login_button)
         self.native_login_status = CaptionLabel(
             "Native Mac browser login is available when your backend enables secure recovery."
         )
         self.native_login_status.setWordWrap(True)
-        native_login_actions.addWidget(self.native_login_status)
+        advanced_wrap.addWidget(self.native_login_status)
         detail_layout.addLayout(native_login_actions)
         self._native_browser_login_enabled = False
+        self._auto_login_busy = False
 
         recovery_actions = QVBoxLayout()
         self.recovery_guide_button = PushButton("Advanced: host recovery instructions")
@@ -560,10 +585,54 @@ class AccountsPage(QWidget):
     def set_native_browser_login_enabled(self, enabled: bool) -> None:
         self._native_browser_login_enabled = enabled
         self.native_login_status.setText(
-            "Secure browser sign-in is available. Select the correct account above."
+            "Manual browser recovery available as a fallback."
             if enabled else
-            "This backend has not enabled native browser login."
+            "This backend has not enabled secure Gameforge session handoff."
         )
+        if not enabled:
+            self.auto_login_status.setText("Automatic login requires an enabled secure backend.")
+        else:
+            self.auto_login_status.setText(
+                "Headless Chrome signs in automatically. If a CAPTCHA appears, "
+                "complete it in the temporary visible Chrome window."
+            )
+        self._update_assistance_buttons()
+
+    def _auto_this(self) -> None:
+        account_id = self._selected_visible_id()
+        account = self.account_record(account_id) if account_id else None
+        if self._native_browser_login_enabled and not self._auto_login_busy and account and account.get("enabled"):
+            self.automatic_login_requested.emit([account_id])
+
+    def _auto_all(self) -> None:
+        if not self._native_browser_login_enabled or self._auto_login_busy:
+            return
+        account_ids = [
+            account["id"] for account in self._accounts
+            if isinstance(account.get("id"), str) and account.get("enabled") is True
+        ]
+        if account_ids:
+            self.automatic_login_requested.emit(account_ids)
+
+    def _auto_selected(self) -> None:
+        from daedalus.desktop.account_scope import AccountSelectionDialog
+
+        if not self._native_browser_login_enabled or self._auto_login_busy:
+            return
+        enabled = [
+            row for row in self._accounts
+            if isinstance(row.get("id"), str) and row.get("enabled") is True
+        ]
+        dialog = AccountSelectionDialog(enabled, [row["id"] for row in enabled],
+                                        self, title="Choose Gameforge sign-ins")
+        if dialog.exec() == QDialog.Accepted:
+            self.automatic_login_requested.emit(dialog.selected_ids())
+
+    def set_automatic_login_busy(self, busy: bool, status: str = "") -> None:
+        self._auto_login_busy = bool(busy)
+        self.auto_cancel_button.setEnabled(busy)
+        if status:
+            self.auto_login_status.setText(status)
         self._update_assistance_buttons()
 
     def _native_browser_login(self) -> None:
@@ -588,7 +657,7 @@ class AccountsPage(QWidget):
             session = str(selected.get("session_status") or "not_connected")
             message = {
                 "authenticated": "Session verified. Warehouse reports and eligible automations are available.",
-                "needs_assistance": "Sign in is needed. Use Sign in on this Mac when enabled.",
+                "needs_assistance": "Session needs sign-in. Use automatic headless login; only CAPTCHA requires input.",
                 "paused": "Worker is paused. Inspect session status before resuming any operation.",
                 "not_connected": "No verified session is attached to this account.",
                 "disabled": "Account is disabled on the authoritative backend.",
@@ -601,10 +670,19 @@ class AccountsPage(QWidget):
             self.selected_account_summary.set_status(
                 "Choose an account", "Select a row for status and sign-in options."
             )
+        allowed = self._native_browser_login_enabled and not self._auto_login_busy
         self.native_browser_login_button.setEnabled(
-            self._native_browser_login_enabled and account_id is not None
+            allowed and account_id is not None
             and selected is not None and selected.get("enabled") is True
         )
+        self.auto_login_button.setEnabled(
+            allowed and account_id is not None and selected is not None
+            and selected.get("enabled") is True
+        )
+        self.auto_login_all_button.setEnabled(allowed and any(
+            a.get("enabled") is True for a in self._accounts
+        ))
+        self.auto_login_selected_button.setEnabled(self.auto_login_all_button.isEnabled())
         self.assistance_check_button.setEnabled(account_id is not None)
         self.recovery_guide_button.setEnabled(account_id is not None)
         self.monitor_button.setEnabled(self._monitor_enabled and account_id is not None)
