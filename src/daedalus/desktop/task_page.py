@@ -104,6 +104,7 @@ class TasksPage(QWidget):
     reconcile_requested = Signal(str, str)
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
+    cities_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -130,6 +131,8 @@ class TasksPage(QWidget):
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
         self._status_account_ids: list[str] = []
+        # Authenticated, account-bound read-only city options; never invent IDs.
+        self._cities_by_account: dict[str, list[dict[str, object]]] = {}
 
         # Large native forms must scroll instead of clipping at 900x650.
         outer = QVBoxLayout(self)
@@ -188,7 +191,8 @@ class TasksPage(QWidget):
         template_row.addWidget(self.catalog_button)
         template_row.addStretch(1)
         if workflow is None:
-            layout.addLayout(template_row)
+            # Category tabs below replace the duplicated template toolbar.
+            pass
         else:
             for button in (
                 self.wine_template_button, self.construction_template_button,
@@ -222,16 +226,23 @@ class TasksPage(QWidget):
         scope_row.addStretch(1)
         layout.addLayout(scope_row)
 
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(BodyLabel("Category"))
         self.category_combo = ComboBox()
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
-        filter_row.addWidget(self.category_combo, 1)
+        self.group_tabs = Pivot(self)
+        self.group_tabs.setAccessibleName("Automation categories")
+        for index, category in enumerate(_CATEGORIES):
+            self.group_tabs.addItem(
+                routeKey=f"group-{index}", text=category,
+                onClick=lambda index=index: self.category_combo.setCurrentIndex(index),
+            )
+        self.group_tabs.setCurrentItem("group-0")
+        layout.addWidget(self.group_tabs)
+        filter_row = QHBoxLayout()
         self.search_input = SearchLineEdit()
         self.search_input.setPlaceholderText("Search automations")
         self.search_input.textChanged.connect(self._filter_tasks)
-        filter_row.addWidget(self.search_input, 2)
+        filter_row.addWidget(self.search_input, 1)
         layout.addLayout(filter_row)
 
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
@@ -505,6 +516,8 @@ class TasksPage(QWidget):
             if isinstance(a.get("id"), str) and a["id"]
         ]
         self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
+        # A metadata refresh may represent a changed session, so discard city caches.
+        self._cities_by_account.clear()
         self._account_metadata = [
             a for a in self._all_account_metadata if a.get("enabled") is True
         ]
@@ -580,6 +593,44 @@ class TasksPage(QWidget):
         self._invalidate_review()
         self._selected_task_changed()
 
+    def _populate_city_picker(self, widget: ComboBox) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        with QSignalBlocker(widget):
+            widget.clear()
+            widget.addItem("Choose a city…" if cities else "Cities unavailable — refresh to load")
+            for city in cities:
+                suffix = str(city.get("coords") or "")
+                widget.addItem(f"{city['name']} ({suffix})" if suffix else str(city["name"]))
+            # Never silently choose a city for a state-changing task.
+            widget.setCurrentIndex(0)
+
+    def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
+        if account_id not in self._account_ids:
+            return
+        verified = []
+        for city in cities[:500]:
+            if (isinstance(city, dict) and type(city.get("id")) is int
+                    and city["id"] > 0 and isinstance(city.get("name"), str)
+                    and city["name"]):
+                verified.append({
+                    "id": city["id"], "name": city["name"][:120],
+                    "coords": str(city.get("coords") or "")[:40],
+                })
+        self._cities_by_account[account_id] = verified
+        if account_id == self.selected_account_id():
+            picker = self._form_inputs.get("city_id")
+            if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
+                self._populate_city_picker(picker)
+                self._invalidate_review()
+
+    def set_cities_unavailable(self, account_id: str) -> None:
+        self._cities_by_account.pop(account_id, None)
+        if account_id == self.selected_account_id():
+            picker = self._form_inputs.get("city_id")
+            if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
+                self._populate_city_picker(picker)
+                self._invalidate_review()
+
     def _choose_bulk_accounts(self) -> None:
         from daedalus.desktop.account_scope import AccountSelectionDialog
 
@@ -607,11 +658,19 @@ class TasksPage(QWidget):
         ineligible = [aid for aid in self._bulk_account_ids
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
+        # One city's construction plan cannot be dispatched against other account IDs.
+        if self.selected_task_name() == "constructionList":
+            can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
-        if count > 32:
+        if self.selected_task_name() == "constructionList":
+            self.bulk_note.setText(
+                "Construction plans are city- and account-specific. Configure each account "
+                "separately; copying one city's building plan to another is unsafe."
+            )
+        elif count > 32:
             self.bulk_note.setText(
                 "View status for any number of accounts. To start tasks, "
                 "choose at most 32 accounts and review each one."
@@ -691,6 +750,7 @@ class TasksPage(QWidget):
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
+                or self.selected_task_name() == "constructionList"
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.selected_task_name()):
@@ -828,6 +888,7 @@ class TasksPage(QWidget):
     def _filter_tasks(self, *_args: object) -> None:
         old = self.selected_task_name()
         category = self.category_combo.currentText() or _CATEGORIES[0]
+        self.group_tabs.setCurrentItem(f"group-{self.category_combo.currentIndex()}")
         search = self.search_input.text().strip().casefold()
         self._task_names = [name for name in self._all_task_names
             if (category == "All automations" or _category(name) == category)
@@ -1031,13 +1092,21 @@ class TasksPage(QWidget):
             )
         for field in fields:
             key = str(field["name"])
+            if name == "constructionList" and key == "city_name":
+                # The paired, verified name comes from the selected city's read-only record.
+                continue
             kind = str(field["type"])
             default = field.get("default")
             label = (
                 str(field.get("label") or key.replace("_", " ").capitalize())
                 + (" *" if field["required"] else "")
             )
-            if field.get("choices"):
+            if name == "constructionList" and key == "city_id":
+                widget = ComboBox()
+                widget.setAccessibleName("Choose a real city for construction")
+                self._populate_city_picker(widget)
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
+            elif field.get("choices"):
                 widget = ComboBox()
                 choices = field["choices"]
                 for choice in choices:
@@ -1122,6 +1191,8 @@ class TasksPage(QWidget):
         account_id = self.selected_account_id()
         if self._dispatch_enabled and account_id and name:
             self.preflight_requested.emit(account_id, name)
+        if account_id and name == "constructionList" and account_id not in self._cities_by_account:
+            self.cities_requested.emit(account_id)
 
     def set_preflight(self, result: dict[str, object]) -> None:
         if (result.get("account_id") != self.selected_account_id()
@@ -1160,6 +1231,8 @@ class TasksPage(QWidget):
         config: dict[str, object] = {}
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
+            if name == "constructionList" and key in {"city_id", "city_name"}:
+                continue
             kind = str(field["type"])
             widget = self._form_inputs[key]
             if isinstance(widget, ComboBox):
@@ -1204,6 +1277,14 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
+        if name == "constructionList":
+            picker = self._form_inputs.get("city_id")
+            cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if index < 1 or index > len(cities):
+                raise ValueError("Select a city loaded from this account before starting construction")
+            config["city_id"] = cities[index - 1]["id"]
+            config["city_name"] = cities[index - 1]["name"]
         if (name == "alertLowWine" and config.get("auto_transfer") is True
                 and (type(config.get("transfer_amount")) is not int
                      or config["transfer_amount"] < 1)):
