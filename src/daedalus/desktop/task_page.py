@@ -116,6 +116,7 @@ class TasksPage(QWidget):
     batch_launch_requested = Signal(object, str, object)
     cities_requested = Signal(str)
     buildings_requested = Signal(str, int)
+    construction_preview_requested = Signal(str, int, object)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -145,6 +146,9 @@ class TasksPage(QWidget):
         # Authenticated, account-bound read-only city options; never invent IDs.
         self._cities_by_account: dict[str, list[dict[str, object]]] = {}
         self._buildings_scope: tuple[str, int] | None = None
+        self._construction_prepared: dict[str, object] | None = None
+        self._construction_preview_ready = False
+        self._pending_preview_key: tuple[object, ...] | None = None
         self._building_rows: list[dict[str, object]] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
@@ -319,7 +323,14 @@ class TasksPage(QWidget):
         self.building_table.setAccessibleName("Read-only verified city building levels and draft targets")
         self.building_table.setMinimumHeight(180)
         self.building_table.setMaximumHeight(320)
+        self.building_table.itemChanged.connect(self._mark_form_dirty)
         layout.addWidget(self.building_table)
+        self.construction_preview_button = PushButton("Calculate actual upgrade costs & queue…")
+        self.construction_preview_button.clicked.connect(self._request_construction_preview)
+        self.construction_preview_button.setAccessibleDescription(
+            "Only reads IkaBot game information. Does not upgrade or ship anything."
+        )
+        layout.addWidget(self.construction_preview_button)
         self.building_note = CaptionLabel(
             "Choose a city to inspect its actual buildings. Upgrade targets are drafts; "
             "starting requires an upstream-validated construction plan, not raw values."
@@ -329,6 +340,7 @@ class TasksPage(QWidget):
         self.building_header.hide()
         self.building_table.hide()
         self.building_note.hide()
+        self.construction_preview_button.hide()
         self.advanced_toggle = PushButton("Show advanced JSON options")
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
         layout.addWidget(self.advanced_toggle)
@@ -552,6 +564,9 @@ class TasksPage(QWidget):
         self._cities_by_account.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
         self.building_table.setRowCount(0)
         self._account_metadata = [
             a for a in self._all_account_metadata if a.get("enabled") is True
@@ -1252,12 +1267,17 @@ class TasksPage(QWidget):
         self._form_inputs.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
         self.building_table.setRowCount(0)
         name = self.selected_task_name()
         show_buildings = name == "constructionList"
         self.building_header.setVisible(show_buildings)
         self.building_table.setVisible(show_buildings)
         self.building_note.setVisible(show_buildings)
+        self.construction_preview_button.setVisible(show_buildings)
+        self.construction_preview_button.setEnabled(False)
         if show_buildings:
             self.building_note.setText("Choose a city to load its actual buildings.")
         fields = self._config_fields_by_task.get(name or "", [])
