@@ -6,9 +6,25 @@
 - [x] Investigate the exact prior Monjo uncertain request, preserve a private backup/audit, verify zero current managed tasks, and reconcile the request without replay.
 - [x] Replace the volatile session keyring dependency with host-encrypted systemd credentials, independently revalidate and encrypt Monjo's saved world session, and verify a controlled service restart with authenticated read-only reporting and native login enabled.
 - [x] Fix the combined owned-worker/native-login startup ordering regression and add an end-to-end CLI synthetic check.
-- [ ] Run the owner-approved isolated real-account browser/CAPTCHA and saved-cookie recovery workflow; record sanitized results.
-- [ ] Verify live dedicated-worker rebind, session expiration, manual recovery and explicit task dispatch without duplicate game operations.
-- [ ] Reconcile findings, update docs and CI, and approve production cutover only after the owner reports successful real testing.
+## Owner-only acceptance transferred, not completed (2026-11-19)
+
+The following three formerly unchecked tasks were **not performed, passed, or waived**.
+At the owner's request, they are transferred unchanged in intent to the public,
+owner-assigned [live acceptance issue #60](https://github.com/itshak/Daedalus/issues/60)
+and the independent checklist in `docs/LIVE-ACCEPTANCE.md`. They are intentionally
+not marked `[x]` in this historical implementation record:
+
+1. Run the isolated, owner-approved real Gameforge browser/MFA/CAPTCHA and
+   saved-cookie recovery workflow; record sanitized results.
+2. Verify live dedicated-worker rebind, expiration, manual recovery and one
+   explicitly approved game task with no duplicated operation.
+3. Reconcile owner findings, update docs/CI as necessary and approve production
+   cutover **only** after successful owner-run acceptance.
+
+A physical-host reboot durability test is also outstanding in issue #60. The
+seven checked tasks above are implementation/preflight evidence only. This
+change can be archived for code/spec completion while the owner issue stays
+open and release acceptance remains **NOT APPROVED**.
 
 Partial field evidence (2026-11-19): one owner-authorized existing-account
 lobby renewal, strict game-world player attestation, single dedicated-worker

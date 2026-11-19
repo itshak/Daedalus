@@ -63,11 +63,12 @@ account/report/settings interactions, backed by a single Daedalus API client:
 
 The original `config.ini` username/email/password, direct Selenium runner,
 browser-choice/headless/retry/tokens settings and automatic login are
-**intentionally not ported**. Manual browser/CAPTCHA recovery, remote
-assistance and server-side player attestation are tracked separately under
-`validate-live-authentication`. Native Mac notarization, production testing
-and third-party binary redistribution obligations are also separate release
-gates. The completed **nonsecret** migration does not imply a production login.
+**intentionally not ported** from the legacy GUI. Native Mac manual browser
+recovery and player attestation were subsequently implemented in #57, while
+owner-run real acceptance remains open in
+[issue #60](https://github.com/itshak/Daedalus/issues/60).
+Native Mac notarization and redistribution reviews are separate release gates.
+The completed **nonsecret** GUI migration never implied production approval.
 
 
 ## License

@@ -13,5 +13,15 @@ The offline authentication implementation can be archived without falsely claimi
 ### Modified Capabilities
 - `account-sessions`: real-world validation and remaining remote UX integration.
 
+## Completion boundary (2026-11-19)
+All seven implementation and safe operational remediation tasks are complete
+and independently validated; the remaining human-only real-account tests,
+rebind/task trial, host reboot and explicit production approval have been
+transferred as **unperformed** acceptance gates to
+[issue #60](https://github.com/itshak/Daedalus/issues/60).
+Archiving this change closes the implementation work, **not** the release gate.
+Any owner-observed defect must receive a new focused OpenSpec proposal and tests.
+
 ## Non-goals
-No unattended CAPTCHA solving, password extraction, or secret upload to controller endpoints.
+No unattended CAPTCHA solving, password extraction, secret upload to controller endpoints,
+or claim that synthetic tests authorize real-game production cutover.

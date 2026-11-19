@@ -23,17 +23,25 @@ The following changes have merged implementation and archived OpenSpec requireme
 | `account-metadata-editor` | Separate opt-in, confirmed native metadata editing with private atomic persistence and active-lease checks | [#25](https://github.com/itshak/Daedalus/pull/25) |
 | `assisted-auth-confirmation` | Nonsecret lease-bound human-step acknowledgment with worker-only verification, NOT Gameforge browser integration | [#27](https://github.com/itshak/Daedalus/pull/27) |
 | `offline-desktop-demo` | Isolated synthetic Mac GUI/API sample mode with fake account/city/warehouse data and real game side effects blocked | [#29](https://github.com/itshak/Daedalus/pull/29) |
-| safe-saved-session-recovery | Explicit lease-guarded OS-keyring-bound world cookie validation, no new lobby loginLink | [#31](https://github.com/itshak/Daedalus/pull/31) |
-| existing-session-recovery-monitor | Opt-in verified in-memory session monitoring, nonsecret manual-assistance notifications, worker revalidation and no task replay | [#33](https://github.com/itshak/Daedalus/pull/33) |
-| private-world-cookie-handoff | Local hidden-input world-cookie validation and OS keyring binding, no remote cookie transfer | [#35](https://github.com/itshak/Daedalus/pull/35) |
-| offline-readiness-doctor | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
-| cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
-| desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
+| `safe-saved-session-recovery` | Explicit lease-guarded OS-keyring-bound world cookie validation, no new lobby loginLink | [#31](https://github.com/itshak/Daedalus/pull/31) |
+| `existing-session-recovery-monitor` | Opt-in verified in-memory session monitoring, nonsecret manual-assistance notifications, worker revalidation and no task replay | [#33](https://github.com/itshak/Daedalus/pull/33) |
+| `private-world-cookie-handoff` | Local hidden-input world-cookie validation and OS keyring binding, no remote cookie transfer | [#35](https://github.com/itshak/Daedalus/pull/35) |
+| `offline-readiness-doctor` | Accurate installed-preview status and isolated in-process synthetic API smoke without game access | [#38](https://github.com/itshak/Daedalus/pull/38) |
+| `cookie-only-worker-bootstrap` | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
+| `desktop-oneclick-synthetic` | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
 | `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, dedicated Wine/Construction workflows, private appearance and grouped exports | [#52](https://github.com/itshak/Daedalus/pull/52) |
 | `guided-automations-and-desktop-redesign` | Account-first native navigation, guided controls, task preflight/rejection safety, direct HTTPS + Mac Keychain auto-reconnect, optional advanced SSH fallback | [#56](https://github.com/itshak/Daedalus/pull/56) |
 | `import-public-ikabot-engine` | Audited pinned public engine and six-file production source diff; safe bounded token API retries, noninteractive fail-fast and explicit rejected credential/auto-launch code | [#53](https://github.com/itshak/Daedalus/pull/53) |
+| `unify-authentication` | Worker-verified, lease-held manual recovery and secure authentication protocol across several PRs | [#51](https://github.com/itshak/Daedalus/pull/51) |
+| `native-mac-browser-login` | Ephemeral Mac WebEngine, encrypted one-time session transfer, independent server-side world/player attestation and idle worker rebind | [#57](https://github.com/itshak/Daedalus/pull/57) |
+| `persist-headless-credentials` | Host-encrypted persistent credential collection, receipt reconciliation and service restart/startup-order regression | [#59](https://github.com/itshak/Daedalus/pull/59) |
+| `validate-live-authentication` | Offline/field-preflight implementation archived; **unperformed owner-only acceptance is still open in [issue #60](https://github.com/itshak/Daedalus/issues/60)** | [archive record](https://github.com/itshak/Daedalus/tree/main/openspec/changes/archive/2026-11-19-validate-live-authentication) |
 
-The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
+The archive folders are dated `2026-11-18` and `2026-11-19`. Archive
+checkboxes reflect completed implementation and local validation, not owner
+real-game certification. The outstanding manual gates were transferred
+explicitly to [issue #60](https://github.com/itshak/Daedalus/issues/60),
+without claiming they were performed.
 
 ## Existing-session read-only bridge (shipped)
 
@@ -62,7 +70,13 @@ artifact is required to test redesigned native controls.
 
 ## Native Mac browser login implementation (archived 2026-11-19)
 
-The completed `native-mac-browser-login` implementation now offers first-class **Sign in on this Mac**, a temporary off-record Qt WebEngine Gameforge browser, optional encrypted email binding, single-use account-bound X25519/AES-GCM cookie exchange over authenticated HTTPS, and server-side independent player verification. It preserves an idle dedicated worker's account lease and denies recovery for active or unconfirmed tasks. Synthetic offline API, engine, GUI, WebEngine cleanup and cryptography tests passed; the Mac build pipeline must still validate the final packaged .app. **The live production backend is not restarted automatically**: its current owner and any unconfirmed dispatches require a controlled operational rollout. The owner-dependent field acceptance is still open in `validate-live-authentication`. See [native Mac login](NATIVE-MAC-LOGIN.md).
+The completed `native-mac-browser-login` implementation now offers first-class **Sign in on this Mac**, a temporary off-record Qt WebEngine Gameforge browser, optional encrypted email binding, single-use account-bound X25519/AES-GCM cookie exchange over authenticated HTTPS, and server-side independent player verification. It preserves an idle dedicated worker's account lease and denies recovery for active or unconfirmed tasks. Synthetic offline API, engine, GUI, WebEngine cleanup and cryptography tests
+passed, and PR #59's macOS packaging pipeline passed. The controlled daemon
+restart and existing-account read-only warehouse checks succeeded without
+dispatching a new game operation. **A physical host reboot, real Mac
+Gameforge/MFA/CAPTCHA login, dedicated rebind, game task and production
+approval remain unverified** in [issue #60](https://github.com/itshak/Daedalus/issues/60).
+See [native Mac login](NATIVE-MAC-LOGIN.md).
 
 ## Secret-free deployment preflight (2026-11-19)
 
@@ -81,44 +95,30 @@ synthetic account metadata and **no** Gameforge network requests; this does
 not replace owner-run Mac login, game task or reboot acceptance. The full
 Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
-## Still active
+## OpenSpec implementation closed; owner acceptance remains open
 
-One umbrella change remains **open** for owner-supervised **real-account** acceptance. The native Mac browser and encrypted world-cookie handoff, backend independent game-world player attestation, and exclusive-worker recovery implementation have passed synthetic tests; none of these can stand in for owner-supervised real Gameforge/MFA/CAPTCHA, task-dispatch, daemon keyring persistence or production cutover acceptance.
+**No active OpenSpec implementation changes** remain after
+`validate-live-authentication` was archived on 2026-11-19. Its seven
+implementation/preflight tasks were checked and verified. The three former
+unchecked owner-only tasks were **transferred as unperformed** into
+[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60)
+and [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md), not marked passed or waived.
 
-- `validate-live-authentication`: the native Mac GUI now opens an ephemeral local Gameforge browser, encrypts the selected world cookie in a one-use account-bound envelope and sends it to the authoritative Linux backend over authenticated HTTPS. On an idle dedicated worker, the backend checks task states, retains the identity lease, independently verifies the actual world/player and promotes only a valid staged cookie to the server's protected keyring. The host-local browser remains an advanced fallback.
-  The engine now requires recognizable server-rendered player identity on
-  fresh TLS-validated game-world responses. A subsequent limited real-account smoke passed saved-cookie identity attestation and read-only data, but **not** the complete real-account recovery/task acceptance.
+### Remaining owner-only acceptance gates — NOT TESTED / NOT APPROVED
 
-`migrate-native-desktop` and `import-public-ikabot-engine` are archived for their
-reviewed, nonsecret scopes. The production engine comparison reviewed six
-tracked source modifications against public 7.7.2 + PR #499, accepted only
-bounded token-API retries and detached manual-prompt failure handling, and
-rejected automatic credentials and unconfirmed task/server start. See
-[production authentication source reconciliation](ENGINE-AUTH-RECONCILIATION.md).
+| Owner gate | Evidence needed |
+| --- | --- |
+| Real Mac browser/MFA/CAPTCHA and encrypted world-cookie exchange | Authorized isolated-account evidence, server attestation and read-only comparison |
+| Worker rebind/expiry/manual recovery and one explicit task trial | Same lease, no duplicate operation, observed game effect and stop |
+| Host reboot durability and automatic HTTPS reconnect | Controlled full reboot under safe maintenance window, verified encrypted store |
+| Release/cutover approval | Sanitized owner results for every gate, plus explicit owner decision |
 
-### Remaining OpenSpec completion gates
-
-**3 unchecked real-account acceptance tasks across 1 active change** remain. All require
-owner-approved live testing or explicit cutover approval. CI cannot substitute.
-
-| Active change | Remaining gate | Evidence required |
-| --- | --- | --- |
-| `validate-live-authentication` | Supervise real browser/CAPTCHA and saved-cookie flows | Owner-approved isolated real-account results |
-| `validate-live-authentication` | Validate worker rebind, expiry, recovery and explicit task dispatch | No duplicate real game operations |
-| `validate-live-authentication` | Reconcile real findings and authorize cutover | Owner's sanitized acceptance and explicit approval |
-
-The offline implementation now has synthetic native Qt WebEngine, one-use encrypted API, browser-cookie,
-engine IPC and negative player-attestation coverage. The maintained IkaBot
-engine rejects cookies when the world page lacks a recognized current-player
-marker, contradicts the saved player, or redirects elsewhere. That may
-prevent real-world authentication if Gameforge's present markup has changed:
-unrecognized layout deliberately **fails closed**. Follow the
-[owner-supervised acceptance plan](LIVE-ACCEPTANCE.md) and
-[native Mac login guide](NATIVE-MAC-LOGIN.md). Production cutover is not
-approved by a green PR.
-
-The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
-
+The current implementation fails closed on unrecognized game-world player
+markup and refuses uncertain/replayed task dispatch. Green CI (including
+synthetic Playwright, Qt/Fluent, Linux/Windows/macOS, packaging and OpenSpec)
+does not replace live acceptance. The OpenSpec hygiene regression checks
+now allow an empty active-change set but continue to reject unchecked
+archived tasks and require visible owner acceptance tracking.
 
 ## Opt-in account metadata editor (shipped)
 
@@ -189,16 +189,31 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 ## Release and production status
 
-The native Mac GUI has been successfully launched by the project owner. GitHub Actions verified the ad-hoc-signed preview bundle and artifact upload. The app is not Apple-notarized. The backend can explicitly bootstrap **one** already-authenticated saved-cookie world session, but cannot perform new Gameforge lobby login, Selenium handoff, or unattended worker recovery. It supports separately opted-in start/list/stop on verified existing sessions. No real production accounts have been migrated.
+The native Mac GUI has launched successfully, and GitHub Actions verifies
+unsigned-preview macOS bundles. The app is not Apple-notarized. It now offers
+**manual** Mac Gameforge browser login and encrypted exact-account session
+handoff, plus independently attested saved-cookie bootstrap on the Linux
+worker. Daedalus does not automate CAPTCHA/MFA or unattended account login.
+The controlled host service restart and one existing account's authenticated
+read-only warehouses passed. Real Mac browser recovery, live task trial,
+dedicated rebind and whole-host reboot still need owner testing. No
+production-wide cutover is approved (issue #60).
 
 
-## Authentication progress (2026-11-18)
+## Earlier local-browser prototype (historical, 2026-11-18)
 
-The optional ephemeral human-operated Chromium login assistant is implemented in `src/daedalus/browser_recovery.py` and documented in [browser recovery](BROWSER-RECOVERY.md). It keeps world cookies out of the API and checks a matching engine session before keyring persistence. Host-local graphical remote-desktop fallback avoids copying session secrets across machines. Synthetic browser tests do not prove Gameforge compatibility. **A running worker cannot yet receive and validate a replacement world cookie in-place**, so the full `unify-authentication` proposal remains active until that secure engine-side handoff and offline regression tests are delivered. Do not mistake a verified cookie saved for future cookie-only startup for a recovered existing worker.
+The opt-in host-local Chromium recovery prototype remains documented in
+[browser recovery](BROWSER-RECOVERY.md). It was superseded as the default UX
+by native Mac WebEngine + encrypted HTTPS handoff in #57. An idle dedicated
+worker can now validate a replacement world session under its existing lease;
+it must still fail closed if active tasks, uncertainty or mismatched identity
+are present. The real-world flow has not passed owner acceptance (issue #60).
 
 
 ## Authentication offline scope archived; live integration remains open
 
-The `unify-authentication` and `native-mac-browser-login` archived implementation changes cover single-owner leases, Mac browser and encrypted HTTPS handoff, OS keyring, independent world/player verification and idle-only dedicated-worker recovery. They do **not** claim successful real Gameforge login/CAPTCHA, real-world dedicated rebind, task dispatch acceptance or production cutover. Those supervised tests remain tracked in the active `validate-live-authentication` change. Archiving the offline implementation is not production authorization.
+The `unify-authentication` and `native-mac-browser-login` archived implementation changes cover single-owner leases, Mac browser and encrypted HTTPS handoff, OS keyring, independent world/player verification and idle-only dedicated-worker recovery. They do **not** claim successful real Gameforge login/CAPTCHA, real-world dedicated rebind, task dispatch acceptance or production cutover. Those supervised tests remain open in
+[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
+Archiving the implementation is not production authorization.
 
 Offline headless Chromium verification on the development host: `tests/test_browser_recovery.py` **7 passed**, using intercepted synthetic pages; no Gameforge traffic.

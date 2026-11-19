@@ -31,9 +31,9 @@ with synthetic native regressions and local-only secure settings tests. They
 close `migrate-native-desktop`; no private credentials or Selenium code
 were copied.
 
-Secure browser login/manual CAPTCHA assistance, host-only remote recovery,
-independent server-side player identity attestation and real-account acceptance
-are **not** part of GUI migration; they remain active in
-`validate-live-authentication`. The project must separately pass supervised
-Mac integration testing and complete Qt/PySide6 binary redistribution notice
-and notarization review before any production release.
+Secure browser login/manual CAPTCHA assistance and independent server-side
+player identity attestation were delivered in separate later implementation
+changes, **not** the legacy GUI migration. Real-account acceptance remains
+open in [issue #60](https://github.com/itshak/Daedalus/issues/60).
+The project must separately pass supervised Mac integration testing and
+review Qt/PySide6 redistribution and notarization requirements before release.

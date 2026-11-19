@@ -49,10 +49,12 @@ or already-covered difference.
   execute a Gameforge command were replaced or removed. Tests use only mocked
   responses and synthetic identities; the reviewed production checkout is
   never imported or invoked.
-- Actual Gameforge/browser login, independent server-reported player
-  attestation, remote UI assistance and worker acceptance **remain open**
-  under `validate-live-authentication`. This source audit cannot certify
-  production readiness or validate real cookie behavior.
+- This historical engine source audit did not by itself implement or certify
+  browser login, server-reported player attestation or worker acceptance.
+  Native Mac handoff and independent player attestation were delivered later
+  (#57); the real owner-supervised Mac sign-in, task/rebind trial and reboot
+  still remain **unverified in [issue #60](https://github.com/itshak/Daedalus/issues/60)**.
+  This source audit never authorized production cutover.
 
 ## Repeatability
 
