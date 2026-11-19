@@ -22,7 +22,6 @@ from daedalus.desktop.native_controls import (
 )
 from daedalus.desktop.task_page import TasksPage
 
-
 CITIES = [
     {"id": 101, "name": "Athens", "coords": "12:13"},
     {"id": 102, "name": "Sparta", "coords": "12:15"},
