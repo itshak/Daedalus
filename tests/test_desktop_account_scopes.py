@@ -233,7 +233,7 @@ def test_print_action_only_enabled_for_real_report_rows(app):
             "city_name": "Corinth", "resources": {"unsecured": {"wood": 7000}}
         }]}])
         assert page.print_button.isEnabled()
-        assert "Print grouped report" in [
+        assert "Print grouped report…" in [
             action.text() for action in page.export_button.menu().actions()
         ]
     finally:
