@@ -272,3 +272,71 @@ account or pretending that all accounts were processed.
 - **WHEN** multi-account preflight runs
 - **THEN** no account in that cohort receives a new start request, and the user
   sees exactly which account requires attention
+
+### Requirement: Original IkaBot headless Selenium sign-in parity
+
+The Daedalus desktop SHALL actually use source-preserving copies of the
+owner's former IkaBot Selenium Chrome/WebDriver factory, LoginFlow and
+humanized mouse/typing implementation for user-initiated Gameforge sign-in.
+It SHALL restore the exact account/world session first and perform ordinary
+Gameforge login automatically using **headless Chrome**. A visible browser
+SHALL open only for a detected CAPTCHA, which the operator solves manually;
+the original humanized interaction logic resumes afterwards. Credential and
+world-session persistence MUST use opt-in macOS Keychain storage isolated
+by backend/account/world/player instead of config.ini or tokens.json.
+No password, lobby token, CAPTCHA response or unencrypted world cookie
+may be sent to the backend. Only the already-specified one-use encrypted
+world cookie handoff, independent account/player attestation and ownership
+lease can authorize server session use.
+
+#### Scenario: Saved Gameforge session is valid
+
+- **GIVEN** the user has saved a valid exact-backend/account/world session
+  in macOS Keychain
+- **WHEN** the operator invokes Sign in automatically or All accounts sign-in
+- **THEN** the original Selenium LoginFlow restores the session headlessly
+  before attempting a full login, opens no visible Chrome window, and
+  submits only an encrypted world-cookie handoff to the backend
+
+#### Scenario: Headless credentials succeed without CAPTCHA
+
+- **GIVEN** Keychain contains this configured account's Gameforge credentials
+  and the cached game session expired
+- **WHEN** Selenium signs in
+- **THEN** the original LoginFlow enters the credentials and opens the game
+  world headlessly without asking for manual login, while the authoritative
+  backend separately verifies that world's player identity
+
+#### Scenario: An actual CAPTCHA interrupts the headless flow
+
+- **GIVEN** a CAPTCHA is detected before or after the login submission
+- **WHEN** headless Selenium cannot finish
+- **THEN** only that account opens visible Chrome with the copied original
+  humanized typing/movement behavior, waits for the human to solve the
+  challenge and continues without another button press or task dispatch
+
+#### Scenario: Login fails without a CAPTCHA
+
+- **GIVEN** a wrong password, unreachable site, expired token or missing
+  game window without a detected CAPTCHA
+- **WHEN** the bounded headless attempts fail
+- **THEN** the desktop provides a sanitized account-specific error and
+  does not pop up a visible login window or misreport the session as active
+
+#### Scenario: Old bot all-account warehouse workflow
+
+- **GIVEN** the backend has multiple configured accounts with missing game sessions
+- **WHEN** the user selects Auto sign-in + load all in Warehouses
+- **THEN** Daedalus sequentially attempts headless sign-in per missing
+  enabled account, preserves already authenticated workers, shows human
+  Chrome only for detected CAPTCHA and then loads combined warehouse
+  reports with explicit partial failures; it never starts game tasks
+
+#### Scenario: Selected-account sign-in
+
+- **GIVEN** multiple account credentials and sessions are configured
+- **WHEN** the user chooses Sign in selected… on Accounts
+- **THEN** the chosen accounts alone are processed sequentially under
+  their independent exact-origin credentials, ticket ownership and secure
+  handoffs; a failure on one account cannot submit a different account's
+  cookie or claim its worker was verified
