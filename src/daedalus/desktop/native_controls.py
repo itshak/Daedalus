@@ -8,13 +8,14 @@ result before starting any task.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -324,3 +325,141 @@ class MapAreaEditor(QWidget):
         if not self.enabled.isChecked():
             return None
         return [self.x.value(), self.y.value()], self.radius.value()
+
+
+class WorkshopUpgradesEditor(QWidget):
+    """Real workshop units and target levels, collected from IkaBot view data."""
+
+    changed = Signal()
+    city_requested = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        city_row = QHBoxLayout()
+        city_row.addWidget(QLabel("City with a workshop"))
+        self.city_picker = ComboBox()
+        self.city_picker.setAccessibleName("Choose the actual workshop city")
+        self.city_picker.currentIndexChanged.connect(self._select_city)
+        city_row.addWidget(self.city_picker, 1)
+        layout.addLayout(city_row)
+        self.table = _table(("Upgrade", "Unit", "Type", "Current level", "Target level"))
+        self.table.setMinimumHeight(210)
+        self.table.setAccessibleName("Verified unit upgrade targets")
+        self.table.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.table)
+        self.description = QLabel("Choose an account city to read its actual workshop upgrades.")
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._scope_city_id: int | None = None
+        self._loaded_city_id: int | None = None
+        self._units: list[dict[str, object]] = []
+        self.set_cities([])
+
+    def set_cities(self, cities: list[dict[str, object]]) -> None:
+        self._scope_city_id = None
+        self._loaded_city_id = None
+        self._units = []
+        self.table.setRowCount(0)
+        with QSignalBlocker(self.city_picker):
+            self.city_picker.clear()
+            self.city_picker.addItem("Choose a verified city")
+            for city in cities:
+                name = str(city["name"])
+                coords = str(city.get("coords") or "")
+                self.city_picker.addItem(
+                    f"{name} ({coords})" if coords else name,
+                    userData=city["id"],
+                )
+            self.city_picker.setCurrentIndex(0)
+        self.description.setText("Choose a city; IkaBot will list only existing workshop upgrades.")
+        self.changed.emit()
+
+    def _select_city(self, *_args: object) -> None:
+        self.table.setRowCount(0)
+        self._units = []
+        self._loaded_city_id = None
+        city_id = self.city_picker.currentData(Qt.UserRole)
+        self._scope_city_id = city_id if type(city_id) is int else None
+        self.description.setText(
+            "Reading actual workshop unit levels…" if self._scope_city_id else
+            "Choose an actual city to see its workshop."
+        )
+        self.changed.emit()
+        if self._scope_city_id:
+            self.city_requested.emit(self._scope_city_id)
+
+    def set_workshop_data(self, city_id: int, choices: list[dict[str, object]],
+                          workshop_level: int) -> None:
+        if city_id != self._scope_city_id:
+            return
+        self._loaded_city_id = city_id
+        self._units = list(choices)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(self._units))
+            for row, unit in enumerate(self._units):
+                current = unit["current_level"]
+                maximum = unit["max_level"]
+                choice = QTableWidgetItem("")
+                choice.setData(Qt.UserRole, (unit["unit_id"], unit["upgrade_type"]))
+                choice.setFlags(
+                    Qt.ItemIsEnabled | Qt.ItemIsUserCheckable
+                    if current < maximum else Qt.ItemIsEnabled
+                )
+                choice.setCheckState(Qt.Unchecked)
+                self.table.setItem(row, 0, choice)
+                for column, value in (
+                    (1, unit["name"]), (2, unit["description"]),
+                    (3, current),
+                ):
+                    label = QTableWidgetItem(str(value))
+                    label.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(row, column, label)
+                target = _amount(
+                    minimum=current, value=current,
+                    label=f"Target {unit['name']} {unit['description']} level",
+                )
+                target.setMaximum(maximum)
+                target.setEnabled(current < maximum)
+                target.valueChanged.connect(self.changed.emit)
+                self.table.setCellWidget(row, 4, target)
+        self.description.setText(
+            f"{len(choices)} actual upgrade options loaded. Workshop level {workshop_level}. "
+            "Select units and target levels. IkaBot checks workshop eligibility again at launch."
+        )
+        self.changed.emit()
+
+    def set_unavailable(self, city_id: int) -> None:
+        if city_id != self._scope_city_id:
+            return
+        self._loaded_city_id = None
+        self._units = []
+        self.table.setRowCount(0)
+        self.description.setText(
+            "No verified workshop information for this city. "
+            "Reconnect the account or choose another city."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> list[dict[str, object]]:
+        city_id = self._scope_city_id
+        if city_id is None or self._loaded_city_id != city_id:
+            raise ValueError("Choose a workshop city and load its verified unit levels")
+        jobs = []
+        for row, unit in enumerate(self._units):
+            cell = self.table.item(row, 0)
+            if cell is None or cell.checkState() != Qt.Checked:
+                continue
+            target = self.table.cellWidget(row, 4)
+            if not isinstance(target, SpinBox) or not target.isEnabled():
+                raise ValueError("Chosen workshop upgrade is unavailable")
+            if not unit["current_level"] < target.value() <= unit["max_level"]:
+                raise ValueError("Choose a higher target level for each unit")
+            jobs.append({
+                "unitId": unit["unit_id"],
+                "upgradeType": unit["upgrade_type"], "target": target.value(),
+            })
+        if not 0 < len(jobs) <= 50:
+            raise ValueError("Select 1 to 50 actual unit upgrades")
+        return [{"city_id": city_id, "upgrades": jobs}]
