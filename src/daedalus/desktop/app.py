@@ -701,8 +701,11 @@ class MainWindow(FluentWindow):
                 "This backend does not currently support secure session recovery.",
             )
             return
-        if not isinstance(account_ids, list) or len(account_ids) > 100:
-            self._notice("Invalid account selection", "Choose up to 100 configured accounts.")
+        if (
+            not isinstance(account_ids, list) or not account_ids
+            or any(not isinstance(account_id, str) for account_id in account_ids)
+        ):
+            self._notice("Invalid account selection", "Choose configured accounts.")
             return
         chosen: list[str] = []
         seen: set[str] = set()
