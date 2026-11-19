@@ -246,3 +246,55 @@ def test_category_filter_and_friendly_labels_preserve_engine_identifiers(page):
     assert page.selected_task_name() == "constructionList"
     assert page.category_combo.currentIndex() == 0
     assert page.search_input.text() == ""
+
+
+def test_construction_city_picker_uses_only_account_bound_real_cities(page):
+    requested = []
+    page.cities_requested.connect(requested.append)
+    page.set_capabilities([{
+        "name": "constructionList",
+        "kind": "background_task",
+        "config_fields": [
+            {"name": "city_id", "type": "json", "required": True},
+            {"name": "city_name", "type": "json", "required": True},
+        ],
+    }], enabled=True)
+    assert requested == ["alpha"]
+    assert page.group_tabs is not None
+    assert not page.start_selected_button.isEnabled()  # City-specific plan cannot be broadcast.
+    picker = page._form_inputs["city_id"]
+    assert picker.count() == 1
+    with pytest.raises(ValueError, match="Select a city"):
+        page._form_config()
+
+    # A different account cannot contaminate this draft's choices.
+    page.set_cities("disabled", [{"id": 77, "name": "Other account"}])
+    assert picker.count() == 1
+    page.set_cities("alpha", [
+        {"id": 101, "name": "Olympia", "coords": "50:48"},
+        {"id": 102, "name": "Sparta", "coords": "50:49"},
+    ])
+    assert picker.count() == 3
+    assert "Olympia" in picker.itemText(1)
+    with pytest.raises(ValueError, match="Select a city"):
+        page._form_config()  # No automatic first-city selection.
+    picker.setCurrentIndex(2)
+    assert page._form_config() == {"city_id": 102, "city_name": "Sparta"}
+
+    # Changing the account data revokes the selection and invalidates consent.
+    page.confirm_box.setChecked(True)
+    page.set_cities_unavailable("alpha")
+    assert not page.confirm_box.isChecked()
+    with pytest.raises(ValueError, match="Select a city"):
+        page._form_config()
+
+
+def test_category_pivot_mirrors_existing_canonical_task_filter(page):
+    records = [{"name": t, "kind": "background_task"} for t in
+               ("alertAttacks", "constructionList", "sellResources")]
+    page.set_capabilities(records, enabled=True)
+    page.category_combo.setCurrentIndex(3)
+    assert page._task_names == ["constructionList"]
+    assert page.group_tabs.currentItem().routeKey() == "group-3" if hasattr(
+        page.group_tabs.currentItem(), "routeKey"
+    ) else page.category_combo.currentIndex() == 3
