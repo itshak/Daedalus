@@ -78,11 +78,13 @@ Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
 ## Still active
 
-One umbrella change remains **open** for owner-supervised **real-account** acceptance. The native Mac browser and encrypted world-cookie handoff, backend independent game-world player attestation, and exclusive-worker recovery implementation have passed synthetic tests; none of these can stand in for owner-supervised real Gameforge/MFA/CAPTCHA, task-dispatch, daemon keyring persistence or production cutover acceptance.
+Two OpenSpec changes are **active**: one for owner-supervised **real-account** acceptance and one newly proposed **desktop UX redesign**. The native Mac browser and encrypted world-cookie handoff, backend independent game-world player attestation, and exclusive-worker recovery implementation have passed synthetic tests; none of these can stand in for owner-supervised real Gameforge/MFA/CAPTCHA, task-dispatch, daemon keyring persistence or production cutover acceptance. The redesign is a plan only: no new visual components or flows have been implemented or accepted by creating its specification.
 
 - `validate-live-authentication`: the native Mac GUI now opens an ephemeral local Gameforge browser, encrypts the selected world cookie in a one-use account-bound envelope and sends it to the authoritative Linux backend over authenticated HTTPS. On an idle dedicated worker, the backend checks task states, retains the identity lease, independently verifies the actual world/player and promotes only a valid staged cookie to the server's protected keyring. The host-local browser remains an advanced fallback.
   The engine now requires recognizable server-rendered player identity on
   fresh TLS-validated game-world responses. A subsequent limited real-account smoke passed saved-cookie identity attestation and read-only data, but **not** the complete real-account recovery/task acceptance.
+
+- `redesign-macos-desktop-experience`: **newly proposed; not implemented**. Planned ground-up Mac visual-system and UX pass over Overview, Accounts, Warehouses, Automations, Activity, Connection and Settings. It preserves proven legacy warehouse components and direct HTTPS/Keychain/automation safety while consolidating duplicated task pages and correcting navigation icons, onboarding and task-aware forms. See the active OpenSpec proposal, design, UX blueprint, delta spec and unchecked tasks. All visual/functional acceptance remains pending, independently of `validate-live-authentication`.
 
 `migrate-native-desktop` and `import-public-ikabot-engine` are archived for their
 reviewed, nonsecret scopes. The production engine comparison reviewed six
@@ -93,7 +95,7 @@ rejected automatic credentials and unconfirmed task/server start. See
 
 ### Remaining OpenSpec completion gates
 
-**3 unchecked real-account acceptance tasks across 1 active change** remain. All require
+**3 unchecked real-account acceptance tasks across 1 active acceptance change** remain (the separate UX design proposal has its own unchecked implementation tasks). All require
 owner-approved live testing or explicit cutover approval. CI cannot substitute.
 
 | Active change | Remaining gate | Evidence required |
