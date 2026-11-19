@@ -32,3 +32,7 @@ category and a reviewed parser update is made.
 The real-account browser, task effects, session expiration, worker rebind and
 production cutover gates remain unchecked. No one has tested a real account
 or authorized production in this change. See docs/LIVE-ACCEPTANCE.md.
+
+## New native Mac implementation (2026-11-19)
+
+The implementation change `native-mac-browser-login` replaces the default host-only GUI guidance with a native Mac off-the-record Gameforge login and an authenticated, account-bound, one-use X25519/HKDF/AES-GCM world-cookie exchange. The backend still independently attests the game-world player and retains the existing dedicated worker lease for a safe idle-only rebind; no Gameforge password or CAPTCHA response is transferred or solved. All offline synthetic steps are archived separately. The owner-controlled real login/CAPTCHA, daemon keyring persistence, live task dispatch, no-duplicate verification and explicit production cutover are **not** completed or waived by this change.

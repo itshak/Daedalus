@@ -31,3 +31,7 @@ The `--adhoc-sign` option creates an **ad-hoc signature** suitable for local tes
 The `macos-app.yml` workflow builds the preview app on macOS, verifies its bundle and ad-hoc signature, and archives it as a short-lived GitHub Actions artifact. Artifacts are built only from the current source checkout, with unprivileged read-only GitHub permissions. There are no game-account secrets, deployment tokens or PyPI credentials.
 
 The workflow intentionally does **not** release automatically, notarize, attach an update feed or install an app on a runner.
+
+## Native browser requirements
+
+The ad-hoc signed preview now bundles `PySide6.QtWebEngineCore`, `PySide6.QtWebEngineWidgets`, `QtWebEngineProcess`, resource files, and the `cryptography` implementation used for one-use encrypted session handoff. The macOS CI build verifies the modules and helper process are present. Native Qt tests use synthetic Gameforge accounts and no live login; macOS real CAPTCHA and binary execution still require owner acceptance. Browser profile data is off-the-record and not packed into the application artifact.

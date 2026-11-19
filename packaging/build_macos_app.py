@@ -65,6 +65,12 @@ def build_command(
         "--hidden-import",
         "daedalus.desktop.app",
         "--hidden-import",
+        "daedalus.desktop.native_login_dialog",
+        "--hidden-import",
+        "PySide6.QtWebEngineCore",
+        "--hidden-import",
+        "PySide6.QtWebEngineWidgets",
+        "--hidden-import",
         "daedalus.desktop.task_page",
         "--hidden-import",
         "daedalus.desktop.pages",
@@ -87,6 +93,15 @@ def launcher_source() -> str:
         "    from daedalus.desktop import main\n"
         "    sys.exit(main())\n"
     )
+
+
+def require_native_browser_runtime(bundle: Path) -> None:
+    """Fail the Mac preview build if its private WebEngine helper is missing."""
+    if not any(path.is_file() and "QtWebEngineProcess" in path.name
+               for path in bundle.rglob("QtWebEngineProcess*")):
+        raise RuntimeError("macOS app is missing the Qt WebEngine browser subprocess")
+    if not any("QtWebEngine" in path.name for path in bundle.rglob("*QtWebEngine*")):
+        raise RuntimeError("macOS app is missing Qt WebEngine resources")
 
 
 def build(
@@ -124,6 +139,10 @@ def build(
         subprocess.run(command, check=True, cwd=ROOT)
         if not bundle.is_dir() or not (bundle / "Contents" / "MacOS" / APP_NAME).is_file():
             raise RuntimeError("PyInstaller did not produce a complete Daedalus.app")
+
+        # Native Mac login cannot work if the Qt WebEngine renderer/helper is
+        # omitted from the .app, even if ordinary Fluent widgets still launch.
+        require_native_browser_runtime(bundle)
 
         if adhoc_sign:
             subprocess.run(

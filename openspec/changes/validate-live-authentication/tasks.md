@@ -1,5 +1,5 @@
 # Tasks
-- [x] Wire desktop remote recovery UX to the authoritative host's human browser flow without HTTP cookie transfer, with synthetic UI/API tests.
+- [x] Wire native Mac human Gameforge browser recovery and authenticated one-use encrypted world-session transfer, with synthetic GUI/API/worker tests. Host-only CLI remains optional.
 - [x] Implement independently verified server-side player identity attestation for recovered world sessions, with synthetic negative tests.
 - [ ] Run the owner-approved isolated real-account browser/CAPTCHA and saved-cookie recovery workflow; record sanitized results.
 - [ ] Verify live dedicated-worker rebind, session expiration, manual recovery and explicit task dispatch without duplicate game operations.

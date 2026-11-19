@@ -32,6 +32,7 @@ from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
+from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
 from daedalus.task_control import (
@@ -58,6 +59,7 @@ def create_app(
     assistance_broker: AssistanceBroker | None = None,
     recovery_monitor: ExistingSessionRecoveryMonitor | None = None,
     saved_worker: SavedCookieWorker | None = None,
+    native_browser_handoff: NativeBrowserHandoff | None = None,
     demo_mode: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
@@ -69,7 +71,7 @@ def create_app(
         or session_coordinator is not None or ipc_client is not None
         or task_controller is not None or enable_account_editing
         or assistance_broker is not None or recovery_monitor is not None
-        or saved_worker is not None
+        or saved_worker is not None or native_browser_handoff is not None
     ):
         raise ValueError("Synthetic demo cannot connect to real accounts, IPC or task controls")
     if demo_mode:
@@ -105,6 +107,14 @@ def create_app(
             raise ValueError("Dedicated saved worker must be the configured authoritative owner")
         if recovery_monitor is not None:
             recovery_monitor.attach_dedicated_worker(saved_worker)
+    if native_browser_handoff is not None and (
+        native_browser_handoff.owner is not owner
+        or not native_browser_handoff.owner.matches_accounts(configured_accounts)
+        or native_browser_handoff.worker is not saved_worker
+        or native_browser_handoff.monitor is not recovery_monitor
+        or enable_account_editing
+    ):
+        raise ValueError("Native browser handoff needs the exact fixed authoritative owner")
     store = AccountMetadataStore(accounts_path) if enable_account_editing else None
     if store is not None:
         saved = store.snapshot()
@@ -238,6 +248,60 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid assistance request") from exc
         except AssistanceConflict as exc:
             raise HTTPException(status_code=409, detail="Assistance request is stale or busy") from exc
+
+    @app.get("/api/v1/native-browser-login", dependencies=[Depends(authorized)])
+    def native_browser_login_capabilities() -> dict[str, object]:
+        return {"enabled": native_browser_handoff is not None,
+                "mode": "mac_ephemeral_encrypted", "client_side_browser": True,
+                "ttl_seconds": 600}
+
+    @app.post("/api/v1/accounts/{account_id}/browser-login/start",
+              dependencies=[Depends(authorized)])
+    def start_native_browser_login(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if native_browser_handoff is None:
+            raise HTTPException(status_code=503, detail="Native browser recovery is not enabled")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit browser-login consent required")
+        try:
+            return native_browser_handoff.start(account_id, confirmed=True)
+        except NativeHandoffUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/browser-login/{ticket_id}/cancel",
+              dependencies=[Depends(authorized)])
+    def cancel_native_browser_login(
+        account_id: str, ticket_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, str]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if native_browser_handoff is None:
+            raise HTTPException(status_code=503, detail="Native browser recovery is not enabled")
+        if payload != {"confirmed": True}:
+            raise HTTPException(status_code=422, detail="Explicit cancellation required")
+        try:
+            return native_browser_handoff.cancel(account_id, ticket_id, confirmed=True)
+        except NativeHandoffUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/browser-login/{ticket_id}/complete",
+              dependencies=[Depends(authorized)])
+    def complete_native_browser_login(
+        account_id: str, ticket_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, str]:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if native_browser_handoff is None:
+            raise HTTPException(status_code=503, detail="Native browser recovery is not enabled")
+        # This endpoint accepts *only* the encrypted envelope. Not a raw cookie,
+        # Gameforge password, browser profile, token or URL.
+        try:
+            return native_browser_handoff.complete(account_id, ticket_id, payload)
+        except NativeHandoffUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get(
         "/api/v1/accounts/{account_id}/recovery-guide",

@@ -219,3 +219,8 @@ Production engine source review and nonsecret upstream reconciliation: [Engine a
 The account-first macOS GUI supports simple Automations settings, direct HTTPS with Keychain token saving and automatic reconnect, read-only
 warehouse reports and explicit task approvals.
 See [Guided native Mac quick start](docs/GUI-QUICKSTART.md) for connection, prerequisites and limitations.
+
+
+### Native Mac authentication
+
+Human Gameforge login/MFA/CAPTCHA is supported in the **client Mac's** temporary embedded browser and the exact-world session is sent as a one-use encrypted payload to the independently verifying Linux worker. No remote VNC or Mac SSH tunnel is needed. Backend opt-in and real-world acceptance are separate. See [native Mac browser login](docs/NATIVE-MAC-LOGIN.md).

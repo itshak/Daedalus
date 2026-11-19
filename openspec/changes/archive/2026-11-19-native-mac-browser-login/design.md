@@ -1,0 +1,7 @@
+# Native Mac human login design
+
+A temporary off-the-record Qt WebEngine profile navigates to official HTTPS Gameforge pages. The human signs in and opens the selected world; only the exact-world Secure `ikariam` session cookie is accepted with explicit consent. Passwords, MFA responses and browser profiles are neither read nor copied.
+
+A bearer-authenticated fixed-account Linux API issues a short-lived one-use X25519 public key challenge. The Mac derives an ephemeral ECDH shared key, uses HKDF-SHA256 and AES-GCM with the exact account/world/player/ticket as authenticated context, and transmits only ciphertext, ephemeral public key and nonce over trusted HTTPS. No raw-cookie HTTP input is accepted. The backend consumes the challenge once, validates the envelope, and checks the existing ownership lease. On an idle dedicated worker, an existing monitoring ticket and protected staging keyring are used to verify the game-world player before the single IPC worker is replaced; unresolved task states refuse recovery. Without an existing owner, a short-lived exclusive lease verifies the world session before saving it to the OS keyring without starting a game worker. Old tasks are never replayed.
+
+The Mac packages Qt WebEngine helpers and explicitly destroys its browser page before the ephemeral profile. A host-only CLI fallback remains optional. The owner-supervised real Gameforge browser/CAPTCHA, daemon keyring-after-reboot and task cutover acceptance stay separately open.

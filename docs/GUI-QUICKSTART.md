@@ -14,6 +14,10 @@ An existing local backend can still be reached through `http://127.0.0.1:8765` f
 
 Server operators: see [private-origin HTTPS deployment](REMOTE-HTTPS.md). The service can remain bound to `127.0.0.1` while the gateway supplies a publicly trusted certificate and HTTPS address.
 
+## Sign in on the Mac (native browser)
+
+From **Accounts**, select the world/player and click **Sign in on this Mac**. An isolated native Gameforge browser opens in the app. Complete your Gameforge login and any MFA/CAPTCHA yourself, open the selected world, then approve **Verify session on server**. The session is encrypted for a one-time HTTPS handoff; the backend independently checks the game-world player before it will accept the cookie. No host-side browser, VNC or SSH is involved. If the button is disabled, the currently connected backend has not yet been started with the optional `--enable-native-browser-login` flag, or the account is disabled. Do not restart a production worker while it has uncertain tasks. See [native Mac login and acceptance boundaries](NATIVE-MAC-LOGIN.md).
+
 ## Find and manage accounts
 
 The **Home** dashboard prioritizes a currently authenticated account and offers clear shortcuts to **View warehouses**, **Manage automations** and **View accounts**. The Accounts page shows connection/recovery status. Opening Accounts or Warehouses never starts tasks.
@@ -31,6 +35,6 @@ The **Home** dashboard prioritizes a currently authenticated account and offers 
 
 ## Current acceptance boundaries
 
-One owner-authorized field smoke verified Monjo saved-cookie restoration, the exact game-world player, seven city records and seven real warehouse snapshots on the Mac. No owner-approved game-task execution, new browser/CAPTCHA login, dedicated-worker rebind, persistent keyring after host reboot or completed production cutover has been demonstrated. Those live acceptance checks remain open in `openspec/changes/validate-live-authentication`. GUI and backend synthetic tests cannot substitute for them.
+One owner-authorized field smoke verified Monjo saved-cookie restoration, the exact game-world player, seven city records and seven real warehouse snapshots on the Mac. No owner-approved game-task execution, **new native Mac Gameforge browser/CAPTCHA login**, dedicated-worker rebind, persistent server keyring after host reboot or completed production cutover has been demonstrated. Those live acceptance checks remain open in the owner acceptance checklist in [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md). GUI and backend synthetic tests cannot substitute for them.
 
 The GitHub Actions macOS build produces an ad-hoc signed preview app. Updating backend code on Linux does **not** automatically replace an older installed Mac `.app`; to use new GUI controls, install the rebuilt preview from the relevant successful macOS CI run. Windows/Linux GUI support is not a guarantee of notarized macOS distribution.

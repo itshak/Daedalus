@@ -92,6 +92,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Run a clearly labeled synthetic read-only desktop demo; no game connection",
     )
     serve.add_argument(
+        "--enable-native-browser-login", action="store_true",
+        help="Opt in to one-time encrypted Mac browser login with server verification",
+    )
+    serve.add_argument(
         "--enable-account-editing", action="store_true",
         help="Opt in to protected metadata-only account editing (not task control)",
     )
@@ -298,6 +302,10 @@ def main(argv: list[str] | None = None) -> int:
                     "Cookie-only worker requires --accounts-file, --connect-existing-ipc "
                     "and --confirm-read-only-network"
                 )
+            if args.enable_native_browser_login and (
+                not args.accounts_file or args.demo or args.enable_account_editing
+            ):
+                parser.error("Native Mac browser login needs fixed accounts, not demo/editor")
             if args.restore_saved_account and (
                 args.ipc_descriptor or args.enable_account_editing or args.demo
             ):
@@ -308,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.accounts_file or args.connect_existing_ipc or args.ipc_descriptor
                 or args.enable_task_control or args.task_ledger or args.enable_account_editing
                 or args.monitor_existing_sessions or args.restore_saved_account
+                or args.enable_native_browser_login
             ):
                 parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
@@ -324,7 +333,8 @@ def main(argv: list[str] | None = None) -> int:
                     if args.enable_task_control
                     else ExistingIPCClient(args.ipc_descriptor)
                 )
-            if args.enable_task_control or args.restore_saved_account:
+            if (args.enable_task_control or args.restore_saved_account
+                    or args.enable_native_browser_login):
                 configured = load_accounts(args.accounts_file)
                 owner = AccountSessionCoordinator(configured)
             if args.enable_task_control:
@@ -350,12 +360,21 @@ def main(argv: list[str] | None = None) -> int:
                 worker.start(confirmed=True)
                 if task_controller is not None:
                     task_controller.adopt_verified_saved_worker(account.id, worker.lease)
+            native_handoff = None
+            if args.enable_native_browser_login:
+                from daedalus.native_browser_handoff import NativeBrowserHandoff
+
+                native_handoff = NativeBrowserHandoff(
+                    configured, owner, monitor=monitor if worker is not None else None,
+                    dedicated_worker=worker,
+                )
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
                 enable_account_editing=args.enable_account_editing,
                 assistance_broker=broker, recovery_monitor=monitor,
-                saved_worker=worker, demo_mode=args.demo,
+                saved_worker=worker, native_browser_handoff=native_handoff,
+                demo_mode=args.demo,
             )
         except (
             AccountConfigError, AccountEditUnavailable, SessionBusyError,
