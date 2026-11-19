@@ -124,8 +124,9 @@ def test_encrypted_systemd_store_metadata_is_supported_without_reading_it(tmp_pa
     assert result["keyring_durability"] == "host_encrypted_collection_present_unverified"
     assert "unencrypted-test-contents" not in json.dumps(result)
     assert not result["production_cutover_authorized"]
-    blob.chmod(0o644)
-    assert deployment_preflight(ledger_path=ledger)["status"] == "blocked"
+    if os.name != "nt":  # This preflight checks POSIX world-readable files on Unix.
+        blob.chmod(0o644)
+        assert deployment_preflight(ledger_path=ledger)["status"] == "blocked"
 
 
 def test_explicit_operator_directory_overrides_unrelated_shell_keyring(tmp_path, capsys, monkeypatch):

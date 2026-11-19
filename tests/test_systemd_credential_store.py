@@ -35,7 +35,8 @@ def test_keyed_secret_encryption_survives_store_reconstruction(tmp_path):
     assert b"synthetic-secret" not in raw
     assert USER.encode() not in raw
     assert SERVICE.encode() not in raw
-    assert files[0].stat().st_mode & 0o077 == 0
+    if os.name != "nt":  # NTFS permissions are ACL-based, not POSIX mode bits.
+        assert files[0].stat().st_mode & 0o077 == 0
     assert store.get_password(SERVICE, USER) == "synthetic-secret-must-not-appear-on-disk"
     restored = _store(tmp_path)
     assert restored.get_password(SERVICE, USER) == store.get_password(SERVICE, USER)
