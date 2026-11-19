@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QListWidget,
+    QListWidgetItem,
     QGridLayout,
     QHBoxLayout,
     QMessageBox,
@@ -125,7 +127,7 @@ class TasksPage(QWidget):
         self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
-        self._form_inputs: dict[str, LineEdit | CheckBox | ComboBox | QSpinBox | QDoubleSpinBox] = {}
+        self._form_inputs: dict[str, LineEdit | CheckBox | ComboBox | QSpinBox | QDoubleSpinBox | QListWidget] = {}
         self._form_dirty = False
         self._reviewed = False
         self._pending_launch = False
@@ -630,6 +632,23 @@ class TasksPage(QWidget):
             # Never silently choose a city for a state-changing task.
             widget.setCurrentIndex(0)
 
+    def _populate_city_list(self, widget: QListWidget) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        with QSignalBlocker(widget):
+            widget.clear()
+            for city in cities:
+                name = str(city["name"])
+                coords = str(city.get("coords") or "")
+                entry = QListWidgetItem(f"{name} ({coords})" if coords else name)
+                entry.setData(Qt.UserRole, city["id"])
+                entry.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                entry.setCheckState(Qt.Unchecked)
+                widget.addItem(entry)
+        widget.setToolTip(
+            "Leave every city unchecked to use engine defaults" if cities else
+            "City list unavailable — connect the account and refresh"
+        )
+
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
         if account_id not in self._account_ids:
             return
@@ -648,6 +667,10 @@ class TasksPage(QWidget):
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
+            for input_widget in self._form_inputs.values():
+                if isinstance(input_widget, QListWidget):
+                    self._populate_city_list(input_widget)
+                    self._invalidate_review()
 
     def _selected_construction_city(self) -> int | None:
         if self.selected_task_name() != "constructionList":
@@ -725,6 +748,10 @@ class TasksPage(QWidget):
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
+            for input_widget in self._form_inputs.values():
+                if isinstance(input_widget, QListWidget):
+                    self._populate_city_list(input_widget)
+                    self._invalidate_review()
 
     def _choose_bulk_accounts(self) -> None:
         from daedalus.desktop.account_scope import AccountSelectionDialog
@@ -1206,7 +1233,14 @@ class TasksPage(QWidget):
                 str(field.get("label") or key.replace("_", " ").capitalize())
                 + (" *" if field["required"] else "")
             )
-            if name == "constructionList" and key == "city_id":
+            if kind == "city_list":
+                widget = QListWidget(self)
+                widget.setAccessibleName(f"Choose account cities for {label}")
+                widget.setMinimumHeight(105)
+                widget.setMaximumHeight(135)
+                self._populate_city_list(widget)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif name == "constructionList" and key == "city_id":
                 widget = ComboBox()
                 widget.setAccessibleName("Choose a real city for construction")
                 self._populate_city_picker(widget)
@@ -1279,8 +1313,9 @@ class TasksPage(QWidget):
         if fields:
             # Match the form to its contents instead of leaving a large empty
             # box under single-parameter workflows.
+            list_extra = 78 if any(field.get("type") == "city_list" for field in fields) else 0
             self.parameter_scroll.setFixedHeight(
-                min(315, max(72, len(fields) * 44 + 24))
+                min(315, max(72, len(fields) * 44 + 24 + list_extra))
             )
         self.build_json_button.setEnabled(bool(fields))
         self._invalidate_review()
@@ -1296,7 +1331,9 @@ class TasksPage(QWidget):
         account_id = self.selected_account_id()
         if self._dispatch_enabled and account_id and name:
             self.preflight_requested.emit(account_id, name)
-        if account_id and name == "constructionList" and account_id not in self._cities_by_account:
+        if (account_id and account_id not in self._cities_by_account
+                and (name == "constructionList"
+                     or any(field.get("type") == "city_list" for field in fields))):
             self.cities_requested.emit(account_id)
 
     def set_preflight(self, result: dict[str, object]) -> None:
@@ -1340,6 +1377,18 @@ class TasksPage(QWidget):
                 continue
             kind = str(field["type"])
             widget = self._form_inputs[key]
+            if isinstance(widget, QListWidget):
+                chosen = [str(widget.item(i).data(Qt.UserRole))
+                          for i in range(widget.count())
+                          if widget.item(i).checkState() == Qt.Checked]
+                if not chosen:
+                    if field["required"]:
+                        raise ValueError(f"Select at least one city for {key}")
+                    continue
+                if name == "distributeResources" and len(chosen) < 2:
+                    raise ValueError("Choose at least two cities to distribute resources")
+                config[key] = chosen
+                continue
             if isinstance(widget, ComboBox):
                 index = widget.currentIndex()
                 choices = field["choices"]
@@ -1382,6 +1431,8 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
+        if name == "distributeResources" and config.get("mode") == "producers" and config.get("resource") == "wood":
+            raise ValueError("Every city produces wood; choose the Even distribution policy")
         if name == "constructionList":
             picker = self._form_inputs.get("city_id")
             cities = self._cities_by_account.get(self.selected_account_id() or "", [])
