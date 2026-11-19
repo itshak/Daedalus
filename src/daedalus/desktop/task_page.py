@@ -707,7 +707,7 @@ class TasksPage(QWidget):
                 _ for _ in ()
             ).throw(ValueError("Invalid nonfinite value")))
             if not isinstance(config, dict):
-                raise ValueError("Configuration must be one JSON object")
+                raise TypeError("Configuration must be one JSON object")
             allowed = {str(field["name"])
                        for field in self._config_fields_by_task.get(name, [])}
             if not allowed or not all(isinstance(key, str) and key in allowed
