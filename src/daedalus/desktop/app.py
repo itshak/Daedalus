@@ -2,7 +2,7 @@
 
 The read-only views remain safe by default. An explicitly enabled backend can
 accept user-confirmed task start/stop actions through existing-session IPC.
-No Selenium login or new game worker is started from this desktop shell.
+The original IkaBot Selenium login runs locally in a headless Qt worker;\nonly a detected CAPTCHA opens Chrome for manual assistance.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sys
 
 from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QSizePolicy, QSpacerItem
+from PySide6.QtWidgets import QDialog, QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import (
     FluentWindow,
     InfoBar,
@@ -396,6 +396,13 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
+        # Original warehouse bot's account loop, now scoped to the current
+        # backend and strictly sequential to preserve one account owner.
+        self._automatic_login_queue: list[str] = []
+        self._automatic_login_origin: str | None = None
+        self._automatic_login_current: str | None = None
+        self._automatic_login_report: list[str] | None = None
+        self._automatic_login_attempts = 0
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
@@ -484,6 +491,9 @@ class MainWindow(FluentWindow):
             lambda account_id: self._request("recovery_guide", account_id=account_id)
         )
         self.accounts_page.native_browser_login_requested.connect(self._begin_native_browser_login)
+        self.accounts_page.native_browser_login_batch_requested.connect(
+            self._start_automatic_login_batch
+        )
         self.accounts_page.recovery_prepare_requested.connect(
             lambda account_id: self._request(
                 "recovery_prepare", account_id=account_id,
@@ -524,6 +534,9 @@ class MainWindow(FluentWindow):
         )
         self.warehouses_page.load_all_requested.connect(
             lambda ids: self._request("warehouses_all", task_payload={"account_ids": ids})
+        )
+        self.warehouses_page.sign_in_all_requested.connect(
+            lambda ids: self._start_automatic_login_batch(ids, report_after=True)
         )
         self.warehouses_page.report_scope_changed.connect(
             lambda ids: self.accounts_page.set_report_exclusions(
@@ -667,26 +680,110 @@ class MainWindow(FluentWindow):
         if account_id:
             self._request_task_refresh(account_id)
 
+    def _start_automatic_login_batch(
+        self, account_ids: list[str], *, report_after: bool = False,
+    ) -> None:
+        """Sequential headless sign-in, like the old all-account warehouse runner.
+
+        Bulk sign-in is explicitly triggered from Accounts or Warehouses; no
+        task starts or network retries occur automatically after an ambiguity.
+        """
+        if (
+            self.client is None or self._active_backend_url is None
+            or self._worker is not None or self._automatic_login_current is not None
+            or self._automatic_login_queue
+        ):
+            self._notice("Sign-in already in progress", "Finish the current account first.")
+            return
+        if not self.accounts_page._native_browser_login_enabled:
+            self._notice(
+                "Automatic sign-in unavailable",
+                "This backend does not currently support secure session recovery.",
+            )
+            return
+        if (
+            not isinstance(account_ids, list) or not account_ids
+            or any(not isinstance(account_id, str) for account_id in account_ids)
+        ):
+            self._notice("Invalid account selection", "Choose configured accounts.")
+            return
+        chosen: list[str] = []
+        seen: set[str] = set()
+        for account_id in account_ids:
+            if not isinstance(account_id, str) or account_id in seen:
+                continue
+            seen.add(account_id)
+            record = self.accounts_page.account_record(account_id)
+            if record is None or record.get("enabled") is not True:
+                continue
+            if str(record.get("session_status")) == "authenticated":
+                continue  # preserve the existing verified worker and task lease
+            chosen.append(account_id)
+        self._automatic_login_origin = self._active_backend_url
+        self._automatic_login_queue = chosen
+        self._automatic_login_report = (
+            list(dict.fromkeys(aid for aid in account_ids if isinstance(aid, str)))
+            if report_after else None
+        )
+        self._automatic_login_attempts = 0
+        self._continue_automatic_login_batch()
+
+    def _continue_automatic_login_batch(self) -> None:
+        """Queue the next account only after the prior API/browser step finished."""
+        if self._automatic_login_origin is None:
+            return
+        if (
+            self.client is None
+            or self._active_backend_url != self._automatic_login_origin
+        ):
+            self._automatic_login_queue.clear()
+            self._automatic_login_origin = None
+            self._automatic_login_current = None
+            self._automatic_login_report = None
+            return
+        if self._worker is not None or self._automatic_login_current is not None:
+            return
+        if self._automatic_login_queue:
+            account_id = self._automatic_login_queue.pop(0)
+            self._automatic_login_current = account_id
+            self._automatic_login_attempts += 1
+            self.accounts_page.native_login_status.setText(
+                f"Headless login {self._automatic_login_attempts}: "
+                "authenticating one account, then continuing with the next."
+            )
+            self._begin_native_browser_login(account_id)
+            return
+        report, self._automatic_login_report = self._automatic_login_report, None
+        attempted = self._automatic_login_attempts
+        self._automatic_login_origin = None
+        self._automatic_login_current = None
+        self._automatic_login_attempts = 0
+        self.accounts_page.native_login_status.setText(
+            f"Automatic sign-in requests finished for {attempted} account(s). "
+            "Check authoritative session status; CAPTCHA is the only manual "
+            "browser step when credentials are saved."
+        )
+        if report:
+            # Always show per-account failures honestly; a login can finish
+            # without starting a dedicated authoritative worker.
+            self._request("warehouses_all", task_payload={"account_ids": report})
+
     def _begin_native_browser_login(self, account_id: str) -> None:
+        """One-click headless Selenium, not a manual Gameforge login workflow.
+
+        The user explicitly initiated this action on the Accounts screen.
+        API consent, ticket ownership and secure session handoff remain enforced.
+        """
         if self.client is None or self._worker is not None:
-            self._notice("Cannot open login", "Connect and finish the current request first.")
+            self._notice("Cannot sign in yet", "Connect and finish the current request first.")
             return
         account = self.accounts_page.account_record(account_id)
         if account is None or account.get("enabled") is not True:
             return
-        answer = QMessageBox.question(
-            self, "Secure Gameforge browser login on your Mac",
-            "An isolated Mac browser will open official Gameforge pages. "
-            "You enter your password and complete any CAPTCHA yourself. "
-            "When you approve the handoff, only the selected world's secure "
-            "session cookie is encrypted to your backend. The server will "
-            "independently verify your player before replacing any worker. "
-            "Existing tasks are NEVER replayed. A dedicated worker must be idle "
-            "and may be paused for recovery. Continue?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if answer == QMessageBox.Yes:
-            self._request("native_login_start", account_id=account_id)
+        if self._active_backend_url is None:
+            self._notice("No backend", "Connect to the selected backend before signing in.")
+            return
+        self._request("native_login_start", account_id=account_id)
 
     def _open_native_browser_login(self, challenge: dict[str, object]) -> None:
         account_id = challenge.get("account_id")
@@ -699,15 +796,23 @@ class MainWindow(FluentWindow):
                               task_payload={"ticket_id": challenge["ticket_id"]})
             return
         try:
-            from daedalus.desktop.native_login_dialog import NativeLoginDialog
+            from daedalus.desktop.selenium_login_dialog import SeleniumLoginDialog
 
-            dialog = NativeLoginDialog(
+            if self._active_backend_url is None:
+                raise RuntimeError("Backend identity missing")
+            dialog = SeleniumLoginDialog(
+                backend_url=self._active_backend_url,
+                account_id=str(record["id"]),
                 world=str(record["world"]), player=str(record["player"]),
                 ttl_seconds=int(challenge["expires_in_seconds"]), parent=self,
             )
         except (ImportError, RuntimeError, ValueError):
-            logger.warning("Native browser could not open")
-            self._notice("Native browser unavailable", "This preview needs the Qt WebEngine runtime.")
+            logger.warning("Automatic local Selenium login could not open")
+            self._notice(
+                "Automatic sign-in unavailable",
+                "Install the native Mac app with Selenium and Chrome support, "
+                "then retry the selected account.",
+            )
             self._request("native_login_cancel", account_id=account_id,
                           task_payload={"ticket_id": challenge["ticket_id"]})
             return
@@ -1033,9 +1138,9 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True, demo=demo)
             self.home_page.set_connected(True, demo=demo)
             browser_capability = payload.get("native_browser_login") or {}
-            self.accounts_page.set_native_browser_login_enabled(
-                not demo and browser_capability.get("enabled") is True
-            )
+            secure_login_available = not demo and browser_capability.get("enabled") is True
+            self.accounts_page.set_native_browser_login_enabled(secure_login_available)
+            self.warehouses_page.set_login_available(secure_login_available)
             self.warehouses_page.set_demo(demo)
             self.warehouses_page.clear_reports()
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
@@ -1362,6 +1467,7 @@ class MainWindow(FluentWindow):
                 self._notice("Backend unavailable", error)
 
     def _on_worker_finished(self) -> None:
+        finished_action = getattr(self._worker, "action", None)
         self._worker = None
         self.connection_page.set_connecting(False)
         challenge, self._pending_native_login_challenge = (
@@ -1370,6 +1476,12 @@ class MainWindow(FluentWindow):
         if challenge is not None and self.client is not None:
             QTimer.singleShot(0, lambda: self._open_native_browser_login(challenge))
             return
+        if finished_action in {
+            "native_login_start", "native_login_complete", "native_login_cancel",
+        }:
+            # A completed/missing handoff cannot hold up the next account;
+            # the backend still owns verification and individual session state.
+            self._automatic_login_current = None
         followup, self._recovery_followup = self._recovery_followup, None
         if followup is not None and self.client is not None:
             action, account_id = followup
@@ -1383,6 +1495,8 @@ class MainWindow(FluentWindow):
             self._pending_batch_status = None
             self._request("task_list_batch", task_payload={"account_ids": ids})
         if self._worker is None:
+            self._continue_automatic_login_batch()
+        if self._worker is None:
             self._run_next_preflight()
 
     def _notice(self, title: str, message: str) -> None:
@@ -1391,6 +1505,9 @@ class MainWindow(FluentWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._automatic_login_queue.clear()
+        self._automatic_login_origin = None
+        self._automatic_login_report = None
         self._assistance_poll.stop()
         # Preserve the old GUI's rule: never destroy a live QThread.
         if (

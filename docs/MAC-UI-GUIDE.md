@@ -41,9 +41,13 @@ Open **Automations**. The single Fluent workspace separates **Configure**, **Run
 
 The user interface does not bypass backend permissions, task leases, idempotency, game engine validation or CAPTCHA. Multi-account task starts are intended for deliberate operator-authorized use, not automatic unattended all-account launch.
 
-## Accounts and sign-in
+## Accounts and automatic Selenium sign-in
 
-The Accounts table summarizes each account and its worker state. Choose an account to see contextual health and **Sign in on this Mac** when the backend enables secure browser recovery. This opens a temporary browser for you to complete Gameforge/MFA/CAPTCHA manually, then uses the previously specified encrypted, one-use account-bound handoff. The backend independently verifies the exact world/player before accepting the result. Browser acknowledgment alone is **not authentication**.
+The Accounts table summarizes each account and its worker state. Choose **Sign in automatically** to use the source-preserved `itshak/ikabot` Selenium login. The Mac first tries a stored, verified game session; otherwise it logs in using **headless Chrome** and the original Gameforge Play-button/world login flow. If the credentials were saved in macOS Keychain there is **no password prompt or visible browser** during a successful headless login. Only when Selenium detects a CAPTCHA does it start a **visible Chrome window** and use the original humanized mouse/typing code. Solve the CAPTCHA yourself, and the same login continues automatically. It never solves CAPTCHA unattended.
+
+On first use, enter the account's Gameforge email/password and choose whether to save them securely to macOS Keychain. The prior bot's plaintext `config.ini` and `tokens.json` are not copied as persistence. **Sign in all accounts** or **Sign in selected…** sequences the same headless-first login for the chosen accounts without reauthenticating already verified workers. In Warehouses, **Auto sign-in + load all** does this and then requests the combined report in one action; unavailable backend accounts are reported separately.
+
+After login, only the exact configured world's secure session cookie travels through the existing one-use, encrypted handoff. The Daedalus API bearer is a different credential, and no password is sent to the backend. The server independently verifies the world/player and existing worker ownership. CAPTCHA resolution is the only human browser step after credentials have been configured. Real Gameforge/MFA/CAPTCHA verification remains an owner-only acceptance task; synthetic CI cannot certify it.
 
 Account editing is permitted only when the controller enables its protected metadata editing mode. More technical monitoring, manual assistance and host recovery actions are under **Advanced recovery and monitoring**. Their per-account security confirmations remain mandatory; there is deliberately no unsafe single-click mass account login.
 

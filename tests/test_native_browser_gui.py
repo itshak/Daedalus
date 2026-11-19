@@ -13,7 +13,7 @@ pytest.importorskip("qfluentwidgets")
 
 from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QNetworkCookie
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog
 
 from daedalus.desktop.app import APIWorker, MainWindow
 from daedalus.desktop.native_login_dialog import (
@@ -137,10 +137,10 @@ def test_main_window_recovery_requests_explicit_permission_and_never_auto_runs(a
         window.client = object()
         request_calls = []
         monkeypatch.setattr(window, "_request", lambda *a, **kw: request_calls.append((a, kw)))
-        monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.No)
-        window._begin_native_browser_login("alpha")
-        assert request_calls == []
-        monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
+        # Clicking "Sign in automatically" IS the user authorization.
+        # Subsequent headless Selenium steps require no dialog confirmation;
+        # input is requested only when credentials are missing or CAPTCHA exists.
+        window._active_backend_url = "https://example.test"
         window._begin_native_browser_login("alpha")
         assert request_calls == [(('native_login_start',), {'account_id': 'alpha'})]
         window._on_completed("native_login_start", {

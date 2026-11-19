@@ -275,6 +275,7 @@ class AccountsPage(QWidget):
     recovery_prepare_requested = Signal(str)
     rebind_requested = Signal(str, str)
     native_browser_login_requested = Signal(str)
+    native_browser_login_batch_requested = Signal(object)
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -389,16 +390,37 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_approve_button)
         advanced_wrap.addLayout(assistance_actions)
         native_login_actions = QVBoxLayout()
-        self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
+        self.native_browser_login_button = PrimaryPushButton("Sign in automatically")
         self.native_browser_login_button.setToolTip(
-            "Human Gameforge browser login on this Mac; encrypted one-time handoff "
-            "to your verified backend worker"
+            "Restore a saved Gameforge session or log in headlessly with the "
+            "original IkaBot Selenium engine. Only a detected CAPTCHA "
+            "opens Chrome for human interaction; the world session is encrypted "
+            "to your verified backend worker."
         )
         self.native_browser_login_button.setEnabled(False)
         self.native_browser_login_button.clicked.connect(self._native_browser_login)
         native_login_actions.addWidget(self.native_browser_login_button)
+        multi_login_actions = QHBoxLayout()
+        self.auto_login_all_button = PushButton("Sign in all accounts")
+        self.auto_login_all_button.setAccessibleName("Automatically sign in every disconnected account")
+        self.auto_login_all_button.setToolTip(
+            "Restore or sign in headlessly for every enabled account, in sequence. "
+            "A browser opens only if CAPTCHA is detected."
+        )
+        self.auto_login_all_button.clicked.connect(self._native_browser_login_all)
+        self.auto_login_all_button.setEnabled(False)
+        multi_login_actions.addWidget(self.auto_login_all_button)
+        self.auto_login_selected_button = PushButton("Sign in selected…")
+        self.auto_login_selected_button.setToolTip(
+            "Choose the accounts to sign in automatically; no game operations start"
+        )
+        self.auto_login_selected_button.clicked.connect(self._native_browser_login_selected)
+        self.auto_login_selected_button.setEnabled(False)
+        multi_login_actions.addWidget(self.auto_login_selected_button)
+        native_login_actions.addLayout(multi_login_actions)
         self.native_login_status = CaptionLabel(
-            "Native Mac browser login is available when your backend enables secure recovery."
+            "Selenium signs in headlessly and reuses saved sessions. "
+            "Only CAPTCHA requires manual action; first use needs credentials."
         )
         self.native_login_status.setWordWrap(True)
         native_login_actions.addWidget(self.native_login_status)
@@ -566,6 +588,37 @@ class AccountsPage(QWidget):
         )
         self._update_assistance_buttons()
 
+    def _native_browser_login_all(self) -> None:
+        if not self._native_browser_login_enabled:
+            return
+        accounts = [
+            str(row["id"]) for row in self._accounts
+            if row.get("enabled") is True and isinstance(row.get("id"), str)
+        ]
+        if accounts:
+            self.native_browser_login_batch_requested.emit(accounts)
+
+    def _native_browser_login_selected(self) -> None:
+        if not self._native_browser_login_enabled:
+            return
+        from daedalus.desktop.account_scope import AccountSelectionDialog
+
+        accounts = [
+            row for row in self._accounts
+            if row.get("enabled") is True and isinstance(row.get("id"), str)
+        ]
+        dialog = AccountSelectionDialog(
+            accounts, [str(a["id"]) for a in accounts], self,
+            title="Choose accounts for automatic Gameforge sign-in",
+            explanation=(
+                "Only disconnected accounts are signed in. Selenium starts "
+                "headless and asks for input only if credentials are missing "
+                "or Gameforge displays a CAPTCHA. No automation tasks start."
+            ),
+        )
+        if dialog.exec() == QDialog.Accepted and dialog.selected_ids():
+            self.native_browser_login_batch_requested.emit(dialog.selected_ids())
+
     def _native_browser_login(self) -> None:
         account_id = self._selected_visible_id()
         account = self.account_record(account_id) if account_id else None
@@ -604,6 +657,16 @@ class AccountsPage(QWidget):
         self.native_browser_login_button.setEnabled(
             self._native_browser_login_enabled and account_id is not None
             and selected is not None and selected.get("enabled") is True
+        )
+        any_enabled = any(
+            row.get("enabled") is True and isinstance(row.get("id"), str)
+            for row in self._accounts
+        )
+        self.auto_login_all_button.setEnabled(
+            self._native_browser_login_enabled and any_enabled
+        )
+        self.auto_login_selected_button.setEnabled(
+            self._native_browser_login_enabled and any_enabled
         )
         self.assistance_check_button.setEnabled(account_id is not None)
         self.recovery_guide_button.setEnabled(account_id is not None)
@@ -986,6 +1049,7 @@ class WarehousesPage(QWidget):
     load_requested = Signal(str)
     load_selected_requested = Signal(object)
     load_all_requested = Signal(object)
+    sign_in_all_requested = Signal(object)
     report_scope_changed = Signal(object)
 
     _COLUMNS = ("City", "Island", "World", *RESOURCES, "Capacity", "Captured", "Incomplete", "Account")
@@ -1001,6 +1065,7 @@ class WarehousesPage(QWidget):
         self._included_ids: list[str] = []
         self._reports: list[tuple[str, list[dict[str, object]]]] = []
         self._failed_accounts: list[str] = []
+        self._headless_login_enabled = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -1067,6 +1132,18 @@ class WarehousesPage(QWidget):
         self.group_island.stateChanged.connect(self._render)
         filters.addWidget(self.group_island)
         filters.addStretch(1)
+        self.sign_in_all_button = PushButton("Auto sign-in + load all")
+        self.sign_in_all_button.setAccessibleName(
+            "Sign in missing account sessions headlessly and load all warehouses"
+        )
+        self.sign_in_all_button.setToolTip(
+            "Original IkaBot-style one-click report: reuse saved sessions, sign in "
+            "headlessly for disconnected accounts, ask for a CAPTCHA only if needed, "
+            "then fetch all account warehouses. Backend-owned workers remain authoritative."
+        )
+        self.sign_in_all_button.clicked.connect(self._sign_in_all)
+        self.sign_in_all_button.setEnabled(False)
+        filters.addWidget(self.sign_in_all_button)
         layout.addLayout(filters)
 
         self.status_label = CaptionLabel("No warehouse snapshots loaded")
@@ -1130,6 +1207,9 @@ class WarehousesPage(QWidget):
         if previous in self._account_ids:
             self.account_combo.setCurrentIndex(self._account_ids.index(previous))
         self.load_all_button.setEnabled(bool(self._account_ids))
+        self.sign_in_all_button.setEnabled(
+            self._headless_login_enabled and bool(self._account_ids)
+        )
         self.choose_accounts_button.setEnabled(bool(self._account_ids))
         self.load_button.setEnabled(bool(self._account_ids))
         self.set_selected_accounts(self._included_ids or self._account_ids)
@@ -1150,6 +1230,21 @@ class WarehousesPage(QWidget):
         self.load_selected_button.setText(
             f"Selected ({len(self._included_ids)})"
         )
+
+    def set_login_available(self, enabled: bool) -> None:
+        """The secure backend must explicitly advertise browser handoff."""
+        self._headless_login_enabled = bool(enabled)
+        self.sign_in_all_button.setEnabled(
+            self._headless_login_enabled and bool(self._account_ids)
+        )
+
+    def _sign_in_all(self) -> None:
+        if self._headless_login_enabled and self._account_ids:
+            self.status_label.setText(
+                f"Signing in missing accounts headlessly before loading "
+                f"all {len(self._account_ids)} warehouse reports…"
+            )
+            self.sign_in_all_requested.emit(list(self._account_ids))
 
     def _load_all(self) -> None:
         """Always include every configured account; individual failures remain visible."""

@@ -19,7 +19,7 @@ handoff, server-side player attestation and idle dedicated-worker rebind are
 implemented and pass offline CI. Real human Gameforge/MFA/CAPTCHA, task/rebind
 trial and host reboot remain **untested** in
 [owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
-Automatic unattended login and production cutover remain unsupported/unapproved.
+The **original IkaBot headless Selenium login** now runs locally when the operator chooses automatic sign-in; a visible browser is used only for detected CAPTCHA. Unattended CAPTCHA solving, automatic task resumption and production cutover remain unsupported/unapproved.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -166,6 +166,32 @@ For an existing IkaBot saved account, a separately authorized local operator can
 ## Offline readiness check and synthetic API smoke
 
 Run `daedalus doctor` to see installed preview capabilities and the dependencies actually present. The report marks live account status as not inspected, and does not claim new-worker bootstrap, automatic browser login or production readiness. Use `daedalus doctor --smoke` after installing server/client test dependencies to check the real API routes in-process with only fictional demo data, without Gameforge or an external TCP socket. See [offline readiness instructions](docs/TEST-READINESS.md).
+
+## Original IkaBot Selenium login and multi-account warehouse reports
+
+Daedalus now includes source-preserving copies of the owner's
+[`itshak/ikabot`](https://github.com/itshak/ikabot) Selenium
+`browser.py`, `login.py` and `humanize.py`, with only the
+necessary package-import adaptation. **Sign in automatically** in Accounts
+tries a saved Gameforge session and then a headless Chrome Selenium login,
+without asking for human interaction on an ordinary successful login.
+Only when Gameforge presents a real CAPTCHA will Chrome open visibly:
+the owner solves it and the original humanized typing/mouse code continues.
+
+First use requires the account's email/password once; thereafter those
+credentials and secure world-session cache can be saved in macOS Keychain,
+never in the original plaintext `config.ini` or `tokens.json`.
+Daedalus sends only the selected world cookie through the existing
+short-lived, encrypted, account-bound handoff; its backend independently
+verifies the world, player, and worker ownership before using it.
+There is no automatic CAPTCHA solving or game-task start.
+
+**Accounts → Sign in all accounts / Sign in selected…** processes missing
+sessions sequentially. **Warehouses → Auto sign-in + load all** performs
+the previous bot's combined headless sign-in and all-account report flow
+without choosing each account. Unavailable backend workers or accounts
+remain explicit failures; never fabricated zero warehouses.
+See the [Mac UI guide](docs/MAC-UI-GUIDE.md).
 
 ## One-click synthetic Mac demo (no setup or game login)
 
