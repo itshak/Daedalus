@@ -389,6 +389,5 @@ def test_readonly_building_api_client_refuses_wrong_account_and_synthetic_data()
     def fake(_request):
         return httpx.Response(200, json={"account_id": "alpha", "city_id": 42,
                                          "available": False, "buildings": []})
-    with mock_client(fake) as client:
-        with pytest.raises(APIConnectionError, match="unavailable"):
-            client.buildings("alpha", 42)
+    with mock_client(fake) as client, pytest.raises(APIConnectionError, match="unavailable"):
+        client.buildings("alpha", 42)
