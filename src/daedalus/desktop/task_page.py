@@ -1545,22 +1545,68 @@ class TasksPage(QWidget):
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
             if name == "constructionList":
-                # Only the live city choice is exposed in the guided editor.
-                # Full engine-prepared construction internals are expert-only.
+                # Full engine-prepared construction internals remain expert-only.
                 continue
             kind = str(field["type"])
+            if kind == "hidden_derived":
+                continue
+            if name == "autoPirate":
+                schedule_widget = self._form_inputs.get("pirateSchedule")
+                scheduled = isinstance(schedule_widget, CheckBox) and schedule_widget.isChecked()
+                if (key in {"pirateMissionChoice"} and scheduled
+                        or key in {"pirateMissionDayChoice", "pirateMissionNightChoice",
+                                   "dayStart", "dayEnd", "nightStart", "nightEnd"}
+                        and not scheduled):
+                    continue
+            if name == "activateShrine" and key == "times":
+                mode_widget = self._form_inputs.get("mode")
+                if isinstance(mode_widget, ComboBox) and mode_widget.currentIndex() == 1:
+                    continue
+            if name == "resourceTransportManager":
+                mode_widget = self._form_inputs.get("mode")
+                index = mode_widget.currentIndex() if isinstance(mode_widget, ComboBox) else -1
+                if (key in {"origin_cities", "destination_city", "send_mode"} and index != 0
+                        or key in {"origin_city", "destination_cities"} and index != 1
+                        or key == "island"):
+                    continue
             widget = self._form_inputs[key]
+            if isinstance(widget, ResourceLimitsEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, ShipmentRoutesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, DonationPoliciesEditor):
+                method_widget = self._form_inputs.get("donate_method")
+                idx = method_widget.currentIndex() if isinstance(method_widget, ComboBox) else -1
+                if idx < 0:
+                    raise ValueError("Choose a donation method")
+                config[key] = widget.to_config([1, 2, 3][idx])
+                continue
+            if isinstance(widget, ResourceAmountsEditor):
+                mode_widget = self._form_inputs.get("send_mode")
+                keep = (name == "resourceTransportManager"
+                        and isinstance(mode_widget, ComboBox)
+                        and mode_widget.currentIndex() == 0)
+                config[key] = widget.to_config(ignore_allowed=keep)
+                continue
+            if isinstance(widget, MapAreaEditor):
+                area = widget.to_config()
+                if area is not None:
+                    config[key], config["radius"] = area
+                continue
             if isinstance(widget, QListWidget):
-                chosen = [str(widget.item(i).data(Qt.UserRole))
+                chosen = [widget.item(i).data(Qt.UserRole)
                           for i in range(widget.count())
                           if widget.item(i).checkState() == Qt.Checked]
                 if not chosen:
-                    if field["required"]:
-                        raise ValueError(f"Select at least one city for {key}")
+                    if field["required"] and kind != "island_list":
+                        raise ValueError(f"Choose at least one option for {key}")
                     continue
                 if name == "distributeResources" and kind == "city_list" and len(chosen) < 2:
                     raise ValueError("Choose at least two cities to distribute resources")
-                config[key] = chosen
+                config[key] = ([str(city) for city in chosen] if kind == "city_list"
+                               else chosen)
                 continue
             if kind == "city_picker" and isinstance(widget, ComboBox):
                 cities = self._cities_by_account.get(self.selected_account_id() or "", [])
@@ -1587,6 +1633,8 @@ class TasksPage(QWidget):
                 if (field.get("explicit_input") is True
                         and value < int(field.get("minimum", 0))):
                     raise ValueError(f"Choose a value for {key} before starting")
+                if field.get("omit_zero") is True and value == 0:
+                    continue
                 config[key] = value
                 continue
             text = widget.text().strip()
@@ -1612,6 +1660,16 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
+        if name == "research" and config.get("qty", 0) > 0 and len(config.get("cities_ids", [])) != 1:
+            raise ValueError("Choose exactly one academy city for a fixed number of experiments")
+        if name == "consolidateResources":
+            destination = config.get("destinationCityId")
+            if destination is not None and str(destination) in config.get("sourceCityIds", []):
+                raise ValueError("Destination cannot also be a source city")
+        if name == "resourceTransportManager" and "mode" not in config:
+            raise ValueError("Choose a transport strategy")
+        if name == "dumpWorld" and config.get("shallow") is True and "coords" in config:
+            raise ValueError("Whole-world shallow scans cannot be limited to a map area")
         if name == "distributeResources" and config.get("mode") == "producers" and config.get("resource") == "wood":
             raise ValueError("Every city produces wood; choose the Even distribution policy")
         if name == "constructionList":
