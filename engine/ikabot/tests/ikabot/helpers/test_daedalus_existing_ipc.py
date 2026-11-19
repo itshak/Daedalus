@@ -310,6 +310,7 @@ def test_managed_task_start_list_and_stop_for_existing_session_only():
         patch("ikabot.helpers.ipc.updateProcessList"),
         patch("ikabot.helpers.ipc.multiprocessing.Process", side_effect=fake_process),
         patch("ikabot.helpers.ipc._resolve_task", return_value=("alertAttacks", synthetic_task)),
+        patch("ikabot.helpers.botComm.telegramDataIsValid", return_value=True),
     ):
         started = server.handle_request({
             "action": "start_task_existing", **identity,
@@ -465,3 +466,72 @@ def test_dedicated_ipc_uses_exclusive_authenticated_session():
                     assert ipc._LOCAL_SERVER is fake
                     with __import__("pytest").raises(RuntimeError, match="already running"):
                         ipc.start_dedicated_ipc_server(session)
+
+
+def test_alert_prerequisites_are_scoped_nonsecret_and_do_not_start_tasks():
+    session = make_session()
+    server = IPCServer(default_session=session)
+    with (
+        patch("ikabot.helpers.botComm.telegramDataIsValid", return_value=False),
+        patch("ikabot.helpers.botComm.discordDataIsValid", return_value=False),
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
+    ):
+        blocked = server.handle_request({
+            "action": "task_preflight_existing", "world": "s301-en",
+            "player": "ExamplePlayer", "task": "alertAttacks",
+        })
+    assert blocked == {"status": "ok", "world": "s301-en", "player": "ExamplePlayer",
+                       "task": "alertAttacks", "ready": False,
+                       "reason": "notifications_required", "notifications_required": True,
+                       "checked": ["notifications"]}
+    assert "secret" not in str(blocked)
+    assert not server._daedalus_tasks
+
+    with (
+        patch("ikabot.helpers.botComm.telegramDataIsValid", return_value=True),
+        patch("ikabot.helpers.botComm.discordDataIsValid", side_effect=AssertionError("unneeded")),
+    ):
+        ready = server.handle_request({
+            "action": "task_preflight_existing", "world": "s301-en",
+            "player": "ExamplePlayer", "task": "alertAttacks",
+        })
+    assert ready["ready"] is True
+    assert ready["reason"] == "none"
+
+
+def test_preflight_refuses_mismatched_identity_and_unknown_task():
+    server = IPCServer(default_session=make_session())
+    for task, world, player in [
+        ("alertAttacks", "s301-en", "WrongPlayer"),
+        ("alertAttacks", "s999-en", "ExamplePlayer"),
+        ("not_a_real_task", "s301-en", "ExamplePlayer"),
+        ("../../alertAttacks", "s301-en", "ExamplePlayer"),
+    ]:
+        reply = server.handle_request({
+            "action": "task_preflight_existing", "world": world,
+            "player": player, "task": task,
+        })
+        assert reply["status"] == "error"
+        assert not server._daedalus_tasks
+
+
+def test_known_alert_preflight_rejection_before_process_creation():
+    from unittest.mock import MagicMock
+
+    session = make_session()
+    server = IPCServer(default_session=session)
+    request = {
+        "action": "start_task_existing", "world": "s301-en",
+        "player": "ExamplePlayer", "task": "alertAttacks",
+        "config": {"minutes": 20},
+        "request_id": "12345678-1234-4123-8123-123456789abc",
+    }
+    with (
+        patch("ikabot.helpers.botComm.telegramDataIsValid", return_value=False),
+        patch("ikabot.helpers.botComm.discordDataIsValid", return_value=False),
+        patch("ikabot.helpers.ipc.multiprocessing.Process", side_effect=AssertionError("spawn!")),
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
+    ):
+        reply = server.handle_request(request)
+    assert reply == {"status": "rejected", "reason": "notifications_required"}
+    assert not server._daedalus_tasks

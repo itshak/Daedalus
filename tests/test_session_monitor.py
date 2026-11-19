@@ -36,6 +36,10 @@ class FakeVerifiedIPC:
             raise EngineIPCUnavailable("private sensitive cookie")
         return self.online
 
+    def preflight_task(self, account, task):
+        return {"task": task, "ready": True, "reason": "none",
+                "notifications_required": False, "checked": []}
+
     def start_managed_task(self, account, task, config, rid):
         self.sent.append((account.id, task, rid))
         return {"task_id": "a" * 24, "pid": 4242, "status": "running"}

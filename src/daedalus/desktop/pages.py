@@ -59,6 +59,7 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 class ConnectionPage(QWidget):
     connect_requested = Signal(str, str)
+    ssh_connect_requested = Signal(str, str)
     demo_requested = Signal()
     reconnect_requested = Signal()
     forget_requested = Signal()
@@ -68,19 +69,21 @@ class ConnectionPage(QWidget):
         self.setObjectName("connection_page")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-        layout.addWidget(SubtitleLabel("Connection"))
-        layout.addWidget(
-            CaptionLabel(
-                "Connect to the local API or an HTTPS/SSH-tunneled remote server. "
-                "Bearer token stays in process memory only."
-            )
+        layout.setSpacing(13)
+        layout.addWidget(SubtitleLabel("Connect to Daedalus"))
+        intro = CaptionLabel(
+            "Connect securely over HTTPS. No SSH tunnel, Terminal or manual "
+            "port forwarding is needed. Your server stays in control of game sessions."
         )
-        layout.addWidget(BodyLabel("Backend URL"))
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        layout.addWidget(BodyLabel("Server address"))
         self.url_input = LineEdit()
-        self.url_input.setText("http://127.0.0.1:8765")
-        self.url_input.setPlaceholderText("http://127.0.0.1:8765")
-        # Private URL metadata is optional; malformed settings cannot prevent launch.
+        self.url_input.setPlaceholderText("https://your-daedalus-server.example")
+        # First run must not imply a backend runs on the Mac. A saved, exact
+        # HTTPS origin is restored below when the user previously approved it.
+        self.url_input.setText("")
         from daedalus.connection_prefs import PreferenceError, load_connection_url
 
         try:
@@ -90,42 +93,101 @@ class ConnectionPage(QWidget):
         if saved_url is not None:
             self.url_input.setText(saved_url)
         layout.addWidget(self.url_input)
-        layout.addWidget(BodyLabel("API bearer token"))
+
+        layout.addWidget(BodyLabel("API access token"))
         self.token_input = LineEdit()
         self.token_input.setEchoMode(QLineEdit.Password)
-        self.token_input.setPlaceholderText("Paste the token from your local backend")
+        self.token_input.setPlaceholderText("Paste your API token once")
         layout.addWidget(self.token_input)
+        tip = CaptionLabel(
+            "Daedalus API token, not a Gameforge lobby token. After the first "
+            "successful connection the token is kept securely in your Mac Keychain."
+        )
+        tip.setWordWrap(True)
+        layout.addWidget(tip)
+        self.remember_checkbox = CheckBox("Save token securely in Keychain and reconnect on startup")
+        self.remember_checkbox.setToolTip(
+            "On by default. The token is stored in the OS keyring only, never in a text file. "
+            "Uncheck for a one-time connection."
+        )
+        self.remember_checkbox.setChecked(True)
+        layout.addWidget(self.remember_checkbox)
+
         self.connect_button = PrimaryPushButton("Connect")
         self.connect_button.clicked.connect(self._connect)
         layout.addWidget(self.connect_button)
-        self.demo_button = PushButton("Try offline demo — no game login")
-        self.demo_button.clicked.connect(self.demo_requested.emit)
-        self.demo_button.setToolTip(
-            "Start a temporary synthetic backend on loopback; no saved accounts are accessed"
-        )
-        layout.addWidget(self.demo_button)
-
-        self.remember_checkbox = CheckBox("Remember URL and token in OS keychain")
-        self.remember_checkbox.setToolTip(
-            "Off by default. URL is stored in owner-only local settings; the token uses OS keyring."
-        )
-        self.remember_checkbox.setChecked(saved_url is not None)
-        layout.addWidget(self.remember_checkbox)
+        self.status_label = CaptionLabel("Not connected")
+        layout.addWidget(self.status_label)
+        self.keychain_status = CaptionLabel("")
+        layout.addWidget(self.keychain_status)
 
         connection_actions = QHBoxLayout()
-        self.reconnect_button = PushButton("Reconnect")
+        self.reconnect_button = PushButton("Reconnect saved server")
         self.reconnect_button.clicked.connect(self.reconnect_requested.emit)
-        self.forget_button = PushButton("Forget saved connection")
+        self.forget_button = PushButton("Forget saved access")
         self.forget_button.clicked.connect(self.forget_requested.emit)
         connection_actions.addWidget(self.reconnect_button)
         connection_actions.addWidget(self.forget_button)
         layout.addLayout(connection_actions)
-        self.status_label = CaptionLabel("Not connected")
-        layout.addWidget(self.status_label)
+
+        self.advanced_button = PushButton("Show advanced connection options")
+        self.advanced_button.clicked.connect(self._toggle_advanced)
+        layout.addWidget(self.advanced_button)
+        self.advanced_panel = QWidget(self)
+        advanced = QVBoxLayout(self.advanced_panel)
+        advanced.setContentsMargins(6, 3, 6, 4)
+        advanced.setSpacing(9)
+        advanced.addWidget(SubtitleLabel("Advanced / optional"))
+        ssh_info = CaptionLabel(
+            "SSH forwarding is only an optional fallback for private networks "
+            "without HTTPS. It is not required for normal Daedalus access."
+        )
+        ssh_info.setWordWrap(True)
+        advanced.addWidget(ssh_info)
+        self.ssh_host_input = LineEdit()
+        self.ssh_host_input.setPlaceholderText("SSH host or user@host")
+        from daedalus.desktop.ssh_tunnel import SSHConnectionUnavailable, load_ssh_destination
+        try:
+            stored_ssh_host = load_ssh_destination()
+        except SSHConnectionUnavailable:
+            stored_ssh_host = None
+        if stored_ssh_host:
+            self.ssh_host_input.setText(stored_ssh_host)
+        advanced.addWidget(self.ssh_host_input)
+        self.ssh_button = PushButton("Use SSH fallback")
+        self.ssh_button.clicked.connect(self._connect_ssh)
+        advanced.addWidget(self.ssh_button)
+        self.demo_button = PushButton("Try offline demo — no game login")
+        self.demo_button.clicked.connect(self.demo_requested.emit)
+        self.demo_button.setToolTip(
+            "Run an isolated synthetic preview on loopback; never access saved accounts"
+        )
+        advanced.addWidget(self.demo_button)
+        layout.addWidget(self.advanced_panel)
+        self.advanced_panel.hide()
         layout.addStretch(1)
+
+    def _toggle_advanced(self) -> None:
+        opened = not self.advanced_panel.isVisible()
+        self.advanced_panel.setVisible(opened)
+        self.advanced_button.setText(
+            "Hide advanced connection options" if opened
+            else "Show advanced connection options"
+        )
+
+    def set_token_saved(self, saved: bool) -> None:
+        self.keychain_status.setText(
+            "API token saved in the OS Keychain; future launches can reconnect automatically."
+            if saved else ""
+        )
 
     def _connect(self) -> None:
         self.connect_requested.emit(self.url_input.text().strip(), self.token_input.text())
+
+    def _connect_ssh(self) -> None:
+        self.ssh_connect_requested.emit(
+            self.ssh_host_input.text().strip(), self.token_input.text()
+        )
 
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
         self.status_label.setText(
@@ -659,6 +721,7 @@ class AccountsPage(QWidget):
 
 class OperationsPage(QWidget):
     refresh_requested = Signal()
+    configure_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -675,7 +738,7 @@ class OperationsPage(QWidget):
         header.addWidget(self.refresh_button)
         layout.addLayout(header)
         self.status_label = CaptionLabel(
-            "Read-only inventory. Task execution will be enabled after worker integration."
+            "Read-only catalog. Select a background task and open its guided setup in Automations."
         )
         layout.addWidget(self.status_label)
         self.search_input = LineEdit()
@@ -683,7 +746,27 @@ class OperationsPage(QWidget):
         self.search_input.textChanged.connect(self._render)
         layout.addWidget(self.search_input)
         self.table = _table(["Operation", "Kind", "Module", "Parameters"])
+        self.table.itemSelectionChanged.connect(self._update_configure)
+        self.table.cellDoubleClicked.connect(lambda *_args: self._configure_selected())
         layout.addWidget(self.table, 1)
+        self.configure_button = PrimaryPushButton("Configure selected automation")
+        self.configure_button.clicked.connect(self._configure_selected)
+        self.configure_button.setEnabled(False)
+        layout.addWidget(self.configure_button)
+
+    def _update_configure(self) -> None:
+        row = self.table.currentRow()
+        item = self.table.item(row, 1) if row >= 0 else None
+        self.configure_button.setEnabled(
+            bool(item is not None and item.text() == "background_task")
+        )
+
+    def _configure_selected(self) -> None:
+        row = self.table.currentRow()
+        kind = self.table.item(row, 1) if row >= 0 else None
+        name = self.table.item(row, 0) if row >= 0 else None
+        if kind is not None and kind.text() == "background_task" and name is not None:
+            self.configure_requested.emit(name.text())
 
     def set_operations(self, operations: list[dict[str, object]]) -> None:
         self._operations = operations
@@ -709,6 +792,7 @@ class OperationsPage(QWidget):
                 for item in filtered
             ],
         )
+        self._update_configure()
 
 
 class WarehousesPage(QWidget):
@@ -811,6 +895,10 @@ class WarehousesPage(QWidget):
     def selected_account_id(self) -> str | None:
         index = self.account_combo.currentIndex()
         return self._account_ids[index] if 0 <= index < len(self._account_ids) else None
+
+    def select_account(self, account_id: str) -> None:
+        if account_id in self._account_ids:
+            self.account_combo.setCurrentIndex(self._account_ids.index(account_id))
 
     def set_selected_accounts(self, account_ids: list[str]) -> None:
         """Local report inclusion only; never changes engine account enablement."""

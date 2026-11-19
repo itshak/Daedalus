@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 
 from daedalus import __version__
 from daedalus.account_editor import (
@@ -34,7 +34,13 @@ from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
-from daedalus.task_control import TaskConflict, TaskController, TaskUnavailable
+from daedalus.task_control import (
+    TaskConflict,
+    TaskController,
+    TaskPrerequisiteMissing,
+    TaskRejected,
+    TaskUnavailable,
+)
 from daedalus.warehouse import CityWarehouseSnapshot
 
 SnapshotProvider = Callable[[str], list[CityWarehouseSnapshot]]
@@ -125,6 +131,21 @@ def create_app(
         openapi_url=None,
         lifespan=monitor_lifespan if recovery_monitor is not None else None,
     )
+
+    @app.middleware("http")
+    async def private_api_no_cache(request: Request, call_next):
+        """Keep game/account snapshots out of browser and intermediary caches.
+
+        TLS terminates at a trusted HTTPS ingress for remote clients; this
+        middleware does not alter the API's required Bearer authorization.
+        """
+        response = await call_next(request)
+        if request.url.path.startswith("/api/v1/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
 
     def authorized(authorization: str | None = Header(default=None)) -> None:
         if (
@@ -432,6 +453,16 @@ def create_app(
             raise HTTPException(status_code=503, detail="Task dispatch is not enabled")
         return task_controller
 
+    @app.get("/api/v1/accounts/{account_id}/tasks/preflight", dependencies=[Depends(authorized)])
+    def task_preflight(account_id: str, task: str) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.preflight(account_id, task)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Task prerequisites unavailable") from exc
+
     @app.get("/api/v1/accounts/{account_id}/tasks", dependencies=[Depends(authorized)])
     def list_account_tasks(account_id: str) -> dict[str, object]:
         controller = require_task_controller(account_id)
@@ -451,6 +482,10 @@ def create_app(
                 account_id, payload.get("task"), payload.get("config"),
                 payload.get("request_id"), confirmed=confirmed,
             )
+        except TaskPrerequisiteMissing as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except TaskRejected as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except TaskConflict as exc:
             raise HTTPException(status_code=409, detail="Conflicting task request ID") from exc
         except (TypeError, ValueError) as exc:

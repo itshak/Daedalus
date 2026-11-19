@@ -59,14 +59,18 @@ def test_disabled_backend_cannot_launch_any_game_task(page):
 
 def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
     page.set_capabilities([
-        {"name": "alertAttacks", "kind": "background_task"},
+        {"name": "alertAttacks", "kind": "background_task", "config_fields": [
+            {"name": "minutes", "type": "integer", "default": 20, "required": False},
+        ]},
     ], enabled=True)
+    assert not page.start_button.isEnabled()
+    page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
     assert page.start_button.isEnabled()
     emitted = []
     page.launch_requested.connect(lambda *args: emitted.append(args))
     answers = []
     monkeypatch.setattr(QMessageBox, "question", lambda *_args: (answers.append(True) or QMessageBox.Yes))
-    page.config_editor.setPlainText('{"minutes": 20}')
+    assert not page.config_editor.isVisible()
     page.confirm_box.setChecked(True)
     page._start()
     assert answers == [True]
@@ -81,6 +85,8 @@ def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
 
 def test_bad_json_does_not_emit_task_start(page, monkeypatch):
     page.set_capabilities([{"name": "alertAttacks", "kind": "background_task"}], enabled=True)
+    page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
+    page._toggle_advanced()
     page.confirm_box.setChecked(True)
     page.config_editor.setPlainText("{not valid")
     warnings = []
@@ -134,7 +140,9 @@ def test_parameter_form_generates_json_but_requires_explicit_review(page, monkey
     assert "minutes" in page._form_inputs
     assert page.build_json_button.isEnabled()
     widget = page._form_inputs["minutes"]
-    assert widget.placeholderText() == "Default: 20"
+    assert widget.value() == 20
+    assert widget.minimum() == 3
+    assert page.config_editor.isHidden()
 
     emitted = []
     warnings = []
@@ -142,18 +150,19 @@ def test_parameter_form_generates_json_but_requires_explicit_review(page, monkey
     monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
     monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
 
-    widget.setText("42")
+    widget.setValue(42)
     assert page._form_dirty is True
+    assert not page._advanced_visible
+    page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
     page.confirm_box.setChecked(True)
     page._start()
-    assert emitted == [] and warnings
-
-    page._build_config_from_form()
-    assert json.loads(page.config_editor.toPlainText()) == {"minutes": 42}
-    assert page._form_dirty is False
-    page.confirm_box.setChecked(True)
-    page._start()
+    assert warnings == []
     assert emitted[0][2] == {"minutes": 42}
+    assert page.config_editor.isHidden()  # no manual JSON editing needed
+
+    page._toggle_advanced()
+    assert page._advanced_visible
+    assert json.loads(page.config_editor.toPlainText()) == {"minutes": 42}
 
 
 def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypatch):
@@ -168,7 +177,7 @@ def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypa
     assert page.config_editor.toPlainText() == "{}"
     page._form_inputs["hours"].setText("4")
     page._form_inputs["auto_transfer"].setChecked(True)
-    page._form_inputs["transfer_amount"].setText("1500")
+    page._form_inputs["transfer_amount"].setValue(1500)
     page._build_config_from_form()
     assert json.loads(page.config_editor.toPlainText()) == {
         "hours": 4, "auto_transfer": True, "transfer_amount": 1500,
@@ -188,10 +197,49 @@ def test_switching_tasks_clears_previous_task_configuration_and_confirmation(pag
         if cap.name in {"alertAttacks", "alertLowWine"}
     ]
     page.set_capabilities(operations, enabled=True)
-    page._form_inputs["minutes"].setText("15")
+    page._form_inputs["minutes"].setValue(15)
     page._build_config_from_form()
     page.confirm_box.setChecked(True)
     page.task_combo.setCurrentIndex(1)
     assert page.config_editor.toPlainText() == "{}"
     assert not page.confirm_box.isChecked()
     assert "hours" in page._form_inputs
+
+
+def test_alert_requires_verified_prerequisites_before_gui_dispatch(page, monkeypatch):
+    page.set_capabilities([{"name": "alertAttacks", "kind": "background_task"}], enabled=True)
+    assert page.selected_task_name() == "alertAttacks"
+    assert not page.start_button.isEnabled()
+    page.set_preflight({"account_id": "alpha", "task": "alertAttacks",
+                        "ready": False, "reason": "notifications_required"})
+    assert not page.start_button.isEnabled()
+    assert "Telegram or Discord" in page.prerequisite_label.text()
+    page.set_preflight({"account_id": "another", "task": "alertAttacks",
+                        "ready": True, "reason": "none"})
+    assert not page.start_button.isEnabled()  # another account cannot unlock it
+    page.set_preflight({"account_id": "alpha", "task": "alertAttacks",
+                        "ready": True, "reason": "none"})
+    assert page.start_button.isEnabled()
+    page.set_tasks({"engine_tasks": [], "requests": [
+        {"request_id": str(uuid.uuid4()), "task": "alertAttacks", "status": "unconfirmed"},
+    ]})
+    assert not page.start_button.isEnabled()
+    assert "reconcile" in page.prerequisite_label.text()
+
+
+def test_category_filter_and_friendly_labels_preserve_engine_identifiers(page):
+    records = [{"name": t, "kind": "background_task"} for t in
+               ("alertAttacks", "constructionList", "sellResources")]
+    page.set_capabilities(records, enabled=True)
+    assert page.task_combo.count() == 3
+    assert "Attack alerts" in [page.task_combo.itemText(i)
+                                for i in range(page.task_combo.count())]
+    page.category_combo.setCurrentIndex(1)
+    assert page._task_names == ["alertAttacks"]
+    page.category_combo.setCurrentIndex(0)
+    page.search_input.setText("sell")
+    assert page._task_names == ["sellResources"]
+    assert page.select_task("constructionList")
+    assert page.selected_task_name() == "constructionList"
+    assert page.category_combo.currentIndex() == 0
+    assert page.search_input.text() == ""

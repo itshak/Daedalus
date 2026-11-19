@@ -746,6 +746,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
+                if action == "task_preflight_existing":
+                    return self._task_preflight_existing(request)
                 if action == "start_task_existing":
                     return self._start_task(request, existing_only=True)
                 if action == "list_tasks_existing":
@@ -964,6 +966,49 @@ class IPCServer:
         return {"status": "ok", "task_id": task_id, "task": entry["task"],
                 "pid": entry["pid"], "task_status": entry["status"]}
 
+    def _task_preflight_existing(self, request):
+        """Check known nonsecret prerequisites; never create a task or login.
+
+        The result is deliberately *not* a claim that arbitrary game tasks
+        are safe or fully configured. Only notification requirements for
+        three built-in alerts are checked; all other task-specific validation
+        remains authoritative in the engine during actual dispatch.
+        """
+        session = self._existing_session(request)
+        name = request.get("task")
+        if not isinstance(name, str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_]{0,79}", name,
+        ):
+            raise ValueError("A built-in task name is required for preflight")
+        builtin_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "function")
+        names = {
+            fname[:-3].casefold(): fname[:-3]
+            for fname in os.listdir(builtin_dir)
+            if fname.endswith(".py") and fname != "__init__.py"
+        }
+        canonical = names.get(name.casefold())
+        if canonical is None:
+            raise ValueError("Unknown built-in task")
+        requires_notifications = canonical in {
+            "alertAttacks", "alertLowWine", "searchForIslandSpaces",
+        }
+        if requires_notifications:
+            from ikabot.helpers.botComm import discordDataIsValid, telegramDataIsValid
+
+            ready = bool(
+                telegramDataIsValid(session) or discordDataIsValid(session)
+            )
+        else:
+            ready = True
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "player": session.username, "task": canonical,
+            "ready": ready,
+            "reason": "none" if ready else "notifications_required",
+            "notifications_required": requires_notifications,
+            "checked": ["notifications"] if requires_notifications else [],
+        }
+
     def _start_task(self, request, existing_only=False):
         task_name = request.get("task")
         config_dict = request.get("config") or {}
@@ -1018,7 +1063,14 @@ class IPCServer:
         canonical_name, task_func = _resolve_task(task_name)
         if existing_only and task_func.__module__ != f"ikabot.function.{canonical_name}":
             raise ValueError("Only built-in IkaBot task implementations are allowed")
-        clean_config = _validate_task_config(canonical_name, task_func, config_dict)
+        try:
+            clean_config = _validate_task_config(canonical_name, task_func, config_dict)
+        except (ValueError, TypeError):
+            if existing_only:
+                # A pure JSON/signature failure before *any* game action or
+                # child launch is definitively rejected, not an uncertain start.
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            raise
         if not existing_only:
             session = self._get_or_create_session(email, world, server, player)
         if existing_only:
@@ -1034,6 +1086,13 @@ class IPCServer:
                 raise ValueError("Managed task registry has reached its safety limit")
             if len(self._daedalus_requests) >= 2048:
                 raise ValueError("Task receipt cache is full; manual recovery is required")
+        if existing_only:
+            # Recheck the notification-only prerequisites immediately before
+            # prepare. A race between GUI preflight and the dispatch request
+            # must not create an ambiguous receipt for this known condition.
+            readiness = self._task_preflight_existing(request)
+            if not readiness["ready"]:
+                return {"status": "rejected", "reason": "notifications_required"}
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log

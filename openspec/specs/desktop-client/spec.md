@@ -236,7 +236,6 @@ The native Connection page SHALL provide an explicitly selected synthetic demo a
 - **WHEN** the user closes the native window
 - **THEN** its API client and local demo service SHALL be stopped without leaving a live game worker
 
-
 ### Requirement: Safe legacy account selection and multi-account reports
 The native desktop SHALL let operators select accounts for **read-only**
 warehouse reporting without modifying account enablement or starting tasks,
@@ -278,7 +277,6 @@ in addition to exporting TXT, CSV and JSON.
 - **WHEN** the operator uses Copy by island
 - **THEN** the clipboard holds grouped human-readable text without converting unknown resource amounts to zero
 
-
 ### Requirement: Dedicated native Wine and Construction workflows
 The desktop SHALL offer dedicated Wine and Construction pages as convenient
 entry points to registered compatible background engine tasks. These pages
@@ -299,3 +297,50 @@ operator confirmations, task status and targeted stop/reconciliation safeguards.
 - **GIVEN** the backend has enabled a registered background task
 - **WHEN** the operator reviews its configuration, checks authorization and confirms start
 - **THEN** the page calls the same authenticated API and replay-safe dispatch as generic Tasks without creating an independent login or game worker
+
+### Requirement: Guided account-first desktop automations
+
+The native Mac desktop SHALL provide account-first navigation, quick access to warehouse and automation workflows, categorized searchable operation selection, and native typed parameter controls. Advanced JSON SHALL be optional. Every task start SHALL remain subject to a separate explicit user confirmation and independently validated backend readiness.
+
+#### Scenario: User starts a supported automation without writing JSON
+
+- **WHEN** a user chooses an authenticated account, selects a background automation, adjusts native controls, sees passing preflight, and confirms launch
+- **THEN** the desktop sends a typed task configuration and one unique request ID through the authenticated API without requiring a handwritten JSON document
+
+#### Scenario: User selects an unavailable or unconfirmed task
+
+- **WHEN** task readiness fails or a prior task request remains unconfirmed
+- **THEN** the Start control stays disabled and the desktop displays clear prerequisite or manual-reconciliation guidance from the authoritative backend's nonsecret read-only readiness result
+
+### Requirement: Guided private SSH connection
+
+The desktop SHALL offer a button to establish a local SSH tunnel using the user's existing trusted SSH host and identity, without passing credentials in SSH arguments. It SHALL retain advanced HTTPS/loopback URL connections and SHALL close owned tunnels when the application exits or switches backend.
+
+#### Scenario: User has a trusted SSH host and saved API token
+
+- **WHEN** the user chooses the secure SSH connection, their trusted SSH host is reachable, and the API accepts the keychain token
+- **THEN** the app performs a private read-only handshake over local port forwarding without a manual Terminal command or a public backend binding
+
+#### Scenario: SSH authentication fails
+
+- **WHEN** the host key or SSH identity cannot be verified
+- **THEN** the app fails with a sanitized connection error and does not disable host-key checking or expose the backend to the public network
+
+### Requirement: Default secure HTTPS and OS-Keychain reconnection
+
+The native client SHALL prefer direct TLS-verified HTTPS as its primary connection workflow, without requiring an SSH tunnel on the user's Mac. After an authenticated connection, the default selected preference SHALL save the bearer only in the OS Keychain, associate it with the exact validated HTTPS origin, and automatically reconnect on subsequent launches. Explicit opt-out SHALL allow an ephemeral session. The client MUST NOT silently copy a token to a different hostname, log credentials, or save bearer tokens in plaintext.
+
+#### Scenario: First authenticated HTTPS connection
+
+- **WHEN** the user supplies a TLS-valid Daedalus HTTPS hostname and correct bearer, leaving secure saving selected
+- **THEN** the app completes a read-only handshake and saves the token in the OS Keychain and the URL in owner-only settings, without any Mac SSH tunnel
+
+#### Scenario: User relaunches the desktop
+
+- **WHEN** an exact previously approved HTTPS origin and its token exist in the OS Keychain
+- **THEN** the app reconnects on startup without reentering either value and without starting a game task
+
+#### Scenario: Different endpoint or missing keychain credential
+
+- **WHEN** the user selects an HTTPS origin other than the one whose bearer was saved, or the Keychain is unavailable
+- **THEN** the client does not reuse the old secret or weaken TLS verification, and requests explicit credentials instead

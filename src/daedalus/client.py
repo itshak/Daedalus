@@ -90,6 +90,20 @@ class DaedalusClient:
         except httpx.RequestError as exc:
             raise APIConnectionError("Cannot connect to Daedalus backend") from exc
         if response.status_code != 200:
+            # Only recognize a specifically audited, nonsecret error string.
+            # Never surface arbitrary server messages, which may contain
+            # session data or tokens from older engine versions.
+            if response.status_code in {409, 422}:
+                try:
+                    detail = response.json().get("detail")
+                except (TypeError, ValueError, AttributeError):
+                    detail = None
+                allowed = {
+                    409: "Configure Telegram or Discord notifications before starting this alert",
+                    422: "Invalid automation parameters. Review the fields and try again.",
+                }
+                if detail == allowed[response.status_code]:
+                    raise APIConnectionError(detail, response.status_code)
             raise APIConnectionError("Backend task request was rejected", response.status_code)
         try:
             data = response.json()
@@ -150,6 +164,22 @@ class DaedalusClient:
             "task": task, "config": config, "request_id": request_id,
             "confirmed": confirmed,
         })
+
+    def task_preflight(self, account_id: str, task: str) -> dict[str, object]:
+        """Show only game-side prerequisite readiness, never auth materials."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_]{0,79}", task
+        ):
+            raise ValueError("Invalid task selection")
+        from urllib.parse import quote
+
+        data = self._read(f"accounts/{account_id}/tasks/preflight?task={quote(task)}")
+        if (data.get("account_id") != account_id or data.get("task") != task
+                or type(data.get("ready")) is not bool
+                or data.get("reason") not in {"none", "notifications_required"}
+                or type(data.get("unresolved_request")) is not bool):
+            raise APIConnectionError("Backend returned invalid prerequisite status")
+        return data
 
     def tasks(self, account_id: str) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):

@@ -212,3 +212,10 @@ The [saved-cookie worker](docs/SAVED-WORKER.md) is an explicitly opted-in, singl
 Authentication recovery implementation and limitations: [Human browser recovery](docs/BROWSER-RECOVERY.md).
 
 Production engine source review and nonsecret upstream reconciliation: [Engine authentication reconciliation](docs/ENGINE-AUTH-RECONCILIATION.md).
+
+
+## Guided desktop preview
+
+The account-first macOS GUI supports simple Automations settings, direct HTTPS with Keychain token saving and automatic reconnect, read-only
+warehouse reports and explicit task approvals.
+See [Guided native Mac quick start](docs/GUI-QUICKSTART.md) for connection, prerequisites and limitations.

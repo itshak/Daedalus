@@ -331,3 +331,19 @@ def test_new_task_contract_routes_keep_account_and_confirmation_scoped(account_f
     assert mock.calls[-1] == ("stop", "alpha", task_id)
     assert mock.calls[1] == ("start", "alpha", "alertAttacks", {"minutes": 10},
                             body["request_id"], True)
+
+
+def test_api_responses_for_remote_https_never_cache_private_account_data(account_file):
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN))
+    for path, headers, expected in (
+        ("/api/v1/health", {}, 200),
+        ("/api/v1/accounts", {}, 401),
+        ("/api/v1/accounts", {"Authorization": f"Bearer {TOKEN}"}, 200),
+        ("/api/v1/warehouses/alpha", {"Authorization": f"Bearer {TOKEN}"}, 503),
+    ):
+        response = client.get(path, headers=headers)
+        assert response.status_code == expected
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.headers["Pragma"] == "no-cache"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Referrer-Policy"] == "no-referrer"

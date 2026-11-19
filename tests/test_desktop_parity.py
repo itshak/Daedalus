@@ -217,6 +217,9 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             assert seen == []
             page.set_capabilities(all_operations, enabled=True)
             assert page._task_names == [expected]
+            assert not page.start_button.isEnabled()
+            page.set_preflight({"account_id": "alpha", "task": expected,
+                                "ready": True, "reason": "none"})
             assert page.start_button.isEnabled()
             if kind == "wine":
                 page._form_inputs["threshold"].setText("1000")
@@ -254,6 +257,10 @@ def test_native_navigation_exposes_readonly_gated_workflow_pages(qt_app, monkeyp
         assert not window.wine_page.start_button.isEnabled()
         assert not window.construction_page.start_button.isEnabled()
         window._show_capabilities({"operations": operations, "structured_engine_dispatch": True})
+        assert not window.wine_page.start_button.isEnabled()
+        assert not window.construction_page.start_button.isEnabled()
+        window.wine_page.set_preflight({"account_id": "alpha", "task": "alertLowWine", "ready": True, "reason": "none"})
+        window.construction_page.set_preflight({"account_id": "alpha", "task": "constructionList", "ready": True, "reason": "none"})
         assert window.wine_page.start_button.isEnabled()
         assert window.construction_page.start_button.isEnabled()
         window._on_completed("task_list", {

@@ -30,6 +30,7 @@ The following changes have merged implementation and archived OpenSpec requireme
 | cookie-only-worker-bootstrap | Explicit one-account saved-cookie-only worker with protected exclusive IPC and retained lease; no new login | [#41](https://github.com/itshak/Daedalus/pull/41) |
 | desktop-oneclick-synthetic | Explicit temporary local synthetic API with automatic private desktop connection and deterministic cleanup; no game login | [#39](https://github.com/itshak/Daedalus/pull/39) |
 | `migrate-native-desktop` | Audited nonsecret Fluent GUI parity: account editing/report selection, multi-account snapshots, dedicated Wine/Construction workflows, private appearance and grouped exports | [#52](https://github.com/itshak/Daedalus/pull/52) |
+| `guided-automations-and-desktop-redesign` | Account-first native navigation, guided controls, task preflight/rejection safety, direct HTTPS + Mac Keychain auto-reconnect, optional advanced SSH fallback | [#56](https://github.com/itshak/Daedalus/pull/56) |
 | `import-public-ikabot-engine` | Audited pinned public engine and six-file production source diff; safe bounded token API retries, noninteractive fail-fast and explicit rejected credential/auto-launch code | [#53](https://github.com/itshak/Daedalus/pull/53) |
 
 The completed archive folders are dated `2026-11-18`. Archive checkboxes reflect merged code and local validation; see individual PR checks for the latest protected CI state. No archive implies real-game production validation.
@@ -41,6 +42,23 @@ The completed `connect-existing-ipc` change was merged through PR #12, verified 
 ## Experimental cookie-only worker bootstrap (merged; live validation pending)
 
 PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA; one subsequent isolated saved-cookie live validation passed, while task execution and recovery acceptance remain pending. See [saved worker](SAVED-WORKER.md). This is not production readiness.
+
+## Guided desktop and task safety improvements (2026-11-19, synthetic validation)
+
+The reviewed implementation in PR #56 adds account-first Home navigation, simpler
+Automations categories and native parameter widgets, server-side alerts
+prerequisite checks, clear deterministic pre-launch rejection statuses, and
+direct private-origin HTTPS, default macOS Keychain credential saving and
+automatic saved-HTTPS reconnection. An opt-in Mac-owned SSH tunnel remains only
+an advanced fallback; normal operation requires no SSH on the Mac.
+The existing Gameforge cookie and Daedalus API bearer remain distinct;
+notification webhooks and bot tokens are never accepted in task JSON.
+
+The archived implementation change `guided-automations-and-desktop-redesign`
+is separate from the remaining owner-dependent real-account acceptance gates. The owner has confirmed the live Mac warehouse path but has **not**
+verified game task launch/stop, remote login recovery, reboot keyring
+persistence or a production-wide cutover. Installing a new macOS CI preview
+artifact is required to test redesigned native controls.
 
 ## Still active
 

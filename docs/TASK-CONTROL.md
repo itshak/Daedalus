@@ -18,6 +18,25 @@ The accounts file contains metadata only: account ID, world, player and label. T
 
 **The task-control flag must be explicit.** Without it, every state-changing task HTTP endpoint returns 503, even if read-only IPC connectivity is enabled. The backend never binds to a public interface; remote Macs use HTTPS or a protected SSH/Tailscale loopback tunnel.
 
+## Guided native automations update
+
+The native UI now prioritizes a Home dashboard, friendly **Automations** filters,
+prepopulated typed parameter widgets, and optional Advanced JSON instead of
+requiring every user to hand-author task configuration. The read-only **Explore**
+operation catalog links supported background tasks into the guided setup.
+Automatic authenticated, read-only task preflight checks flag missing Telegram
+or Discord notifications for alert tasks. Before dispatch reservation, known
+missing notification prerequisites fail with an understandable error. A typed
+engine rejection that proves no process started becomes `rejected`, whereas
+an ambiguous lost IPC response remains `unconfirmed`, blocking replay.
+
+Existing task request ledgers are **not automatically cleared**. The owner must
+confirm the game and engine state and explicitly reconcile prior unconfirmed
+requests. No notification key or webhook is accepted in general task arguments.
+See [guided Mac quick start](GUI-QUICKSTART.md) for normal operations and the
+direct HTTPS and Keychain auto-reconnect flow. The old SSH fallback is optional. Only user-approved starts have game side
+effects.
+
 ## Native Fluent GUI task control
 
 Launch `daedalus-desktop` and connect to the backend. The **Tasks** view lists registered engine background tasks; other menu actions remain in the read-only Operations inventory. Select an enabled account, choose a task, enter a JSON configuration with the parameters expected by that IkaBot task, check the authorization box, and confirm the separate start dialog.

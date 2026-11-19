@@ -31,8 +31,17 @@ from daedalus.connection_prefs import (
 )
 from daedalus.desktop.appearance_page import AppearancePage
 from daedalus.desktop.branding import application_icon
+from daedalus.desktop.home_page import HomePage
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
+from daedalus.desktop.ssh_tunnel import (
+    LocalSSHTunnel,
+    SSHConnectionUnavailable,
+    forget_ssh_destination,
+    load_ssh_destination,
+    save_ssh_destination,
+    validate_ssh_destination,
+)
 from daedalus.desktop.task_page import TasksPage
 from daedalus.gui_preferences import (
     GuiPreferenceError,
@@ -167,6 +176,13 @@ class APIWorker(QThread):
                     except APIConnectionError:
                         # Never forward game backend bodies/credentials to a report.
                         result.append({"account_id": aid, "error": True})
+            elif (
+                self.action == "task_preflight" and self.account_id
+                and self.task_payload and isinstance(self.task_payload.get("task"), str)
+            ):
+                result = self.client.task_preflight(
+                    self.account_id, str(self.task_payload["task"])
+                )
             elif self.action == "task_list" and self.account_id:
                 result = self.client.tasks(self.account_id)
             elif self.action == "task_start" and self.account_id and self.task_payload:
@@ -197,6 +213,47 @@ class APIWorker(QThread):
             self.failed.emit(self.action, "Unexpected backend request error")
 
 
+class SecureSSHConnectionWorker(QThread):
+    """Open and verify SSH forwarding off the UI thread, without secret logs."""
+
+    completed = Signal(str, object)
+    failed = Signal(str, str)
+
+    def __init__(self, destination: str, token: str, parent=None) -> None:
+        super().__init__(parent)
+        self.destination = destination
+        self.token = token
+
+    def run(self) -> None:
+        tunnel = None
+        client = None
+        try:
+            tunnel = LocalSSHTunnel(self.destination)
+            address = tunnel.start()
+            client = DaedalusClient(address, self.token)
+            result = {
+                "health": client.health(),
+                "accounts": client.accounts(),
+                "capabilities": client.capabilities(),
+                "account_config": client.account_config(),
+            }
+            self.completed.emit("ssh_connect", {
+                "result": result, "client": client, "tunnel": tunnel,
+            })
+        except (ValueError, APIConnectionError, SSHConnectionUnavailable) as exc:
+            if client is not None:
+                client.close()
+            if tunnel is not None:
+                tunnel.close()
+            self.failed.emit("ssh_connect", str(exc))
+        except Exception:  # noqa: BLE001 - sanitizes unforeseen SSH worker failures
+            if client is not None:
+                client.close()
+            if tunnel is not None:
+                tunnel.close()
+            self.failed.emit("ssh_connect", "Could not establish a trusted SSH backend connection")
+
+
 class MainWindow(FluentWindow):
     """Familiar Fluent navigation with all data fetched from Daedalus backend."""
 
@@ -204,10 +261,19 @@ class MainWindow(FluentWindow):
         super().__init__()
         self.client: DaedalusClient | None = None
         self._pending_client: DaedalusClient | None = None
+        self._ssh_tunnel: LocalSSHTunnel | None = None
+        self._pending_ssh_tunnel: LocalSSHTunnel | None = None
+        self._pending_ssh_destination: str | None = None
+        self._pending_ssh_token: str | None = None
+        self._active_ssh_destination: str | None = None
+        self._active_ssh_token: str | None = None
+        self._pending_secret_saved = False
         self._pending_preferences: tuple[str, str] | None = None
         self._worker: APIWorker | None = None
         # Follow-up API reads run only after QThread.finished. A zero-delay
         # timer fired from completed may race with finished and be discarded.
+        self._preflight_queue: list[tuple[str, str]] = []
+        self._pending_task_refresh: str | None = None
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
@@ -222,6 +288,7 @@ class MainWindow(FluentWindow):
         self._assistance_poll.setInterval(30_000)
         self._assistance_poll.timeout.connect(self._poll_pending_assistance)
 
+        self.home_page = HomePage(self)
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
@@ -238,13 +305,14 @@ class MainWindow(FluentWindow):
             group_by_island=self._gui_preferences.group_by_island,
         )
 
+        self.addSubInterface(self.home_page, FIF.HOME, "Home")
         self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
         self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
         self.addSubInterface(self.wine_page, FIF.PLAY, "Wine")
         self.addSubInterface(self.construction_page, FIF.EDIT, "Construction")
-        self.addSubInterface(self.operations_page, FIF.PLAY, "Operations")
-        self.addSubInterface(self.tasks_page, FIF.EDIT, "Tasks")
-        self.addSubInterface(self.log_page, FIF.DOCUMENT, "Log")
+        self.addSubInterface(self.tasks_page, FIF.PLAY, "Automations")
+        self.addSubInterface(self.operations_page, FIF.APPLICATION, "Explore")
+        self.addSubInterface(self.log_page, FIF.DOCUMENT, "Activity")
         self.addSubInterface(
             self.appearance_page, FIF.SETTING, "Appearance", NavigationItemPosition.BOTTOM
         )
@@ -256,6 +324,7 @@ class MainWindow(FluentWindow):
         header = self.navigationInterface.panel.topLayout
         header.insertSpacerItem(0, QSpacerItem(40, 36, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
+        self.connection_page.ssh_connect_requested.connect(self._connect_ssh)
         self.connection_page.connect_requested.connect(self._connect)
         self.connection_page.demo_requested.connect(self._start_offline_demo)
         self.connection_page.reconnect_requested.connect(self._reconnect)
@@ -297,6 +366,12 @@ class MainWindow(FluentWindow):
         self.accounts_page.check_engine_requested.connect(
             lambda: self._request("connected_accounts")
         )
+        self.home_page.connect_backend.connect(lambda: self.switchTo(self.connection_page))
+        self.home_page.manage_accounts.connect(lambda: self.switchTo(self.accounts_page))
+        self.home_page.account_selected.connect(self._select_working_account)
+        self.home_page.view_warehouses.connect(self._view_home_warehouses)
+        self.home_page.manage_automations.connect(self._view_home_automations)
+        self.operations_page.configure_requested.connect(self._configure_catalog_task)
         self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
         self.warehouses_page.load_requested.connect(
             lambda account_id: self._request("warehouses", account_id=account_id)
@@ -308,6 +383,7 @@ class MainWindow(FluentWindow):
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
             )
+            view.preflight_requested.connect(self._queue_task_preflight)
             view.launch_requested.connect(
                 lambda aid, name, config, rid: self._request(
                     "task_start", account_id=aid,
@@ -333,7 +409,11 @@ class MainWindow(FluentWindow):
         self.setWindowTitle("Daedalus for Ikariam")
         self.setWindowIcon(application_icon())
         self.resize(1130, 780)
-        logger.info("Desktop ready; connect to a local or protected remote backend")
+        logger.info("Desktop ready; HTTPS and OS-keychain access are preferred")
+        # Keychain access is deferred until the native window has rendered.
+        # Only previously approved HTTPS endpoints are auto-connected; an old
+        # loopback/SSH URL is never silently revived or migrated to a new host.
+        QTimer.singleShot(0, self._auto_reconnect_securely)
 
     def systemTitleBarRect(self, size: QSize) -> QRect:
         """Preserve the original Mac GUI's traffic-light positioning."""
@@ -361,6 +441,38 @@ class MainWindow(FluentWindow):
         )
         self._save_gui_preferences()
 
+    def _select_working_account(self, account_id: str) -> None:
+        self.warehouses_page.select_account(account_id)
+        for view in self._task_views:
+            view.select_account(account_id)
+
+    def _view_home_warehouses(self, account_id: str) -> None:
+        self._select_working_account(account_id)
+        self.switchTo(self.warehouses_page)
+        self._request("warehouses", account_id=account_id)
+
+    def _view_home_automations(self, account_id: str) -> None:
+        self._select_working_account(account_id)
+        self.switchTo(self.tasks_page)
+        self._request_task_refresh(account_id)
+
+    def _configure_catalog_task(self, name: str) -> None:
+        self.tasks_page.select_task(name)
+        self.switchTo(self.tasks_page)
+        account_id = self.tasks_page.selected_account_id()
+        if account_id:
+            self._request_task_refresh(account_id)
+
+    def _request_task_refresh(self, account_id: str) -> None:
+        if self.client is None:
+            return
+        if self._worker is not None:
+            # Never silently lose a task-list refresh to the single-worker
+            # busy guard, particularly after an uncertain task start.
+            self._pending_task_refresh = account_id
+        else:
+            self._request("task_list", account_id=account_id)
+
     def _on_report_selection_changed(self, selected: list[str]) -> None:
         self.warehouses_page.set_selected_accounts(selected)
         if self._syncing_report_preferences or self._active_backend_url is None:
@@ -373,6 +485,20 @@ class MainWindow(FluentWindow):
             self._notice("Invalid report selection", "Unable to save selected accounts")
             return
         self._save_gui_preferences()
+
+    def _auto_reconnect_securely(self) -> None:
+        if self.client is not None or self._worker is not None:
+            return
+        try:
+            saved = saved_connection()
+        except PreferenceError:
+            # Missing/locked Keychain is not a reason to block a first launch.
+            # The user can unlock it through the OS or paste the token again.
+            logger.info("Saved Keychain connection not currently available")
+            return
+        if saved is None or not saved[0].startswith("https://"):
+            return
+        self._connect(*saved, saved_keychain=True)
 
     def _start_offline_demo(self) -> None:
         """Explicit local demonstration; never imports real session data."""
@@ -388,22 +514,81 @@ class MainWindow(FluentWindow):
         except (OfflineDemoUnavailable, ImportError) as exc:
             self._notice("Offline demo unavailable", str(exc))
             return
-        # Temporary demo bearer tokens must never enter persistent preferences.
+        # Temporary demo bearer tokens must never enter persistent preferences,
+        # but preserve the user's normal Keychain choice for future real logins.
+        remember = self.connection_page.remember_checkbox.isChecked()
         self.connection_page.remember_checkbox.setChecked(False)
-        self._connect(self._embedded_demo.url, self._embedded_demo.token)
+        try:
+            self._connect(self._embedded_demo.url, self._embedded_demo.token)
+        finally:
+            self.connection_page.remember_checkbox.setChecked(remember)
 
-    def _connect(self, url: str, token: str) -> None:
+    def _connect_ssh(self, destination: str, token: str) -> None:
         if self._worker is not None:
             self._notice("Request in progress", "Finish the current request before connecting.")
             return
+        try:
+            destination = validate_ssh_destination(destination)
+            if not token:
+                # A saved bearer must never be sent to a different SSH host.
+                # Reuse it only for the exact destination previously approved.
+                stored_destination = load_ssh_destination()
+                if stored_destination == destination:
+                    saved = saved_connection()
+                    if saved is not None and saved[0] == "http://127.0.0.1:8765":
+                        token = saved[1]
+            # Validate only the token shape without sending it over any network.
+            test_client = DaedalusClient("http://127.0.0.1:8765", token)
+            test_client.close()
+        except (ValueError, PreferenceError) as exc:
+            self._notice("Cannot connect via SSH", str(exc))
+            return
+        self._pending_ssh_destination = destination
+        self._pending_ssh_token = token
+        self._pending_preferences = (
+            ("http://127.0.0.1:8765", token)
+            if self.connection_page.remember_checkbox.isChecked() else None
+        )
+        worker = SecureSSHConnectionWorker(destination, token, parent=self)
+        self._worker = worker
+        self.connection_page.connect_button.setEnabled(False)
+        self.connection_page.ssh_button.setEnabled(False)
+        worker.completed.connect(self._on_completed)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(self._on_worker_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _connect(self, url: str, token: str, *, saved_keychain: bool = False) -> None:
+        if self._worker is not None:
+            self._notice("Request in progress", "Finish the current request before connecting.")
+            return
+        # A saved trusted-HTTPS token must not be written again on every app
+        # launch, which may otherwise trigger repeated macOS Keychain prompts.
+        remembered = saved_keychain
+        if not token:
+            # An empty token field may use the OS Keychain only for exactly the
+            # stored endpoint. Never forward a saved bearer to a different URL.
+            try:
+                saved = saved_connection()
+            except PreferenceError as exc:
+                self._notice("Keychain unavailable", str(exc))
+                return
+            if saved is None or saved[0] != url:
+                self._notice("API token required", "Paste the token once to connect to this server.")
+                return
+            token = saved[1]
+            remembered = True
         try:
             candidate = DaedalusClient(url, token)
         except ValueError as exc:
             self._notice("Invalid connection", str(exc))
             return
         self._pending_client = candidate
+        self._pending_secret_saved = remembered
         self._pending_preferences = (
-            (url, token) if self.connection_page.remember_checkbox.isChecked() else None
+            (url, token) if self.connection_page.remember_checkbox.isChecked() and not remembered
+            else None
         )
         self._launch(candidate, "connect")
 
@@ -412,7 +597,14 @@ class MainWindow(FluentWindow):
         if self._worker is not None:
             self._notice("Request in progress", "Finish the current request first.")
             return
-        if self.client is not None:
+        if self._ssh_tunnel is not None:
+            if self._ssh_tunnel.running() and self.client is not None:
+                self._launch(self.client, "connect")
+                return
+            if self._active_ssh_destination and self._active_ssh_token:
+                self._connect_ssh(self._active_ssh_destination, self._active_ssh_token)
+                return
+        elif self.client is not None:
             self._launch(self.client, "connect")
             return
         try:
@@ -421,9 +613,16 @@ class MainWindow(FluentWindow):
             self._notice("Cannot retrieve saved connection", str(exc))
             return
         if saved is None:
-            self._notice("No saved connection", "Enter a backend URL and bearer token.")
+            self._notice("No saved connection", "Enter an SSH host and API token.")
             return
-        self._connect(*saved)
+        try:
+            destination = load_ssh_destination()
+        except SSHConnectionUnavailable:
+            destination = None
+        if destination and not saved[0].startswith("https://"):
+            self._connect_ssh(destination, saved[1])
+        else:
+            self._connect(*saved, saved_keychain=True)
 
     def _forget_connection(self) -> None:
         try:
@@ -431,6 +630,12 @@ class MainWindow(FluentWindow):
         except PreferenceError as exc:
             self._notice("Unable to forget saved connection", str(exc))
             return
+        try:
+            forget_ssh_destination()
+        except SSHConnectionUnavailable as exc:
+            self._notice("SSH host preference not cleared", str(exc))
+            return
+        self.connection_page.set_token_saved(False)
         self.connection_page.remember_checkbox.setChecked(False)
         self._notice("Saved preference cleared", "The current in-memory connection is unchanged.")
 
@@ -450,6 +655,31 @@ class MainWindow(FluentWindow):
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
+    def _queue_task_preflight(self, account_id: str, task: str) -> None:
+        """Defer harmless readiness probes until the single HTTP worker is free."""
+        key = (account_id, task)
+        if key not in self._preflight_queue:
+            self._preflight_queue.append(key)
+        if self._worker is None:
+            self._run_next_preflight()
+
+    def _run_next_preflight(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        # A prior selection may have become obsolete during the last network call.
+        while self._preflight_queue:
+            account_id, task = self._preflight_queue.pop(0)
+            if any(
+                view.selected_account_id() == account_id
+                and view.selected_task_name() == task
+                for view in self._task_views
+            ):
+                self._launch(
+                    self.client, "task_preflight", account_id=account_id,
+                    task_payload={"task": task},
+                )
+                return
+
     def _launch(
         self, client: DaedalusClient, action: str, *, account_id: str | None = None,
         task_payload: dict[str, object] | None = None,
@@ -459,6 +689,7 @@ class MainWindow(FluentWindow):
         )
         self._worker = worker
         self.connection_page.connect_button.setEnabled(False)
+        self.connection_page.ssh_button.setEnabled(False)
         worker.completed.connect(self._on_completed)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_worker_finished)
@@ -466,6 +697,12 @@ class MainWindow(FluentWindow):
         worker.start()
 
     def _on_completed(self, action: str, payload: object) -> None:
+        if action == "ssh_connect":
+            assert isinstance(payload, dict)
+            self._pending_client = payload["client"]
+            self._pending_ssh_tunnel = payload["tunnel"]
+            payload = payload["result"]
+            action = "connect"
         if action == "connect":
             assert isinstance(payload, dict)
             if self._pending_client is not None:
@@ -473,23 +710,45 @@ class MainWindow(FluentWindow):
                     self.client.close()
                 self.client = self._pending_client
                 self._pending_client = None
+                old_tunnel = self._ssh_tunnel
+                self._ssh_tunnel = self._pending_ssh_tunnel
+                self._pending_ssh_tunnel = None
+                if old_tunnel is not None and old_tunnel is not self._ssh_tunnel:
+                    old_tunnel.close()
+                self._active_ssh_destination = self._pending_ssh_destination
+                self._active_ssh_token = self._pending_ssh_token
             preferences = self._pending_preferences
             self._pending_preferences = None
+            token_saved = self._pending_secret_saved
+            self._pending_secret_saved = False
             if preferences is not None:
                 try:
                     remember_connection(*preferences)
-                except PreferenceError as exc:
+                    token_saved = True
+                    if self._pending_ssh_destination:
+                        save_ssh_destination(self._pending_ssh_destination)
+                except (PreferenceError, SSHConnectionUnavailable, ValueError) as exc:
                     self._notice("Connection not saved", str(exc))
+            self.connection_page.set_token_saved(token_saved)
+            self._pending_ssh_destination = None
+            self._pending_ssh_token = None
             health = payload.get("health") or {}
             demo = bool(health.get("synthetic_demo") is True)
             self.connection_page.set_connected(True, demo=demo)
+            self.home_page.set_connected(True, demo=demo)
             self.warehouses_page.set_demo(demo)
             self.warehouses_page.clear_reports()
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
             # Report selection must never leak across remote backends.
             self._syncing_report_preferences = True
             try:
-                self._active_backend_url = getattr(self.client, "_server", None)
+                # SSH forwarding uses a different random local port on every
+                # launch; scope private report choices by the trusted host.
+                self._active_backend_url = (
+                    "ssh://" + self._active_ssh_destination
+                    if self._ssh_tunnel is not None and self._active_ssh_destination
+                    else getattr(self.client, "_server", None)
+                )
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
                 self.accounts_page.set_report_exclusions(excluded)
                 self.accounts_page.set_connected_ids(None)
@@ -599,6 +858,10 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, list)
             self.warehouses_page.set_batch_snapshots(payload)
             logger.info("Multi-account warehouse report updated")
+        elif action == "task_preflight":
+            assert isinstance(payload, dict)
+            for view in self._task_views:
+                view.set_preflight(payload)
         elif action == "task_list":
             assert isinstance(payload, dict)
             account_id = payload.get("account_id")
@@ -614,12 +877,13 @@ class MainWindow(FluentWindow):
             self._notice("Task operation accepted", str(payload.get("status", "Complete")))
             account_id = payload.get("account_id")
             if isinstance(account_id, str):
-                QTimer.singleShot(0, lambda: self._request("task_list", account_id=account_id))
+                self._pending_task_refresh = account_id
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
         self.accounts_page.set_accounts(data)
         self.warehouses_page.set_accounts(data)
+        self.home_page.set_accounts(data)
         # Refresh inclusion *after* the warehouse account map is replaced.
         # This also handles accounts newly created via metadata editing.
         self.warehouses_page.set_selected_accounts(
@@ -640,23 +904,48 @@ class MainWindow(FluentWindow):
     def _on_failed(self, action: str, error: str) -> None:
         # Never reuse a recovery refresh across a failed or changed backend.
         self._recovery_followup = None
-        if action == "connect":
+        if action == "task_preflight":
+            for view in self._task_views:
+                view.set_preflight_unavailable()
+        if action in {"task_start", "task_stop", "task_reconcile"} and self._worker is not None:
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self._pending_task_refresh = account_id
+        if action in {"connect", "ssh_connect"}:
+            self._pending_ssh_destination = None
+            self._pending_ssh_token = None
+            if self._pending_ssh_tunnel is not None:
+                self._pending_ssh_tunnel.close()
+                self._pending_ssh_tunnel = None
             self._pending_preferences = None
+            self._pending_secret_saved = False
             if self._pending_client is not None:
                 self._pending_client.close()
                 self._pending_client = None
             self.connection_page.set_connected(self.client is not None)
         logger.warning("Backend %s request failed", action)
-        if action != "assistance_pending":  # Periodic checks must not spam banners.
-            self._notice("Backend unavailable", error)
+        if action not in {"assistance_pending", "task_preflight"}:
+            if action == "task_start":
+                self._notice("Automation not started", error)
+            elif action in {"task_stop", "task_reconcile"}:
+                self._notice("Automation action failed", error)
+            else:
+                self._notice("Backend unavailable", error)
 
     def _on_worker_finished(self) -> None:
         self._worker = None
         self.connection_page.connect_button.setEnabled(True)
+        self.connection_page.ssh_button.setEnabled(True)
         followup, self._recovery_followup = self._recovery_followup, None
         if followup is not None and self.client is not None:
             action, account_id = followup
             self._request(action, account_id=account_id or None)
+        if self._worker is None and self._pending_task_refresh is not None:
+            account_id = self._pending_task_refresh
+            self._pending_task_refresh = None
+            self._request("task_list", account_id=account_id)
+        if self._worker is None:
+            self._run_next_preflight()
 
     def _notice(self, title: str, message: str) -> None:
         InfoBar.warning(
@@ -677,6 +966,12 @@ class MainWindow(FluentWindow):
         if self.client is not None:
             self.client.close()
             self.client = None
+        if self._ssh_tunnel is not None:
+            self._ssh_tunnel.close()
+            self._ssh_tunnel = None
+        if self._pending_ssh_tunnel is not None:
+            self._pending_ssh_tunnel.close()
+            self._pending_ssh_tunnel = None
         if self._pending_client is not None:
             self._pending_client.close()
             self._pending_client = None

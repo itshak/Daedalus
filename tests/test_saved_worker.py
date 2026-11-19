@@ -34,6 +34,10 @@ class FakeIPC:
     def has_account(self, account):
         return self.online and account == self.account
 
+    def preflight_task(self, account, task):
+        return {"task": task, "ready": True, "reason": "none",
+                "notifications_required": False, "checked": []}
+
     def start_managed_task(self, account, task, config, request_id):
         self.started.append((account.id, task, config, request_id))
         return {"task_id": "a" * 24, "pid": 42, "status": "running"}
