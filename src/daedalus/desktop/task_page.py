@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +33,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
+    Pivot,
 )
 
 from daedalus.desktop.pages import _populate, _table
@@ -114,7 +116,16 @@ class TasksPage(QWidget):
         scroll.setWidgetResizable(True)
         content = QWidget(scroll)
         scroll.setWidget(content)
-        outer.addWidget(scroll)
+        self.pivot = Pivot(self)
+        self.pivot.setAccessibleName("Automation workspace sections")
+        self.stack = QStackedWidget(self)
+        outer.addWidget(self.pivot)
+        outer.addWidget(self.stack, 1)
+        self.stack.addWidget(scroll)
+        self.pivot.addItem(
+            routeKey="configure", text="Discover & configure",
+            onClick=lambda: self._show_section(0),
+        )
         layout = QVBoxLayout(content)
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(14)
@@ -267,6 +278,15 @@ class TasksPage(QWidget):
         batch_row.addWidget(self.start_selected_button)
         layout.addLayout(batch_row)
 
+        running_panel = QWidget(self.stack)
+        layout = QVBoxLayout(running_panel)
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(14)
+        self.stack.addWidget(running_panel)
+        self.pivot.addItem(
+            routeKey="running", text="Running",
+            onClick=lambda: self._show_section(1),
+        )
         layout.addWidget(SubtitleLabel("Running automations"))
         self.task_table = _table(["Task", "Status", "PID", "Task ID"])
         layout.addWidget(self.task_table, 2)
@@ -278,6 +298,15 @@ class TasksPage(QWidget):
         stop_row.addStretch(1)
         layout.addLayout(stop_row)
 
+        history_panel = QWidget(self.stack)
+        layout = QVBoxLayout(history_panel)
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(14)
+        self.stack.addWidget(history_panel)
+        self.pivot.addItem(
+            routeKey="history", text="History & recovery",
+            onClick=lambda: self._show_section(2),
+        )
         layout.addWidget(SubtitleLabel("Request history & recovery"))
         layout.addWidget(CaptionLabel(
             "If a request is uncertain, review its game state before clearing it. "
@@ -292,6 +321,16 @@ class TasksPage(QWidget):
         self.reconcile_button.clicked.connect(self._reconcile)
         layout.addWidget(self.reconcile_button)
 
+        multi_panel = QWidget(self.stack)
+        layout = QVBoxLayout(multi_panel)
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(14)
+        self.stack.addWidget(multi_panel)
+        self.pivot.addItem(
+            routeKey="accounts", text="All accounts",
+            onClick=lambda: self._show_section(3),
+        )
+        layout.addWidget(SubtitleLabel("Multi-account task overview"))
         self.multi_summary = CaptionLabel(
             "View all accounts or selected accounts to see their task status side by side."
         )
@@ -300,7 +339,17 @@ class TasksPage(QWidget):
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
         self.multi_table.setMaximumHeight(185)
         layout.addWidget(self.multi_table)
+        layout.addStretch(1)
+        self._show_section(0)
         self._set_controls()
+
+    def _show_section(self, index: int) -> None:
+        """Fluent pivot for discover/configure, running, history and multi-account views."""
+        keys = ("configure", "running", "history", "accounts")
+        if not 0 <= index < len(keys):
+            raise ValueError("Unknown automation section")
+        self.stack.setCurrentIndex(index)
+        self.pivot.setCurrentItem(keys[index])
 
     def selected_account_id(self) -> str | None:
         idx = self.account_combo.currentIndex()
@@ -349,9 +398,11 @@ class TasksPage(QWidget):
         self.search_input.clear()
         self._filter_tasks()
         self.task_combo.setCurrentIndex(self._task_names.index(task_name))
+        self._show_section(0)
         return True
 
     def select_workflow(self, workflow: str) -> None:
+        self._show_section(0)
         if workflow not in {"all", "wine", "construction"}:
             raise ValueError("Unsupported automation template")
         self.category_combo.setCurrentIndex(0)
@@ -403,6 +454,7 @@ class TasksPage(QWidget):
 
     def _refresh_all(self) -> None:
         if self._account_ids:
+            self._show_section(3)
             self.multi_summary.setText(
                 f"Checking tasks across all {len(self._account_ids)} accounts…"
             )
@@ -410,6 +462,7 @@ class TasksPage(QWidget):
 
     def _refresh_selected(self) -> None:
         if self._bulk_account_ids:
+            self._show_section(3)
             self.multi_summary.setText(
                 f"Checking tasks for {len(self._bulk_account_ids)} selected accounts…"
             )
@@ -498,6 +551,7 @@ class TasksPage(QWidget):
             self.confirm_box.setChecked(False)
 
     def set_batch_launch_result(self, data: dict[str, object]) -> None:
+        self._show_section(3)
         submitted = data.get("submitted", [])
         blocked = data.get("blocked", [])
         halted = data.get("halted")

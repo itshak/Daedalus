@@ -430,6 +430,9 @@ class MainWindow(FluentWindow):
         self.connection_page.ssh_connect_requested.connect(self._connect_ssh)
         self.connection_page.connect_requested.connect(self._connect)
         self.connection_page.demo_requested.connect(self._start_offline_demo)
+        self.connection_page.overview_requested.connect(
+            lambda: self.switchTo(self.home_page)
+        )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
         self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
@@ -589,6 +592,7 @@ class MainWindow(FluentWindow):
 
     def _view_home_automations(self, account_id: str) -> None:
         self._select_working_account(account_id)
+        self.tasks_page._show_section(0)
         self.switchTo(self.tasks_page)
         self._request_task_refresh(account_id)
 

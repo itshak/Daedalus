@@ -62,6 +62,7 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 class ConnectionPage(QWidget):
     connect_requested = Signal(str, str)
+    overview_requested = Signal()
     ssh_connect_requested = Signal(str, str)
     demo_requested = Signal()
     reconnect_requested = Signal()
@@ -121,6 +122,10 @@ class ConnectionPage(QWidget):
         layout.addWidget(self.connect_button)
         self.status_label = CaptionLabel("Not connected")
         layout.addWidget(self.status_label)
+        self.overview_button = PushButton("Open Overview")
+        self.overview_button.setEnabled(False)
+        self.overview_button.clicked.connect(self.overview_requested.emit)
+        layout.addWidget(self.overview_button)
         self.keychain_status = CaptionLabel("")
         layout.addWidget(self.keychain_status)
 
@@ -193,6 +198,7 @@ class ConnectionPage(QWidget):
         )
 
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
+        self.overview_button.setEnabled(connected)
         self.status_label.setText(
             "SYNTHETIC DEMO connected — no real game accounts or sessions"
             if connected and demo else
@@ -990,11 +996,17 @@ class WarehousesPage(QWidget):
         self.json_button.clicked.connect(lambda: self._save("json"))
         self.txt_button = PushButton("Save TXT")
         self.txt_button.clicked.connect(lambda: self._save("txt"))
+        self.print_button = PushButton("Print report…")
+        self.print_button.setAccessibleName("Preview and print the combined warehouse report")
+        self.print_button.clicked.connect(self._print_report)
+        self.print_button.setEnabled(False)
+        actions.addWidget(self.print_button)
         self.export_button = PushButton("Export report ▾")
         self.export_button.setAccessibleName("Copy or save the current warehouse report")
         menu = QMenu(self)
         menu.addAction("Copy CSV to clipboard", self._copy_csv)
         menu.addAction("Copy grouped island report", self._copy_islands)
+        menu.addAction("Print grouped report…", self._print_report)
         menu.addSeparator()
         menu.addAction("Save CSV…", lambda: self._save("csv"))
         menu.addAction("Save JSON…", lambda: self._save("json"))
@@ -1085,7 +1097,7 @@ class WarehousesPage(QWidget):
         for button in (
             self.copy_button, self.copy_islands_button,
             self.csv_button, self.json_button, self.txt_button,
-            self.export_button,
+            self.export_button, self.print_button,
         ):
             button.setEnabled(False)
 
@@ -1181,9 +1193,34 @@ class WarehousesPage(QWidget):
         for button in (
             self.copy_button, self.copy_islands_button,
             self.csv_button, self.json_button, self.txt_button,
-            self.export_button,
+            self.export_button, self.print_button,
         ):
             button.setEnabled(bool(self._rows))
+
+    def _print_report(self) -> None:
+        """Preview a text report for any number of included account warehouses."""
+        if not self._rows:
+            return
+        try:
+            from PySide6.QtGui import QFont, QTextDocument
+            from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
+
+            document = QTextDocument(self)
+            document.setDefaultFont(QFont("Menlo", 10))
+            document.setPlainText(
+                report_txt(self._rows, group_by_island=self.group_island.isChecked())
+            )
+            printer = QPrinter(QPrinter.HighResolution)
+            preview = QPrintPreviewDialog(printer, self)
+            preview.setWindowTitle("Print Daedalus warehouse report")
+            preview.paintRequested.connect(document.print_)
+            preview.exec()
+        except (ImportError, RuntimeError):
+            QMessageBox.warning(
+                self, "Printing unavailable",
+                "This system does not offer Qt printer support. "
+                "Use Save TXT or Copy by island and print with another application.",
+            )
 
     def _copy_csv(self) -> None:
         QGuiApplication.clipboard().setText(report_csv(self._rows))

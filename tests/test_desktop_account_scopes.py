@@ -208,3 +208,33 @@ def test_multi_account_status_partial_result_is_not_fabricated(app):
         assert page.multi_table.item(2, 3).text() == "Needs review"
     finally:
         _dispose(page, app)
+
+
+def test_fluent_automation_pivot_separates_configuration_and_history(app):
+    page = TasksPage()
+    try:
+        assert page.stack.count() == 4
+        page._show_section(3)
+        assert page.stack.currentIndex() == 3
+        page._show_section(1)
+        assert page.stack.currentIndex() == 1
+        page.select_workflow("wine")
+        assert page.stack.currentIndex() == 0
+    finally:
+        _dispose(page, app)
+
+
+def test_print_action_only_enabled_for_real_report_rows(app):
+    page = WarehousesPage()
+    try:
+        page.set_accounts(accounts(2))
+        assert not page.print_button.isEnabled()
+        page.set_batch_snapshots([{"account_id": "account-0", "cities": [{
+            "city_name": "Corinth", "resources": {"unsecured": {"wood": 7000}}
+        }]}])
+        assert page.print_button.isEnabled()
+        assert "Print grouped report" in [
+            action.text() for action in page.export_button.menu().actions()
+        ]
+    finally:
+        _dispose(page, app)
