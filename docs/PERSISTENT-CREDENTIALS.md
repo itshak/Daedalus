@@ -1,6 +1,9 @@
 # Protected Linux daemon credentials (persistent across service restarts)
 
-The Linux daemon can use an **opt-in machine-bound encrypted systemd credential store** instead of GNOME Secret Service's volatile graphical-session collection. The native Mac client still uses macOS Keychain for its separate Daedalus API token. Neither the macOS Keychain nor server-side credential storage requires SSH or VNC forwarding.
+The Linux daemon can use an **opt-in machine-bound encrypted systemd credential store** instead of GNOME Secret Service's volatile graphical-session collection. The native Mac client still uses macOS Keychain for its separate Daedalus API token
+and its per-account Gameforge login-vault encryption keys. A client-sealed
+password backup can now be held as opaque ciphertext in the persistent
+server credential store; see [LOGIN-VAULT.md](LOGIN-VAULT.md). Neither the macOS Keychain nor server-side credential storage requires SSH or VNC forwarding.
 
 ## Architecture and security
 

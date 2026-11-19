@@ -89,3 +89,33 @@ def test_automation_gallery_is_optional_but_keeps_task_selection(app):
         assert not page.start_button.isEnabled()
     finally:
         page.close()
+
+
+def test_account_identity_world_flag_and_status_icons(app):
+    page = AccountsPage()
+    try:
+        page.set_accounts([
+            {"id": "saved-01", "label": "Imported IkaBot identity 01",
+             "email": "synthetic@example.invalid", "world": "s58-ru",
+             "player": "Player", "enabled": True,
+             "session_status": "authenticated"},
+            {"id": "saved-02", "label": "Imported IkaBot identity 02",
+             "world": "s53-ru", "player": "Other", "enabled": False,
+             "session_status": "not_connected"},
+        ])
+        assert page.table.item(0, 0).text() == "synthetic@example.invalid"
+        assert page.table.item(1, 0).text() == "Other"
+        assert page.table.item(0, 1).text() == "🇷🇺 S58"
+        assert page.table.item(1, 1).text() == "🇷🇺 S53"
+        assert page.table.item(0, 3).text() == "✓"
+        assert page.table.item(1, 3).text() == "✕"
+        assert page.table.item(0, 4).text() == "✓"
+        assert page.table.item(1, 4).text() == "✕"
+        assert page.table.item(0, 5).text() == "?"
+        assert "not been checked" in page.table.item(0, 5).toolTip()
+        page.set_connected_ids(["saved-01"])
+        assert page.table.item(0, 5).text() == "✓"
+        assert page.table.item(1, 5).text() == "✕"
+        assert "attached" in page.table.item(0, 5).toolTip()
+    finally:
+        page.close()

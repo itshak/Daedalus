@@ -73,7 +73,7 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 
 _WORLD_CODE = re.compile(r"^s([0-9]+)-([a-z]{2,4})$", re.IGNORECASE)
-_IMPORTED_LABEL = re.compile(r"Imported IkaBot account(?: [0-9]+)?", re.IGNORECASE)
+_IMPORTED_LABEL = re.compile(r"Imported IkaBot (?:account|identity)(?: [0-9]+)?", re.IGNORECASE)
 
 
 def _account_title(account: dict[str, object]) -> str:
@@ -351,6 +351,7 @@ class AccountsPage(QWidget):
     native_browser_login_requested = Signal(str)
     automatic_login_requested = Signal(object)
     automatic_login_cancel_requested = Signal()
+    sync_saved_logins_requested = Signal(object)
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -419,7 +420,7 @@ class AccountsPage(QWidget):
         toolbar.addWidget(self.more_button)
         layout.addLayout(toolbar)
 
-        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
+        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "Worker", "Report"])
         self.table.setAccessibleName("Configured accounts and warehouse report inclusion")
         self.table.horizontalHeaderItem(5).setToolTip(
             "Whether an existing IkaBot worker is attached; not a Gameforge login status"
@@ -443,6 +444,11 @@ class AccountsPage(QWidget):
         self.toggle_button = PushButton("Enable / Disable")
         self.remove_button = PushButton("Remove")
         self.check_engine_button = PushButton("Check IkaBot sessions")
+        self.sync_logins_button = PushButton("Back up saved logins")
+        self.sync_logins_button.setToolTip(
+            "Copy already remembered Mac logins to encrypted server storage. "
+            "Passwords never travel as plaintext."
+        )
         self.assistance_check_button = PushButton("Check login assistance")
         self.assistance_approve_button = PushButton("Confirm manual step complete")
         self.native_browser_login_button = PushButton("Manual browser fallback")
@@ -456,6 +462,7 @@ class AccountsPage(QWidget):
             (self.toggle_button, self._toggle),
             (self.remove_button, self._remove),
             (self.check_engine_button, self.check_engine_requested.emit),
+            (self.sync_logins_button, self._sync_saved_logins),
             (self.assistance_check_button, self._check_assistance),
             (self.assistance_approve_button, self._approve_assistance),
             (self.native_browser_login_button, self._native_browser_login),
@@ -477,6 +484,7 @@ class AccountsPage(QWidget):
             (None, None),
             ("Sign in selected accounts…", self.auto_login_selected_button),
             ("Check IkaBot sessions", self.check_engine_button),
+            ("Back up saved logins to server…", self.sync_logins_button),
             ("Check login assistance", self.assistance_check_button),
             ("Confirm manual step complete", self.assistance_approve_button),
             ("Manual browser fallback…", self.native_browser_login_button),
@@ -531,6 +539,9 @@ class AccountsPage(QWidget):
 
     def _sync_account_menu(self) -> None:
         self.check_engine_button.setEnabled(bool(self._accounts))
+        self.sync_logins_button.setEnabled(
+            bool(self._accounts) and self._native_browser_login_enabled
+        )
         for action, button in self._menu_actions:
             needs_selection = button in (
                 self.edit_button, self.toggle_button, self.remove_button,
@@ -538,6 +549,11 @@ class AccountsPage(QWidget):
             action.setEnabled(
                 button.isEnabled() and (not needs_selection or self._selected_account() is not None)
             )
+
+    def _sync_saved_logins(self) -> None:
+        self.sync_saved_logins_requested.emit([
+            dict(account) for account in self._accounts if account.get("enabled") is True
+        ])
 
     def _toggle_advanced_recovery(self) -> None:
         self._advanced_open = not self._advanced_open

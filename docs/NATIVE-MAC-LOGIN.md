@@ -35,7 +35,10 @@ Daedalus settings. Otherwise you supply your Gameforge email/password **once**
 through a secure Mac form, and can save them to **macOS Keychain**, bound to
 the exact backend HTTPS origin, account ID and world. Subsequently those
 credentials are reused automatically and no password input is needed until
-they are unavailable or changed. They never leave the Mac for the Daedalus API.
+they are unavailable or changed. When opted in, a client-sealed copy is also
+stored persistently on the server and can be restored by the originating Mac.
+The **plaintext password never leaves the Mac**, and the API never returns it.
+See [the encrypted login vault](LOGIN-VAULT.md) for key-loss limitations.
 
 After login, the Mac extracts **only the exact world's secure `ikariam`
 cookie** and uses the existing single-use, account/world/player-bound

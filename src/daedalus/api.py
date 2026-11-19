@@ -32,6 +32,12 @@ from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
+from daedalus.login_vault import (
+    LoginVaultUnavailable,
+    read_login_vault,
+    validate_login_vault,
+    write_login_vault,
+)
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
@@ -191,6 +197,46 @@ def create_app(
                 for account in configured_accounts
             ),
         }
+
+    @app.get("/api/v1/login-vaults", dependencies=[Depends(authorized)])
+    def login_vaults() -> dict[str, object]:
+        """Return opaque ciphertext only; the decryption key stays on the Mac."""
+        if demo_mode or native_browser_handoff is None:
+            return {"vaults": {}}
+        result: dict[str, dict[str, object]] = {}
+        try:
+            for account in configured_accounts:
+                sealed = read_login_vault(
+                    account, credential_store=native_browser_handoff.credentials,
+                )
+                if sealed is not None:
+                    result[account.id] = sealed
+        except LoginVaultUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Protected login vault unavailable") from exc
+        return {"vaults": result}
+
+    @app.post("/api/v1/accounts/{account_id}/login-vault",
+              dependencies=[Depends(authorized)])
+    def save_login_vault(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, bool]:
+        """Persist client-sealed credentials only after verified email binding."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if native_browser_handoff is None or demo_mode:
+            raise HTTPException(status_code=503, detail="Protected login vault is disabled")
+        try:
+            validate_login_vault(payload, confirmed=True)
+        except LoginVaultUnavailable as exc:
+            raise HTTPException(status_code=422, detail="Invalid sealed login material") from exc
+        try:
+            write_login_vault(
+                account, payload, credential_store=native_browser_handoff.credentials,
+            )
+        except LoginVaultUnavailable as exc:
+            raise HTTPException(status_code=409, detail="Verified login binding unavailable") from exc
+        return {"saved": True}
 
     @app.get("/api/v1/account-config", dependencies=[Depends(authorized)])
     def account_config() -> dict[str, object]:

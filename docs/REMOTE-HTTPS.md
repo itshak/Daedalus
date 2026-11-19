@@ -25,4 +25,7 @@ The Connection page opens to a single primary **Connect** action. The first succ
 
 ## Native Mac browser login through trusted HTTPS
 
-Starting the backend with `--enable-native-browser-login` enables an audited, bearer-authenticated, one-use encrypted session handoff API. No *plaintext* Gameforge cookie, password, email or browser profile is accepted as a field; only a session encrypted with the short-lived server public key and bound to the exact account/world/player/ticket is permitted. All endpoints require the same strong API bearer. Do not enable for public demos or metadata-editing mode. Rate-limit or place an appropriate access policy in front of the authenticated API. All actual game session verification and owner lease enforcement stays on the Linux backend, not on the Mac. See [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md).
+Starting the backend with `--enable-native-browser-login` enables an audited, bearer-authenticated, one-use encrypted session handoff API. No *plaintext* Gameforge cookie, password or browser profile is accepted as a field;
+the authenticated account-list view may disclose an already verified email
+binding, while login-vault endpoints accept and return **only client-sealed
+ciphertext**; only a session encrypted with the short-lived server public key and bound to the exact account/world/player/ticket is permitted. All endpoints require the same strong API bearer. Do not enable for public demos or metadata-editing mode. Rate-limit or place an appropriate access policy in front of the authenticated API. All actual game session verification and owner lease enforcement stays on the Linux backend, not on the Mac. See [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md).

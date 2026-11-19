@@ -26,8 +26,8 @@ class SeleniumCredentialsDialog(QDialog):
         layout.addWidget(SubtitleLabel(f"Automatic login — {player} ({world})"))
         note = CaptionLabel(
             "Enter this Gameforge account once. Selenium signs in with Chrome in "
-            "headless mode; a window opens only for a CAPTCHA. The password "
-            "never goes to the Daedalus server."
+            "headless mode; a window opens only for a CAPTCHA. Your password "
+            "is sealed using macOS Keychain before encrypted server backup."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -43,7 +43,7 @@ class SeleniumCredentialsDialog(QDialog):
         self.password_input.setAccessibleName("Gameforge password")
         form.addRow(BodyLabel("Password"), self.password_input)
         layout.addLayout(form)
-        self.remember = CheckBox("Save securely in macOS Keychain for future headless logins")
+        self.remember = CheckBox("Remember securely in Keychain and encrypted server backup")
         self.remember.setChecked(True)
         layout.addWidget(self.remember)
         self.error_label = CaptionLabel("")

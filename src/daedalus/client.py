@@ -240,6 +240,45 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid account metadata")
         return data
 
+    def login_vaults(self) -> dict[str, dict[str, object]]:
+        """Obtain sealed server copies; never request plaintext passwords."""
+        try:
+            data = self._read("login-vaults")
+        except APIConnectionError as exc:
+            if exc.status_code in {404, 503}:
+                return {}  # Older servers have no protected vault feature.
+            raise
+        vaults = data.get("vaults")
+        if not isinstance(vaults, dict):
+            raise APIConnectionError("Backend returned invalid encrypted login index")
+        for aid, envelope in vaults.items():
+            if (not isinstance(aid, str) or not _ACCOUNT_ID.fullmatch(aid)
+                    or not isinstance(envelope, dict)
+                    or set(envelope) != {"version", "nonce", "ciphertext"}
+                    or type(envelope.get("version")) is not int or envelope["version"] != 1
+                    or not all(isinstance(envelope.get(key), str)
+                               and len(envelope[key]) <= 6000
+                               for key in ("nonce", "ciphertext"))):
+                raise APIConnectionError("Backend returned invalid encrypted login index")
+        return vaults
+
+    def store_login_vault(
+        self, account_id: str, sealed: dict[str, object],
+    ) -> bool:
+        """Upload Mac-encrypted material, not a Gameforge password."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        if (not isinstance(sealed, dict)
+                or set(sealed) != {"version", "nonce", "ciphertext", "confirmed"}
+                or sealed.get("confirmed") is not True
+                or type(sealed.get("version")) is not int or sealed["version"] != 1
+                or not all(isinstance(sealed.get(key), str)
+                           and 0 < len(sealed[key]) <= 6000
+                           for key in ("nonce", "ciphertext"))):
+            raise ValueError("A valid encrypted login envelope is required")
+        response = self._write(f"accounts/{account_id}/login-vault", sealed)
+        return response.get("saved") is True
+
     def capabilities(self) -> dict[str, object]:
         data = self._read("capabilities")
         if not isinstance(data.get("operations"), list):

@@ -23,6 +23,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
+| `persistent-login-identity-status` | Encrypted Mac-bound server login backups, protected email identities, Russian world flags and accessible account/session/worker status indicators | Pending PR for this change |
 | `bootstrap-public-monorepo` | Clean open-source package, CI, OpenSpec, license and security boundaries | [Initial foundation](https://github.com/itshak/Daedalus/commits/main/) |
 | `add-readonly-controller-api` | Credential-free account TOML, authenticated read-only API, warehouse parser | [#6](https://github.com/itshak/Daedalus/pull/6) |
 | `integrate-upstream-cli-ipc` | Reviewed upstream experimental CLI/IPC plus PR #502/#511 fixes | [#7](https://github.com/itshak/Daedalus/pull/7) |
@@ -272,3 +273,15 @@ The `unify-authentication` and `native-mac-browser-login` archived implementatio
 Archiving the implementation is not production authorization.
 
 Offline headless Chromium verification on the development host: `tests/test_browser_recovery.py` **7 passed**, using intercepted synthetic pages; no Gameforge traffic.
+
+## 2026-11-20: Account identity and encrypted login backup
+
+The Accounts view now prioritizes verified Gameforge email addresses over
+imported placeholder labels, formats Russian worlds as flag plus exact server
+number, and uses accessible check/X/unknown indicators for account enabling,
+game sessions and IkaBot worker attachment. The login prompt uses verified
+email from the server. Mac Keychain keeps local credentials and encrypts
+opt-in backups for the persistent protected Linux store; the API never serves
+plaintext passwords. A background action migrates previously saved Mac logins.
+Accounts with no recoverable credentials still require one-time input.
+The live deployment and actual Mac acceptance remain separately owner-controlled.
