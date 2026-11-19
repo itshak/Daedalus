@@ -35,6 +35,14 @@ def fake_worker(tmp_path, responder=None):
         if msg["action"] == "list_cities_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "cities": [{"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}]}
+        if msg["action"] == "list_buildings_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "buildings": [
+                        {"position": 1, "name": "Town Hall", "building": "townHall",
+                         "level": 12, "busy": False, "can_upgrade": True},
+                        {"position": 3, "name": "Academy", "building": "academy",
+                         "level": 6, "busy": True, "can_upgrade": False},
+                    ]}
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
@@ -310,3 +318,56 @@ def test_active_validation_refuses_missing_existing_session_without_get(tmp_path
     with fake_worker(tmp_path, responder) as (client, requested, _):
         assert client.validate_account(ALPHA) is False
         assert [item["action"] for item in requested] == ["list_sessions"]
+
+
+def test_building_inventory_uses_existing_session_and_owned_city(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        buildings = client.buildings(ALPHA, 42)
+        assert [(row["position"], row["level"]) for row in buildings] == [(1, 12), (3, 6)]
+        assert requests[-1] == {"action": "list_buildings_existing",
+                                "world": "s301-en", "player": "ExamplePlayer", "city_id": 42}
+        with pytest.raises(ValueError, match="belong"):
+            client.buildings(ALPHA, 43)
+        assert all(row["action"] != "start_task_existing" for row in requests)
+
+
+def test_building_inventory_rejects_cross_account_ipc_data(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}
+            ]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        if msg["action"] == "list_buildings_existing":
+            return {"status": "ok", "world": "s302-en", "username": "OtherPlayer",
+                    "city_id": 42, "buildings": []}
+        raise AssertionError("No other IPC action expected")
+
+    with fake_worker(tmp_path, responder) as (client, requests, _):
+        with pytest.raises(EngineIPCUnavailable, match="another account"):
+            client.buildings(ALPHA, 42)
+        assert not any(row["action"].startswith("start_task") for row in requests)
+
+
+def test_building_inventory_rejects_malformed_and_duplicate_positions(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": 42, "buildings": [
+                    {"position": 1, "level": 10, "name": "Town Hall",
+                     "building": "townHall", "busy": False, "can_upgrade": True},
+                    {"position": 1, "level": 20, "name": "Academy",
+                     "building": "academy", "busy": False, "can_upgrade": True},
+                ]}
+    with fake_worker(tmp_path, responder) as (client, _, _):
+        with pytest.raises(EngineIPCUnavailable, match="invalid building"):
+            client.buildings(ALPHA, 42)
