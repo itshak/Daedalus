@@ -11,7 +11,7 @@ import logging
 import sys
 
 from PySide6.QtCore import QObject, QRect, QSize, QThread, QTimer, Signal
-from PySide6.QtWidgets import QPlainTextEdit, QSizePolicy, QSpacerItem
+from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     FluentWindow,
@@ -22,6 +22,7 @@ from qfluentwidgets import (
     setTheme,
 )
 
+from daedalus.accounts import Account
 from daedalus.client import APIConnectionError, DaedalusClient
 from daedalus.connection_prefs import (
     PreferenceError,
@@ -48,6 +49,10 @@ from daedalus.gui_preferences import (
     GuiPreferences,
     load_gui_preferences,
     save_gui_preferences,
+)
+from daedalus.native_browser_handoff import (
+    NativeHandoffUnavailable,
+    encrypt_mac_world_session,
 )
 
 logger = logging.getLogger("daedalus.desktop")
@@ -111,6 +116,11 @@ class APIWorker(QThread):
                     "accounts": self.client.accounts(),
                     "capabilities": self.client.capabilities(),
                     "account_config": self.client.account_config(),
+                    "native_browser_login": (
+                        self.client.native_browser_login_capabilities()
+                        if callable(getattr(self.client, "native_browser_login_capabilities", None))
+                        else {"enabled": False}
+                    ),
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
@@ -128,6 +138,21 @@ class APIWorker(QThread):
                 result = self.client.pending_assistance()
             elif self.action == "auth_assistance" and self.account_id:
                 result = self.client.auth_assistance(self.account_id)
+            elif self.action == "native_login_start" and self.account_id:
+                result = self.client.start_native_browser_login(
+                    self.account_id, confirmed=True,
+                )
+            elif (self.action == "native_login_complete" and self.account_id
+                  and self.task_payload):
+                result = self.client.finish_native_browser_login(
+                    self.account_id, str(self.task_payload["ticket_id"]),
+                    self.task_payload["envelope"],
+                )
+            elif (self.action == "native_login_cancel" and self.account_id
+                  and self.task_payload):
+                result = self.client.cancel_native_browser_login(
+                    self.account_id, str(self.task_payload["ticket_id"]),
+                )
             elif self.action == "recovery_guide" and self.account_id:
                 result = self.client.recovery_guide(self.account_id)
             elif self.action == "recovery_prepare" and self.account_id:
@@ -236,6 +261,11 @@ class SecureSSHConnectionWorker(QThread):
                 "accounts": client.accounts(),
                 "capabilities": client.capabilities(),
                 "account_config": client.account_config(),
+                "native_browser_login": (
+                    client.native_browser_login_capabilities()
+                    if callable(getattr(client, "native_browser_login_capabilities", None))
+                    else {"enabled": False}
+                ),
             }
             self.completed.emit("ssh_connect", {
                 "result": result, "client": client, "tunnel": tunnel,
@@ -274,6 +304,7 @@ class MainWindow(FluentWindow):
         # timer fired from completed may race with finished and be discarded.
         self._preflight_queue: list[tuple[str, str]] = []
         self._pending_task_refresh: str | None = None
+        self._pending_native_login_challenge: dict[str, object] | None = None
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
@@ -346,6 +377,7 @@ class MainWindow(FluentWindow):
         self.accounts_page.recovery_guide_requested.connect(
             lambda account_id: self._request("recovery_guide", account_id=account_id)
         )
+        self.accounts_page.native_browser_login_requested.connect(self._begin_native_browser_login)
         self.accounts_page.recovery_prepare_requested.connect(
             lambda account_id: self._request(
                 "recovery_prepare", account_id=account_id,
@@ -462,6 +494,84 @@ class MainWindow(FluentWindow):
         account_id = self.tasks_page.selected_account_id()
         if account_id:
             self._request_task_refresh(account_id)
+
+    def _begin_native_browser_login(self, account_id: str) -> None:
+        if self.client is None or self._worker is not None:
+            self._notice("Cannot open login", "Connect and finish the current request first.")
+            return
+        account = self.accounts_page.account_record(account_id)
+        if account is None or account.get("enabled") is not True:
+            return
+        answer = QMessageBox.question(
+            self, "Secure Gameforge browser login on your Mac",
+            "An isolated Mac browser will open official Gameforge pages. "
+            "You enter your password and complete any CAPTCHA yourself. "
+            "When you approve the handoff, only the selected world's secure "
+            "session cookie is encrypted to your backend. The server will "
+            "independently verify your player before replacing any worker. "
+            "Existing tasks are NEVER replayed. A dedicated worker must be idle "
+            "and may be paused for recovery. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self._request("native_login_start", account_id=account_id)
+
+    def _open_native_browser_login(self, challenge: dict[str, object]) -> None:
+        account_id = challenge.get("account_id")
+        record = self.accounts_page.account_record(account_id) if isinstance(account_id, str) else None
+        if (record is None or record.get("world") != challenge.get("world")
+                or record.get("enabled") is not True):
+            self._notice("Login cancelled", "The account identity changed before browser login.")
+            if isinstance(account_id, str) and isinstance(challenge.get("ticket_id"), str):
+                self._request("native_login_cancel", account_id=account_id,
+                              task_payload={"ticket_id": challenge["ticket_id"]})
+            return
+        try:
+            from daedalus.desktop.native_login_dialog import NativeLoginDialog
+
+            dialog = NativeLoginDialog(
+                world=str(record["world"]), player=str(record["player"]),
+                ttl_seconds=int(challenge["expires_in_seconds"]), parent=self,
+            )
+        except (ImportError, RuntimeError, ValueError):
+            logger.warning("Native browser could not open")
+            self._notice("Native browser unavailable", "This preview needs the Qt WebEngine runtime.")
+            self._request("native_login_cancel", account_id=account_id,
+                          task_payload={"ticket_id": challenge["ticket_id"]})
+            return
+        was_polling = self._assistance_poll.isActive()
+        self._assistance_poll.stop()
+        try:
+            if dialog.exec() != QDialog.Accepted:
+                self._request("native_login_cancel", account_id=account_id,
+                              task_payload={"ticket_id": challenge["ticket_id"]})
+                return
+            try:
+                selected = Account(
+                    str(record["id"]), str(record["world"]), str(record["player"]),
+                    str(record.get("label") or record["player"]), True,
+                )
+                envelope = encrypt_mac_world_session(
+                    challenge, selected, dialog.world_session(),
+                    email=dialog.optional_email(),
+                )
+            except (NativeHandoffUnavailable, ValueError):
+                self._notice("World login not ready", "The secure world session is invalid. Try again.")
+                self._request("native_login_cancel", account_id=account_id,
+                              task_payload={"ticket_id": challenge["ticket_id"]})
+                return
+            finally:
+                dialog.discard_session()
+            # The HTTP thread sees ciphertext only. It never owns a plaintext
+            # Gameforge session, email, password or browser page.
+            self._request("native_login_complete", account_id=account_id,
+                          task_payload={"ticket_id": challenge["ticket_id"],
+                                        "envelope": envelope})
+        finally:
+            dialog.dispose_browser()
+            dialog.deleteLater()
+            if was_polling:
+                self._assistance_poll.start()
 
     def _request_task_refresh(self, account_id: str) -> None:
         if self.client is None:
@@ -736,6 +846,10 @@ class MainWindow(FluentWindow):
             demo = bool(health.get("synthetic_demo") is True)
             self.connection_page.set_connected(True, demo=demo)
             self.home_page.set_connected(True, demo=demo)
+            browser_capability = payload.get("native_browser_login") or {}
+            self.accounts_page.set_native_browser_login_enabled(
+                not demo and browser_capability.get("enabled") is True
+            )
             self.warehouses_page.set_demo(demo)
             self.warehouses_page.clear_reports()
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
@@ -813,6 +927,31 @@ class MainWindow(FluentWindow):
                 account_id = payload.get("account_id")
                 if isinstance(account_id, str):
                     self._recovery_followup = ("recovery_guide", account_id)
+        elif action == "native_login_start":
+            assert isinstance(payload, dict)
+            self._pending_native_login_challenge = payload
+            logger.info("One-time Mac browser login prepared; no game action started")
+        elif action == "native_login_complete":
+            assert isinstance(payload, dict)
+            if payload.get("status") == "worker_recovered_verified":
+                self._notice(
+                    "Game session verified",
+                    "The backend independently verified the selected player and "
+                    "rebound the idle worker. No old task was restarted.",
+                )
+            else:
+                self._notice(
+                    "Game session verified and saved",
+                    "The server stored a verified world session in its OS keyring. "
+                    "Start or attach a dedicated worker before running tasks.",
+                )
+            self._recovery_followup = ("accounts", "")
+        elif action == "native_login_cancel":
+            self._notice(
+                "Mac browser login cancelled",
+                "No new session was imported. A dedicated worker may remain "
+                "paused; start a new login or review its recovery status.",
+            )
         elif action == "recovery_guide":
             assert isinstance(payload, dict)
             self.accounts_page.set_recovery_guide(payload)
@@ -904,6 +1043,8 @@ class MainWindow(FluentWindow):
     def _on_failed(self, action: str, error: str) -> None:
         # Never reuse a recovery refresh across a failed or changed backend.
         self._recovery_followup = None
+        if action == "native_login_start":
+            self._pending_native_login_challenge = None
         if action == "task_preflight":
             for view in self._task_views:
                 view.set_preflight_unavailable()
@@ -925,7 +1066,19 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(self.client is not None)
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight"}:
-            if action == "task_start":
+            if action.startswith("native_login_"):
+                known_reason = str(error) if str(error) in {
+                    "A Gameforge email is required for first-time account binding",
+                    "This worker is busy or has an uncertain task; reconcile it before login",
+                    "Running or uncertain tasks must be reconciled before login",
+                } else None
+                self._notice(
+                    "Mac browser recovery unavailable",
+                    known_reason or "The server could not complete the secure session step. "
+                    "Check that the worker is idle, prior uncertain tasks are reconciled, "
+                    "and the selected account is configured on the server.",
+                )
+            elif action == "task_start":
                 self._notice("Automation not started", error)
             elif action in {"task_stop", "task_reconcile"}:
                 self._notice("Automation action failed", error)
@@ -936,6 +1089,12 @@ class MainWindow(FluentWindow):
         self._worker = None
         self.connection_page.connect_button.setEnabled(True)
         self.connection_page.ssh_button.setEnabled(True)
+        challenge, self._pending_native_login_challenge = (
+            self._pending_native_login_challenge, None
+        )
+        if challenge is not None and self.client is not None:
+            QTimer.singleShot(0, lambda: self._open_native_browser_login(challenge))
+            return
         followup, self._recovery_followup = self._recovery_followup, None
         if followup is not None and self.client is not None:
             action, account_id = followup

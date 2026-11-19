@@ -54,7 +54,7 @@ The saved IkaBot email association SHALL exist only in a protected OS credential
 
 ### Requirement: Manually imported session cookies never traverse public APIs or project files
 
-The CLI SHALL prompt for a world cookie only in an interactive echo-disabled local terminal with separate explicit network consent, and SHALL keep it out of command arguments, environment variables, logs, TOML and HTTP API. Only a verified cookie MAY be stored through a protected OS credential provider, using an account/world/player-specific key.
+The expert CLI SHALL prompt for a world cookie only in an interactive echo-disabled **host-local** terminal with separate explicit network consent; it SHALL keep plaintext credentials out of command arguments, environment variables, logs and TOML. The separate opt-in native Mac encrypted handoff is the only permitted remote transfer: it SHALL NOT accept any raw plaintext world-cookie field. Only a server-side independently verified cookie MAY be promoted to a protected OS credential provider, using an account/world/player-specific key.
 
 #### Scenario: No terminal or OS credential provider
 - **WHEN** a user attempts to bind a world cookie without a TTY or protected keyring
@@ -86,3 +86,15 @@ The one-click demo SHALL use only `create_app(demo_mode=True)`, SHALL bind only 
 #### Scenario: Remember connection was enabled
 - **WHEN** a user selects the demo action after enabling Remember connection
 - **THEN** the UI SHALL explicitly disable persistence for the ephemeral demo token
+
+### Requirement: Remote Mac session material is encrypted for a one-use identity-bound handoff
+
+A backend explicitly opted in to native browser recovery MAY receive encrypted world-cookie material only through a time-limited, single-use public-key challenge scoped to the exact fixed configured account/world/player identity. It MUST require the existing API bearer, trusted HTTPS for remote access, authenticated encryption, protected OS-keyring storage after independent world verification, and sanitized failures. The endpoint MUST reject raw plaintext game cookies, passwords, unrelated profiles, expired challenges and replays.
+
+#### Scenario: Browser session is submitted
+- **WHEN** the native Mac user explicitly authorizes one world-cookie handoff
+- **THEN** the API receives ciphertext, a one-time client public key and nonce only; no plaintext world cookie or Gameforge identity appears in request fields, logs, responses or project files
+
+#### Scenario: Envelope is tampered with or replayed
+- **WHEN** an attacker changes ciphertext, identity binding, or reuses a consumed ticket
+- **THEN** decryption/validation fails closed and no worker or verified cookie is replaced

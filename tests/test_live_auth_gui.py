@@ -249,3 +249,22 @@ def test_recovery_status_refresh_waits_for_finished_worker(qt_app, monkeypatch):
     finally:
         window.client = None
         _dispose(window, qt_app)
+
+
+def test_native_mac_browser_cookie_policy_is_present_in_standard_macos_ci():
+    """Run on the existing macOS GUI workflow without workflow-file edits."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtNetwork import QNetworkCookie
+
+    from daedalus.desktop.native_login_dialog import (
+        allowed_gameforge_navigation,
+        exact_world_cookie,
+    )
+
+    assert allowed_gameforge_navigation(QUrl("https://lobby.ikariam.gameforge.com"), True)
+    assert not allowed_gameforge_navigation(QUrl("https://gameforge.com.attacker.example"), True)
+    correct = QNetworkCookie(b"ikariam", b"S" * 48)
+    correct.setDomain("s301-en.ikariam.gameforge.com")
+    correct.setSecure(True)
+    assert exact_world_cookie(correct, "s301-en.ikariam.gameforge.com") == "S" * 48
+    assert exact_world_cookie(correct, "s302-en.ikariam.gameforge.com") is None

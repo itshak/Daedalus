@@ -60,17 +60,15 @@ verified game task launch/stop, remote login recovery, reboot keyring
 persistence or a production-wide cutover. Installing a new macOS CI preview
 artifact is required to test redesigned native controls.
 
+## Native Mac browser login implementation (archived 2026-11-19)
+
+The completed `native-mac-browser-login` implementation now offers first-class **Sign in on this Mac**, a temporary off-record Qt WebEngine Gameforge browser, optional encrypted email binding, single-use account-bound X25519/AES-GCM cookie exchange over authenticated HTTPS, and server-side independent player verification. It preserves an idle dedicated worker's account lease and denies recovery for active or unconfirmed tasks. Synthetic offline API, engine, GUI, WebEngine cleanup and cryptography tests passed; the Mac build pipeline must still validate the final packaged .app. **The live production backend is not restarted automatically**: its current owner and any unconfirmed dispatches require a controlled operational rollout. The owner-dependent field acceptance is still open in `validate-live-authentication`. See [native Mac login](NATIVE-MAC-LOGIN.md).
+
 ## Still active
 
-One umbrella change remains **open** for owner-supervised **real-account**
-acceptance, although its two offline implementation tasks (the host-only
-desktop recovery integration and independent server player attestation)
-have passed synthetic tests.
+One umbrella change remains **open** for owner-supervised **real-account** acceptance. The native Mac browser and encrypted world-cookie handoff, backend independent game-world player attestation, and exclusive-worker recovery implementation have passed synthetic tests; none of these can stand in for owner-supervised real Gameforge/MFA/CAPTCHA, task-dispatch, daemon keyring persistence or production cutover acceptance.
 
-- `validate-live-authentication`: the native desktop now prepares one idle
-  owned worker, guides a human to the authoritative host, acknowledges a
-  nonsecret assistance ticket, and confirms independently verified rebind.
-  The backend stores staged cookies solely in that host's OS keyring.
+- `validate-live-authentication`: the native Mac GUI now opens an ephemeral local Gameforge browser, encrypts the selected world cookie in a one-use account-bound envelope and sends it to the authoritative Linux backend over authenticated HTTPS. On an idle dedicated worker, the backend checks task states, retains the identity lease, independently verifies the actual world/player and promotes only a valid staged cookie to the server's protected keyring. The host-local browser remains an advanced fallback.
   The engine now requires recognizable server-rendered player identity on
   fresh TLS-validated game-world responses. A subsequent limited real-account smoke passed saved-cookie identity attestation and read-only data, but **not** the complete real-account recovery/task acceptance.
 
@@ -83,7 +81,7 @@ rejected automatic credentials and unconfirmed task/server start. See
 
 ### Remaining OpenSpec completion gates
 
-**3 unchecked acceptance tasks across 1 active change** remain. All require
+**3 unchecked real-account acceptance tasks across 1 active change** remain. All require
 owner-approved live testing or explicit cutover approval. CI cannot substitute.
 
 | Active change | Remaining gate | Evidence required |
@@ -92,14 +90,14 @@ owner-approved live testing or explicit cutover approval. CI cannot substitute.
 | `validate-live-authentication` | Validate worker rebind, expiry, recovery and explicit task dispatch | No duplicate real game operations |
 | `validate-live-authentication` | Reconcile real findings and authorize cutover | Owner's sanitized acceptance and explicit approval |
 
-The offline implementation now has synthetic native Qt, API, browser-cookie,
+The offline implementation now has synthetic native Qt WebEngine, one-use encrypted API, browser-cookie,
 engine IPC and negative player-attestation coverage. The maintained IkaBot
 engine rejects cookies when the world page lacks a recognized current-player
 marker, contradicts the saved player, or redirects elsewhere. That may
 prevent real-world authentication if Gameforge's present markup has changed:
 unrecognized layout deliberately **fails closed**. Follow the
 [owner-supervised acceptance plan](LIVE-ACCEPTANCE.md) and
-[host-local recovery guide](BROWSER-RECOVERY.md). Production cutover is not
+[native Mac login guide](NATIVE-MAC-LOGIN.md). Production cutover is not
 approved by a green PR.
 
 The new `tests/test_openspec_hygiene.py` guard fails CI if an archived change contains an unchecked task, if a completed active change is left unarchived, if an active change is absent from this status document, or if a change's capability has no canonical specification. It enforces consistency; it does not implement the remaining features.
@@ -184,6 +182,6 @@ The optional ephemeral human-operated Chromium login assistant is implemented in
 
 ## Authentication offline scope archived; live integration remains open
 
-The `unify-authentication` OpenSpec change records offline-tested single-owner leases, protected browser and keyring recovery, worker verification, an idle-only dedicated-worker rebind primitive and one-use new-task approval. It does **not** claim a complete remote GUI recovery flow, independently attested server-side player identity, or successful real Gameforge login. Those remaining integration and supervised tests are tracked in the active `validate-live-authentication` change. Archiving the offline implementation is not production authorization.
+The `unify-authentication` and `native-mac-browser-login` archived implementation changes cover single-owner leases, Mac browser and encrypted HTTPS handoff, OS keyring, independent world/player verification and idle-only dedicated-worker recovery. They do **not** claim successful real Gameforge login/CAPTCHA, real-world dedicated rebind, task dispatch acceptance or production cutover. Those supervised tests remain tracked in the active `validate-live-authentication` change. Archiving the offline implementation is not production authorization.
 
 Offline headless Chromium verification on the development host: `tests/test_browser_recovery.py` **7 passed**, using intercepted synthetic pages; no Gameforge traffic.

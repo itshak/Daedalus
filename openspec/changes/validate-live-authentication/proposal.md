@@ -5,7 +5,7 @@ The offline authentication implementation can be archived without falsely claimi
 
 ## What Changes
 - Run a supervised isolated-account end-to-end login, CAPTCHA, cookie restoration, worker rebind and new-task flow when the owner authorizes testing.
-- Connect the desktop's remote recovery UX to the supported authoritative-host workflow without transmitting cookies through the API.
+- Verify the implemented native Mac browser recovery and account-bound encrypted handoff against an owner-authorized real account; never submit plaintext game cookies through API fields.
 - Confirm the game server's actual player identity, not merely local restored engine metadata, before considering production cutover.
 - Investigate compatibility failures and document deployment-specific recovery limits; preserve the running production IkaBot installation.
 

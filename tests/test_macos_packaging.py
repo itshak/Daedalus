@@ -84,3 +84,14 @@ def test_script_has_no_user_config_side_effects(packager):
     assert "shutil.copy(" not in script
     assert "seed_config(" not in script
     assert "os.environ[" not in script
+
+
+def test_native_mac_browser_packaging_requires_renderer_helper(packager, tmp_path):
+    bundle = tmp_path / "Daedalus.app"
+    bundle.mkdir()
+    with pytest.raises(RuntimeError, match="WebEngine browser subprocess"):
+        packager.require_native_browser_runtime(bundle)
+    helper = bundle / "Contents/Frameworks/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes(b"synthetic Qt WebEngine helper")
+    packager.require_native_browser_runtime(bundle)

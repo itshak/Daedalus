@@ -98,11 +98,17 @@ class DaedalusClient:
                     detail = response.json().get("detail")
                 except (TypeError, ValueError, AttributeError):
                     detail = None
-                allowed = {
-                    409: "Configure Telegram or Discord notifications before starting this alert",
-                    422: "Invalid automation parameters. Review the fields and try again.",
+                safe_409 = {
+                    "Configure Telegram or Discord notifications before starting this alert",
+                    "A Gameforge email is required for first-time account binding",
+                    "This worker is busy or has an uncertain task; reconcile it before login",
+                    "Running or uncertain tasks must be reconciled before login",
+                    "This backend has not enabled native browser login",
                 }
-                if detail == allowed[response.status_code]:
+                if (response.status_code == 409 and detail in safe_409) or (
+                    response.status_code == 422 and detail ==
+                    "Invalid automation parameters. Review the fields and try again."
+                ):
                     raise APIConnectionError(detail, response.status_code)
             raise APIConnectionError("Backend task request was rejected", response.status_code)
         try:
@@ -317,6 +323,72 @@ class DaedalusClient:
         return self._write(f"accounts/{account_id}/auth-assistance/{ticket_id}/approve", {
             "confirmed": True,
         })
+
+    def native_browser_login_capabilities(self) -> dict[str, object]:
+        try:
+            response = self._read("native-browser-login")
+        except APIConnectionError as exc:
+            if exc.status_code == 404:
+                return {"enabled": False, "mode": "unavailable"}
+            raise
+        if (type(response.get("enabled")) is not bool or
+                response.get("mode") != "mac_ephemeral_encrypted"):
+            raise APIConnectionError("Backend native browser capability is invalid")
+        return response
+
+    def start_native_browser_login(
+        self, account_id: str, *, confirmed: bool,
+    ) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or confirmed is not True:
+            raise ValueError("Exact account and explicit Mac browser approval required")
+        response = self._write(f"accounts/{account_id}/browser-login/start", {
+            "confirmed": True,
+        })
+        if (
+            response.get("status") != "browser_login_ready"
+            or response.get("account_id") != account_id
+            or not isinstance(response.get("world"), str)
+            or not re.fullmatch(r"s[0-9]{1,6}-[a-z]{2,4}", response["world"])
+            or not isinstance(response.get("ticket_id"), str)
+            or not re.fullmatch(r"[0-9a-f-]{36}", response["ticket_id"])
+            or not isinstance(response.get("public_key"), str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{42,44}", response["public_key"])
+            or not isinstance(response.get("expires_in_seconds"), int)
+            or not 60 <= response["expires_in_seconds"] <= 900
+        ):
+            raise APIConnectionError("Backend native browser challenge is malformed")
+        return response
+
+    def finish_native_browser_login(
+        self, account_id: str, ticket_id: str, envelope: dict[str, object],
+    ) -> dict[str, str]:
+        if (not _ACCOUNT_ID.fullmatch(account_id)
+                or not re.fullmatch(r"[0-9a-f-]{36}", ticket_id)
+                or set(envelope) != {"confirmed", "client_key", "nonce", "ciphertext"}
+                or envelope.get("confirmed") is not True
+                or any(not isinstance(envelope.get(key), str)
+                       for key in ("client_key", "nonce", "ciphertext"))):
+            raise ValueError("A valid encrypted and confirmed handoff is required")
+        reply = self._write(
+            f"accounts/{account_id}/browser-login/{ticket_id}/complete", envelope,
+        )
+        if (reply.get("account_id") != account_id
+                or reply.get("status") not in {
+                    "world_cookie_bound", "worker_recovered_verified",
+                }):
+            raise APIConnectionError("Browser login did not receive a verified server receipt")
+        return reply
+
+    def cancel_native_browser_login(
+        self, account_id: str, ticket_id: str,
+    ) -> dict[str, object]:
+        if (not _ACCOUNT_ID.fullmatch(account_id)
+                or not re.fullmatch(r"[0-9a-f-]{36}", ticket_id)):
+            raise ValueError("Invalid browser login cancellation")
+        return self._write(
+            f"accounts/{account_id}/browser-login/{ticket_id}/cancel",
+            {"confirmed": True},
+        )
 
     def recovery_guide(self, account_id: str) -> dict[str, object]:
         """Read only strictly typed host-local recovery metadata, never secrets."""

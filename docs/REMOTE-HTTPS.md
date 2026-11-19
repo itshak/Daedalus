@@ -22,3 +22,7 @@ The Cloudflare Tunnel is **server-side**: it is not an SSH tunnel and requires n
 ## Native macOS client behavior
 
 The Connection page opens to a single primary **Connect** action. The first successful authenticated HTTPS session stores the exact URL in owner-only local preferences and its bearer in macOS Keychain by default. From subsequent launches, only the **same** saved HTTPS origin is auto-connected; missing/locked Keychain state fails without leaking the token. Explicitly unchecking the Keychain option creates an ephemeral session. No Gameforge login or game task runs from this connection action. Optional local loopback, SSH fallback and an isolated demo remain available for development, behind advanced options.
+
+## Native Mac browser login through trusted HTTPS
+
+Starting the backend with `--enable-native-browser-login` enables an audited, bearer-authenticated, one-use encrypted session handoff API. No *plaintext* Gameforge cookie, password, email or browser profile is accepted as a field; only a session encrypted with the short-lived server public key and bound to the exact account/world/player/ticket is permitted. All endpoints require the same strong API bearer. Do not enable for public demos or metadata-editing mode. Rate-limit or place an appropriate access policy in front of the authenticated API. All actual game session verification and owner lease enforcement stays on the Linux backend, not on the Mac. See [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md).

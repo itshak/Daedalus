@@ -208,6 +208,7 @@ class AccountsPage(QWidget):
     recovery_guide_requested = Signal(str)
     recovery_prepare_requested = Signal(str)
     rebind_requested = Signal(str, str)
+    native_browser_login_requested = Signal(str)
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -278,10 +279,26 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_approve_button)
         assistance_actions.addStretch(1)
         layout.addLayout(assistance_actions)
+        native_login_actions = QHBoxLayout()
+        self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
+        self.native_browser_login_button.setToolTip(
+            "Human Gameforge browser login on this Mac; encrypted one-time handoff "
+            "to your verified backend worker"
+        )
+        self.native_browser_login_button.setEnabled(False)
+        self.native_browser_login_button.clicked.connect(self._native_browser_login)
+        native_login_actions.addWidget(self.native_browser_login_button)
+        self.native_login_status = CaptionLabel(
+            "Native Mac browser login is available when your backend enables secure recovery."
+        )
+        native_login_actions.addWidget(self.native_login_status, 1)
+        layout.addLayout(native_login_actions)
+        self._native_browser_login_enabled = False
+
         recovery_actions = QHBoxLayout()
-        self.recovery_guide_button = PushButton("Host recovery instructions")
-        self.recovery_prepare_button = PushButton("Prepare idle worker recovery")
-        self.rebind_button = PushButton("Verify staged cookie and rebind worker")
+        self.recovery_guide_button = PushButton("Advanced: host recovery instructions")
+        self.recovery_prepare_button = PushButton("Advanced: prepare host-side recovery")
+        self.rebind_button = PushButton("Advanced: verify host-staged session")
         self.recovery_guide_button.setEnabled(False)
         self.recovery_prepare_button.setEnabled(False)
         self.rebind_button.setEnabled(False)
@@ -408,6 +425,26 @@ class AccountsPage(QWidget):
             self._updating_report_checks = False
         self._update_select_all_reports()
 
+    def account_record(self, account_id: str) -> dict[str, object] | None:
+        return next((dict(record) for record in self._accounts
+                     if record.get("id") == account_id), None)
+
+    def set_native_browser_login_enabled(self, enabled: bool) -> None:
+        self._native_browser_login_enabled = enabled
+        self.native_login_status.setText(
+            "Secure browser sign-in is available. Select the correct account above."
+            if enabled else
+            "This backend has not enabled native browser login."
+        )
+        self._update_assistance_buttons()
+
+    def _native_browser_login(self) -> None:
+        account_id = self._selected_visible_id()
+        account = self.account_record(account_id) if account_id else None
+        if (account_id is not None and account is not None and
+                account.get("enabled") is True and self._native_browser_login_enabled):
+            self.native_browser_login_requested.emit(account_id)
+
     def _selected_visible_id(self) -> str | None:
         index = self.table.currentRow()
         if 0 <= index < len(self._accounts):
@@ -418,6 +455,11 @@ class AccountsPage(QWidget):
 
     def _update_assistance_buttons(self) -> None:
         account_id = self._selected_visible_id()
+        selected = self.account_record(account_id) if account_id else None
+        self.native_browser_login_button.setEnabled(
+            self._native_browser_login_enabled and account_id is not None
+            and selected is not None and selected.get("enabled") is True
+        )
         self.assistance_check_button.setEnabled(account_id is not None)
         self.recovery_guide_button.setEnabled(account_id is not None)
         self.monitor_button.setEnabled(self._monitor_enabled and account_id is not None)
