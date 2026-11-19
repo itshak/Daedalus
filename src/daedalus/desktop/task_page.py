@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -105,6 +106,7 @@ class TasksPage(QWidget):
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
     cities_requested = Signal(str)
+    buildings_requested = Signal(str, int)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -133,6 +135,8 @@ class TasksPage(QWidget):
         self._status_account_ids: list[str] = []
         # Authenticated, account-bound read-only city options; never invent IDs.
         self._cities_by_account: dict[str, list[dict[str, object]]] = {}
+        self._buildings_scope: tuple[str, int] | None = None
+        self._building_rows: list[dict[str, object]] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
         outer = QVBoxLayout(self)
@@ -226,7 +230,7 @@ class TasksPage(QWidget):
         scope_row.addStretch(1)
         layout.addLayout(scope_row)
 
-        self.category_combo = ComboBox()
+        self.category_combo = ComboBox(self)
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
         self.group_tabs = Pivot(self)
@@ -297,6 +301,25 @@ class TasksPage(QWidget):
         self.parameter_layout = QFormLayout(self.parameter_container)
         self.parameter_scroll.setWidget(self.parameter_container)
         layout.addWidget(self.parameter_scroll)
+        # Source-backed construction inventory: never a fabricated plan.
+        self.building_header = SubtitleLabel("Buildings in this city")
+        layout.addWidget(self.building_header)
+        self.building_table = _table([
+            "Choose", "Building", "Slot", "Current level", "Target level", "Status"
+        ])
+        self.building_table.setAccessibleName("Read-only verified city building levels and draft targets")
+        self.building_table.setMinimumHeight(180)
+        self.building_table.setMaximumHeight(320)
+        layout.addWidget(self.building_table)
+        self.building_note = CaptionLabel(
+            "Choose a city to inspect its actual buildings. Upgrade targets are drafts; "
+            "starting requires an upstream-validated construction plan, not raw values."
+        )
+        self.building_note.setWordWrap(True)
+        layout.addWidget(self.building_note)
+        self.building_header.hide()
+        self.building_table.hide()
+        self.building_note.hide()
         self.advanced_toggle = PushButton("Show advanced JSON options")
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
         layout.addWidget(self.advanced_toggle)
@@ -518,6 +541,9 @@ class TasksPage(QWidget):
         self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
         # A metadata refresh may represent a changed session, so discard city caches.
         self._cities_by_account.clear()
+        self._buildings_scope = None
+        self._building_rows = []
+        self.building_table.setRowCount(0)
         self._account_metadata = [
             a for a in self._all_account_metadata if a.get("enabled") is True
         ]
@@ -621,7 +647,76 @@ class TasksPage(QWidget):
             picker = self._form_inputs.get("city_id")
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
-                self._invalidate_review()
+                self._construction_city_changed()
+
+    def _selected_construction_city(self) -> int | None:
+        if self.selected_task_name() != "constructionList":
+            return None
+        picker = self._form_inputs.get("city_id")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        return cities[index - 1]["id"] if 1 <= index <= len(cities) else None
+
+    def _construction_city_changed(self, *_args: object) -> None:
+        self._mark_form_dirty()
+        self._building_rows = []
+        self._buildings_scope = None
+        self.building_table.setRowCount(0)
+        city_id = self._selected_construction_city()
+        account_id = self.selected_account_id()
+        if account_id and city_id:
+            self.building_note.setText("Loading real building levels for the chosen city…")
+            self.buildings_requested.emit(account_id, city_id)
+        else:
+            self.building_note.setText("Choose an actual city to inspect its buildings.")
+
+    def set_buildings(self, account_id: str, city_id: int,
+                      buildings: list[dict[str, object]]) -> None:
+        if account_id != self.selected_account_id() or city_id != self._selected_construction_city():
+            return  # late result from a different account/city
+        self._buildings_scope = (account_id, city_id)
+        self._building_rows = [dict(item) for item in buildings]
+        self.building_table.setRowCount(len(self._building_rows))
+        for row_index, item in enumerate(self._building_rows):
+            position, level = item["position"], item["level"]
+            choice = QTableWidgetItem("")
+            choice.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            choice.setCheckState(Qt.Unchecked)
+            choice.setData(Qt.UserRole, position)
+            self.building_table.setItem(row_index, 0, choice)
+            for col, value in ((1, item["name"]), (2, position), (3, level),
+                               (5, "Upgrading" if item["busy"] else
+                                "Eligible" if item["can_upgrade"] else "Not available")):
+                cell = QTableWidgetItem(str(value))
+                cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.building_table.setItem(row_index, col, cell)
+            target = QSpinBox(self.building_table)
+            target.setAccessibleName(f"Draft target level for {item['name']}")
+            target.setRange(level, 150)
+            target.setValue(level)
+            target.setEnabled(item["can_upgrade"] and not item["busy"])
+            target.valueChanged.connect(self._mark_form_dirty)
+            self.building_table.setCellWidget(row_index, 4, target)
+            choice.setFlags(choice.flags() if item["can_upgrade"] and not item["busy"]
+                            else Qt.ItemIsEnabled)
+        self.building_note.setText(
+            f"{len(self._building_rows)} actual buildings loaded. Select upgrade targets above. "
+            "Cost, shipment and queue preparation are not yet provided by the engine; "
+            "these draft selections cannot be started from this table. "
+            "Experts may import a separately validated construction plan."
+        )
+        self._invalidate_review()
+
+    def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
+        if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
+            self._buildings_scope = None
+            self._building_rows.clear()
+            self.building_table.setRowCount(0)
+            self.building_note.setText(
+                "Building information is unavailable for this city. "
+                "No upgrade assumptions were made; reconnect the account and refresh."
+            )
+            self._invalidate_review()
 
     def set_cities_unavailable(self, account_id: str) -> None:
         self._cities_by_account.pop(account_id, None)
@@ -629,7 +724,7 @@ class TasksPage(QWidget):
             picker = self._form_inputs.get("city_id")
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
-                self._invalidate_review()
+                self._construction_city_changed()
 
     def _choose_bulk_accounts(self) -> None:
         from daedalus.desktop.account_scope import AccountSelectionDialog
@@ -984,7 +1079,7 @@ class TasksPage(QWidget):
             "Hide advanced JSON options" if self._advanced_visible
             else "Show advanced JSON options"
         )
-        if self._advanced_visible:
+        if self._advanced_visible and self.selected_task_name() != "constructionList":
             self._build_config_from_form()
 
     def _import_advanced_config(self) -> None:
@@ -1071,7 +1166,16 @@ class TasksPage(QWidget):
         while self.parameter_layout.rowCount():
             self.parameter_layout.removeRow(0)
         self._form_inputs.clear()
+        self._buildings_scope = None
+        self._building_rows = []
+        self.building_table.setRowCount(0)
         name = self.selected_task_name()
+        show_buildings = name == "constructionList"
+        self.building_header.setVisible(show_buildings)
+        self.building_table.setVisible(show_buildings)
+        self.building_note.setVisible(show_buildings)
+        if show_buildings:
+            self.building_note.setText("Choose a city to load its actual buildings.")
         fields = self._config_fields_by_task.get(name or "", [])
         self.task_description.setText(
             f"{_friendly_task(name)}  ·  {_category(name)}. {task_explanation(name)}"
@@ -1105,7 +1209,7 @@ class TasksPage(QWidget):
                 widget = ComboBox()
                 widget.setAccessibleName("Choose a real city for construction")
                 self._populate_city_picker(widget)
-                widget.currentIndexChanged.connect(self._mark_form_dirty)
+                widget.currentIndexChanged.connect(self._construction_city_changed)
             elif field.get("choices"):
                 widget = ComboBox()
                 choices = field["choices"]
@@ -1352,6 +1456,8 @@ class TasksPage(QWidget):
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
+            # Live building selection alone is NOT a prepared engine plan.
+            and (self.selected_task_name() != "constructionList" or self._advanced_visible)
         )
         # Status/history is read-only even on a backend that refuses dispatch.
         has_read_scope = bool(self._account_ids)
