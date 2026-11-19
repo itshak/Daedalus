@@ -263,13 +263,16 @@ def test_failed_start_queues_task_history_refresh_instead_of_retry(app, monkeypa
         window.close()
 
 
-def test_https_keychain_save_is_default_and_optional_ssh_is_hidden(app):
+def test_https_keychain_save_is_default_and_optional_ssh_is_hidden(app, monkeypatch):
+    import daedalus.connection_prefs as prefs
     from daedalus.desktop.pages import ConnectionPage
 
+    monkeypatch.setattr(prefs, "load_connection_url", lambda: None)
     page = ConnectionPage()
     try:
         assert page.remember_checkbox.isChecked()
         assert page.connect_button.text() == "Connect"
+        assert page.url_input.text() == ""  # no fake local backend on a fresh Mac
         assert page.advanced_panel.isHidden()
         assert "HTTPS" in page.layout().itemAt(1).widget().text()
         page.advanced_button.click()

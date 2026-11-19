@@ -81,7 +81,9 @@ class ConnectionPage(QWidget):
         layout.addWidget(BodyLabel("Server address"))
         self.url_input = LineEdit()
         self.url_input.setPlaceholderText("https://your-daedalus-server.example")
-        self.url_input.setText("http://127.0.0.1:8765")
+        # First run must not imply a backend runs on the Mac. A saved, exact
+        # HTTPS origin is restored below when the user previously approved it.
+        self.url_input.setText("")
         from daedalus.connection_prefs import PreferenceError, load_connection_url
 
         try:
