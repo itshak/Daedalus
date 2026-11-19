@@ -44,6 +44,10 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("UpgradeUnits", "jobs"): {
+        "type": "workshop_jobs", "label": "Workshop upgrade plan",
+        "help": "Choose a real city, then available unit and ship upgrades from its IkaBot workshop.",
+    },
     # Source-verified compound editors. These field maps follow the actual
     # upstream prepare_* contract; options and amounts remain subject to
     # independent engine-side validation.
