@@ -501,6 +501,19 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid city data")
         return data
 
+    def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
+        """Read sanitized, account-scoped real building rows; never a task launch."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid building inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/buildings")
+        rows = data.get("buildings")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or not isinstance(rows, list)
+                or data.get("available") is not True
+                or not all(isinstance(row, dict) for row in rows)):
+            raise APIConnectionError("Backend building inventory unavailable")
+        return rows
+
     def warehouses(self, account_id: str) -> list[dict[str, object]]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
