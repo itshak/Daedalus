@@ -7,6 +7,7 @@ Daedalus only asks the engine for identities and already-authenticated cities.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import socket
@@ -30,6 +31,7 @@ _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_construction_existing", "list_workshop_upgrades_existing",
+    "list_trainables_existing",
 })
 
 
@@ -121,7 +123,8 @@ class ExistingIPCClient:
 
     def request(self, action: str, *, account: Account | None = None,
                 city_id: int | None = None,
-                upgrades: list[dict[str, int]] | None = None) -> dict[str, Any]:
+                upgrades: list[dict[str, int]] | None = None,
+                train_troops: bool | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
@@ -129,6 +132,7 @@ class ExistingIPCClient:
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
             "preview_construction_existing", "list_workshop_upgrades_existing",
+            "list_trainables_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -137,7 +141,7 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
-                      "list_workshop_upgrades_existing"}:
+                      "list_workshop_upgrades_existing", "list_trainables_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
                 raise ValueError("Choose a valid city")
             payload["city_id"] = city_id
@@ -153,7 +157,13 @@ class ExistingIPCClient:
                 payload["upgrades"] = upgrades
             elif upgrades is not None:
                 raise ValueError("Upgrades are allowed only in a construction preview")
-        elif city_id is not None or upgrades is not None:
+            if action == "list_trainables_existing":
+                if type(train_troops) is not bool:
+                    raise ValueError("Choose troops or ships")
+                payload["train_troops"] = train_troops
+            elif train_troops is not None:
+                raise ValueError("Training mode is only supported for real unit discovery")
+        elif city_id is not None or upgrades is not None or train_troops is not None:
             raise ValueError("City argument is not supported for this IPC action")
         return self._exchange(payload, read_timeout=60.0 if action ==
                               "preview_construction_existing" else 8.0)
@@ -439,6 +449,69 @@ class ExistingIPCClient:
         return {
             "account_id": account.id, "city_id": city_id,
             "workshop_level": level, "upgrades": result,
+        }
+
+    def trainable_units(
+        self, account: Account, city_id: int, *, train_troops: bool,
+    ) -> dict[str, object]:
+        """Bounded, account-owned barracks/shipyard unit options and current costs."""
+        if type(city_id) is not int or not 0 < city_id < 10**12 or type(train_troops) is not bool:
+            raise ValueError("Invalid training selection")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Training city not owned by account")
+        data = self.request(
+            "list_trainables_existing", account=account, city_id=city_id,
+            train_troops=train_troops,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id or data.get("train_troops") is not train_troops):
+            raise EngineIPCUnavailable("IkaBot training options belong to another account")
+        city = data.get("city")
+        units = data.get("units")
+        resources = data.get("available")
+        citizens = data.get("free_citizens")
+        if (not isinstance(city, dict) or not isinstance(units, list)
+                or not 0 < len(units) <= 100
+                or not isinstance(resources, list) or len(resources) != 5
+                or any(type(value) is not int or not 0 <= value <= 10**15 for value in resources)
+                or type(citizens) is not int or not 0 <= citizens <= 10**15):
+            raise EngineIPCUnavailable("Invalid IkaBot training inventory")
+        if (city.get("id") != str(city_id)
+                or not isinstance(city.get("cityName"), str)
+                or not 0 < len(city["cityName"]) <= 100
+                or not isinstance(city.get("pos"), str)
+                or not city["pos"].isdigit()):
+            raise EngineIPCUnavailable("IkaBot training city did not match")
+        allowed_costs = {
+            "wood", "wine", "marble", "crystal", "sulfur",
+            "citizens", "upkeep", "completiontime",
+        }
+        verified = []
+        ids = set()
+        for unit in units:
+            if not isinstance(unit, dict):
+                raise EngineIPCUnavailable("Invalid trainable unit")
+            uid, name, costs = (
+                unit.get("unit_type_id"), unit.get("local_name"), unit.get("costs")
+            )
+            if (type(uid) is not int or not 0 < uid < 10**7 or uid in ids
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(costs, dict) or not set(costs).issubset(allowed_costs)):
+                raise EngineIPCUnavailable("Malformed trainable unit data")
+            for value in costs.values():
+                if (type(value) not in (int, float)
+                        or not math.isfinite(value) or not 0 <= value <= 10**9):
+                    raise EngineIPCUnavailable("Invalid recruitable unit costs")
+            ids.add(uid)
+            verified.append({
+                "unit_type_id": uid, "local_name": name, "costs": dict(costs),
+            })
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "train_troops": train_troops,
+            "city": city, "units": verified,
+            "available": list(resources), "free_citizens": citizens,
         }
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
