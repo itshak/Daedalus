@@ -36,5 +36,6 @@ Safe bounded token API retries and noninteractive prompt fail-fast were
 independently reimplemented with synthetic regressions. Automatic environment
 credential loading, unreviewed direct login, indefinite menu parking and
 unconfirmed web server launch were explicitly rejected. No real account,
-runtime or saved-session paths were read. See the [file-by-file review](ENGINE-AUTH-RECONCILIATION.md). This source reconciliation does not complete
-`validate-live-authentication` or authorize production workers.
+runtime or saved-session paths were read. See the [file-by-file review](ENGINE-AUTH-RECONCILIATION.md). This source reconciliation does not satisfy
+[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60)
+or authorize production cutover.

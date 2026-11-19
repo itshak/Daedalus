@@ -1,6 +1,9 @@
 # Owner-supervised real-account acceptance — Mac-first
 
-**Status (2026-11-19): release implementation merged, final live acceptance blocked.** Native macOS Gameforge login and one-use encrypted session transfer are merged in [PR #57](https://github.com/itshak/Daedalus/pull/57). Synthetic tests, a separate Linux daemon with native-login enabled, and authenticated real Monjo read-only warehouse requests passed. A real Mac Gameforge/MFA/CAPTCHA browser login, live dedicated rebind, game-changing task trial and reboot durability were **not** completed. Never label the app production-ready on synthetic evidence alone. The `validate-live-authentication` OpenSpec change remains active for owner approval.
+**Status (2026-11-19): release implementation merged, final live acceptance blocked.** Native macOS Gameforge login and one-use encrypted session transfer are merged in [PR #57](https://github.com/itshak/Daedalus/pull/57). Synthetic tests, a separate Linux daemon with native-login enabled, and authenticated real Monjo read-only warehouse requests passed. A real Mac Gameforge/MFA/CAPTCHA browser login, live dedicated rebind, game-changing task trial and reboot durability were **not** completed. Never label the app production-ready on synthetic evidence alone. The completed `validate-live-authentication` **implementation** OpenSpec record
+is archived. Owner-only acceptance remains open in
+[issue #60](https://github.com/itshak/Daedalus/issues/60), and production
+cutover has **not** been approved.
 
 ## A. Preflight: no game effects
 
@@ -46,4 +49,8 @@ Record each row as `pass`, `fail` or `not-tested`, including the UTC timestamp, 
 - [ ] No credentials leaked into API/logs/repository; production and other bots unaffected
 - [ ] Owner explicitly approves production cutover with sanitized evidence
 
-**Unverified statuses must not be checked off.** This is why `openspec/changes/validate-live-authentication` remains open even after all feature code is merged, archived and passing CI. Manual login, approval and the observation of real game effects cannot be replaced with an automated simulation.
+**Unverified statuses must not be checked off.** Record owner results on
+[issue #60](https://github.com/itshak/Daedalus/issues/60) without any secrets.
+The archived implementation OpenSpec record does not close this checklist or
+authorize cutover. Manual login, approval and observation of real game effects
+cannot be replaced with an automated simulation.

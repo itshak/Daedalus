@@ -14,10 +14,12 @@
   </p>
 </div>
 
-**Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. Optional human-assisted Playwright Chromium recovery, protected host-only
-cookie staging and lease-held dedicated-worker rebind are implemented but
-**not yet verified against a real Gameforge account**. Automatic unattended
-login, generic legacy-worker hot-swap and production cutover remain unsupported.
+**Status: native desktop with opt-in existing-session task controls and separate protected account metadata editing.** Daedalus includes an adapted PySide6/Fluent GUI (Accounts, Warehouses, Operations, Tasks, Log and Connection), credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The native Mac Gameforge login dialog, protected one-use HTTPS session
+handoff, server-side player attestation and idle dedicated-worker rebind are
+implemented and pass offline CI. Real human Gameforge/MFA/CAPTCHA, task/rebind
+trial and host reboot remain **untested** in
+[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
+Automatic unattended login and production cutover remain unsupported/unapproved.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -100,7 +102,9 @@ export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urls
 daedalus serve --host 127.0.0.1 --port 8765
 ```
 
-With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; connect a remote desktop client through an authenticated SSH or private network tunnel. No password login, worker creation, task execution, or live Ikariam request is performed by **default startup**. Game task execution requires both `--connect-existing-ipc` and `--enable-task-control`, with an already-authenticated compatible engine session, plus operator confirmation in the GUI.
+With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; normal remote desktop access
+uses a TLS-verified private HTTPS origin and macOS Keychain-saved Daedalus bearer
+token. SSH tunneling is an opt-in advanced fallback, not required on the Mac. No password login, worker creation, task execution, or live Ikariam request is performed by **default startup**. Game task execution requires both `--connect-existing-ipc` and `--enable-task-control`, with an already-authenticated compatible engine session, plus operator confirmation in the GUI.
 
 **Optional account metadata editor:** Start an editing-only backend with `daedalus serve --enable-account-editing`. The Accounts page can add/edit/enable/disable/remove secret-free account records, each requiring confirmation. It uses owner-only atomic TOML, optimistic revisions and account-lease checks. `--enable-account-editing` is incompatible with `--enable-task-control`; neither editing nor read-only startup performs game login. See [account editing setup and limitations](docs/ACCOUNT-EDITING.md).
 
@@ -118,7 +122,7 @@ See [AGENTS.md](AGENTS.md), [implementation and OpenSpec status](docs/PROJECT-ST
 
 ## Optional task controls — explicit operator opt-in
 
-With a compatible already-authenticated IkaBot engine process on the same host, run `daedalus serve --connect-existing-ipc --enable-task-control`. The native **Tasks** page offers a built-in background operation list, JSON configuration, explicit start/stop confirmation and status for Daedalus-managed child processes. **The default service has no task mutations.** Existing IkaBot tasks started outside Daedalus cannot be stopped from this page. This is not a substitute for the still-unfinished Selenium login assistant or task persistence. See the complete [task control setup, API and safeguards](docs/TASK-CONTROL.md).
+With a compatible already-authenticated IkaBot engine process on the same host, run `daedalus serve --connect-existing-ipc --enable-task-control`. The native **Tasks** page offers a built-in background operation list, JSON configuration, explicit start/stop confirmation and status for Daedalus-managed child processes. **The default service has no task mutations.** Existing IkaBot tasks started outside Daedalus cannot be stopped from this page. The task controller has a restart-safe request ledger; native Mac human login and encrypted handoff are implemented separately. Owner-run real-game acceptance remains open in [issue #60](https://github.com/itshak/Daedalus/issues/60). See the complete [task control setup, API and safeguards](docs/TASK-CONTROL.md).
 
 ## Account-session ownership groundwork
 

@@ -12,7 +12,7 @@ Production cutover SHALL require a supervised real-account test confirming that 
 #### Scenario: Passing offline tests cannot authorize production
 - **GIVEN** synthetic browser, IPC, GUI and server-side identity regression tests pass
 - **WHEN** no actual isolated Gameforge account has completed the owner-supervised recovery and task trial
-- **THEN** the real-account acceptance change SHALL remain active and production cutover SHALL remain unauthorized
+- **THEN** the owner-run real-account acceptance checklist SHALL remain open in the dedicated tracking issue, independent of implementation archival, and production cutover SHALL remain unauthorized
 
 ### Requirement: Nonsecret deployment preflight must not imply production acceptance
 

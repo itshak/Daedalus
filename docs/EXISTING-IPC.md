@@ -39,6 +39,6 @@ Engine HTML is parsed inside its process; **raw game HTML and hidden action toke
 
 ## Current limitations
 
-The bridge is opt-in and does not authorize a second daemon to share game session ownership. Host-local Daedalus file locks still do not coordinate different computers or independent OS users. It also cannot stop tasks, renew credentials, restore a lost login, automatically navigate CAPTCHA, or migrate existing production tmux sessions. All those capabilities remain active work in the OpenSpec proposals.
+The bridge is opt-in and does not authorize a second daemon to share game session ownership. Host-local Daedalus file locks still do not coordinate different computers or independent OS users. It also cannot stop tasks, renew credentials, restore a lost login, automatically navigate CAPTCHA, or migrate existing production tmux sessions. These are limitations of **this read-only IPC bridge**, not a description of the entire current app. Separate later changes added task control, native Mac human recovery and protected credentials; unattended CAPTCHA and production-wide migration are not supported, and owner-only live acceptance remains open in [issue #60](https://github.com/itshak/Daedalus/issues/60).
 
 **Offline CI** uses a synthetic localhost socket, mock game sessions and fabricated warehouse HTML. It never calls Gameforge.

@@ -4,6 +4,7 @@ These checks read repository-local Markdown only. They do not require a live
 game session, browser, credentials, or network access.
 """
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,13 @@ def test_every_archived_change_has_a_fully_completed_checklist():
 def test_every_active_change_is_explicitly_unfinished_and_reported():
     active = sorted(CHANGES.glob("*/tasks.md"))
     status = STATUS.read_text(encoding="utf-8")
-    assert active, "Expected active umbrella work to remain visible"
+    if not active:
+        assert "No active OpenSpec implementation changes" in status, (
+            "Zero active changes must be disclosed explicitly"
+        )
+        assert "issues/60" in status and "NOT TESTED / NOT APPROVED" in status, (
+            "Human-only acceptance must remain tracked separately from code closure"
+        )
     for path in active:
         _checked, unchecked = _tasks(path)
         assert unchecked > 0, f"Complete change must be archived: {path.parent.name}"
@@ -46,6 +53,16 @@ def test_canonical_capability_specs_exist_for_all_active_deltas():
         assert (SPECS / capability / "spec.md").is_file(), (
             f"Active delta {path} has no canonical capability spec"
         )
+
+
+
+def test_project_status_inventory_matches_the_archive():
+    archives = sorted(p.name.split("-", 3)[-1] for p in (CHANGES / "archive").iterdir() if p.is_dir())
+    status = STATUS.read_text(encoding="utf-8")
+    rows = re.findall(r"^\| \`([^\`]+)\` \|", status, flags=re.MULTILINE)
+    assert len(rows) == len(set(rows)), "Project status repeats an archived change"
+    assert sorted(rows) == archives, "Project status must list every archived change"
+
 
 
 def test_archived_capability_specs_have_canonical_targets():
