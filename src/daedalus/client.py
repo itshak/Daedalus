@@ -528,6 +528,19 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned an invalid construction preview")
         return data
 
+    def workshop_upgrades(self, account_id: str, city_id: int) -> dict[str, object]:
+        """Fetch only real, account-bound workshop options for a city."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid workshop scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/workshop-upgrades")
+        choices = data.get("upgrades")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or not isinstance(choices, list) or len(choices) > 250
+                or type(data.get("workshop_level")) is not int
+                or any(not isinstance(choice, dict) for choice in choices)):
+            raise APIConnectionError("Backend returned invalid workshop options")
+        return data
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
