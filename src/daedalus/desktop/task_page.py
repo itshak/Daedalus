@@ -52,6 +52,7 @@ from daedalus.desktop.native_controls import (
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
+    WorkshopUpgradesEditor,
 )
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
@@ -117,6 +118,7 @@ class TasksPage(QWidget):
     cities_requested = Signal(str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
+    workshop_requested = Signal(str, int)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -722,7 +724,9 @@ class TasksPage(QWidget):
                     self._populate_city_picker(input_widget, optional=not
                                                self._field_is_required(key))
                     self._invalidate_review()
-                elif isinstance(input_widget, (ShipmentRoutesEditor, DonationPoliciesEditor)):
+                elif isinstance(input_widget, (
+                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor
+                )):
                     input_widget.set_cities(self._cities_by_account.get(account_id, []))
                     self._invalidate_review()
 
@@ -891,6 +895,29 @@ class TasksPage(QWidget):
                 "No upgrade has started; reconnect and recheck the building targets."
             )
 
+    def _workshop_city_requested(self, city_id: int) -> None:
+        account_id = self.selected_account_id()
+        if (account_id and self.selected_task_name() == "UpgradeUnits"
+                and type(city_id) is int):
+            self.workshop_requested.emit(account_id, city_id)
+
+    def set_workshop_upgrades(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "UpgradeUnits"):
+            return
+        editor = self._form_inputs.get("jobs")
+        if isinstance(editor, WorkshopUpgradesEditor):
+            editor.set_workshop_data(
+                result["city_id"], result["upgrades"], result["workshop_level"]
+            )
+
+    def set_workshop_unavailable(self, account_id: str, city_id: int) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("jobs")
+        if isinstance(editor, WorkshopUpgradesEditor):
+            editor.set_unavailable(city_id)
+
     def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
         if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
             self._buildings_scope = None
@@ -925,7 +952,9 @@ class TasksPage(QWidget):
                     self._populate_city_picker(input_widget, optional=not
                                                self._field_is_required(key))
                     self._invalidate_review()
-                elif isinstance(input_widget, (ShipmentRoutesEditor, DonationPoliciesEditor)):
+                elif isinstance(input_widget, (
+                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor
+                )):
                     input_widget.set_cities(self._cities_by_account.get(account_id, []))
                     self._invalidate_review()
 
@@ -957,16 +986,16 @@ class TasksPage(QWidget):
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
         # One city's construction plan cannot be dispatched against other account IDs.
-        if self.selected_task_name() == "constructionList":
+        if self.selected_task_name() in {"constructionList", "UpgradeUnits"}:
             can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
-        if self.selected_task_name() == "constructionList":
+        if self.selected_task_name() in {"constructionList", "UpgradeUnits"}:
             self.bulk_note.setText(
-                "Construction plans are city- and account-specific. Configure each account "
-                "separately; copying one city's building plan to another is unsafe."
+                "Building and unit upgrade plans are city- and account-specific. Configure "
+                "each account separately; never reuse an upgrade plan across accounts."
             )
         elif count > 32:
             self.bulk_note.setText(
@@ -1048,7 +1077,7 @@ class TasksPage(QWidget):
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
-                or self.selected_task_name() == "constructionList"
+                or self.selected_task_name() in {"constructionList", "UpgradeUnits"}
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.selected_task_name()):
@@ -1442,6 +1471,11 @@ class TasksPage(QWidget):
             elif kind == "map_center":
                 widget = MapAreaEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
+            elif kind == "workshop_jobs":
+                widget = WorkshopUpgradesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+                widget.city_requested.connect(self._workshop_city_requested)
             elif kind == "island_list":
                 widget = QListWidget(self)
                 widget.setProperty("island_scope", True)
@@ -1578,6 +1612,7 @@ class TasksPage(QWidget):
             list_extra = 135 if any(field.get("type") in {
                 "city_list", "choices_list", "island_list", "shipment_routes",
                 "donation_policies", "resource_limits", "resource_config",
+                "workshop_jobs",
             } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
@@ -1600,7 +1635,7 @@ class TasksPage(QWidget):
                 and (name == "constructionList"
                      or any(field.get("type") in {
                          "city_list", "city_picker", "island_list", "shipment_routes",
-                         "donation_policies",
+                         "donation_policies", "workshop_jobs",
                      } for field in fields))):
             self.cities_requested.emit(account_id)
 
@@ -1704,6 +1739,9 @@ class TasksPage(QWidget):
                 config[key] = widget.to_config()
                 continue
             if isinstance(widget, ShipmentRoutesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, WorkshopUpgradesEditor):
                 config[key] = widget.to_config()
                 continue
             if isinstance(widget, DonationPoliciesEditor):
