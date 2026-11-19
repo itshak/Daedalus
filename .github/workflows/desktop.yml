@@ -37,6 +37,15 @@ jobs:
           python -m pytest -q tests/test_task_page.py tests/test_live_auth_gui.py
       - name: Confirm desktop CLI is installed
         run: python -c "from daedalus.desktop import main; assert callable(main)"
+      - name: Capture credential-free Fluent desktop screenshots
+        run: python scripts/capture_native_ui.py --output-dir synthetic-ui-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-fluent-macos-synthetic-screenshots
+          path: synthetic-ui-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
 
   browser-recovery:
     name: Synthetic Playwright / Chromium cookie isolation
