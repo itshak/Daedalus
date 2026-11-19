@@ -195,6 +195,11 @@ class APIWorker(QThread):
                 result = self.client.connected_accounts()
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "task_cities" and self.account_id:
+                result = {
+                    "account_id": self.account_id,
+                    "cities": self.client.cities(self.account_id),
+                }
             elif self.action == "warehouses" and self.account_id:
                 result = {
                     "account_id": self.account_id,
@@ -403,6 +408,7 @@ class MainWindow(FluentWindow):
         # timer fired from completed may race with finished and be discarded.
         self._preflight_queue: list[tuple[str, str, int]] = []
         self._pending_task_refresh: str | None = None
+        self._pending_task_cities: str | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._selenium_worker: SeleniumLoginWorker | None = None
@@ -554,6 +560,7 @@ class MainWindow(FluentWindow):
             )
         )
         for view in self._task_views:
+            view.cities_requested.connect(self._queue_task_cities)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
             )
@@ -1236,6 +1243,21 @@ class MainWindow(FluentWindow):
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
+    def _queue_task_cities(self, account_id: str) -> None:
+        """Fetch account-bound city choices off-thread, after an active request ends."""
+        if self.client is None or self.tasks_page.selected_account_id() != account_id:
+            return
+        self._pending_task_cities = account_id
+        self._run_next_task_cities()
+
+    def _run_next_task_cities(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_task_cities
+        self._pending_task_cities = None
+        if account_id and self.tasks_page.selected_account_id() == account_id:
+            self._launch(self.client, "task_cities", account_id=account_id)
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1347,6 +1369,7 @@ class MainWindow(FluentWindow):
                     self._preflight_queue.clear()
                     self._pending_task_refresh = None
                     self._pending_batch_status = None
+                    self._pending_task_cities = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
@@ -1520,6 +1543,9 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
+        elif action == "task_cities":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_cities(payload["account_id"], payload["cities"])
         elif action == "task_preflight":
             assert isinstance(payload, dict)
             worker = self._worker
@@ -1618,6 +1644,11 @@ class MainWindow(FluentWindow):
             self._automatic_login_failures += 1
             self._reset_automatic_attempt()
             self._automatic_login_pending_advance = True
+        if action == "task_cities":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_cities_unavailable(account_id)
         if action == "task_preflight":
             worker = self._worker
             request = getattr(worker, "task_payload", None)
@@ -1661,7 +1692,7 @@ class MainWindow(FluentWindow):
                 # A failed reconnect must not hide an existing authorized session.
                 self.connection_page.set_connected(True)
         logger.warning("Backend %s request failed", action)
-        if action not in {"assistance_pending", "task_preflight"}:
+        if action not in {"assistance_pending", "task_preflight", "task_cities"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -1714,6 +1745,8 @@ class MainWindow(FluentWindow):
                 and self._automatic_login_pending_advance):
             self._automatic_login_pending_advance = False
             QTimer.singleShot(0, self._advance_automatic_login)
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_task_cities()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
