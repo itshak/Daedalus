@@ -13,7 +13,7 @@ pytest.importorskip("qfluentwidgets")
 
 from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QNetworkCookie
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog
 
 from daedalus.desktop.app import APIWorker, MainWindow
 from daedalus.desktop.native_login_dialog import (

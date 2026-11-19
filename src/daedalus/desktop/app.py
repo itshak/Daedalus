@@ -12,7 +12,7 @@ import sys
 
 from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QSizePolicy, QSpacerItem
+from PySide6.QtWidgets import QDialog, QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import (
     FluentWindow,
     InfoBar,
