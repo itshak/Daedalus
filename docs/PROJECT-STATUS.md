@@ -277,7 +277,7 @@ Offline headless Chromium verification on the development host: `tests/test_brow
 ## 2026-11-20: Account identity and encrypted login backup
 
 The Accounts view now prioritizes verified Gameforge email addresses over
-imported placeholder labels, formats Russian worlds as flag plus exact server
+imported placeholder labels, formats officially identified Russian worlds with flag, name and server
 number, and uses accessible check/X/unknown indicators for account enabling,
 game sessions and IkaBot worker attachment. The login prompt uses verified
 email from the server. Mac Keychain keeps local credentials and encrypts

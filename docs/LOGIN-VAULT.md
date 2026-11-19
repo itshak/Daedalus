@@ -52,3 +52,12 @@ be unavailable.
 Source and synthetic tests establish encryption, scope, fail-closed behavior,
 authentication and API response contents. Live Gameforge login and Mac Keychain
 usage must be verified separately by the owner.
+
+
+## World-name source
+
+The official Gameforge 2026 Russian server merger announcement lists
+ru_52 as Adonis and ru_53 as Eurydike:
+https://forum.ikariam.gameforge.com/forum/thread/114624/
+The Accounts table uses these published mappings with the Russian flag
+and S-number. Unverified server numbers retain their numeric identifiers.

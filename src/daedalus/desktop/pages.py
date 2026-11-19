@@ -74,6 +74,10 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
 
 _WORLD_CODE = re.compile(r"^s([0-9]+)-([a-z]{2,4})$", re.IGNORECASE)
 _IMPORTED_LABEL = re.compile(r"Imported IkaBot (?:account|identity)(?: [0-9]+)?", re.IGNORECASE)
+# Verified in official Gameforge 2026 server-merger announcement:
+# https://forum.ikariam.gameforge.com/forum/thread/114624/
+# Unknown server numbers keep their exact identifiers, never guessed names.
+_OFFICIAL_WORLD_NAMES = {"s52-ru": "Adonis", "s53-ru": "Eurydike"}
 
 
 def _account_title(account: dict[str, object]) -> str:
@@ -97,7 +101,9 @@ def _world_title(account: dict[str, object]) -> str:
     flag = "🇷🇺" if match.group(2).casefold() == "ru" else "🌐"
     server = f"S{int(match.group(1))}"
     name = account.get("world_name")
-    if isinstance(name, str) and 0 < len(name.strip()) <= 80 and name.isprintable():
+    if not (isinstance(name, str) and 0 < len(name.strip()) <= 80 and name.isprintable()):
+        name = _OFFICIAL_WORLD_NAMES.get(world.casefold())
+    if isinstance(name, str) and name:
         return f"{flag} {name.strip()} · {server}"
     return f"{flag} {server}"
 

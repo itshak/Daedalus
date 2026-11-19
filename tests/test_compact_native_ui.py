@@ -106,7 +106,7 @@ def test_account_identity_world_flag_and_status_icons(app):
         assert page.table.item(0, 0).text() == "synthetic@example.invalid"
         assert page.table.item(1, 0).text() == "Other"
         assert page.table.item(0, 1).text() == "🇷🇺 S58"
-        assert page.table.item(1, 1).text() == "🇷🇺 S53"
+        assert page.table.item(1, 1).text() == "🇷🇺 Eurydike · S53"
         assert page.table.item(0, 3).text() == "✓"
         assert page.table.item(1, 3).text() == "✕"
         assert page.table.item(0, 4).text() == "✓"
