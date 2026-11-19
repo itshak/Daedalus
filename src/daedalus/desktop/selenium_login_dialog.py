@@ -231,7 +231,12 @@ class SeleniumLoginDialog(QDialog):
         self.status.setText(message)
 
     def _worker_finished(self) -> None:
+        worker = self._worker
         self._worker = None
+        if worker is not None:
+            # An unused Qt child must not retain a Gameforge password.
+            worker.credentials = None
+            worker.deleteLater()
         self._credentials = None
         if self._cancel_requested:
             super().reject()
@@ -241,7 +246,11 @@ class SeleniumLoginDialog(QDialog):
             self.start_button.setEnabled(True)
             self.change_button.setEnabled(True)
             self.start_button.setText("Retry automatic login")
-            self._show_credentials(False if self.store_available() else True)
+            try:
+                self._credentials = self.store.get_credentials()
+            except GameforgeCredentialError:
+                self._credentials = None
+            self._show_credentials(self._credentials is None)
 
     def store_available(self) -> bool:
         try:
