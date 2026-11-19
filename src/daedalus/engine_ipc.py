@@ -29,6 +29,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
+    "preview_construction_existing",
 })
 
 
@@ -119,13 +120,15 @@ class ExistingIPCClient:
         return port, authkey
 
     def request(self, action: str, *, account: Account | None = None,
-                city_id: int | None = None) -> dict[str, Any]:
+                city_id: int | None = None,
+                upgrades: list[dict[str, int]] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
+            "preview_construction_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -133,13 +136,26 @@ class ExistingIPCClient:
         payload: dict[str, object] = {"action": action}
         if account is not None:
             payload.update(world=account.world, player=account.player)
-        if action == "list_buildings_existing":
+        if action in {"list_buildings_existing", "preview_construction_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
                 raise ValueError("Choose a valid city")
             payload["city_id"] = city_id
-        elif city_id is not None:
+            if action == "preview_construction_existing":
+                if not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12:
+                    raise ValueError("Choose valid construction upgrades")
+                for upgrade in upgrades:
+                    if (not isinstance(upgrade, dict)
+                            or set(upgrade) != {"position", "target_level"}
+                            or type(upgrade["position"]) is not int
+                            or type(upgrade["target_level"]) is not int):
+                        raise ValueError("Invalid construction upgrade")
+                payload["upgrades"] = upgrades
+            elif upgrades is not None:
+                raise ValueError("Upgrades are allowed only in a construction preview")
+        elif city_id is not None or upgrades is not None:
             raise ValueError("City argument is not supported for this IPC action")
-        return self._exchange(payload)
+        return self._exchange(payload, read_timeout=60.0 if action ==
+                              "preview_construction_existing" else 8.0)
 
     def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0,
                   allow_task_rejection: bool = False) -> dict[str, Any]:
@@ -292,6 +308,85 @@ class ExistingIPCClient:
                 "can_upgrade": row["can_upgrade"],
             })
         return validated
+
+    def construction_preview(
+        self, account: Account, city_id: int, upgrades: list[dict[str, int]],
+    ) -> dict[str, object]:
+        """One strictly read-only engine calculation, bound to an owned city."""
+        if type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid preview city")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Construction city is not owned by this account")
+        data = self.request(
+            "preview_construction_existing", account=account, city_id=city_id,
+            upgrades=upgrades,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot preview belongs to a different game account")
+        plan = data.get("plan")
+        if not isinstance(plan, dict) or type(plan.get("ready")) is not bool:
+            raise EngineIPCUnavailable("Invalid IkaBot construction preview")
+        numbers = {}
+        for name in ("costs", "available", "missing"):
+            values = plan.get(name)
+            if (not isinstance(values, list) or len(values) != 5
+                    or any(type(v) is not int or v < 0 or v > 10**15
+                           for v in values)):
+                raise EngineIPCUnavailable("IkaBot returned invalid resource amounts")
+            numbers[name] = values
+        config = plan.get("config")
+        expected_keys = {
+            "city_id", "city_name", "buildings", "shipments", "expand_overall",
+            "wait_resources", "construction_queue", "total_time",
+        }
+        if (not isinstance(config, dict) or set(config) != expected_keys
+                or config.get("city_id") != city_id
+                or not isinstance(config.get("city_name"), str)
+                or not 0 < len(config["city_name"]) <= 100
+                or config.get("shipments") != []
+                or config.get("expand_overall") is not True
+                or config.get("wait_resources") is not False
+                or not isinstance(config.get("buildings"), list)
+                or not 0 < len(config["buildings"]) <= 12
+                or not isinstance(config.get("construction_queue"), list)
+                or any(type(v) is not int or v <= 0
+                       for v in config["construction_queue"])
+                or type(config.get("total_time")) is not int
+                or config["total_time"] < 0):
+            raise EngineIPCUnavailable("IkaBot returned an invalid prepared plan")
+        allowed_building_keys = {
+            "position", "name", "building", "level", "isBusy", "upgradeTo",
+            "constructionTime", "constructionTimes",
+        }
+        for row in config["buildings"]:
+            if (not isinstance(row, dict) or set(row) != allowed_building_keys
+                    or type(row.get("position")) is not int or not 0 <= row["position"] <= 80
+                    or type(row.get("level")) is not int or not 0 <= row["level"] <= 150
+                    or type(row.get("upgradeTo")) is not int
+                    or not row["level"] < row["upgradeTo"] <= 150
+                    or row.get("isBusy") is not False
+                    or not isinstance(row.get("name"), str)
+                    or not 0 < len(row["name"]) <= 100
+                    or not isinstance(row.get("building"), str)
+                    or not 0 < len(row["building"]) <= 64
+                    or type(row.get("constructionTime")) is not int
+                    or not isinstance(row.get("constructionTimes"), list)):
+                raise EngineIPCUnavailable("IkaBot returned an invalid building plan")
+        try:
+            size = len(json.dumps(config, allow_nan=False).encode("utf-8"))
+        except (ValueError, TypeError) as exc:
+            raise EngineIPCUnavailable("IkaBot returned an invalid preview payload") from exc
+        if size > 16000:
+            raise EngineIPCUnavailable("IkaBot construction plan exceeds safe size")
+        seconds = plan.get("estimated_seconds")
+        if type(seconds) is not int or seconds < 0:
+            raise EngineIPCUnavailable("IkaBot returned an invalid construction time")
+        return {
+            "account_id": account.id, "city_id": city_id, "ready": plan["ready"],
+            "config": config, "estimated_seconds": seconds, **numbers,
+        }
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
