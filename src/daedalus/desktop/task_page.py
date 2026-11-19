@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QMessageBox,
@@ -39,7 +41,14 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.desktop.design_system import style_form_input
 from daedalus.desktop.pages import _populate, _table
+from daedalus.desktop.task_presentation import (
+    configuration_summary,
+    expert_configuration_needed,
+    present_fields,
+    task_explanation,
+)
 
 # Fixed, reviewed display labels. Unknown built-ins get a readable fallback,
 # but dispatch always uses the engine's canonical original task name.
@@ -223,6 +232,10 @@ class TasksPage(QWidget):
         )
         self.task_description.setWordWrap(True)
         layout.addWidget(self.task_description)
+        self.expert_note = CaptionLabel("")
+        self.expert_note.setWordWrap(True)
+        self.expert_note.hide()
+        layout.addWidget(self.expert_note)
         self.prerequisite_label = CaptionLabel("Select an automation to check readiness.")
         self.prerequisite_label.setWordWrap(True)
         layout.addWidget(self.prerequisite_label)
@@ -251,6 +264,13 @@ class TasksPage(QWidget):
         self.build_json_button = PushButton("Build JSON from guided settings")
         self.build_json_button.clicked.connect(self._build_config_from_form)
         layout.addWidget(self.build_json_button)
+        self.import_config_button = PushButton("Import a prepared configuration…")
+        self.import_config_button.setToolTip(
+            "Load an explicitly chosen, small JSON configuration previously prepared "
+            "for this engine task. Daedalus validates allowed parameter names."
+        )
+        self.import_config_button.clicked.connect(self._import_advanced_config)
+        layout.addWidget(self.import_config_button)
         self.config_editor = QPlainTextEdit()
         self.config_editor.setPlaceholderText('{"minutes": 20}')
         self.config_editor.setPlainText("{}")
@@ -258,6 +278,7 @@ class TasksPage(QWidget):
         layout.addWidget(self.config_editor)
         self.advanced_note.hide()
         self.build_json_button.hide()
+        self.import_config_button.hide()
         self.config_editor.hide()
         self.config_editor.textChanged.connect(self._review_advanced_json)
         self.task_combo.currentIndexChanged.connect(self._selected_task_changed)
@@ -550,7 +571,7 @@ class TasksPage(QWidget):
             self, "Review multi-account automation",
             f"Start {_friendly_task(task)} for {len(names)} selected accounts?\n\n"
             f"Accounts: {summary}\n\n"
-            f"Settings: {str(config)[:500]}\n\n"
+            f"Settings: {configuration_summary(config)}\n\n"
             "Daedalus checks every account's readiness before starting any. "
             "Each account gets its own validated request; on an uncertain result "
             "dispatch stops without retrying. Game state can change.",
@@ -619,7 +640,7 @@ class TasksPage(QWidget):
                         "required": field.get("required") is True,
                         **({"default": field["default"]} if "default" in field else {}),
                     })
-            self._config_fields_by_task[str(name)] = fields
+            self._config_fields_by_task[str(name)] = present_fields(str(name), fields)
         self.status_label.setText(
             "Choose an automation. Daedalus checks prerequisites before enabling Start."
             if enabled and self._all_task_names else
@@ -655,7 +676,10 @@ class TasksPage(QWidget):
 
     def _toggle_advanced(self) -> None:
         self._advanced_visible = not self._advanced_visible
-        for widget in (self.advanced_note, self.config_editor, self.build_json_button):
+        for widget in (
+            self.advanced_note, self.config_editor, self.build_json_button,
+            self.import_config_button,
+        ):
             widget.setVisible(self._advanced_visible)
         self.advanced_toggle.setText(
             "Hide advanced JSON options" if self._advanced_visible
@@ -663,6 +687,60 @@ class TasksPage(QWidget):
         )
         if self._advanced_visible:
             self._build_config_from_form()
+
+    def _import_advanced_config(self) -> None:
+        """User-directed bounded JSON import, never a system or account-file search."""
+        name = self.selected_task_name()
+        if not name:
+            return
+        filename, _selected_filter = QFileDialog.getOpenFileName(
+            self, "Import reviewed IkaBot automation settings", "", "JSON files (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            source = Path(filename)
+            if source.stat().st_size > 16384:
+                raise ValueError("Configuration file exceeds the 16 KiB safety limit")
+            raw = source.read_text(encoding="utf-8")
+            config = json.loads(raw, parse_constant=lambda _x: (
+                _ for _ in ()
+            ).throw(ValueError("Invalid nonfinite value")))
+            if not isinstance(config, dict):
+                raise ValueError("Configuration must be one JSON object")
+            allowed = {str(field["name"])
+                       for field in self._config_fields_by_task.get(name, [])}
+            if not allowed or not all(isinstance(key, str) and key in allowed
+                                      for key in config):
+                raise ValueError("File has parameters not registered for this automation")
+            if len(json.dumps(config, ensure_ascii=False, allow_nan=False).encode()) > 16384:
+                raise ValueError("Configuration exceeds the task size limit")
+        except (OSError, UnicodeError, ValueError, TypeError):
+            QMessageBox.warning(
+                self, "Configuration not imported",
+                "Choose a valid JSON object under 16 KiB containing only "
+                "this automation's registered parameter names. "
+                "No account operation was started.",
+            )
+            return
+        if not self._advanced_visible:
+            self._advanced_visible = True
+            for widget in (
+                self.advanced_note, self.config_editor, self.build_json_button,
+                self.import_config_button,
+            ):
+                widget.show()
+            self.advanced_toggle.setText("Hide advanced JSON options")
+        self.config_editor.setPlainText(
+            json.dumps(config, ensure_ascii=False, indent=2)
+        )
+        self._form_dirty = False
+        self.confirm_box.setChecked(False)
+        QMessageBox.information(
+            self, "Configuration loaded",
+            "Review the advanced settings and confirm the correct account "
+            "before starting anything. The backend will still validate the task.",
+        )
 
     def _review_advanced_json(self) -> None:
         """Hand-edited JSON supersedes unbuilt form values deliberately."""
@@ -677,38 +755,52 @@ class TasksPage(QWidget):
         self._form_inputs.clear()
         name = self.selected_task_name()
         fields = self._config_fields_by_task.get(name or "", [])
-        descriptions = {
-            "alertAttacks": "Get notified about incoming attacks at a safe polling interval.",
-            "alertLowWine": "Monitor wine availability for your cities.",
-            "tavernManager": "Manage tavern wine use according to reviewed account settings.",
-            "constructionList": "Plan supported construction steps with explicit approval.",
-            "research": "Manage supported research operations.",
-            "sendResources": "Transport resources using validated destination and amounts.",
-            "resourceTransportManager": "Coordinate supported transport operations.",
-        }
         self.task_description.setText(
-            f"{_friendly_task(name)}  ·  {_category(name)}. "
-            + descriptions.get(
-                name, "Use the supported controls below, or Advanced for complex settings."
-            )
+            f"{_friendly_task(name)}  ·  {_category(name)}. {task_explanation(name)}"
             if name else "No automations match this filter."
         )
+        expert_needed = expert_configuration_needed(fields)
+        self.expert_note.setVisible(expert_needed)
+        if expert_needed:
+            self.expert_note.setText(
+                "This operation needs a prepared engine plan (for example, a "
+                "validated city, building queue or route). Daedalus cannot "
+                "invent those values. Use Advanced to import an existing "
+                "configuration or supply reviewed fields."
+            )
         for field in fields:
             key = str(field["name"])
             kind = str(field["type"])
             default = field.get("default")
-            label = f"{key.replace('_', ' ').capitalize()}{' *' if field['required'] else ''}"
+            label = (
+                str(field.get("label") or key.replace("_", " ").capitalize())
+                + (" *" if field["required"] else "")
+            )
             if kind == "boolean":
                 widget = CheckBox("Enabled")
                 widget.setChecked(default is True)
                 widget.stateChanged.connect(self._mark_form_dirty)
-            elif kind == "integer" and type(default) is int and -1_000_000 <= default <= 1_000_000:
+            elif kind == "integer" and (
+                (type(default) is int and -1_000_000 <= default <= 1_000_000)
+                or field.get("explicit_input") is True
+            ):
                 widget = SpinBox()
-                widget.setRange(-1_000_000, 1_000_000)
-                widget.setValue(default)
+                minimum = int(field.get("minimum", -1_000_000))
+                maximum = int(field.get("maximum", 1_000_000))
+                if field.get("explicit_input") is True:
+                    # Native spinner with a *missing* sentinel rather than an
+                    # invented game setting. The sentinel cannot be dispatched.
+                    widget.setRange(minimum - 1, maximum)
+                    widget.setSpecialValueText("Choose a value")
+                    widget.setValue(minimum - 1)
+                else:
+                    widget.setRange(minimum, maximum)
+                    widget.setValue(default)
                 if key == "minutes" and name == "alertAttacks":
                     widget.setMinimum(3)
                     widget.setSuffix(" min")
+                elif field.get("suffix"):
+                    widget.setSuffix(str(field["suffix"]))
                 widget.valueChanged.connect(self._mark_form_dirty)
             elif kind == "number" and type(default) in (int, float) and -1_000_000 <= default <= 1_000_000:
                 widget = DoubleSpinBox()
@@ -730,6 +822,7 @@ class TasksPage(QWidget):
                 else:
                     widget.setPlaceholderText("Required" if field["required"] else "Optional")
                 widget.textChanged.connect(self._mark_form_dirty)
+            style_form_input(widget, label, str(field.get("help") or ""))
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
         self.parameter_scroll.setVisible(bool(fields))
@@ -796,7 +889,11 @@ class TasksPage(QWidget):
                 config[key] = widget.isChecked()
                 continue
             if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                config[key] = widget.value()
+                value = widget.value()
+                if (field.get("explicit_input") is True
+                        and value < int(field.get("minimum", 0))):
+                    raise ValueError(f"Choose a value for {key} before starting")
+                config[key] = value
                 continue
             text = widget.text().strip()
             if not text:
@@ -821,6 +918,12 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
+        if (name == "alertLowWine" and config.get("auto_transfer") is True
+                and (type(config.get("transfer_amount")) is not int
+                     or config["transfer_amount"] < 1)):
+            raise ValueError(
+                "Set a positive transfer amount before enabling automatic wine transfers"
+            )
         if len(json.dumps(config, allow_nan=False).encode("utf-8")) > 16384:
             raise ValueError("Task configuration exceeds the safe size limit")
         return config
@@ -908,7 +1011,7 @@ class TasksPage(QWidget):
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
-        params = ", ".join(f"{key}: {value}" for key, value in config.items()) or "Default settings"
+        params = configuration_summary(config)
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for {account_id}?\n\n"
