@@ -6,7 +6,7 @@
 - [x] Add synthetic API, engine IPC and offscreen native GUI regression coverage for the redesigned workflow.
 - [x] Provision and verify direct trusted HTTPS to the loopback-only backend, without Mac SSH, and test tokenless 401 and authorized account retrieval.
 - [x] Make Keychain saving the default, add HTTPS-only automatic reconnect and prevent cross-origin saved-token reuse.
-- [ ] Update reference docs, verify offline CI, merge under `itshak`, and avoid affecting Monjo's active live session during development.
+- [x] Update reference docs, verify offline tests and GitHub PR checks under `itshak`, and avoid affecting Monjo's active live session during development.
 
 Implementation field note (2026-11-19): this change does not launch any game
 operation, manipulate saved cookies, or count as owner acceptance of the native

@@ -4,7 +4,7 @@
 
 The first owner-authorized live task trial exposed a nonsecret prerequisite failure that the controller mislabeled as an uncertain launch. The desktop also exposes a read-only operations table, duplicate task views and mandatory raw JSON authoring instead of a guided workflow. Users need understandable, low-friction controls without weakening single-account ownership, idempotency, and explicit consent.
 
-## Changes
+## What Changes
 
 - Add protected read-only task prerequisite diagnostics that return only restricted booleans/reason codes, never notification tokens, game HTML or credentials.
 - Reject deterministic prerequisites *before* request reservation and preserve durable `unconfirmed` behavior for genuine ambiguous transport errors.
