@@ -576,6 +576,30 @@ def create_app(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/workshop-upgrades",
+        dependencies=[Depends(authorized)],
+    )
+    def workshop_upgrades(account_id: str, city_id: int) -> dict[str, object]:
+        """Discover verified unit/ship workshop upgrades without game mutations."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated workshop inventory unavailable")
+        try:
+            return ipc_client.workshop_upgrades(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned workshop city unavailable") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated workshop inventory unavailable"
+            ) from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
