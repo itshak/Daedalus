@@ -2,8 +2,10 @@
 insecure plaintext TokenStore. Daedalus provides a Keychain-backed store.
 """
 from __future__ import annotations
+
 import time
 from typing import Any
+
 _COOKIE_KEYS = ("name", "value", "path", "domain", "secure", "httpOnly")
 
 def sanitize_cookie(cookie: dict[str, Any]) -> dict[str, Any]:

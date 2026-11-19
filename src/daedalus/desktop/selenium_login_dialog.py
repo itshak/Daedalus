@@ -12,7 +12,15 @@ import logging
 
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLineEdit, QMessageBox, QVBoxLayout
-from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, LineEdit, PrimaryPushButton, PushButton, SubtitleLabel
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CheckBox,
+    LineEdit,
+    PrimaryPushButton,
+    PushButton,
+    SubtitleLabel,
+)
 
 from daedalus.desktop.selenium_automation import (
     LoginCancelled,
@@ -79,7 +87,7 @@ class SeleniumLoginWorker(QThread):
                 "Selenium/Chrome support is missing from this Mac installation. "
                 "Reinstall the native Daedalus app or its desktop dependencies."
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - redact browser internals
             logger.warning("Selenium login failed; internal browser details redacted")
             self.failed.emit(
                 "Unable to complete automatic Gameforge login. Check that Chrome "

@@ -84,7 +84,7 @@ class DaedalusLoginFlow(LoginFlow):
             return any(widget.is_displayed() for widget in widgets)
         except (AttributeError, RuntimeError):
             return False
-        except Exception:
+        except Exception:  # noqa: BLE001 - browser failures may contain secrets
             # A stale selector cannot justify escalating on its own.
             return False
 
@@ -244,14 +244,14 @@ def login_headless_first(
             raise
         except SeleniumLoginError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - browser failures may contain secrets
             logger.warning("Headless browser attempt failed (secrets omitted)")
             # Follow legacy per-account retry behavior without surfacing driver internals.
         finally:
             if driver is not None:
                 try:
                     driver_cleanup(driver)
-                except Exception:
+                except Exception:  # noqa: BLE001 - browser failures may contain secrets
                     logger.warning("Could not fully close the headless Chrome instance")
     if not require_visible_captcha:
         raise SeleniumLoginError(
@@ -286,5 +286,5 @@ def login_headless_first(
         if driver is not None:
             try:
                 driver_cleanup(driver)
-            except Exception:
+            except Exception:  # noqa: BLE001 - browser failures may contain secrets
                 logger.warning("Could not fully close the visible Chrome instance")

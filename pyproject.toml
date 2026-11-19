@@ -47,3 +47,8 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+# Keep the user's original browser code unchanged, including its catch-all
+# Selenium-driver cleanup paths. The adapted original files are source-frozen.
+"src/daedalus/desktop/legacy_selenium/browser.py" = ["BLE001"]
