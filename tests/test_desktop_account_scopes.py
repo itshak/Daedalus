@@ -586,9 +586,7 @@ def test_activity_is_bounded_filtered_and_does_not_expose_unrecognized_messages(
         _dispose(page, app)
 
 
-def test_accounts_master_detail_and_small_mac_layout(app, monkeypatch):
-    from PySide6.QtWidgets import QSplitter
-
+def test_accounts_table_first_and_small_mac_layout(app, monkeypatch):
     import daedalus.desktop.app as module
     from daedalus.gui_preferences import GuiPreferences
 
@@ -598,8 +596,12 @@ def test_accounts_master_detail_and_small_mac_layout(app, monkeypatch):
         window.resize(900, 650)
         assert window.minimumWidth() == 900
         assert window.minimumHeight() == 650
-        assert isinstance(window.accounts_page.master_detail, QSplitter)
-        assert window.accounts_page.master_detail.count() == 2
+        # Ecobot-style table is the full-width primary workspace; no detail
+        # panel is allowed to occupy half the account table.
+        assert not hasattr(window.accounts_page, "master_detail")
+        assert window.accounts_page.layout().indexOf(window.accounts_page.table) >= 0
+        assert window.accounts_page.table.minimumHeight() >= 290
+        assert window.accounts_page.advanced_recovery_panel.isHidden()
         window._show_accounts(accounts(5))
         assert window.accounts_page.table.rowCount() == 5
         assert len(window._task_views) == 1

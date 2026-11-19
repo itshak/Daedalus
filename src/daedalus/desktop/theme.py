@@ -15,16 +15,18 @@ def apply_app_palette() -> None:
         app.setStyle("Fusion")
 
     dark = isDarkTheme()
-    window = QColor(32, 32, 32) if dark else QColor(240, 244, 249)
-    base = QColor(24, 24, 24) if dark else QColor(255, 255, 255)
-    text = QColor(255, 255, 255) if dark else QColor(0, 0, 0)
-    accent = QColor(76, 194, 255) if dark else QColor(0, 120, 212)
+    window = QColor(28, 28, 30) if dark else QColor(245, 245, 247)
+    base = QColor(39, 39, 41) if dark else QColor(255, 255, 255)
+    text = QColor(242, 242, 247) if dark else QColor(29, 29, 31)
+    accent = QColor(10, 132, 255) if dark else QColor(0, 122, 255)
 
     palette = QPalette()
     palette.setColor(QPalette.Window, window)
     palette.setColor(QPalette.WindowText, text)
     palette.setColor(QPalette.Base, base)
-    palette.setColor(QPalette.AlternateBase, base)
+    palette.setColor(
+        QPalette.AlternateBase, QColor(44, 44, 46) if dark else QColor(248, 248, 250)
+    )
     palette.setColor(QPalette.ToolTipBase, window)
     palette.setColor(QPalette.ToolTipText, text)
     palette.setColor(QPalette.Text, text)

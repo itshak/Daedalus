@@ -34,20 +34,17 @@ class AppearancePage(QWidget):
         scroll.setWidget(content)
         shell.addWidget(scroll)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
         layout.addWidget(PageHeading(
             "Settings", "Personalize Daedalus without changing your backend's game sessions.",
             self,
         ))
         layout.addWidget(SubtitleLabel("Appearance"))
-        layout.addWidget(CaptionLabel(
-            "Settings apply only to this Mac client, not the connected game worker. "
-            "Account report selection is stored privately for each backend."
-        ))
         layout.addWidget(BodyLabel("Theme"))
         self.theme_combo = ComboBox()
         self.theme_combo.addItems(_THEME_LABELS)
+        self.theme_combo.setMaximumWidth(220)
         layout.addWidget(self.theme_combo)
         layout.addWidget(SubtitleLabel("Warehouse reporting"))
         self.only_220k = CheckBox("Filter to 220K+ unsecured resources by default")
@@ -71,10 +68,6 @@ class AppearancePage(QWidget):
         report_actions.addStretch(1)
         layout.addLayout(report_actions)
         layout.addWidget(SubtitleLabel("Connection"))
-        layout.addWidget(CaptionLabel(
-            "API access is saved only in macOS Keychain for the exact server you approved. "
-            "Gameforge login and recovery remain separate and account-scoped."
-        ))
         self.connection_button = PushButton("Manage secure connection…")
         self.connection_button.clicked.connect(self.connection_settings_requested.emit)
         layout.addWidget(self.connection_button)

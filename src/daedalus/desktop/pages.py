@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -21,7 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -49,9 +47,17 @@ def _table(headers: list[str]) -> ScrollTableWidget:
     table.setBorderVisible(True)
     table.setBorderRadius(8)
     table.verticalHeader().hide()
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.verticalHeader().setDefaultSectionSize(34)
+    table.horizontalHeader().setFixedHeight(32)
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+    table.horizontalHeader().setStretchLastSection(True)
+    table.setShowGrid(False)
+    table.setAlternatingRowColors(False)
+    table.setWordWrap(False)
+    table.setTextElideMode(Qt.ElideRight)
     table.setEditTriggers(ScrollTableWidget.NoEditTriggers)
     table.setSelectionBehavior(ScrollTableWidget.SelectRows)
+    table.setSelectionMode(ScrollTableWidget.SingleSelection)
     return table
 
 
@@ -85,15 +91,15 @@ class ConnectionPage(QWidget):
         center.setSpacing(0)
         center.addStretch(1)
         self.connection_card = OpaqueCardWidget(host)
-        self.connection_card.setMaximumWidth(680)
+        self.connection_card.setMaximumWidth(540)
         self.connection_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         center.addWidget(self.connection_card, 0, Qt.AlignTop)
         center.addStretch(1)
         self.content_scroll.setWidget(host)
         shell.addWidget(self.content_scroll)
         layout = QVBoxLayout(self.connection_card)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(13)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(9)
         layout.addWidget(PageHeading("Connect to Daedalus"))
         intro = CaptionLabel(
             "Connect securely over HTTPS. No SSH tunnel, Terminal or manual "
@@ -101,7 +107,8 @@ class ConnectionPage(QWidget):
         )
         intro.setWordWrap(True)
         self.intro_label = intro
-        layout.addWidget(intro)
+        self.url_input_explanation = intro
+        intro.hide()
 
         layout.addWidget(BodyLabel("Server address"))
         self.url_input = LineEdit()
@@ -131,7 +138,7 @@ class ConnectionPage(QWidget):
             "successful connection the token is kept securely in your Mac Keychain."
         )
         tip.setWordWrap(True)
-        layout.addWidget(tip)
+        self.token_input.setToolTip(tip.text())
         self.remember_checkbox = CheckBox("Save token securely in Keychain and reconnect on startup")
         self.remember_checkbox.setToolTip(
             "On by default. The token is stored in the OS keyring only, never in a text file. "
@@ -156,6 +163,7 @@ class ConnectionPage(QWidget):
         layout.addWidget(self.overview_button)
         self.keychain_status = CaptionLabel("")
         layout.addWidget(self.keychain_status)
+        self.keychain_status.hide()
 
         connection_actions = QHBoxLayout()
         self.reconnect_button = PushButton("Reconnect saved server")
@@ -212,9 +220,9 @@ class ConnectionPage(QWidget):
 
     def set_token_saved(self, saved: bool) -> None:
         self.keychain_status.setText(
-            "API token saved in the OS Keychain; future launches can reconnect automatically."
-            if saved else ""
+            "API access saved in Keychain" if saved else ""
         )
+        self.keychain_status.setVisible(saved)
 
     def _connect(self) -> None:
         self.connect_requested.emit(self.url_input.text().strip(), self.token_input.text())
@@ -283,195 +291,190 @@ class AccountsPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("accounts_page")
-        container_layout = QVBoxLayout(self)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setWidgetResizable(True)
-        container = QWidget(scroll)
-        scroll.setWidget(container)
-        container_layout.addWidget(scroll)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(26, 24, 26, 24)
-        layout.setSpacing(14)
-        header = QHBoxLayout()
-        header.addWidget(PageHeading(
-            "Accounts", "Your configured identities, sessions and recovery actions."
-        ))
-        header.addStretch(1)
-        self.refresh_button = PushButton("Refresh")
-        self.refresh_button.clicked.connect(self.refresh_requested.emit)
-        header.addWidget(self.refresh_button)
-        self.check_engine_button = PushButton("Check IkaBot sessions")
-        self.check_engine_button.clicked.connect(self.check_engine_requested.emit)
-        header.addWidget(self.check_engine_button)
-        layout.addLayout(header)
-        layout.addWidget(CaptionLabel(
-            "Read-only account status. IkaBot sessions are checked only when requested."
-        ))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(9)
         self._accounts: list[dict[str, object]] = []
         self._connected_ids: set[str] | None = None
         self._edit_revision: str | None = None
         self._editable_accounts: list[dict[str, object]] = []
         self._excluded_report_ids: set[str] = set()
         self._updating_report_checks = False
-        # Native master/detail workspace: persistent account list on the
-        # left, contextual status/actions on the right. Both panes remain
-        # accessible and resize together rather than stacking every action.
-        self.master_detail = QSplitter(Qt.Horizontal, container)
-        self.master_detail.setChildrenCollapsible(False)
-        master = QWidget(self.master_detail)
-        master_layout = QVBoxLayout(master)
-        master_layout.setContentsMargins(0, 0, 8, 0)
-        master_layout.setSpacing(12)
-        detail = QWidget(self.master_detail)
-        detail_layout = QVBoxLayout(detail)
-        detail_layout.setContentsMargins(8, 0, 0, 0)
-        detail_layout.setSpacing(12)
-        master.setMinimumWidth(270)
-        detail.setMinimumWidth(295)
-        self.master_detail.addWidget(master)
-        self.master_detail.addWidget(detail)
-        self.master_detail.setStretchFactor(0, 3)
-        self.master_detail.setStretchFactor(1, 2)
-        self.master_detail.setSizes([420, 340])
-        layout.addWidget(self.master_detail)
-        self.select_all_reports = CheckBox("Include all accounts in warehouse reports")
-        self.select_all_reports.setToolTip(
-            "Local report selection only; does not start game tasks or change account enablement"
-        )
+        self._assistance_account_id: str | None = None
+        self._assistance_ticket: dict[str, object] | None = None
+        self._recovery_guide: dict[str, object] | None = None
+        self._native_browser_login_enabled = False
+        self._auto_login_busy = False
+        self._monitor_enabled = False
+        self._advanced_open = False
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(SubtitleLabel("Accounts"))
+        header.addStretch(1)
+        self.refresh_button = PushButton("Refresh")
+        self.refresh_button.setToolTip("Refresh account status from the backend")
+        self.refresh_button.clicked.connect(self.refresh_requested.emit)
+        self.create_button = PrimaryPushButton("Add account")
+        self.create_button.clicked.connect(self._create)
+        self.create_button.setEnabled(False)
+        header.addWidget(self.refresh_button)
+        header.addWidget(self.create_button)
+        layout.addLayout(header)
+
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+        self.select_all_reports = CheckBox("All in reports")
         self.select_all_reports.setChecked(True)
-        self.select_all_reports.stateChanged.connect(self._set_all_reports)
-        master_layout.addWidget(self.select_all_reports)
-        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
-        self.table.itemChanged.connect(self._report_item_changed)
-        # Keep seven columns readable on a compact Mac; deliberate horizontal
-        # scrolling beats seven unusably compressed columns.
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.table.setMinimumHeight(265)
-        master_layout.addWidget(self.table, 1)
-        self.selected_account_summary = StatusPanel(
-            "Choose an account",
-            "Select a row to see session status and available next steps.",
-            self,
+        self.select_all_reports.setToolTip(
+            "Include all configured accounts in combined warehouse reports; "
+            "this changes no game sessions or task permissions"
         )
-        detail_layout.addWidget(self.selected_account_summary)
-        editor_actions = QGridLayout()
-        editor_actions.setSpacing(8)
-        self.create_button = PushButton("Add account")
-        self.edit_button = PushButton("Edit selected")
+        self.select_all_reports.stateChanged.connect(self._set_all_reports)
+        toolbar.addWidget(self.select_all_reports)
+        toolbar.addStretch(1)
+        self.auto_login_all_button = PushButton("Sign in all")
+        self.auto_login_all_button.clicked.connect(self._auto_all)
+        self.auto_login_button = PushButton("Sign in")
+        self.auto_login_button.setToolTip(
+            "Sign in the highlighted account using headless Selenium; "
+            "only an actual CAPTCHA needs your input"
+        )
+        self.auto_login_button.clicked.connect(self._auto_this)
+        toolbar.addWidget(self.auto_login_all_button)
+        toolbar.addWidget(self.auto_login_button)
+        self.auto_cancel_button = PushButton("Cancel sign-in")
+        self.auto_cancel_button.clicked.connect(self.automatic_login_cancel_requested.emit)
+        self.auto_cancel_button.setEnabled(False)
+        self.auto_cancel_button.hide()
+        toolbar.addWidget(self.auto_cancel_button)
+        self.more_button = PushButton("More ▾")
+        self.more_button.setAccessibleName("More account actions")
+        toolbar.addWidget(self.more_button)
+        layout.addLayout(toolbar)
+
+        self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
+        self.table.setAccessibleName("Configured accounts and warehouse report inclusion")
+        self.table.setToolTip("Select an account; tick Report to include it in warehouse printing")
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setMinimumHeight(290)
+        for col, width in enumerate((170, 110, 140, 70, 150, 115, 72)):
+            self.table.setColumnWidth(col, width)
+        self.table.itemChanged.connect(self._report_item_changed)
+        self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
+        self.table.cellDoubleClicked.connect(lambda row, col: self._edit() if col != 6 else None)
+        layout.addWidget(self.table, 1)
+        self.selection_status = CaptionLabel("No accounts loaded")
+        self.selection_status.setAccessibleName("Selected account and session status")
+        layout.addWidget(self.selection_status)
+
+        # Keep existing named actions and backend signals for compatibility,
+        # but display them only in the contextual More menu.
+        self.edit_button = PushButton("Edit")
         self.toggle_button = PushButton("Enable / Disable")
-        self.remove_button = PushButton("Remove selected")
-        for index, (button, callback) in enumerate((
-            (self.create_button, self._create),
+        self.remove_button = PushButton("Remove")
+        self.check_engine_button = PushButton("Check IkaBot sessions")
+        self.assistance_check_button = PushButton("Check login assistance")
+        self.assistance_approve_button = PushButton("Confirm manual step complete")
+        self.native_browser_login_button = PushButton("Manual browser fallback")
+        self.monitor_button = PushButton("Monitor verified session")
+        self.recovery_guide_button = PushButton("Host recovery instructions")
+        self.recovery_prepare_button = PushButton("Prepare host-side recovery")
+        self.rebind_button = PushButton("Verify host-staged session")
+        self.auto_login_selected_button = PushButton("Sign in selected…")
+        for button, callback in (
             (self.edit_button, self._edit),
             (self.toggle_button, self._toggle),
             (self.remove_button, self._remove),
-        )):
+            (self.check_engine_button, self.check_engine_requested.emit),
+            (self.assistance_check_button, self._check_assistance),
+            (self.assistance_approve_button, self._approve_assistance),
+            (self.native_browser_login_button, self._native_browser_login),
+            (self.monitor_button, self._monitor_selected),
+            (self.recovery_guide_button, self._request_recovery_guide),
+            (self.recovery_prepare_button, self._prepare_worker_recovery),
+            (self.rebind_button, self._request_worker_rebind),
+            (self.auto_login_selected_button, self._auto_selected),
+        ):
             button.clicked.connect(callback)
             button.setEnabled(False)
-            editor_actions.addWidget(button, index // 2, index % 2)
-        detail_layout.addLayout(editor_actions)
-        self.editor_status = CaptionLabel("Account editing is disabled on this backend")
-        detail_layout.addWidget(self.editor_status)
-        advanced_wrap = QVBoxLayout()
-        advanced_wrap.setSpacing(12)
-        assistance_actions = QVBoxLayout()
-        self.assistance_check_button = PushButton("Check login assistance")
-        self.assistance_approve_button = PushButton("Confirm manual step complete")
-        self.assistance_check_button.clicked.connect(self._check_assistance)
-        self.assistance_approve_button.clicked.connect(self._approve_assistance)
-        self.assistance_check_button.setEnabled(False)
-        self.assistance_approve_button.setEnabled(False)
-        self._assistance_account_id: str | None = None
-        self._assistance_ticket: dict[str, object] | None = None
-        self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
-        assistance_actions.addWidget(self.assistance_check_button)
-        assistance_actions.addWidget(self.assistance_approve_button)
-        advanced_wrap.addLayout(assistance_actions)
-        native_login_actions = QVBoxLayout()
-        self.auto_login_button = PrimaryPushButton("Sign in automatically (headless)")
-        self.auto_login_button.setToolTip(
-            "Use stored Gameforge login in headless Selenium Chrome; "
-            "a browser window appears only when a CAPTCHA needs you"
-        )
-        self.auto_login_button.clicked.connect(self._auto_this)
-        native_login_actions.addWidget(self.auto_login_button)
-        self.auto_login_all_button = PushButton("Sign in all accounts")
-        self.auto_login_all_button.clicked.connect(self._auto_all)
-        native_login_actions.addWidget(self.auto_login_all_button)
-        self.auto_login_selected_button = PushButton("Choose sign-in accounts…")
-        self.auto_login_selected_button.clicked.connect(self._auto_selected)
-        native_login_actions.addWidget(self.auto_login_selected_button)
-        self.auto_login_status = CaptionLabel(
-            "Headless Selenium uses macOS Keychain credentials and reuses verified "
-            "sessions. Only an actual CAPTCHA opens visible Chrome."
-        )
-        self.auto_login_status.setWordWrap(True)
-        native_login_actions.addWidget(self.auto_login_status)
-        self.auto_cancel_button = PushButton("Cancel automatic sign-in")
-        self.auto_cancel_button.setEnabled(False)
-        self.auto_cancel_button.clicked.connect(self.automatic_login_cancel_requested.emit)
-        native_login_actions.addWidget(self.auto_cancel_button)
-        self.native_browser_login_button = PushButton("Manual browser fallback")
-        self.native_browser_login_button.setToolTip(
-            "Advanced fallback only: open an interactive browser to sign in manually"
-        )
-        self.native_browser_login_button.setEnabled(False)
-        self.native_browser_login_button.clicked.connect(self._native_browser_login)
-        advanced_wrap.addWidget(self.native_browser_login_button)
-        self.native_login_status = CaptionLabel(
-            "Native Mac browser login is available when your backend enables secure recovery."
-        )
-        self.native_login_status.setWordWrap(True)
-        advanced_wrap.addWidget(self.native_login_status)
-        detail_layout.addLayout(native_login_actions)
-        self._native_browser_login_enabled = False
-        self._auto_login_busy = False
 
-        recovery_actions = QVBoxLayout()
-        self.recovery_guide_button = PushButton("Advanced: host recovery instructions")
-        self.recovery_prepare_button = PushButton("Advanced: prepare host-side recovery")
-        self.rebind_button = PushButton("Advanced: verify host-staged session")
-        self.recovery_guide_button.setEnabled(False)
-        self.recovery_prepare_button.setEnabled(False)
-        self.rebind_button.setEnabled(False)
-        self.recovery_guide_button.clicked.connect(self._request_recovery_guide)
-        self.recovery_prepare_button.clicked.connect(self._prepare_worker_recovery)
-        self.rebind_button.clicked.connect(self._request_worker_rebind)
-        self._recovery_guide: dict[str, object] | None = None
-        recovery_actions.addWidget(self.recovery_guide_button)
-        recovery_actions.addWidget(self.recovery_prepare_button)
-        recovery_actions.addWidget(self.rebind_button)
-        advanced_wrap.addLayout(recovery_actions)
-        self.assistance_status = CaptionLabel("Select an account to check for manual help")
-        advanced_wrap.addWidget(self.assistance_status)
-        self._monitor_enabled = False
-        self.monitor_button = PushButton("Monitor verified session")
-        self.monitor_button.clicked.connect(self._monitor_selected)
-        self.monitor_button.setEnabled(False)
-        advanced_wrap.addWidget(self.monitor_button)
-        self.monitor_status = CaptionLabel("Existing-session monitoring is disabled")
-        advanced_wrap.addWidget(self.monitor_status)
-        self.advanced_recovery_panel = QWidget(self)
-        self.advanced_recovery_panel.setLayout(advanced_wrap)
-        self.advanced_recovery_button = PushButton("Advanced recovery and monitoring ▾")
+        self.more_menu = QMenu(self)
+        self._menu_actions = []
+        for label, button in (
+            ("Edit account…", self.edit_button),
+            ("Enable / disable", self.toggle_button),
+            ("Remove account…", self.remove_button),
+            (None, None),
+            ("Sign in selected accounts…", self.auto_login_selected_button),
+            ("Check IkaBot sessions", self.check_engine_button),
+            ("Check login assistance", self.assistance_check_button),
+            ("Confirm manual step complete", self.assistance_approve_button),
+            ("Manual browser fallback…", self.native_browser_login_button),
+            ("Monitor verified session…", self.monitor_button),
+        ):
+            if button is None:
+                self.more_menu.addSeparator()
+                continue
+            action = self.more_menu.addAction(label)
+            action.triggered.connect(button.click)
+            self._menu_actions.append((action, button))
+        self.more_menu.addSeparator()
+        self.advanced_recovery_button = PushButton("Advanced recovery")
         self.advanced_recovery_button.clicked.connect(self._toggle_advanced_recovery)
-        self.advanced_recovery_button.setAccessibleName(
-            "Show or hide advanced account recovery actions"
-        )
-        detail_layout.addWidget(self.advanced_recovery_button)
-        detail_layout.addWidget(self.advanced_recovery_panel)
-        detail_layout.addStretch(1)
+        recovery_action = self.more_menu.addAction("Advanced recovery…")
+        recovery_action.triggered.connect(self.advanced_recovery_button.click)
+        self._menu_actions.append((recovery_action, self.advanced_recovery_button))
+        self.more_menu.aboutToShow.connect(self._sync_account_menu)
+        self.more_button.setMenu(self.more_menu)
+
+        # Recovery is deliberately not part of the normal account workspace.
+        # Show it only after an explicit More > Advanced recovery action.
+        self.advanced_recovery_panel = QWidget(self)
+        expert = QVBoxLayout(self.advanced_recovery_panel)
+        expert.setContentsMargins(6, 8, 6, 8)
+        expert.setSpacing(6)
+        expert.addWidget(CaptionLabel("Advanced account recovery"))
+        for button in (
+            self.recovery_guide_button, self.recovery_prepare_button,
+            self.rebind_button, self.assistance_check_button,
+            self.assistance_approve_button, self.native_browser_login_button,
+            self.monitor_button,
+        ):
+            # A named button is still the single source of enabled state for
+            # the overflow-menu counterpart.
+            button.setParent(self.advanced_recovery_panel)
+            expert.addWidget(button)
+        layout.addWidget(self.advanced_recovery_panel)
         self.advanced_recovery_panel.hide()
 
+        # Dynamic/diagnostic labels exist for callers, but do not consume
+        # permanent space with explanations already conveyed by tooltips.
+        self.selected_account_summary = StatusPanel("", "", self)
+        self.editor_status = CaptionLabel("")
+        self.assistance_status = CaptionLabel("")
+        self.monitor_status = CaptionLabel("")
+        self.native_login_status = CaptionLabel("")
+        self.auto_login_status = CaptionLabel("")
+        self.auto_login_status.setWordWrap(True)
+        layout.addWidget(self.auto_login_status)
+        self.auto_login_status.hide()
+
+    def _sync_account_menu(self) -> None:
+        self.check_engine_button.setEnabled(bool(self._accounts))
+        for action, button in self._menu_actions:
+            needs_selection = button in (
+                self.edit_button, self.toggle_button, self.remove_button,
+            )
+            action.setEnabled(
+                button.isEnabled() and (not needs_selection or self._selected_account() is not None)
+            )
+
     def _toggle_advanced_recovery(self) -> None:
-        showing = not self.advanced_recovery_panel.isVisible()
-        self.advanced_recovery_panel.setVisible(showing)
+        self._advanced_open = not self._advanced_open
+        self.advanced_recovery_panel.setVisible(self._advanced_open)
         self.advanced_recovery_button.setText(
-            "Hide advanced recovery and monitoring" if showing
-            else "Advanced recovery and monitoring ▾"
+            "Hide advanced recovery" if self._advanced_open else "Advanced recovery"
         )
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
@@ -548,6 +551,7 @@ class AccountsPage(QWidget):
         self._render()
 
     def _render(self) -> None:
+        previous_id = self._selected_visible_id()
         self._updating_report_checks = True
         try:
             _populate(
@@ -576,7 +580,15 @@ class AccountsPage(QWidget):
                 item.setToolTip("Include in read-only warehouse reporting")
         finally:
             self._updating_report_checks = False
+        if previous_id is not None:
+            new_index = next(
+                (i for i, row in enumerate(self._accounts) if row.get("id") == previous_id),
+                -1,
+            )
+            if new_index >= 0:
+                self.table.selectRow(new_index)
         self._update_select_all_reports()
+        self._update_assistance_buttons()
 
     def account_record(self, account_id: str) -> dict[str, object] | None:
         return next((dict(record) for record in self._accounts
@@ -631,8 +643,10 @@ class AccountsPage(QWidget):
     def set_automatic_login_busy(self, busy: bool, status: str = "") -> None:
         self._auto_login_busy = bool(busy)
         self.auto_cancel_button.setEnabled(busy)
+        self.auto_cancel_button.setVisible(bool(busy))
         if status:
             self.auto_login_status.setText(status)
+        self.auto_login_status.setVisible(bool(busy and status))
         self._update_assistance_buttons()
 
     def _native_browser_login(self) -> None:
@@ -670,6 +684,19 @@ class AccountsPage(QWidget):
             self.selected_account_summary.set_status(
                 "Choose an account", "Select a row for status and sign-in options."
             )
+        if selected:
+            label = str(selected.get("label") or selected.get("player") or selected["id"])
+            session = str(selected.get("session_status") or "not_connected")
+            self.selection_status.setText(f"{label}  ·  {session.replace('_', ' ')}")
+        else:
+            self.selection_status.setText(
+                f"{len(self._accounts)} accounts" if self._accounts
+                else "No accounts yet — use Add account"
+            )
+        editing = self._edit_revision is not None
+        self.edit_button.setEnabled(editing)
+        self.toggle_button.setEnabled(editing)
+        self.remove_button.setEnabled(editing)
         allowed = self._native_browser_login_enabled and not self._auto_login_busy
         self.native_browser_login_button.setEnabled(
             allowed and account_id is not None
@@ -888,10 +915,8 @@ class AccountsPage(QWidget):
         self._editable_accounts = [
             dict(row) for row in data["accounts"] if isinstance(row, dict)
         ] if enabled else []
-        for button in (
-            self.create_button, self.edit_button, self.toggle_button, self.remove_button,
-        ):
-            button.setEnabled(enabled)
+        self.create_button.setEnabled(enabled)
+        self._update_assistance_buttons()
         self.editor_status.setText(
             "Metadata-only editing enabled; changes require confirmation"
             if enabled else "Account editing is disabled on this backend"
@@ -993,31 +1018,37 @@ class OperationsPage(QWidget):
         self.setObjectName("operations_page")
         self._operations: list[dict[str, object]] = []
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(9)
         header = QHBoxLayout()
-        header.addWidget(SubtitleLabel("IkaBot operations"))
+        header.setSpacing(8)
+        header.addWidget(SubtitleLabel("Operations"))
         header.addStretch(1)
+        self.search_input = LineEdit()
+        self.search_input.setPlaceholderText("Search operations")
+        self.search_input.setMaximumWidth(230)
+        self.search_input.textChanged.connect(self._render)
+        header.addWidget(self.search_input)
         self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
         header.addWidget(self.refresh_button)
+        self.configure_button = PrimaryPushButton("Configure…")
+        self.configure_button.clicked.connect(self._configure_selected)
+        self.configure_button.setEnabled(False)
+        header.addWidget(self.configure_button)
         layout.addLayout(header)
-        self.status_label = CaptionLabel(
-            "Read-only catalog. Select a background task and open its guided setup in Automations."
-        )
-        layout.addWidget(self.status_label)
-        self.search_input = LineEdit()
-        self.search_input.setPlaceholderText("Filter operations by name or module")
-        self.search_input.textChanged.connect(self._render)
-        layout.addWidget(self.search_input)
         self.table = _table(["Operation", "Kind", "Module", "Parameters"])
+        self.table.setAccessibleName("IkaBot operation catalog")
+        self.table.setToolTip("Read-only catalog. Double-click a background task to configure it.")
         self.table.itemSelectionChanged.connect(self._update_configure)
         self.table.cellDoubleClicked.connect(lambda *_args: self._configure_selected())
         layout.addWidget(self.table, 1)
-        self.configure_button = PrimaryPushButton("Configure selected automation")
-        self.configure_button.clicked.connect(self._configure_selected)
-        self.configure_button.setEnabled(False)
-        layout.addWidget(self.configure_button)
+        # Leave read-only mode explicit for accessibility and callers without
+        # showing a permanent disclaimer above the table.
+        self.status_label = CaptionLabel(
+            "Read-only catalog. Background tasks can be configured in Automations."
+        )
+        self.status_label.hide()
 
     def _update_configure(self) -> None:
         row = self.table.currentRow()
@@ -1081,78 +1112,59 @@ class WarehousesPage(QWidget):
         self._failed_accounts: list[str] = []
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-        layout.addWidget(SubtitleLabel("Warehouses"))
-        self.demo_note = CaptionLabel("")
-        layout.addWidget(self.demo_note)
-        layout.addWidget(
-            CaptionLabel(
-                "Unsecured resources from the IkaBot session. Unknown values display as —, not zero."
-            )
-        )
-
-        # Combined reports are the primary path. Individual account inspection
-        # is still available, but intentionally secondary on compact Macs.
-        controls = QHBoxLayout()
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(9)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(SubtitleLabel("Warehouses"))
+        header.addStretch(1)
         self.load_all_button = PrimaryPushButton("All accounts")
         self.load_all_button.setAccessibleName("Load warehouses for all accounts")
         self.load_all_button.setToolTip(
-            "Fetch read-only warehouse reports for every configured account; "
-            "unavailable accounts will be shown separately"
+            "Read-only snapshots for every account; unavailable accounts remain identified"
         )
         self.load_all_button.clicked.connect(self._load_all)
         self.load_all_button.setEnabled(False)
-        controls.addWidget(self.load_all_button)
-
-        self.load_selected_button = PushButton("Selected accounts")
-        self.load_selected_button.setToolTip(
-            "Read-only snapshots for accounts selected here; no tasks started"
-        )
+        header.addWidget(self.load_all_button)
+        self.load_selected_button = PushButton("Selected")
+        self.load_selected_button.setToolTip("Load the saved warehouse report selection")
         self.load_selected_button.clicked.connect(self._load_selected)
         self.load_selected_button.setEnabled(False)
-        controls.addWidget(self.load_selected_button)
-
-        self.choose_accounts_button = PushButton("Choose accounts…")
-        self.choose_accounts_button.setToolTip(
-            "Choose any combination of accounts for warehouse reports"
-        )
+        header.addWidget(self.load_selected_button)
+        self.choose_accounts_button = PushButton("Choose…")
+        self.choose_accounts_button.setAccessibleName("Choose accounts for combined warehouse reports")
         self.choose_accounts_button.clicked.connect(self._choose_accounts)
         self.choose_accounts_button.setEnabled(False)
-        controls.addWidget(self.choose_accounts_button)
-        controls.addStretch(1)
-        layout.addLayout(controls)
+        header.addWidget(self.choose_accounts_button)
+        layout.addLayout(header)
 
-        account_controls = QHBoxLayout()
-        account_controls.addWidget(BodyLabel("Single account"))
+        options = QHBoxLayout()
+        options.setSpacing(8)
         self.account_combo = ComboBox()
-        account_controls.addWidget(self.account_combo, 1)
-        self.load_button = PushButton("This account")
-        self.load_button.setToolTip("Refresh only this account's warehouse report")
+        self.account_combo.setAccessibleName("Inspect single warehouse account")
+        self.account_combo.setMinimumWidth(130)
+        self.account_combo.setMaximumWidth(200)
+        options.addWidget(self.account_combo)
+        self.load_button = PushButton("Load one")
         self.load_button.clicked.connect(self._load)
-        account_controls.addWidget(self.load_button)
-        layout.addLayout(account_controls)
-        filters = QHBoxLayout()
-
-        self.only_220k = CheckBox("Only 220K+")
-        self.only_220k.setToolTip(
-            "Show cities with at least 220,000 known unsecured resources in total"
-        )
+        self.load_button.setToolTip("Read-only warehouse report for this account only")
+        options.addWidget(self.load_button)
+        self.only_220k = CheckBox("220K+")
+        self.only_220k.setToolTip("Only cities with at least 220,000 known unsecured resources")
         self.only_220k.stateChanged.connect(self._render)
-        filters.addWidget(self.only_220k)
-        self.group_island = CheckBox("Group by island")
-        self.group_island.setToolTip("Order rows by existing city island coordinates")
+        options.addWidget(self.only_220k)
+        self.group_island = CheckBox("By island")
+        self.group_island.setToolTip("Group city rows by world and island coordinates")
         self.group_island.stateChanged.connect(self._render)
-        filters.addWidget(self.group_island)
-        filters.addStretch(1)
-        layout.addLayout(filters)
+        options.addWidget(self.group_island)
+        options.addStretch(1)
 
-        self.status_label = CaptionLabel("No warehouse snapshots loaded")
-        layout.addWidget(self.status_label)
-        self.table = _table(list(self._COLUMNS))
-        layout.addWidget(self.table, 1)
+        self.print_button = PushButton("Print…")
+        self.print_button.setAccessibleName("Preview and print the combined warehouse report")
+        self.print_button.clicked.connect(self._print_report)
+        self.print_button.setEnabled(False)
+        options.addWidget(self.print_button)
 
-        actions = QHBoxLayout()
         self.copy_button = PushButton("Copy CSV")
         self.copy_button.clicked.connect(self._copy_csv)
         self.copy_islands_button = PushButton("Copy by island")
@@ -1163,40 +1175,43 @@ class WarehousesPage(QWidget):
         self.json_button.clicked.connect(lambda: self._save("json"))
         self.txt_button = PushButton("Save TXT")
         self.txt_button.clicked.connect(lambda: self._save("txt"))
-        self.print_button = PushButton("Print report…")
-        self.print_button.setAccessibleName("Preview and print the combined warehouse report")
-        self.print_button.clicked.connect(self._print_report)
-        self.print_button.setEnabled(False)
-        actions.addWidget(self.print_button)
-        self.export_button = PushButton("Export report ▾")
+        self.export_button = PushButton("Export ▾")
         self.export_button.setAccessibleName("Copy or save the current warehouse report")
         menu = QMenu(self)
-        menu.addAction("Copy CSV to clipboard", self._copy_csv)
-        menu.addAction("Copy grouped island report", self._copy_islands)
-        menu.addAction("Print grouped report…", self._print_report)
-        menu.addSeparator()
-        menu.addAction("Save CSV…", lambda: self._save("csv"))
-        menu.addAction("Save JSON…", lambda: self._save("json"))
-        menu.addAction("Save island text…", lambda: self._save("txt"))
+        for label, button in (
+            ("Copy CSV", self.copy_button),
+            ("Copy by island", self.copy_islands_button),
+            ("Print grouped report…", self.print_button),
+            ("Save CSV…", self.csv_button),
+            ("Save JSON…", self.json_button),
+            ("Save TXT…", self.txt_button),
+        ):
+            action = menu.addAction(label)
+            action.triggered.connect(button.click)
         self.export_button.setMenu(menu)
         self.export_button.setEnabled(False)
-        actions.addWidget(self.export_button)
-        for button in (
-            self.copy_button, self.copy_islands_button,
-            self.csv_button, self.json_button, self.txt_button,
-        ):
-            button.setEnabled(False)
-            button.setVisible(False)
-            actions.addWidget(button)  # Compatibility for existing test/API callers.
-        actions.addStretch(1)
-        # Keep Print/Export visible above the potentially tall warehouse table.
-        layout.insertLayout(layout.indexOf(self.status_label), actions)
+        options.addWidget(self.export_button)
+        layout.addLayout(options)
+
+        self.table = _table(list(self._COLUMNS))
+        self.table.setAccessibleName("Warehouse resources grouped across selected accounts")
+        self.table.setToolTip("— means unknown, not zero. Export retains this distinction.")
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        for index, width in enumerate((155, 94, 94, 90, 90, 90, 90, 90, 100, 135, 87, 140)):
+            self.table.setColumnWidth(index, width)
+        self.status_label = CaptionLabel("No warehouse snapshots loaded")
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.table, 1)
+        self.demo_note = CaptionLabel("")
+        self.demo_note.hide()
+        layout.addWidget(self.demo_note)
 
     def set_demo(self, enabled: bool) -> None:
         self.demo_note.setText(
-            "SYNTHETIC DEMO — sample amounts only; no real account resources"
-            if enabled else ""
+            "SYNTHETIC DEMO · sample amounts only" if enabled else ""
         )
+        self.demo_note.setVisible(enabled)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         previous = self.selected_account_id()

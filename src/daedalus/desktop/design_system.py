@@ -13,7 +13,6 @@ from qfluentwidgets import (
     CaptionLabel,
     CardWidget,
     SubtitleLabel,
-    TitleLabel,
 )
 from qfluentwidgets import (
     FluentIcon as FIF,
@@ -67,15 +66,19 @@ class PageHeading(QWidget):
     def __init__(self, title: str, subtitle: str = "", parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, METRICS.md)
-        layout.setSpacing(METRICS.sm)
-        self.title = TitleLabel(title)
+        layout.setContentsMargins(0, 0, 0, METRICS.xs)
+        layout.setSpacing(0)
+        self.title = SubtitleLabel(title)
         self.title.setAccessibleName(title)
+        if subtitle:
+            self.title.setToolTip(subtitle)
+            self.title.setAccessibleDescription(subtitle)
         layout.addWidget(self.title)
-        self.subtitle = BodyLabel(subtitle)
+        # Description is available on hover/assistive tech instead of
+        # occupying every page header. Retain this member for existing callers.
+        self.subtitle = CaptionLabel(subtitle)
         _wrap(self.subtitle)
-        self.subtitle.setVisible(bool(subtitle))
-        layout.addWidget(self.subtitle)
+        self.subtitle.hide()
 
 
 class SectionCard(CardWidget):
