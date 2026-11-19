@@ -202,3 +202,30 @@ def test_unsafe_origin_blocks_typing_even_with_valid_credentials():
     )
     with pytest.raises(automation.SeleniumLoginError, match="changed origin"):
         flow._type(object(), "credentials")
+
+
+def test_only_a_displayed_captcha_can_trigger_visible_browser():
+    from daedalus.desktop.legacy_selenium.settings import Settings
+
+    class Widget:
+        def __init__(self, visible):
+            self.visible = visible
+        def is_displayed(self):
+            return self.visible
+
+    class Driver:
+        def __init__(self, visible):
+            self.visible = visible
+        def find_elements(self, *_args):
+            return [Widget(self.visible)]
+
+    hidden = automation.DaedalusLoginFlow(
+        Driver(False), Settings(password="fixture"),
+        headless=True, cancelled=lambda: False, progress=lambda _: None,
+    )
+    shown = automation.DaedalusLoginFlow(
+        Driver(True), Settings(password="fixture"),
+        headless=True, cancelled=lambda: False, progress=lambda _: None,
+    )
+    assert hidden._captcha_present() is False
+    assert shown._captcha_present() is True
