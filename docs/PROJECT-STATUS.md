@@ -26,7 +26,7 @@ with draft upgrade targets, and safe rejection of cross-account city/plan reuse.
 Raw construction planner JSON is hidden from the normal UI, with expert import
 retained for previously prepared engine plans. Resource distribution has native
 resource/mode choices and source-backed participating-city multi-selection;
-research and tavern management have account-bound city subsets.
+research and tavern management have account-bound city subsets. Daily reward collection has native wine/wood/luxury city destinations and verified favour-task choices.
 
 The remaining implementation is substantial: IkaBot's authoritative, read-only
 construction cost/shipment/ETA planner; native executable construction queue;
