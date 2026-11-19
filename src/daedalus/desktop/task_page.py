@@ -621,11 +621,14 @@ class TasksPage(QWidget):
         self._invalidate_review()
         self._selected_task_changed()
 
-    def _populate_city_picker(self, widget: ComboBox) -> None:
+    def _populate_city_picker(self, widget: ComboBox, *, optional: bool = False) -> None:
         cities = self._cities_by_account.get(self.selected_account_id() or "", [])
         with QSignalBlocker(widget):
             widget.clear()
-            widget.addItem("Choose a city…" if cities else "Cities unavailable — refresh to load")
+            widget.addItem(
+                ("Skip optional reward" if optional else "Choose a city…")
+                if cities else "Cities unavailable — refresh to load"
+            )
             for city in cities:
                 suffix = str(city.get("coords") or "")
                 widget.addItem(f"{city['name']} ({suffix})" if suffix else str(city["name"]))
@@ -667,9 +670,13 @@ class TasksPage(QWidget):
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
-            for input_widget in self._form_inputs.values():
-                if isinstance(input_widget, QListWidget):
+            for key, input_widget in self._form_inputs.items():
+                if isinstance(input_widget, QListWidget) and input_widget.property("city_scope") is True:
                     self._populate_city_list(input_widget)
+                    self._invalidate_review()
+                elif (isinstance(input_widget, ComboBox)
+                      and input_widget.property("city_picker") is True):
+                    self._populate_city_picker(input_widget, optional=key != "wine_city")
                     self._invalidate_review()
 
     def _selected_construction_city(self) -> int | None:
@@ -748,9 +755,13 @@ class TasksPage(QWidget):
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
-            for input_widget in self._form_inputs.values():
-                if isinstance(input_widget, QListWidget):
+            for key, input_widget in self._form_inputs.items():
+                if isinstance(input_widget, QListWidget) and input_widget.property("city_scope") is True:
                     self._populate_city_list(input_widget)
+                    self._invalidate_review()
+                elif (isinstance(input_widget, ComboBox)
+                      and input_widget.property("city_picker") is True):
+                    self._populate_city_picker(input_widget, optional=key != "wine_city")
                     self._invalidate_review()
 
     def _choose_bulk_accounts(self) -> None:
@@ -1239,11 +1250,30 @@ class TasksPage(QWidget):
             )
             if kind == "city_list":
                 widget = QListWidget(self)
+                widget.setProperty("city_scope", True)
                 widget.setAccessibleName(f"Choose account cities for {label}")
                 widget.setMinimumHeight(105)
                 widget.setMaximumHeight(135)
                 self._populate_city_list(widget)
                 widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "choices_list":
+                widget = QListWidget(self)
+                widget.setAccessibleName(f"Choose options for {label}")
+                widget.setMinimumHeight(105)
+                widget.setMaximumHeight(135)
+                for choice in field["choices"]:
+                    item = QListWidgetItem(str(choice))
+                    item.setData(Qt.UserRole, str(choice))
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Unchecked)
+                    widget.addItem(item)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "city_picker":
+                widget = ComboBox()
+                widget.setProperty("city_picker", True)
+                widget.setAccessibleName(f"Choose actual city for {label}")
+                self._populate_city_picker(widget, optional=not field["required"])
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
             elif name == "constructionList" and key == "city_id":
                 widget = ComboBox()
                 widget.setAccessibleName("Choose a real city for construction")
@@ -1319,7 +1349,8 @@ class TasksPage(QWidget):
             # box under single-parameter workflows.
             visible_fields = [f for f in fields if name != "constructionList"
                               or f.get("name") == "city_id"]
-            list_extra = 78 if any(field.get("type") == "city_list" for field in visible_fields) else 0
+            list_extra = 78 if any(field.get("type") in {"city_list", "choices_list"}
+                                   for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(315, max(72, len(visible_fields) * 44 + 24 + list_extra))
             )
@@ -1339,7 +1370,7 @@ class TasksPage(QWidget):
             self.preflight_requested.emit(account_id, name)
         if (account_id and account_id not in self._cities_by_account
                 and (name == "constructionList"
-                     or any(field.get("type") == "city_list" for field in fields))):
+                     or any(field.get("type") in {"city_list", "city_picker"} for field in fields))):
             self.cities_requested.emit(account_id)
 
     def set_preflight(self, result: dict[str, object]) -> None:
@@ -1393,9 +1424,17 @@ class TasksPage(QWidget):
                     if field["required"]:
                         raise ValueError(f"Select at least one city for {key}")
                     continue
-                if name == "distributeResources" and len(chosen) < 2:
+                if name == "distributeResources" and kind == "city_list" and len(chosen) < 2:
                     raise ValueError("Choose at least two cities to distribute resources")
                 config[key] = chosen
+                continue
+            if kind == "city_picker" and isinstance(widget, ComboBox):
+                cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+                index = widget.currentIndex()
+                if 1 <= index <= len(cities):
+                    config[key] = cities[index - 1]["id"]
+                elif field["required"]:
+                    raise ValueError(f"Select an actual city for {key}")
                 continue
             if isinstance(widget, ComboBox):
                 index = widget.currentIndex()
