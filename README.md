@@ -224,3 +224,6 @@ See [Guided native Mac quick start](docs/GUI-QUICKSTART.md) for connection, prer
 ### Native Mac authentication
 
 Human Gameforge login/MFA/CAPTCHA is supported in the **client Mac's** temporary embedded browser and the exact-world session is sent as a one-use encrypted payload to the independently verifying Linux worker. No remote VNC or Mac SSH tunnel is needed. Backend opt-in and real-world acceptance are separate. See [native Mac browser login](docs/NATIVE-MAC-LOGIN.md).
+
+
+For unattended Linux deployment, [host-persistent encrypted systemd credentials](docs/PERSISTENT-CREDENTIALS.md) replace volatile desktop-session keyrings without adding a Mac SSH/VNC requirement. The local release preflight and real-owner acceptance checklist remain mandatory.

@@ -107,3 +107,40 @@ def test_invalid_ledger_does_not_expose_sqlite_error_or_create_journal(tmp_path)
     assert state["task_ledger"]["status"] == "unavailable"
     assert "private-token" not in str(state)
     assert not (tmp_path / "bad.sqlite-journal").exists()
+
+
+def test_encrypted_systemd_store_metadata_is_supported_without_reading_it(tmp_path, monkeypatch):
+    ledger = tmp_path / "ledger.db"
+    _ledger(ledger, "operator_reconciled")
+    encrypted = tmp_path / "persistent"
+    encrypted.mkdir(mode=0o700)
+    blob = encrypted / "opaque.secret"
+    blob.write_bytes(b"unencrypted-test-contents-are-never-read")
+    blob.chmod(0o600)
+    monkeypatch.setenv("DAEDALUS_PROTECTED_STORE_DIR", str(encrypted))
+    result = deployment_preflight(ledger_path=ledger)
+    assert result["status"] == "requires_owner_acceptance"
+    assert result["task_ledger"]["status"] == "clear"
+    assert result["keyring_durability"] == "host_encrypted_collection_present_unverified"
+    assert "unencrypted-test-contents" not in json.dumps(result)
+    assert not result["production_cutover_authorized"]
+    blob.chmod(0o644)
+    assert deployment_preflight(ledger_path=ledger)["status"] == "blocked"
+
+
+def test_explicit_operator_directory_overrides_unrelated_shell_keyring(tmp_path, capsys, monkeypatch):
+    ledger = tmp_path / "tasks.db"
+    _ledger(ledger, "operator_reconciled")
+    store = tmp_path / "encrypted"
+    store.mkdir(mode=0o700)
+    record = store / "opaque.secret"
+    record.write_bytes(b"fictional-test-ciphertext")
+    if os.name != "nt":
+        record.chmod(0o600)
+    monkeypatch.delenv("DAEDALUS_PROTECTED_STORE_DIR", raising=False)
+    assert main(["doctor", "--deployment-check", "--task-ledger", str(ledger),
+                 "--protected-store-directory", str(store)]) == 0
+    result = json.loads(capsys.readouterr().out)["deployment_preflight"]
+    assert result["status"] == "requires_owner_acceptance"
+    assert result["task_ledger"]["unresolved_requests"] == 0
+    assert result["keyring_durability"] == "host_encrypted_collection_present_unverified"

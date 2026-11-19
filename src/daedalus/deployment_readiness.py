@@ -37,6 +37,27 @@ def _durable_keyring_evidence(directory: Path) -> str:
     return "volatile_session_only_or_unprovisioned"
 
 
+def _systemd_store_evidence(directory: Path) -> str:
+    """Inspect encrypted file metadata; never read ciphertext or the key."""
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return "systemd_encrypted_store_unavailable"
+        mode = directory.stat().st_mode
+        if os.name != "nt" and mode & (stat.S_IRWXG | stat.S_IRWXO):
+            return "unsafe_encrypted_store_permissions"
+        items = list(directory.glob("*.secret"))
+        if not items:
+            return "systemd_encrypted_store_unavailable"
+        for item in items:
+            if item.is_symlink() or not item.is_file():
+                return "unsafe_encrypted_store_permissions"
+            if os.name != "nt" and item.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+                return "unsafe_encrypted_store_permissions"
+        return "host_encrypted_collection_present_unverified"
+    except OSError:
+        return "systemd_encrypted_store_unavailable"
+
+
 def _ledger_evidence(path: Path) -> dict[str, object]:
     """Read-only SELECT, no sqlite journal, no file creation or identifiers."""
     if path.is_symlink() or path.parent.is_symlink():
@@ -62,16 +83,25 @@ def _ledger_evidence(path: Path) -> dict[str, object]:
 
 
 def deployment_preflight(*, ledger_path: str | Path | None = None,
-                         keyring_directory: str | Path | None = None) -> dict[str, object]:
+                         keyring_directory: str | Path | None = None,
+                         protected_store_directory: str | Path | None = None) -> dict[str, object]:
     """Only owner-local metadata; production approval always requires a human."""
     ledger = Path(ledger_path).expanduser() if ledger_path is not None else default_task_ledger_path()
     keyrings = (Path(keyring_directory).expanduser()
                 if keyring_directory is not None else _keyring_location())
     receipt = _ledger_evidence(ledger)
-    keyring = _durable_keyring_evidence(keyrings)
+    systemd_dir = (protected_store_directory if protected_store_directory is not None
+                   else os.environ.get("DAEDALUS_PROTECTED_STORE_DIR"))
+    keyring = (
+        _systemd_store_evidence(Path(systemd_dir)) if systemd_dir
+        else _durable_keyring_evidence(keyrings)
+    )
     unsafe = (
         receipt["status"] != "clear"
-        or keyring != "encrypted_collection_file_present_unverified"
+        or keyring not in {
+            "encrypted_collection_file_present_unverified",
+            "host_encrypted_collection_present_unverified",
+        }
     )
     return {
         "status": "blocked" if unsafe else "requires_owner_acceptance",

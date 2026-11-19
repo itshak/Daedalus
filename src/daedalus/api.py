@@ -106,7 +106,13 @@ def create_app(
         ):
             raise ValueError("Dedicated saved worker must be the configured authoritative owner")
         if recovery_monitor is not None:
-            recovery_monitor.attach_dedicated_worker(saved_worker)
+            # CLI must pre-attach the worker before constructing encrypted
+            # native handoff; direct API callers may still attach here.
+            attached = recovery_monitor._dedicated_worker
+            if attached is None:
+                recovery_monitor.attach_dedicated_worker(saved_worker)
+            elif attached is not saved_worker:
+                raise ValueError("Dedicated recovery monitor is owned by a different worker")
     if native_browser_handoff is not None and (
         native_browser_handoff.owner is not owner
         or not native_browser_handoff.owner.matches_accounts(configured_accounts)
