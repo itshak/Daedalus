@@ -359,3 +359,70 @@ def test_construction_advanced_mode_does_not_require_making_up_queue_values(page
     page._toggle_advanced()
     assert warnings == []  # Opening expert mode does not fabricate a plan.
     assert page.config_editor.toPlainText() == "{}"
+
+
+def test_distribution_uses_verified_resource_policy_and_actual_city_multiselect(page):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    requested = []
+    page.cities_requested.connect(requested.append)
+    page.set_capabilities([{
+        "name": "distributeResources", "kind": "background_task",
+        "config_fields": [
+            {"name": "resource", "type": "json", "required": True},
+            {"name": "mode", "type": "text", "default": "even", "required": False},
+            {"name": "cities_ids", "type": "json", "required": False},
+            {"name": "useFreighters", "type": "boolean", "required": False},
+        ],
+    }], enabled=True)
+    assert requested == ["alpha"]
+    cities = page._form_inputs["cities_ids"]
+    assert isinstance(cities, QListWidget)
+    assert cities.count() == 0
+    page.set_cities("alpha", [
+        {"id": 11, "name": "Athens", "coords": "1:2"},
+        {"id": 12, "name": "Olympia", "coords": "1:3"},
+        {"id": 13, "name": "Sparta", "coords": "1:4"},
+    ])
+    assert cities.count() == 3
+    assert "Athens" in cities.item(0).text()
+    resource = page._form_inputs["resource"]
+    values = [resource.itemText(i) for i in range(resource.count())]
+    assert values == ["wood", "wine", "marble", "crystal", "sulfur"]
+    assert page._form_config()["resource"] == "wood"
+    assert "cities_ids" not in page._form_config()  # all cities through upstream default
+
+    cities.item(0).setCheckState(Qt.Checked)
+    with pytest.raises(ValueError, match="at least two"):
+        page._form_config()
+    cities.item(1).setCheckState(Qt.Checked)
+    assert page._form_config()["cities_ids"] == ["11", "12"]
+    page._form_inputs["mode"].setCurrentIndex(1)
+    with pytest.raises(ValueError, match="Every city produces wood"):
+        page._form_config()
+    resource.setCurrentIndex(1)
+    assert page._form_config()["resource"] == "wine"
+
+    # A refreshed authenticated city set invalidates the previous chosen IDs.
+    page.set_cities_unavailable("alpha")
+    assert cities.count() == 0
+    assert "cities_ids" not in page._form_config()
+
+
+def test_tavern_cities_are_native_and_never_fabricated(page):
+    from PySide6.QtWidgets import QListWidget
+
+    page.set_capabilities([{
+        "name": "tavernManager", "kind": "background_task",
+        "config_fields": [
+            {"name": "run_hours", "type": "json", "required": True},
+            {"name": "cities_ids", "type": "json", "required": False},
+        ],
+    }], enabled=True)
+    assert isinstance(page._form_inputs["cities_ids"], QListWidget)
+    page.set_cities("alpha", [{"id": 30, "name": "Ephesus"}])
+    assert page._form_inputs["cities_ids"].count() == 1
+    # Uses engine default without explicitly choosing a city.
+    page._form_inputs["run_hours"].setValue(1)
+    assert page._form_config() == {"run_hours": 1}
