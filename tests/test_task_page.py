@@ -175,7 +175,9 @@ def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypa
     page._build_config_from_form()
     assert warnings
     assert page.config_editor.toPlainText() == "{}"
-    page._form_inputs["hours"].setText("4")
+    # Upstream documents hours as an integer; the redesigned GUI uses a
+    # native Fluent SpinBox with a mandatory empty sentinel, not free-form JSON.
+    page._form_inputs["hours"].setValue(4)
     page._form_inputs["auto_transfer"].setChecked(True)
     page._form_inputs["transfer_amount"].setValue(1500)
     page._build_config_from_form()
@@ -183,9 +185,10 @@ def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypa
         "hours": 4, "auto_transfer": True, "transfer_amount": 1500,
     }
 
-    page._form_inputs["hours"].setText("NaN")
+    previous_warnings = len(warnings)
+    page._form_inputs["hours"].setValue(0)  # missing-value sentinel
     page._build_config_from_form()
-    assert warnings
+    assert len(warnings) > previous_warnings
     assert '"hours": 4' in page.config_editor.toPlainText()
 
 
