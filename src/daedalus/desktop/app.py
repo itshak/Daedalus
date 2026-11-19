@@ -12,7 +12,6 @@ import sys
 
 from PySide6.QtCore import QObject, QRect, QSize, QThread, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QSizePolicy, QSpacerItem
-from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     FluentWindow,
     InfoBar,
@@ -32,6 +31,7 @@ from daedalus.connection_prefs import (
 )
 from daedalus.desktop.appearance_page import AppearancePage
 from daedalus.desktop.branding import application_icon
+from daedalus.desktop.design_system import NAV_ICONS
 from daedalus.desktop.home_page import HomePage
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
@@ -183,14 +183,15 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.warehouses(self.account_id),
                 }
-            elif self.action == "warehouses_batch" and self.task_payload is not None:
+            elif self.action in {"warehouses_batch", "warehouses_all"} and self.task_payload is not None:
                 ids = self.task_payload.get("account_ids")
+                limit = 32 if self.action == "warehouses_batch" else 100
                 if (
-                    not isinstance(ids, list) or not 1 <= len(ids) <= 32
+                    not isinstance(ids, list) or not 1 <= len(ids) <= limit
                     or any(not isinstance(aid, str) for aid in ids)
                     or len(set(ids)) != len(ids)
                 ):
-                    raise ValueError("Select between 1 and 32 distinct report accounts")
+                    raise ValueError(f"Select between 1 and {limit} distinct report accounts")
                 result = []
                 for aid in ids:
                     try:
@@ -210,6 +211,74 @@ class APIWorker(QThread):
                 )
             elif self.action == "task_list" and self.account_id:
                 result = self.client.tasks(self.account_id)
+            elif self.action == "task_list_batch" and self.task_payload is not None:
+                ids = self.task_payload.get("account_ids")
+                if (
+                    not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                    or any(not isinstance(aid, str) for aid in ids)
+                    or len(set(ids)) != len(ids)
+                ):
+                    raise ValueError("Choose between 1 and 100 distinct accounts")
+                result = []
+                for aid in ids:
+                    try:
+                        data = self.client.tasks(aid)
+                        # The backend binds every task ledger to its account;
+                        # never display another account's result under this name.
+                        if data.get("account_id") not in {None, aid}:
+                            raise ValueError("Task status account mismatch")
+                        result.append({"account_id": aid,
+                                       "engine_tasks": data.get("engine_tasks", []),
+                                       "requests": data.get("requests", [])})
+                    except (ValueError, APIConnectionError):
+                        result.append({"account_id": aid, "error": True})
+            elif self.action == "task_start_batch" and self.task_payload is not None:
+                import uuid
+
+                ids = self.task_payload.get("account_ids")
+                task = self.task_payload.get("task")
+                config = self.task_payload.get("config")
+                if (
+                    not isinstance(ids, list) or not 1 <= len(ids) <= 32
+                    or any(not isinstance(aid, str) for aid in ids)
+                    or len(set(ids)) != len(ids)
+                    or not isinstance(task, str) or not isinstance(config, dict)
+                ):
+                    raise ValueError("Select up to 32 distinct authorized task accounts")
+                # All preflights must succeed BEFORE the first game mutation.
+                blocked = []
+                for aid in ids:
+                    try:
+                        readiness = self.client.task_preflight(aid, task)
+                        if (readiness.get("ready") is not True
+                                or readiness.get("unresolved_request") is True):
+                            blocked.append({
+                                "account_id": aid,
+                                "reason": str(readiness.get("reason") or "unavailable"),
+                            })
+                    except (ValueError, APIConnectionError):
+                        blocked.append({"account_id": aid, "reason": "unavailable"})
+                submitted = []
+                halted = None
+                if not blocked:
+                    for aid in ids:
+                        rid = str(uuid.uuid4())
+                        try:
+                            receipt = self.client.start_task(
+                                aid, task, config, rid, confirmed=True,
+                            )
+                            submitted.append({
+                                "account_id": aid, "request_id": rid,
+                                "status": str(receipt.get("status") or "submitted"),
+                            })
+                        except (ValueError, APIConnectionError):
+                            # Transport uncertainty MAY mean execution occurred.
+                            # Stop subsequent launches, do not retry or reissue.
+                            halted = {"account_id": aid, "request_id": rid,
+                                      "status": "unconfirmed"}
+                            break
+                result = {"submitted": submitted, "blocked": blocked,
+                          "halted": halted, "account_ids": ids}
             elif self.action == "task_start" and self.account_id and self.task_payload:
                 payload = self.task_payload
                 result = self.client.start_task(
@@ -304,6 +373,7 @@ class MainWindow(FluentWindow):
         # timer fired from completed may race with finished and be discarded.
         self._preflight_queue: list[tuple[str, str]] = []
         self._pending_task_refresh: str | None = None
+        self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
@@ -336,19 +406,21 @@ class MainWindow(FluentWindow):
             group_by_island=self._gui_preferences.group_by_island,
         )
 
-        self.addSubInterface(self.home_page, FIF.HOME, "Home")
-        self.addSubInterface(self.accounts_page, FIF.PEOPLE, "Accounts")
-        self.addSubInterface(self.warehouses_page, FIF.SAVE, "Warehouses")
-        self.addSubInterface(self.wine_page, FIF.PLAY, "Wine")
-        self.addSubInterface(self.construction_page, FIF.EDIT, "Construction")
-        self.addSubInterface(self.tasks_page, FIF.PLAY, "Automations")
-        self.addSubInterface(self.operations_page, FIF.APPLICATION, "Explore")
-        self.addSubInterface(self.log_page, FIF.DOCUMENT, "Activity")
+        # Five daily destinations. Wine, Construction and the read-only
+        # operation catalog live inside Automations rather than duplicating
+        # entire navigable task editors.
+        self.addSubInterface(self.home_page, NAV_ICONS["overview"], "Overview")
+        self.addSubInterface(self.accounts_page, NAV_ICONS["accounts"], "Accounts")
+        self.addSubInterface(self.warehouses_page, NAV_ICONS["warehouses"], "Warehouses")
+        self.addSubInterface(self.tasks_page, NAV_ICONS["automations"], "Automations")
+        self.addSubInterface(self.log_page, NAV_ICONS["activity"], "Activity")
         self.addSubInterface(
-            self.appearance_page, FIF.SETTING, "Appearance", NavigationItemPosition.BOTTOM
+            self.connection_page, NAV_ICONS["connection"], "Connection",
+            NavigationItemPosition.BOTTOM,
         )
         self.addSubInterface(
-            self.connection_page, FIF.SETTING, "Connection", NavigationItemPosition.BOTTOM
+            self.appearance_page, NAV_ICONS["settings"], "Settings",
+            NavigationItemPosition.BOTTOM,
         )
 
         self.navigationInterface.setReturnButtonVisible(False)
@@ -361,6 +433,9 @@ class MainWindow(FluentWindow):
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
         self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
+        self.appearance_page.connection_settings_requested.connect(
+            lambda: self.switchTo(self.connection_page)
+        )
         self.accounts_page.report_selection_changed.connect(self._on_report_selection_changed)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
         self.accounts_page.account_change_requested.connect(
@@ -402,6 +477,8 @@ class MainWindow(FluentWindow):
         self.home_page.manage_accounts.connect(lambda: self.switchTo(self.accounts_page))
         self.home_page.account_selected.connect(self._select_working_account)
         self.home_page.view_warehouses.connect(self._view_home_warehouses)
+        self.home_page.view_all_warehouses.connect(self._view_all_warehouses)
+        self.home_page.view_all_automations.connect(self._view_all_automations)
         self.home_page.manage_automations.connect(self._view_home_automations)
         self.operations_page.configure_requested.connect(self._configure_catalog_task)
         self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
@@ -410,6 +487,14 @@ class MainWindow(FluentWindow):
         )
         self.warehouses_page.load_selected_requested.connect(
             lambda ids: self._request("warehouses_batch", task_payload={"account_ids": ids})
+        )
+        self.warehouses_page.load_all_requested.connect(
+            lambda ids: self._request("warehouses_all", task_payload={"account_ids": ids})
+        )
+        self.warehouses_page.report_scope_changed.connect(
+            lambda ids: self.accounts_page.set_report_exclusions(
+                set(self.warehouses_page._account_ids).difference(ids)
+            )
         )
         for view in self._task_views:
             view.refresh_requested.connect(
@@ -430,6 +515,17 @@ class MainWindow(FluentWindow):
             view.reconcile_requested.connect(
                 lambda aid, rid: self._request(
                     "task_reconcile", account_id=aid, task_payload={"request_id": rid},
+                )
+            )
+            view.batch_status_requested.connect(
+                lambda ids: self._request(
+                    "task_list_batch", task_payload={"account_ids": ids},
+                )
+            )
+            view.batch_launch_requested.connect(
+                lambda ids, task, config: self._request(
+                    "task_start_batch",
+                    task_payload={"account_ids": ids, "task": task, "config": config},
                 )
             )
 
@@ -482,6 +578,14 @@ class MainWindow(FluentWindow):
         self._select_working_account(account_id)
         self.switchTo(self.warehouses_page)
         self._request("warehouses", account_id=account_id)
+
+    def _view_all_warehouses(self) -> None:
+        self.switchTo(self.warehouses_page)
+        self.warehouses_page._load_all()
+
+    def _view_all_automations(self) -> None:
+        self.switchTo(self.tasks_page)
+        self.tasks_page._refresh_all()
 
     def _view_home_automations(self, account_id: str) -> None:
         self._select_working_account(account_id)
@@ -993,7 +1097,7 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.warehouses_page.set_snapshots(payload["account_id"], payload["cities"])
             logger.info("Warehouse snapshot report updated")
-        elif action == "warehouses_batch":
+        elif action in {"warehouses_batch", "warehouses_all"}:
             assert isinstance(payload, list)
             self.warehouses_page.set_batch_snapshots(payload)
             logger.info("Multi-account warehouse report updated")
@@ -1001,6 +1105,36 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             for view in self._task_views:
                 view.set_preflight(payload)
+        elif action == "task_list_batch":
+            assert isinstance(payload, list)
+            for view in self._task_views:
+                view.set_batch_status(payload)
+            logger.info("Multi-account read-only managed task statuses refreshed")
+        elif action == "task_start_batch":
+            assert isinstance(payload, dict)
+            for view in self._task_views:
+                view.set_batch_launch_result(payload)
+            ids = payload.get("account_ids", [])
+            if isinstance(ids, list):
+                self._pending_batch_status = ids
+            if payload.get("blocked"):
+                self._notice(
+                    "Multi-account automation blocked",
+                    "No account was launched. Review the readiness of each selected account.",
+                )
+            elif payload.get("halted"):
+                self._notice(
+                    "Multi-account automation stopped",
+                    "A request may be unconfirmed. No further accounts were started. "
+                    "Inspect the request ledger before retrying.",
+                )
+            else:
+                count = len(payload.get("submitted", []))
+                InfoBar.success(
+                    "Automation requests received",
+                    f"Received {count} account-scoped receipts; review their status.",
+                    parent=self, position=InfoBarPosition.TOP_RIGHT,
+                )
         elif action == "task_list":
             assert isinstance(payload, dict)
             account_id = payload.get("account_id")
@@ -1048,10 +1182,23 @@ class MainWindow(FluentWindow):
         if action == "task_preflight":
             for view in self._task_views:
                 view.set_preflight_unavailable()
+        if action == "task_start_batch":
+            # Failure could have happened after an irreversible request;
+            # do not rerun or automatically acknowledge a task.
+            self._pending_batch_status = None
+            self._notice(
+                "Multi-account dispatch interrupted",
+                "Check every selected account's request history before starting again.",
+            )
         if action in {"task_start", "task_stop", "task_reconcile"} and self._worker is not None:
             account_id = getattr(self._worker, "account_id", None)
             if isinstance(account_id, str):
                 self._pending_task_refresh = account_id
+        if action in {"warehouses", "warehouses_batch", "warehouses_all"}:
+            self.warehouses_page.status_label.setText(
+                "Warehouse refresh failed. The earlier report, if shown, is stale. "
+                "Check your account sessions and try again."
+            )
         if action in {"connect", "ssh_connect"}:
             self._pending_ssh_destination = None
             self._pending_ssh_token = None
@@ -1103,6 +1250,10 @@ class MainWindow(FluentWindow):
             account_id = self._pending_task_refresh
             self._pending_task_refresh = None
             self._request("task_list", account_id=account_id)
+        if self._worker is None and self._pending_batch_status:
+            ids = self._pending_batch_status
+            self._pending_batch_status = None
+            self._request("task_list_batch", task_payload={"account_ids": ids})
         if self._worker is None:
             self._run_next_preflight()
 

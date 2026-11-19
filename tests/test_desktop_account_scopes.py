@@ -1,0 +1,210 @@
+"""Multi-account Fluent desktop workflow contracts; entirely synthetic/offline."""
+from __future__ import annotations
+
+import os
+import uuid
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PySide6")
+pytest.importorskip("qfluentwidgets")
+
+from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from daedalus.client import APIConnectionError
+from daedalus.desktop.account_scope import AccountSelectionDialog
+from daedalus.desktop.app import APIWorker, MainWindow
+from daedalus.desktop.design_system import NAV_ICONS
+from daedalus.desktop.pages import WarehousesPage
+from daedalus.desktop.task_page import TasksPage
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+def _dispose(widget, app):
+    widget.close()
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+
+
+def accounts(count=3):
+    return [
+        {"id": f"account-{i}", "label": f"Town {i}", "world": "s1-en",
+         "player": f"Player {i}", "enabled": True, "session_status": "authenticated"}
+        for i in range(count)
+    ]
+
+
+def test_navigation_has_unique_icons_and_only_one_regular_automation(app, monkeypatch):
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        assert len({icon.value for icon in NAV_ICONS.values()}) == 7
+        assert NAV_ICONS["connection"] != NAV_ICONS["settings"]
+        assert NAV_ICONS["automations"] != NAV_ICONS["activity"]
+        assert window.tasks_page.objectName() == "tasks_page"
+        assert window.wine_page.objectName() == "wine_page"
+        assert window.construction_page.objectName() == "construction_page"
+        assert hasattr(window.home_page, "all_warehouse_card")
+    finally:
+        _dispose(window, app)
+
+
+def test_warehouse_all_accounts_and_arbitrary_selected_accounts(app):
+    page = WarehousesPage()
+    try:
+        page.set_accounts(accounts(4))
+        page.set_selected_accounts(["account-1", "account-3"])
+        all_calls = []
+        selected_calls = []
+        page.load_all_requested.connect(all_calls.append)
+        page.load_selected_requested.connect(selected_calls.append)
+        page.load_all_button.click()
+        assert all_calls == [["account-0", "account-1", "account-2", "account-3"]]
+        page.load_selected_button.click()
+        assert selected_calls == [["account-1", "account-3"]]
+        assert page.load_selected_button.text() == "Selected (2)"
+        page.set_accounts(accounts(4))
+        assert page._included_ids == ["account-1", "account-3"]
+    finally:
+        _dispose(page, app)
+
+
+def test_warehouse_more_than_32_uses_safe_full_read_path(app):
+    page = WarehousesPage()
+    try:
+        page.set_accounts(accounts(40))
+        page.set_selected_accounts([f"account-{i}" for i in range(35)])
+        larger, short = [], []
+        page.load_all_requested.connect(larger.append)
+        page.load_selected_requested.connect(short.append)
+        page._load_selected()
+        assert len(larger[0]) == 35
+        assert short == []
+        page._load_all()
+        assert len(larger[1]) == 40
+    finally:
+        _dispose(page, app)
+
+
+def test_scoped_account_picker_select_all_and_some(app):
+    dialog = AccountSelectionDialog(accounts(), ["account-1"])
+    try:
+        assert dialog.selected_ids() == ["account-1"]
+        dialog.all_checkbox.setChecked(True)
+        assert dialog.selected_ids() == ["account-0", "account-1", "account-2"]
+        dialog.checkboxes["account-0"].setChecked(False)
+        assert dialog.selected_ids() == ["account-1", "account-2"]
+    finally:
+        _dispose(dialog, app)
+
+
+def test_automation_bulk_start_requires_approval_and_exact_accounts(app, monkeypatch):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([{"name": "alertAttacks", "kind": "background_task",
+                                 "config_fields": [{"name": "minutes", "type": "integer",
+                                                    "default": 20}]}], enabled=True)
+        page._bulk_account_ids = ["account-0", "account-2"]
+        emitted = []
+        page.batch_launch_requested.connect(lambda *args: emitted.append(args))
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        page._start_selected()
+        assert emitted == []
+        page.confirm_box.setChecked(True)
+        page._start_selected()
+        assert len(emitted) == 1
+        ids, task, config = emitted[0]
+        assert ids == ["account-0", "account-2"]
+        assert task == "alertAttacks"
+        assert config == {"minutes": 20}
+    finally:
+        _dispose(page, app)
+
+
+def _run_batch(worker):
+    completed = []
+    failed = []
+    worker.completed.connect(lambda action, response: completed.append(response))
+    worker.failed.connect(lambda action, message: failed.append(message))
+    worker.run()
+    assert failed == []
+    return completed[0]
+
+
+def test_bulk_dispatch_rejects_any_blocked_account_before_game_mutation(app):
+    class FakeBackend:
+        def __init__(self):
+            self.starts = []
+        def task_preflight(self, aid, task):
+            return {"ready": aid != "account-2", "reason": "notifications_required",
+                    "unresolved_request": False}
+        def start_task(self, aid, task, config, rid, *, confirmed):
+            self.starts.append(aid)
+            return {"status": "running"}
+
+    backend = FakeBackend()
+    result = _run_batch(APIWorker(backend, "task_start_batch", task_payload={
+        "account_ids": ["account-0", "account-2"], "task": "alertAttacks", "config": {}
+    }))
+    assert backend.starts == []
+    assert result["submitted"] == []
+    assert result["blocked"][0]["account_id"] == "account-2"
+
+
+def test_bulk_dispatch_stops_on_first_uncertain_receipt_without_retry(app):
+    class FakeBackend:
+        def __init__(self):
+            self.starts = []
+            self.rids = []
+        def task_preflight(self, aid, task):
+            return {"ready": True, "reason": "none", "unresolved_request": False}
+        def start_task(self, aid, task, config, rid, *, confirmed):
+            assert confirmed is True
+            self.starts.append(aid)
+            self.rids.append(rid)
+            if aid == "account-1":
+                raise APIConnectionError("Cannot connect to Daedalus backend")
+            return {"status": "running"}
+
+    backend = FakeBackend()
+    result = _run_batch(APIWorker(backend, "task_start_batch", task_payload={
+        "account_ids": ["account-0", "account-1", "account-2"],
+        "task": "alertAttacks", "config": {"minutes": 20},
+    }))
+    assert backend.starts == ["account-0", "account-1"]
+    assert result["halted"]["account_id"] == "account-1"
+    assert len(result["submitted"]) == 1
+    assert len(set(backend.rids)) == 2
+    for rid in backend.rids:
+        assert str(uuid.UUID(rid)) == rid
+
+
+def test_multi_account_status_partial_result_is_not_fabricated(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_batch_status([
+            {"account_id": "account-0", "engine_tasks": [
+                {"task": "alertAttacks", "status": "running"}
+            ], "requests": []},
+            {"account_id": "account-1", "error": True},
+            {"account_id": "account-2", "engine_tasks": [],
+             "requests": [{"status": "unconfirmed"}]},
+        ])
+        assert page.multi_table.rowCount() == 3
+        assert page.multi_table.item(0, 1).text() == "1"
+        assert page.multi_table.item(1, 3).text() == "Unavailable"
+        assert page.multi_table.item(2, 3).text() == "Needs review"
+    finally:
+        _dispose(page, app)

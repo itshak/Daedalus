@@ -13,8 +13,14 @@ class LogPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
-        root.addWidget(SubtitleLabel("Log"))
-        root.addWidget(CaptionLabel("Local desktop connection and diagnostic messages."))
+        root.addWidget(SubtitleLabel("Activity"))
+        description = CaptionLabel(
+            "Local Daedalus desktop events across all accounts. This is not a "
+            "complete server audit history. Technical details never contain API "
+            "tokens, game cookies or passwords."
+        )
+        description.setWordWrap(True)
+        root.addWidget(description)
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)

@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
+    QMenu,
     QMessageBox,
+    QScrollArea,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -32,6 +34,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.desktop.design_system import StatusPanel
 from daedalus.desktop.widgets import ScrollTableWidget
 from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
 
@@ -215,9 +218,17 @@ class AccountsPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("accounts_page")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        container_layout = QVBoxLayout(self)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidgetResizable(True)
+        container = QWidget(scroll)
+        scroll.setWidget(container)
+        container_layout.addWidget(scroll)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(26, 24, 26, 24)
+        layout.setSpacing(14)
         header = QHBoxLayout()
         header.addWidget(SubtitleLabel("Accounts"))
         header.addStretch(1)
@@ -246,7 +257,14 @@ class AccountsPage(QWidget):
         layout.addWidget(self.select_all_reports)
         self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
         self.table.itemChanged.connect(self._report_item_changed)
+        self.table.setMinimumHeight(245)
         layout.addWidget(self.table, 1)
+        self.selected_account_summary = StatusPanel(
+            "Choose an account",
+            "Select a row to see session status and available next steps.",
+            self,
+        )
+        layout.addWidget(self.selected_account_summary)
         editor_actions = QHBoxLayout()
         self.create_button = PushButton("Add account")
         self.edit_button = PushButton("Edit selected")
@@ -265,6 +283,8 @@ class AccountsPage(QWidget):
         layout.addLayout(editor_actions)
         self.editor_status = CaptionLabel("Account editing is disabled on this backend")
         layout.addWidget(self.editor_status)
+        advanced_wrap = QVBoxLayout()
+        advanced_wrap.setSpacing(12)
         assistance_actions = QHBoxLayout()
         self.assistance_check_button = PushButton("Check login assistance")
         self.assistance_approve_button = PushButton("Confirm manual step complete")
@@ -278,7 +298,7 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_check_button)
         assistance_actions.addWidget(self.assistance_approve_button)
         assistance_actions.addStretch(1)
-        layout.addLayout(assistance_actions)
+        advanced_wrap.addLayout(assistance_actions)
         native_login_actions = QHBoxLayout()
         self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
         self.native_browser_login_button.setToolTip(
@@ -310,16 +330,34 @@ class AccountsPage(QWidget):
         recovery_actions.addWidget(self.recovery_prepare_button)
         recovery_actions.addWidget(self.rebind_button)
         recovery_actions.addStretch(1)
-        layout.addLayout(recovery_actions)
+        advanced_wrap.addLayout(recovery_actions)
         self.assistance_status = CaptionLabel("Select an account to check for manual help")
-        layout.addWidget(self.assistance_status)
+        advanced_wrap.addWidget(self.assistance_status)
         self._monitor_enabled = False
         self.monitor_button = PushButton("Monitor verified session")
         self.monitor_button.clicked.connect(self._monitor_selected)
         self.monitor_button.setEnabled(False)
-        layout.addWidget(self.monitor_button)
+        advanced_wrap.addWidget(self.monitor_button)
         self.monitor_status = CaptionLabel("Existing-session monitoring is disabled")
-        layout.addWidget(self.monitor_status)
+        advanced_wrap.addWidget(self.monitor_status)
+        self.advanced_recovery_panel = QWidget(self)
+        self.advanced_recovery_panel.setLayout(advanced_wrap)
+        self.advanced_recovery_button = PushButton("Advanced recovery and monitoring ▾")
+        self.advanced_recovery_button.clicked.connect(self._toggle_advanced_recovery)
+        self.advanced_recovery_button.setAccessibleName(
+            "Show or hide advanced account recovery actions"
+        )
+        layout.addWidget(self.advanced_recovery_button)
+        layout.addWidget(self.advanced_recovery_panel)
+        self.advanced_recovery_panel.hide()
+
+    def _toggle_advanced_recovery(self) -> None:
+        showing = not self.advanced_recovery_panel.isVisible()
+        self.advanced_recovery_panel.setVisible(showing)
+        self.advanced_recovery_button.setText(
+            "Hide advanced recovery and monitoring" if showing
+            else "Advanced recovery and monitoring ▾"
+        )
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         self._accounts = accounts
@@ -456,6 +494,23 @@ class AccountsPage(QWidget):
     def _update_assistance_buttons(self) -> None:
         account_id = self._selected_visible_id()
         selected = self.account_record(account_id) if account_id else None
+        if selected:
+            session = str(selected.get("session_status") or "not_connected")
+            message = {
+                "authenticated": "Session verified. Warehouse reports and eligible automations are available.",
+                "needs_assistance": "Sign in is needed. Use Sign in on this Mac when enabled.",
+                "paused": "Worker is paused. Inspect session status before resuming any operation.",
+                "not_connected": "No verified session is attached to this account.",
+                "disabled": "Account is disabled on the authoritative backend.",
+            }.get(session, "Session: " + session.replace("_", " "))
+            self.selected_account_summary.set_status(
+                str(selected.get("label") or selected.get("player") or selected["id"]),
+                message,
+            )
+        else:
+            self.selected_account_summary.set_status(
+                "Choose an account", "Select a row for status and sign-in options."
+            )
         self.native_browser_login_button.setEnabled(
             self._native_browser_login_enabled and account_id is not None
             and selected is not None and selected.get("enabled") is True
@@ -840,6 +895,8 @@ class OperationsPage(QWidget):
 class WarehousesPage(QWidget):
     load_requested = Signal(str)
     load_selected_requested = Signal(object)
+    load_all_requested = Signal(object)
+    report_scope_changed = Signal(object)
 
     _COLUMNS = ("City", "Island", "World", *RESOURCES, "Capacity", "Captured", "Incomplete", "Account")
 
@@ -871,27 +928,51 @@ class WarehousesPage(QWidget):
         controls.addWidget(BodyLabel("Account"))
         self.account_combo = ComboBox()
         controls.addWidget(self.account_combo, 1)
-        self.load_button = PrimaryPushButton("Load warehouses")
+        self.load_button = PushButton("This account")
+        self.load_button.setToolTip("Refresh this account's warehouse report")
         self.load_button.clicked.connect(self._load)
         controls.addWidget(self.load_button)
-        self.load_selected_button = PushButton("Load selected accounts")
+
+        self.load_all_button = PrimaryPushButton("All accounts")
+        self.load_all_button.setAccessibleName("Load warehouses for all accounts")
+        self.load_all_button.setToolTip(
+            "Fetch read-only warehouse reports for every configured account; "
+            "unavailable accounts will be shown separately"
+        )
+        self.load_all_button.clicked.connect(self._load_all)
+        self.load_all_button.setEnabled(False)
+        controls.addWidget(self.load_all_button)
+
+        self.load_selected_button = PushButton("Selected accounts")
         self.load_selected_button.setToolTip(
-            "Read-only snapshots for accounts selected on the Accounts page; no tasks started"
+            "Read-only snapshots for accounts selected here; no tasks started"
         )
         self.load_selected_button.clicked.connect(self._load_selected)
         self.load_selected_button.setEnabled(False)
         controls.addWidget(self.load_selected_button)
+
+        self.choose_accounts_button = PushButton("Choose accounts…")
+        self.choose_accounts_button.setToolTip(
+            "Choose any combination of accounts for warehouse reports"
+        )
+        self.choose_accounts_button.clicked.connect(self._choose_accounts)
+        self.choose_accounts_button.setEnabled(False)
+        controls.addWidget(self.choose_accounts_button)
+        layout.addLayout(controls)
+        filters = QHBoxLayout()
+
         self.only_220k = CheckBox("Only 220K+")
         self.only_220k.setToolTip(
             "Show cities with at least 220,000 known unsecured resources in total"
         )
         self.only_220k.stateChanged.connect(self._render)
-        controls.addWidget(self.only_220k)
+        filters.addWidget(self.only_220k)
         self.group_island = CheckBox("Group by island")
         self.group_island.setToolTip("Order rows by existing city island coordinates")
         self.group_island.stateChanged.connect(self._render)
-        controls.addWidget(self.group_island)
-        layout.addLayout(controls)
+        filters.addWidget(self.group_island)
+        filters.addStretch(1)
+        layout.addLayout(filters)
 
         self.status_label = CaptionLabel("No warehouse snapshots loaded")
         layout.addWidget(self.status_label)
@@ -909,12 +990,25 @@ class WarehousesPage(QWidget):
         self.json_button.clicked.connect(lambda: self._save("json"))
         self.txt_button = PushButton("Save TXT")
         self.txt_button.clicked.connect(lambda: self._save("txt"))
+        self.export_button = PushButton("Export report ▾")
+        self.export_button.setAccessibleName("Copy or save the current warehouse report")
+        menu = QMenu(self)
+        menu.addAction("Copy CSV to clipboard", self._copy_csv)
+        menu.addAction("Copy grouped island report", self._copy_islands)
+        menu.addSeparator()
+        menu.addAction("Save CSV…", lambda: self._save("csv"))
+        menu.addAction("Save JSON…", lambda: self._save("json"))
+        menu.addAction("Save island text…", lambda: self._save("txt"))
+        self.export_button.setMenu(menu)
+        self.export_button.setEnabled(False)
+        actions.addWidget(self.export_button)
         for button in (
             self.copy_button, self.copy_islands_button,
             self.csv_button, self.json_button, self.txt_button,
         ):
             button.setEnabled(False)
-            actions.addWidget(button)
+            button.setVisible(False)
+            actions.addWidget(button)  # Compatibility for existing test/API callers.
         actions.addStretch(1)
         layout.addLayout(actions)
 
@@ -933,6 +1027,10 @@ class WarehousesPage(QWidget):
             self.account_combo.addItem(str(account.get("label") or account.get("player") or account["id"]))
         if previous in self._account_ids:
             self.account_combo.setCurrentIndex(self._account_ids.index(previous))
+        self.load_all_button.setEnabled(bool(self._account_ids))
+        self.choose_accounts_button.setEnabled(bool(self._account_ids))
+        self.load_button.setEnabled(bool(self._account_ids))
+        self.set_selected_accounts(self._included_ids or self._account_ids)
 
     def selected_account_id(self) -> str | None:
         index = self.account_combo.currentIndex()
@@ -947,6 +1045,29 @@ class WarehousesPage(QWidget):
         included = set(account_ids)
         self._included_ids = [aid for aid in self._account_ids if aid in included]
         self.load_selected_button.setEnabled(bool(self._included_ids))
+        self.load_selected_button.setText(
+            f"Selected ({len(self._included_ids)})"
+        )
+
+    def _load_all(self) -> None:
+        """Always include every configured account; individual failures remain visible."""
+        if self._account_ids:
+            self.status_label.setText(
+                f"Loading warehouses for all {len(self._account_ids)} accounts…"
+            )
+            self.load_all_requested.emit(list(self._account_ids))
+
+    def _choose_accounts(self) -> None:
+        from daedalus.desktop.account_scope import AccountSelectionDialog
+
+        dialog = AccountSelectionDialog(
+            list(self._accounts.values()), list(self._included_ids), self,
+            title="Warehouse report accounts",
+        )
+        if dialog.exec() == QDialog.Accepted:
+            selected = dialog.selected_ids()
+            self.set_selected_accounts(selected)
+            self.report_scope_changed.emit(selected)
 
     def set_display_preferences(self, *, only_220k: bool, group_by_island: bool) -> None:
         self.only_220k.setChecked(only_220k)
@@ -964,16 +1085,24 @@ class WarehousesPage(QWidget):
         for button in (
             self.copy_button, self.copy_islands_button,
             self.csv_button, self.json_button, self.txt_button,
+            self.export_button,
         ):
             button.setEnabled(False)
 
     def _load_selected(self) -> None:
         if self._included_ids:
-            self.load_selected_requested.emit(list(self._included_ids))
+            self.status_label.setText(
+                f"Loading warehouses for {len(self._included_ids)} selected accounts…"
+            )
+            if len(self._included_ids) > 32:
+                self.load_all_requested.emit(list(self._included_ids))
+            else:
+                self.load_selected_requested.emit(list(self._included_ids))
 
     def _load(self) -> None:
         account_id = self.selected_account_id()
         if account_id is not None:
+            self.status_label.setText("Loading this account's warehouses…")
             self.load_requested.emit(account_id)
 
     def set_snapshots(self, account_id: str, snapshots: list[dict[str, object]]) -> None:
@@ -1033,7 +1162,13 @@ class WarehousesPage(QWidget):
                 for row in self._rows
             ],
         )
-        status = f"{len(self._rows)} cities shown"
+        status = (
+            f"{len(self._rows)} cities across {len(self._reports)} account reports"
+            if self._reports else
+            "No warehouse snapshots available — connect an authenticated account"
+        )
+        if self._reports and not self._rows and self.only_220k.isChecked():
+            status = "No warehouses match the 220K+ filter; disable it to see all cities"
         if self._failed_accounts:
             labels = [
                 str(self._accounts.get(aid, {}).get("label") or aid)
@@ -1046,6 +1181,7 @@ class WarehousesPage(QWidget):
         for button in (
             self.copy_button, self.copy_islands_button,
             self.csv_button, self.json_button, self.txt_button,
+            self.export_button,
         ):
             button.setEnabled(bool(self._rows))
 

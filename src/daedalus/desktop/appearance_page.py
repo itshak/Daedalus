@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, ComboBox, SubtitleLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, ComboBox, PushButton, SubtitleLabel
 
+from daedalus.desktop.design_system import PageHeading
 from daedalus.gui_preferences import GuiPreferences
 
 _THEME_LABELS = ("System", "Light", "Dark")
@@ -16,6 +17,7 @@ class AppearancePage(QWidget):
     """Safe UI-only settings: no browser, password or game-session controls."""
 
     preferences_changed = Signal(object)
+    connection_settings_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -24,7 +26,11 @@ class AppearancePage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
-        layout.addWidget(SubtitleLabel("Appearance and reports"))
+        layout.addWidget(PageHeading(
+            "Settings", "Personalize Daedalus without changing your backend's game sessions.",
+            self,
+        ))
+        layout.addWidget(SubtitleLabel("Appearance"))
         layout.addWidget(CaptionLabel(
             "Settings apply only to this Mac client, not the connected game worker. "
             "Account report selection is stored privately for each backend."
@@ -33,14 +39,19 @@ class AppearancePage(QWidget):
         self.theme_combo = ComboBox()
         self.theme_combo.addItems(_THEME_LABELS)
         layout.addWidget(self.theme_combo)
+        layout.addWidget(SubtitleLabel("Warehouse reporting"))
         self.only_220k = CheckBox("Filter to 220K+ unsecured resources by default")
         layout.addWidget(self.only_220k)
         self.group_island = CheckBox("Group warehouse results by island by default")
         layout.addWidget(self.group_island)
+        layout.addWidget(SubtitleLabel("Connection"))
         layout.addWidget(CaptionLabel(
-            "Browser login, credentials and recovery settings stay on the authoritative "
-            "backend, never in local GUI preferences."
+            "API access is saved only in macOS Keychain for the exact server you approved. "
+            "Gameforge login and recovery remain separate and account-scoped."
         ))
+        self.connection_button = PushButton("Manage secure connection…")
+        self.connection_button.clicked.connect(self.connection_settings_requested.emit)
+        layout.addWidget(self.connection_button)
         layout.addStretch(1)
         self.theme_combo.currentIndexChanged.connect(self._changed)
         self.only_220k.stateChanged.connect(self._changed)

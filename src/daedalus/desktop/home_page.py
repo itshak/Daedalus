@@ -15,8 +15,9 @@ from qfluentwidgets import (
     ComboBox,
     PushButton,
     SubtitleLabel,
-    TitleLabel,
 )
+
+from daedalus.desktop.design_system import PageHeading
 
 
 class _ActionCard(CardWidget):
@@ -41,6 +42,8 @@ class HomePage(QWidget):
     """Prominent account selector and task-oriented entry points."""
 
     view_warehouses = Signal(str)
+    view_all_warehouses = Signal()
+    view_all_automations = Signal()
     manage_automations = Signal(str)
     manage_accounts = Signal()
     connect_backend = Signal()
@@ -57,10 +60,11 @@ class HomePage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 26, 28, 28)
         layout.setSpacing(18)
-        title = TitleLabel("Your command center")
-        layout.addWidget(title)
-        subtitle = BodyLabel("Choose an account, then choose what you want to do.")
-        layout.addWidget(subtitle)
+        layout.addWidget(PageHeading(
+            "Overview",
+            "Everything you need for your accounts, reports and automations.",
+            self,
+        ))
 
         overview = CardWidget(self)
         overview_row = QVBoxLayout(overview)
@@ -99,9 +103,21 @@ class HomePage(QWidget):
             "Accounts", "See connection and recovery status for your worlds.",
             "View accounts", self.manage_accounts.emit, self,
         )
+        self.all_warehouse_card = _ActionCard(
+            "All account warehouses",
+            "Combine all warehouses into one report, with island grouping and exports.",
+            "Load all warehouses", self.view_all_warehouses.emit, self,
+        )
+        self.all_automation_card = _ActionCard(
+            "All account activity",
+            "Check running tasks and requests across every account without starting anything.",
+            "View all task status", self.view_all_automations.emit, self,
+        )
         self.actions.addWidget(self.warehouse_card, 0, 0)
-        self.actions.addWidget(self.automation_card, 0, 1)
-        self.actions.addWidget(self.accounts_card, 1, 0)
+        self.actions.addWidget(self.all_warehouse_card, 0, 1)
+        self.actions.addWidget(self.automation_card, 1, 0)
+        self.actions.addWidget(self.all_automation_card, 1, 1)
+        self.actions.addWidget(self.accounts_card, 2, 0)
         layout.addLayout(self.actions)
         self.help_text = CaptionLabel(
             "Automations only start after you review and confirm them. "
@@ -186,6 +202,12 @@ class HomePage(QWidget):
         self.warehouse_card.open_button.setEnabled(ready and status == "authenticated")
         self.automation_card.open_button.setEnabled(ready and status == "authenticated")
         self.accounts_card.open_button.setEnabled(self._connected)
+        self.all_warehouse_card.open_button.setEnabled(
+            self._connected and bool(self._accounts)
+        )
+        self.all_automation_card.open_button.setEnabled(
+            self._connected and bool(self._accounts)
+        )
 
     def _open_warehouses(self) -> None:
         if (account_id := self.selected_account_id()) is not None:
