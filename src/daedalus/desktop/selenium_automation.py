@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from daedalus.desktop.legacy_selenium.browser import create_driver, quit_driver
-from daedalus.desktop.legacy_selenium.login import LoginFlow
+from daedalus.desktop.legacy_selenium.login import CAPTCHA_XPATH, LoginFlow
 from daedalus.desktop.legacy_selenium.settings import Settings
 from daedalus.desktop.selenium_credentials import GameforgeCredentials
 
@@ -69,23 +69,30 @@ class DaedalusLoginFlow(LoginFlow):
             raise LoginCancelled("Gameforge login was cancelled")
 
     def _captcha_present(self) -> bool:
-        """Extend the legacy Russian text selector for translated challenge widgets."""
-        if super()._captcha_present():
-            return True
+        """Only a *visible* challenge justifies opening Chrome.
+
+        The original Russian IkaBot XPath remains the first selector. A hidden
+        placeholder in the DOM is not an actual challenge to solve.
+        """
         try:
             from selenium.webdriver.common.by import By
 
-            widgets = self.driver.find_elements(
-                By.CSS_SELECTOR,
-                "iframe[src*='captcha'], iframe[src*='hcaptcha'], "
-                "iframe[src*='recaptcha'], iframe[src*='turnstile'], "
-                "[id*='captcha' i], [class*='captcha' i]",
+            selectors = (
+                (By.XPATH, CAPTCHA_XPATH),
+                (By.CSS_SELECTOR,
+                 "iframe[src*='captcha'], iframe[src*='hcaptcha'], "
+                 "iframe[src*='recaptcha'], iframe[src*='turnstile'], "
+                 "[id*='captcha' i], [class*='captcha' i]"),
             )
-            return any(widget.is_displayed() for widget in widgets)
+            return any(
+                widget.is_displayed()
+                for by, selector in selectors
+                for widget in self.driver.find_elements(by, selector)
+            )
         except (AttributeError, RuntimeError):
             return False
         except Exception:  # noqa: BLE001 - browser failures may contain secrets
-            # A stale selector cannot justify escalating on its own.
+            # Unknown browser errors never falsely trigger visible CAPTCHA mode.
             return False
 
     def _wait_captcha(self) -> None:
