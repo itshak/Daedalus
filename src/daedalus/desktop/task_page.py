@@ -1574,13 +1574,28 @@ class TasksPage(QWidget):
             return
         try:
             if self._advanced_visible:
-                if self._form_dirty:
+                if self._form_dirty and task != "constructionList":
                     QMessageBox.warning(self, "Guided settings changed",
                         "Build JSON from guided settings or hide Advanced to use the form.")
                     return
                 config = json.loads(self.config_editor.toPlainText())
                 if not isinstance(config, dict):
                     raise ValueError("Advanced configuration must be a JSON object")
+                if task == "constructionList":
+                    city_id = self._selected_construction_city()
+                    cities = self._cities_by_account.get(account_id, [])
+                    matching = next((city for city in cities if city["id"] == city_id), None)
+                    if (matching is None or config.get("city_id") != city_id
+                            or config.get("city_name") != matching["name"]):
+                        raise ValueError(
+                            "Prepared construction plan must match the selected "
+                            "authenticated city and its exact name"
+                        )
+                    if any(key not in config for key in (
+                        "buildings", "shipments", "expand_overall", "wait_resources",
+                        "construction_queue", "total_time",
+                    )):
+                        raise ValueError("Import a complete upstream-prepared construction plan")
             else:
                 config = self._form_config()
         except (ValueError, TypeError) as exc:
