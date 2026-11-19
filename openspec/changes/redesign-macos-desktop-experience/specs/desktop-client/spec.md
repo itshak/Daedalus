@@ -272,3 +272,66 @@ account or pretending that all accounts were processed.
 - **WHEN** multi-account preflight runs
 - **THEN** no account in that cohort receives a new start request, and the user
   sees exactly which account requires attention
+
+
+### Requirement: Automatic headless Gameforge authentication with human CAPTCHA only
+
+The Mac desktop SHALL use the prior local `itshak/ikabot` warehouse-bot
+authentication lifecycle instead of requiring manual browser login for every
+account: first attempt to restore a matching unexpired saved world session;
+otherwise log in through the Gameforge lobby in **headless Selenium Chrome**
+using securely stored per-account credentials, select the matching game world,
+and return only an exact-host secure world cookie to the existing one-time
+encrypted server handoff. A visible Selenium Chrome window SHALL open
+**only upon detection of an actual user CAPTCHA challenge** and SHALL resume
+automatically after the user resolves it. The app MUST NOT solve or bypass
+CAPTCHA, fabricate authentication, ship plaintext game secrets through the
+backend API or start/duplicate game tasks. If credentials are absent,
+the user may supply them once and persist them to a macOS OS-keychain entry
+bound to HTTPS backend origin, account ID and world.
+
+#### Scenario: Valid saved session or headless login works
+
+- **GIVEN** an account with an existing verified server session or exact-world
+  saved legacy session, or correct stored Gameforge credentials
+- **WHEN** the operator chooses All accounts warehouses or automatic login
+- **THEN** accounts already authenticated skip login, missing sessions are
+  restored or logged in headlessly, and no visible browser or password prompt
+  appears when usable Keychain/legacy credentials already exist
+- **AND** the server independently verifies world/player and worker ownership
+  before any account is reported authenticated
+
+#### Scenario: A real CAPTCHA appears
+
+- **GIVEN** a headless Gameforge login reveals a visible CAPTCHA indicator
+- **WHEN** Selenium detects the challenge
+- **THEN** only that account opens temporary visible Chrome for the user
+  to solve it, no automated CAPTCHA response is attempted, and Selenium
+  continues world navigation after the challenge is removed
+- **AND** cancellation, timeout or wrong player never authorizes a game task
+
+#### Scenario: A non-CAPTCHA failure occurs
+
+- **WHEN** Gameforge rejects credentials, Chrome fails, the game world
+  mismatches, or a normal login times out without a detected challenge
+- **THEN** the account is marked unavailable without opening a visible
+  browser, leaking credentials or claiming a verified world session
+
+#### Scenario: All-account warehouse run needs some logins
+
+- **GIVEN** a selection of multiple enabled accounts with differing session
+  states
+- **WHEN** the operator clicks Warehouses All accounts or Selected accounts
+- **THEN** the GUI authenticates missing accounts serially using the same
+  headless Selenium flow and continues with a combined read-only report
+  showing partial failures explicitly, retaining native printing, island
+  grouping and export behavior; no game tasks start
+
+#### Scenario: Legacy local warehouse credentials exist
+
+- **WHEN** the operator selects an exact account alias whose previous
+  owner-owned `~/.ikabot/config.ini` and `tokens.json` match its world
+- **THEN** the Mac may read those source files for the scoped login,
+  but it does not modify or upload them, guesses no account association,
+  stores new Gameforge credentials only in macOS Keychain, and retains
+  the server's existing independent identity attestation

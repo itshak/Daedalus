@@ -41,8 +41,10 @@ def test_pyinstaller_build_is_native_and_avoids_legacy_scraper(packager, tmp_pat
     assert "qfluentwidgets" in cmd
     assert "daedalus.desktop.app" in cmd
     assert "daedalus.desktop.task_page" in cmd
-    assert "selenium" not in cmd
-    assert "undetected_chromedriver" not in cmd
+    assert "selenium" in cmd
+    assert "undetected_chromedriver" in cmd
+    assert "webdriver_manager" in cmd
+    assert "daedalus.desktop.selenium_worker" in cmd
     assert "accounts.toml" not in cmd
     assert "/Applications" not in " ".join(cmd)
 

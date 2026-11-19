@@ -139,6 +139,22 @@ does not replace live acceptance. The OpenSpec hygiene regression checks
 now allow an empty active-change set but continue to reject unchecked
 archived tasks and require visible owner acceptance tracking.
 
+## Headless-first Gameforge sign-in parity (implementation pending Mac acceptance)
+
+The UI redesign now includes the local `itshak/ikabot` warehouse-bot
+authentication sequence: headless Selenium Chrome login, exact-world
+`tokens.json` restore, opt-in legacy `config.ini` alias migration,
+account+world+HTTPS-origin macOS Keychain credentials, and a visible Chrome
+window **only when a CAPTCHA is detected**. The Accounts page provides
+single/all/selected sign-in; Warehouses All accounts refreshes missing
+sessions before aggregating snapshots. Session handoff still uses the
+existing one-time encrypted, exact-account server verification and cannot
+start or replay a task. Offline Selenium and synthetic Qt tests exercise
+the new coordinator without contacting Gameforge. **Live Mac login,
+CAPTCHA, owner reboot and game-task acceptance remain unverified** in
+[issue #60](https://github.com/itshak/Daedalus/issues/60). This OpenSpec
+change remains active until remaining implementation and review gates close.
+
 ## Native Fluent desktop redesign (implementation in progress, 2026-11-19)
 
 The active `redesign-macos-desktop-experience` change now has an account-aware

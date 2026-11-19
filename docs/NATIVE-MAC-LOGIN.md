@@ -1,8 +1,57 @@
-# Native Mac Gameforge authentication — opt-in recovery
+# Native Mac Gameforge authentication — headless Selenium default, manual fallback
 
 **Implementation:** native Mac Qt WebEngine + a one-use, encrypted handoff to the one authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
 
+**The historical native Qt WebEngine instructions below describe only the advanced manual fallback.**
+
 For release preflight, use `daedalus doctor --smoke --deployment-check` on the Linux host. This reads no credential values or game pages and reports unresolved task receipts and evidence (not proof) of persistent keyring provisioning. See [owner-supervised Mac-first acceptance](LIVE-ACCEPTANCE.md) before restarting an existing worker.
+
+## Automatic headless Gameforge sign-in (the prior warehouse-bot workflow)
+
+**The normal path is now automatic Selenium Chrome, not a manual Gameforge browser.**
+This is adapted from the original local warehouse bot in
+[itshak/ikabot](https://github.com/itshak/ikabot): restore the previously saved
+world session when available, otherwise enter Gameforge lobby using stored
+email/password, select the game's play/world entry, and detect the exact-world
+authenticated city UI. Selenium starts with **headless Chrome**. A visible
+Chrome window is opened **only when an actual CAPTCHA is detected**, so the user
+can solve it; Selenium resumes navigation itself. A wrong password, missing
+browser, timeout or world mismatch does *not* open a random visible browser.
+CAPTCHA is never solved or bypassed by software.
+
+In Daedalus **Accounts**, select **Sign in automatically (headless)**, **Sign in
+all accounts**, or **Choose sign-in accounts…**. The **Warehouses → All accounts**
+button also checks which accounts lack verified sessions and attempts headless
+sign-in for those accounts before collecting **one combined warehouse report**.
+Already authenticated accounts require no new login. Existing island grouping,
+220K filter, native Print preview and CSV/JSON/TXT exports remain unchanged.
+All attempts are account-scoped, proceed sequentially and report errors
+independently rather than aborting a full multi-account report.
+
+On the first use, Daedalus tries an exact account alias match in the previous
+local bot's owner-owned `~/.ikabot/config.ini` and an unexpired, exact-world
+session in `~/.ikabot/tokens.json`. Neither source is changed or copied into
+Daedalus settings. Otherwise you supply your Gameforge email/password **once**
+through a secure Mac form, and can save them to **macOS Keychain**, bound to
+the exact backend HTTPS origin, account ID and world. Subsequently those
+credentials are reused automatically and no password input is needed until
+they are unavailable or changed. They never leave the Mac for the Daedalus API.
+
+After login, the Mac extracts **only the exact world's secure `ikariam`
+cookie** and uses the existing single-use, account/world/player-bound
+X25519/AES-GCM handoff. The authoritative backend independently verifies the
+game identity, respects active task/uncertain-request ownership and accepts
+or rejects the new session. It does not start game tasks. For emergencies,
+**Manual browser fallback** is available under Advanced recovery; it is not
+the ordinary sign-in flow.
+
+**Scope and acceptance:** This requires a trusted HTTPS Daedalus connection,
+backend native browser handoff enabled, Chrome/Selenium on the Mac and
+account-scoped Gameforge credentials or a matching legacy configuration.
+Source code and synthetic tests do not establish that a live Gameforge
+CAPTCHA, 2FA prompt or world selection currently succeeds. The owner will
+perform actual account tests separately; no live credentials or game traffic
+were used during implementation.
 
 ## What the operator sees
 
