@@ -200,6 +200,12 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.cities(self.account_id),
                 }
+            elif self.action == "task_construction_preview" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                upgrades = self.task_payload.get("upgrades")
+                if type(city_id) is not int or not isinstance(upgrades, list):
+                    raise ValueError("Invalid construction preview")
+                result = self.client.construction_preview(self.account_id, city_id, upgrades)
             elif self.action == "task_buildings" and self.account_id and self.task_payload:
                 city_id = self.task_payload.get("city_id")
                 if type(city_id) is not int:
@@ -418,6 +424,7 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_task_cities: str | None = None
         self._pending_task_buildings: tuple[str, int] | None = None
+        self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._selenium_worker: SeleniumLoginWorker | None = None
@@ -571,6 +578,7 @@ class MainWindow(FluentWindow):
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
             view.buildings_requested.connect(self._queue_task_buildings)
+            view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
             )
@@ -1284,6 +1292,28 @@ class MainWindow(FluentWindow):
             self._launch(self.client, "task_buildings", account_id=scope[0],
                          task_payload={"city_id": scope[1]})
 
+    def _queue_construction_preview(
+        self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+    ) -> None:
+        """Prepare a read-only queue for the currently selected account and city."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "constructionList"):
+            return
+        self._pending_construction_preview = (account_id, city_id, upgrades)
+        self._run_next_construction_preview()
+
+    def _run_next_construction_preview(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_construction_preview
+        self._pending_construction_preview = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() == "constructionList"):
+            self._launch(
+                self.client, "task_construction_preview", account_id=scope[0],
+                task_payload={"city_id": scope[1], "upgrades": scope[2]},
+            )
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1397,6 +1427,7 @@ class MainWindow(FluentWindow):
                     self._pending_batch_status = None
                     self._pending_task_cities = None
                     self._pending_task_buildings = None
+                    self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
@@ -1577,6 +1608,9 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
                                           payload["buildings"])
+        elif action == "task_construction_preview":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_construction_preview(payload)
         elif action == "task_preflight":
             assert isinstance(payload, dict)
             worker = self._worker
@@ -1687,6 +1721,13 @@ class MainWindow(FluentWindow):
             city_id = request.get("city_id") if isinstance(request, dict) else None
             if isinstance(account_id, str) and type(city_id) is int:
                 self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action == "task_construction_preview":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            if isinstance(account_id, str) and type(city_id) is int:
+                self.tasks_page.set_construction_preview_unavailable(account_id, city_id)
         if action == "task_preflight":
             worker = self._worker
             request = getattr(worker, "task_payload", None)
@@ -1730,7 +1771,8 @@ class MainWindow(FluentWindow):
                 # A failed reconnect must not hide an existing authorized session.
                 self.connection_page.set_connected(True)
         logger.warning("Backend %s request failed", action)
-        if action not in {"assistance_pending", "task_preflight", "task_cities", "task_buildings"}:
+        if action not in {"assistance_pending", "task_preflight", "task_cities",
+                          "task_buildings", "task_construction_preview"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -1787,6 +1829,8 @@ class MainWindow(FluentWindow):
             self._run_next_task_cities()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_task_buildings()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_construction_preview()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
