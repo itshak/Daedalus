@@ -742,7 +742,9 @@ class TasksPage(QWidget):
         self._mark_form_dirty()
         self._building_rows = []
         self._buildings_scope = None
+        self._reset_construction_preview()
         self.building_table.setRowCount(0)
+        self.construction_preview_button.setEnabled(False)
         city_id = self._selected_construction_city()
         account_id = self.selected_account_id()
         if account_id and city_id:
@@ -755,6 +757,7 @@ class TasksPage(QWidget):
                       buildings: list[dict[str, object]]) -> None:
         if account_id != self.selected_account_id() or city_id != self._selected_construction_city():
             return  # late result from a different account/city
+        self._reset_construction_preview()
         self._buildings_scope = (account_id, city_id)
         self._building_rows = [dict(item) for item in buildings]
         self.building_table.setRowCount(len(self._building_rows))
@@ -781,18 +784,118 @@ class TasksPage(QWidget):
             choice.setFlags(choice.flags() if item["can_upgrade"] and not item["busy"]
                             else Qt.ItemIsEnabled)
         self.building_note.setText(
-            f"{len(self._building_rows)} actual buildings loaded. Select upgrade targets above. "
-            "Cost, shipment and queue preparation are not yet provided by the engine; "
-            "these draft selections cannot be started from this table. "
-            "Experts may import a separately validated construction plan."
+            f"{len(self._building_rows)} actual buildings loaded. Check the desired "
+            "buildings, set target levels and calculate costs using the actual IkaBot "
+            "planner. Missing resources must be supplied before launching."
         )
+        self.construction_preview_button.setEnabled(bool(self._building_rows))
         self._invalidate_review()
+
+    def _reset_construction_preview(self) -> None:
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
+        self.construction_preview_button.setEnabled(bool(self._building_rows))
+        self._invalidate_review()
+
+    def _selected_building_upgrades(self) -> list[dict[str, int]]:
+        upgrades: list[dict[str, int]] = []
+        for row, building in enumerate(self._building_rows):
+            checkbox = self.building_table.item(row, 0)
+            target = self.building_table.cellWidget(row, 4)
+            if checkbox is None or checkbox.checkState() != Qt.Checked:
+                continue
+            if not isinstance(target, QSpinBox) or not target.isEnabled():
+                raise ValueError("A selected building cannot be upgraded")
+            desired = target.value()
+            current = building["level"]
+            if desired <= current or desired > current + 10:
+                raise ValueError("Select a higher target (at most 10 levels per building)")
+            upgrades.append({"position": building["position"], "target_level": desired})
+        if not 0 < len(upgrades) <= 12:
+            raise ValueError("Select 1 to 12 real buildings before preview")
+        return upgrades
+
+    def _request_construction_preview(self) -> None:
+        account_id = self.selected_account_id()
+        city_id = self._selected_construction_city()
+        if not account_id or city_id is None or self._buildings_scope != (account_id, city_id):
+            QMessageBox.warning(self, "City data needed",
+                                "Load real buildings for the selected city first.")
+            return
+        try:
+            upgrades = self._selected_building_upgrades()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Choose upgrades", str(exc))
+            return
+        self._reset_construction_preview()
+        self._pending_preview_key = (
+            account_id, city_id,
+            tuple((row["position"], row["target_level"]) for row in upgrades),
+        )
+        self.construction_preview_button.setEnabled(False)
+        self.building_note.setText(
+            "Reading IkaBot's actual building costs and queue durations. "
+            "No upgrade or shipment has started."
+        )
+        self.construction_preview_requested.emit(account_id, city_id, upgrades)
+
+    def set_construction_preview(self, result: dict[str, object]) -> None:
+        account_id, city_id = result.get("account_id"), result.get("city_id")
+        try:
+            upgrades = self._selected_building_upgrades()
+        except ValueError:
+            return
+        scope = (account_id, city_id, tuple(
+            (row["position"], row["target_level"]) for row in upgrades
+        ))
+        if (self.selected_task_name() != "constructionList"
+                or self._pending_preview_key != scope
+                or self.selected_account_id() != account_id
+                or self._selected_construction_city() != city_id):
+            return
+        self._pending_preview_key = None
+        config = result.get("config")
+        ready = result.get("ready") is True
+        if not isinstance(config, dict):
+            self.set_construction_preview_unavailable(account_id, city_id)
+            return
+        self._construction_prepared = config if ready else None
+        self._construction_preview_ready = ready
+        names = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
+        costs, missing = result["costs"], result["missing"]
+        cost_text = " · ".join(f"{name} {qty:,}" for name, qty in zip(names, costs))
+        shortages = " · ".join(
+            f"{name} {qty:,}" for name, qty in zip(names, missing) if qty
+        )
+        seconds = result["estimated_seconds"]
+        description = (f"Actual IkaBot costs: {cost_text}. Estimated queue: "
+                       f"{seconds // 3600}h {(seconds % 3600) // 60}m. ")
+        if ready:
+            description += "Resources are sufficient. Review and approve the queue to start."
+        else:
+            description += (f"Missing: {shortages}. Supply the shortages, then preview again. "
+                            "This queue cannot start until it is affordable.")
+        self.building_note.setText(description)
+        self.construction_preview_button.setEnabled(True)
+        self._invalidate_review()
+
+    def set_construction_preview_unavailable(self, account_id: str, city_id: int) -> None:
+        if (account_id == self.selected_account_id()
+                and city_id == self._selected_construction_city()):
+            self._reset_construction_preview()
+            self.building_note.setText(
+                "IkaBot could not safely calculate this upgrade queue. "
+                "No upgrade has started; reconnect and recheck the building targets."
+            )
 
     def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
         if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
             self._buildings_scope = None
             self._building_rows.clear()
+            self._reset_construction_preview()
             self.building_table.setRowCount(0)
+            self.construction_preview_button.setEnabled(False)
             self.building_note.setText(
                 "Building information is unavailable for this city. "
                 "No upgrade assumptions were made; reconnect the account and refresh."
