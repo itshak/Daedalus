@@ -249,3 +249,68 @@ class DonationPoliciesEditor(QWidget):
         if not result:
             raise ValueError("Choose at least one city and donation project")
         return result
+
+
+class ResourceAmountsEditor(QWidget):
+    """Five engine resource_config values with None = omit the resource."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.values: list[SpinBox] = []
+        for name in _RESOURCES:
+            value = _amount(minimum=-1, value=-1, label=f"{name} shipping policy amount")
+            value.setSpecialValueText("Ignore resource")
+            value.valueChanged.connect(self.changed.emit)
+            layout.addRow(name, value)
+            self.values.append(value)
+
+    def to_config(self, *, ignore_allowed: bool = True) -> list[int | None]:
+        values = [field.value() for field in self.values]
+        if ignore_allowed:
+            result = [None if value == -1 else value for value in values]
+        else:
+            result = [0 if value == -1 else value for value in values]
+        if not any(value is not None and value > 0 for value in result):
+            raise ValueError("Enter at least one amount to send or retain")
+        return result
+
+
+class MapAreaEditor(QWidget):
+    """Optional bounded world-map center and radius, no raw coordinate JSON."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        from qfluentwidgets import CheckBox
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.enabled = CheckBox("Limit scan to area")
+        self.enabled.stateChanged.connect(self._toggle)
+        layout.addWidget(self.enabled)
+        self.x = _amount(label="Island map X coordinate")
+        self.y = _amount(label="Island map Y coordinate")
+        self.radius = _amount(value=15, label="Island map radius")
+        for label, field, maximum in (("X", self.x, 100), ("Y", self.y, 100),
+                                      ("Radius", self.radius, 200)):
+            field.setMaximum(maximum)
+            field.valueChanged.connect(self.changed.emit)
+            layout.addWidget(QLabel(label))
+            layout.addWidget(field)
+        self._toggle()
+
+    def _toggle(self, *_args: object) -> None:
+        active = self.enabled.isChecked()
+        for widget in (self.x, self.y, self.radius):
+            widget.setEnabled(active)
+        self.changed.emit()
+
+    def to_config(self) -> tuple[list[int], int] | None:
+        if not self.enabled.isChecked():
+            return None
+        return [self.x.value(), self.y.value()], self.radius.value()
