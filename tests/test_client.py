@@ -365,3 +365,30 @@ def test_only_fixed_task_prerequisite_errors_are_shown_to_user():
             c.start_task("alpha", "alertAttacks", {},
                 "12345678-1234-4123-8123-123456789abc", confirmed=True)
         assert "private-secret" not in str(err.value)
+
+
+def test_readonly_building_api_client_refuses_wrong_account_and_synthetic_data():
+    seen = []
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path.endswith("/cities/42/buildings"):
+            return httpx.Response(200, json={
+                "account_id": "alpha", "city_id": 42, "available": True,
+                "buildings": [{"position": 1, "name": "Town Hall", "level": 12,
+                              "building": "townHall", "busy": False, "can_upgrade": True}]
+            })
+        return httpx.Response(404)
+    with mock_client(handler) as client:
+        assert client.buildings("alpha", 42)[0]["level"] == 12
+        with pytest.raises(ValueError, match="Invalid building inventory"):
+            client.buildings("../other", 42)
+        with pytest.raises(ValueError, match="Invalid building inventory"):
+            client.buildings("alpha", -1)
+        assert seen == ["/api/v1/accounts/alpha/cities/42/buildings"]
+
+    def fake(_request):
+        return httpx.Response(200, json={"account_id": "alpha", "city_id": 42,
+                                         "available": False, "buildings": []})
+    with mock_client(fake) as client:
+        with pytest.raises(APIConnectionError, match="unavailable"):
+            client.buildings("alpha", 42)
