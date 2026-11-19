@@ -541,6 +541,27 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid workshop options")
         return data
 
+    def trainable_units(
+        self, account_id: str, city_id: int, *, train_troops: bool,
+    ) -> dict[str, object]:
+        """Read only actual trainable troop/ship types and source-provided costs."""
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or city_id <= 0 or type(train_troops) is not bool):
+            raise ValueError("Invalid training unit scope")
+        mode = "true" if train_troops else "false"
+        data = self._read(
+            f"accounts/{account_id}/cities/{city_id}/trainable-units?train_troops={mode}"
+        )
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("train_troops") is not train_troops
+                or not isinstance(data.get("city"), dict)
+                or not isinstance(data.get("units"), list)
+                or not isinstance(data.get("available"), list)
+                or len(data["available"]) != 5
+                or type(data.get("free_citizens")) is not int):
+            raise APIConnectionError("Backend returned invalid trainable unit options")
+        return data
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
