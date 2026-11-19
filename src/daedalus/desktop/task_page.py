@@ -770,7 +770,9 @@ class TasksPage(QWidget):
             self.building_table.setItem(row_index, 0, choice)
             for col, value in ((1, item["name"]), (2, position), (3, level),
                                (5, "Upgrading" if item["busy"] else
-                                "Eligible" if item["can_upgrade"] else "Not available")):
+                                "Maximum level" if not item["can_upgrade"] else
+                                "Ready now" if item.get("can_upgrade_now", True) else
+                                "Needs materials")):
                 cell = QTableWidgetItem(str(value))
                 cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 self.building_table.setItem(row_index, col, cell)
