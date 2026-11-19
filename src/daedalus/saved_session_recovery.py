@@ -37,6 +37,19 @@ class CredentialStore(Protocol):
 def _store(provided: CredentialStore | None) -> CredentialStore:
     if provided is not None:
         return provided
+    # Headless Linux services can opt in to a machine-bound, encrypted systemd
+    # credential store instead of the current GUI session's volatile keyring.
+    # A misconfigured opt-in must fail closed, never read from another backend.
+    from daedalus.systemd_credential_store import (
+        ProtectedStoreUnavailable,
+        store_from_systemd_environment,
+    )
+    try:
+        persistent = store_from_systemd_environment()
+    except ProtectedStoreUnavailable as exc:
+        raise SavedSessionUnavailable(str(exc)) from exc
+    if persistent is not None:
+        return persistent
     try:
         import keyring
     except ImportError as exc:

@@ -68,9 +68,14 @@ The completed `native-mac-browser-login` implementation now offers first-class *
 
 The operator can run `daedalus doctor --smoke --deployment-check` to obtain a
 read-only ledger/keyring metadata audit. On the current Monjo host, the audit
-reports one unresolved task receipt and no durable protected keyring collection
-file (the active Secret Service default points to `session`), so production
-cutover and a live worker restart remain blocked. The isolated new-version
+originally reported one unresolved task receipt and no durable protected
+keyring file. On 2026-11-19 the receipt was inspected and operator-reconciled,
+and the independently verified Monjo cookie and email binding were migrated
+to host-encrypted, reboot-persistent systemd credentials. A controlled Daedalus
+service restart recovered Monjo (authenticated, seven warehouses, zero tasks)
+and enabled native Mac login without VNC. Deployment metadata now shows a
+clear task ledger and encrypted credential files. The **host reboot and owner
+real-game acceptance** remain unverified. The isolated new-version
 backend's encrypted browser challenge start/cancel workflow passed with
 synthetic account metadata and **no** Gameforge network requests; this does
 not replace owner-run Mac login, game task or reboot acceptance. The full

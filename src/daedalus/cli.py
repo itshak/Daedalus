@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     doctor.add_argument("--task-ledger", help="Private task-ledger path for deployment check")
     doctor.add_argument("--keyring-directory", help="Keyring metadata directory for deployment check")
+    doctor.add_argument("--protected-store-directory", help="Encrypted daemon store directory for deployment metadata check")
 
     engine = subcommands.add_parser("engine", help="Inspect public IkaBot engine source")
     engine.add_argument("action", choices=["inventory"], help="Inspect available engine operations")
@@ -112,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         from daedalus.readiness import OfflineSmokeError, offline_readiness, synthetic_smoke
 
         report = offline_readiness()
-        if (args.task_ledger or args.keyring_directory) and not args.deployment_check:
+        if (args.task_ledger or args.keyring_directory or args.protected_store_directory) and not args.deployment_check:
             parser.error("Deployment metadata paths require --deployment-check")
         if args.deployment_check:
             from daedalus.deployment_readiness import deployment_preflight
@@ -120,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             report["deployment_preflight"] = deployment_preflight(
                 ledger_path=args.task_ledger,
                 keyring_directory=args.keyring_directory,
+                protected_store_directory=args.protected_store_directory,
             )
         if args.smoke:
             try:
@@ -375,6 +377,10 @@ def main(argv: list[str] | None = None) -> int:
                 worker.start(confirmed=True)
                 if task_controller is not None:
                     task_controller.adopt_verified_saved_worker(account.id, worker.lease)
+                if monitor is not None:
+                    # NativeBrowserHandoff validates monitor ownership at
+                    # construction, so attach before creating the handoff.
+                    monitor.attach_dedicated_worker(worker)
             native_handoff = None
             if args.enable_native_browser_login:
                 from daedalus.native_browser_handoff import NativeBrowserHandoff

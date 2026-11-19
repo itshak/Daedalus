@@ -181,3 +181,71 @@ def test_cookie_only_cli_bootstraps_only_selected_worker_offline(monkeypatch):
         ("api", "/synthetic/private.toml", None),
         ("serve", sentinel, "127.0.0.1", 8765), "closed-worker",
     ]
+
+
+def test_combined_native_login_and_owned_worker_cli_wiring_is_safe(tmp_path, monkeypatch):
+    """Covers actual startup order that previously crashed the live service."""
+    from fastapi.testclient import TestClient
+
+    import daedalus.api as api_module
+    import daedalus.cli as cli_module
+    import daedalus.engine_ipc as ipc_module
+    import daedalus.saved_worker as worker_module
+    from daedalus.account_sessions import SessionPhase
+    from daedalus.accounts import Account
+
+    account = Account("alpha", "s301-en", "Fictional", "Test", True)
+    token = "synthetic-backend-test-token-is-not-real-12345678"
+    monkeypatch.setenv("DAEDALUS_API_TOKEN", token)
+    monkeypatch.setattr(cli_module, "load_accounts", lambda *_: [account])
+    monkeypatch.setattr(api_module, "load_accounts", lambda *_: [account])
+    events = []
+
+    class OfflineIPC:
+        def __init__(self, *args, **kwargs):
+            pass
+        def validate_account(self, row):
+            return row == account
+        def has_account(self, row):
+            return row == account
+        def list_managed_tasks(self, row):
+            return []
+
+    class FakeWorker:
+        def __init__(self, row, coordinator):
+            self.account = row
+            self.coordinator = coordinator
+            self.lease = None
+        def start(self, *, confirmed):
+            assert confirmed is True
+            self.lease = self.coordinator.acquire(self.account.id)
+            self.lease.transition(SessionPhase.AUTHENTICATED)
+            events.append("leased")
+        def close(self):
+            events.append("closed")
+            if self.lease is not None:
+                self.lease.close()
+
+    monkeypatch.setattr(ipc_module, "ControlledIPCClient", OfflineIPC)
+    monkeypatch.setattr(worker_module, "SavedCookieWorker", FakeWorker)
+
+    def fake_serve(app, **kwargs):
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/native-browser-login",
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert response.status_code == 200
+            assert response.json()["enabled"] is True
+            events.append("native_login_opt_in_enabled")
+
+    monkeypatch.setattr("uvicorn.run", fake_serve)
+    result = cli_module.main([
+        "serve", "--accounts-file", str(tmp_path / "metadata.toml"),
+        "--connect-existing-ipc", "--enable-task-control",
+        "--monitor-existing-sessions", "--restore-saved-account", "alpha",
+        "--confirm-read-only-network", "--enable-native-browser-login",
+        "--task-ledger", str(tmp_path / "ledger.sqlite3"),
+    ])
+    assert result == 0
+    assert events == ["leased", "native_login_opt_in_enabled", "closed"]
