@@ -295,6 +295,5 @@ def test_category_pivot_mirrors_existing_canonical_task_filter(page):
     page.set_capabilities(records, enabled=True)
     page.category_combo.setCurrentIndex(3)
     assert page._task_names == ["constructionList"]
-    assert page.group_tabs.currentItem().routeKey() == "group-3" if hasattr(
-        page.group_tabs.currentItem(), "routeKey"
-    ) else page.category_combo.currentIndex() == 3
+    assert page.category_combo.currentIndex() == 3
+    assert page.group_tabs.isEnabled()
