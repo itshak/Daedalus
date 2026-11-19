@@ -44,6 +44,7 @@ from daedalus.desktop.selenium_credentials import (
     remember_login,
 )
 from daedalus.desktop.selenium_credentials_dialog import SeleniumCredentialsDialog
+from daedalus.desktop.selenium_vault import seal_login, unseal_login
 from daedalus.desktop.selenium_worker import SeleniumLoginWorker
 from daedalus.desktop.ssh_tunnel import (
     LocalSSHTunnel,
@@ -66,6 +67,17 @@ from daedalus.native_browser_handoff import (
 )
 
 logger = logging.getLogger("daedalus.desktop")
+
+
+def _known_ikabot_workers(client: object) -> list[str] | None:
+    """Unknown must not be confused with the absence of an IkaBot worker."""
+    try:
+        if not callable(getattr(client, "connected_accounts", None)):
+            return None
+        ids = client.connected_accounts()
+        return ids if isinstance(ids, list) else None
+    except (APIConnectionError, ValueError):
+        return None
 
 
 class QtLogBridge(QObject):
@@ -138,9 +150,44 @@ class APIWorker(QThread):
                         if callable(getattr(self.client, "native_browser_login_capabilities", None))
                         else {"enabled": False}
                     ),
+                    "login_vaults": (
+                        self.client.login_vaults()
+                        if callable(getattr(self.client, "login_vaults", None)) else {}
+                    ),
+                    "connected_accounts": _known_ikabot_workers(self.client),
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "login_vault_sync" and self.task_payload:
+                from daedalus.desktop.selenium_vault import seal_login
+
+                rows = self.task_payload.get("accounts")
+                origin = self.task_payload.get("origin")
+                if not isinstance(rows, list) or not isinstance(origin, str):
+                    raise ValueError("Invalid encrypted login backup selection")
+                saved, missing, failed = 0, 0, 0
+                for row in rows:
+                    if not isinstance(row, dict) or row.get("enabled") is not True:
+                        continue
+                    aid, world = row.get("id"), row.get("world")
+                    if not isinstance(aid, str) or not isinstance(world, str):
+                        failed += 1
+                        continue
+                    try:
+                        credentials = get_saved_login(origin, aid, world)
+                        if credentials is None:
+                            credentials = legacy_warehouse_login(row)
+                        if credentials is None:
+                            missing += 1
+                            continue
+                        sealed = seal_login(origin, aid, world, credentials)
+                        if self.client.store_login_vault(aid, sealed):
+                            saved += 1
+                        else:
+                            failed += 1
+                    except (LoginCredentialError, APIConnectionError, ValueError):
+                        failed += 1
+                result = {"saved": saved, "missing": missing, "failed": failed}
             elif self.action == "account_config":
                 result = self.client.account_config()
             elif self.action == "account_config_put" and self.task_payload:
@@ -165,6 +212,16 @@ class APIWorker(QThread):
                     self.account_id, str(self.task_payload["ticket_id"]),
                     self.task_payload["envelope"],
                 )
+                sealed = self.task_payload.get("vault")
+                if (isinstance(sealed, dict)
+                        and callable(getattr(self.client, "store_login_vault", None))):
+                    try:
+                        result["vault_saved"] = self.client.store_login_vault(
+                            self.account_id, sealed,
+                        )
+                    except (APIConnectionError, ValueError):
+                        # The verified session stays valid if backup fails.
+                        result["vault_saved"] = False
             elif (self.action == "native_login_cancel" and self.account_id
                   and self.task_payload):
                 result = self.client.cancel_native_browser_login(
@@ -365,6 +422,11 @@ class SecureSSHConnectionWorker(QThread):
                     if callable(getattr(client, "native_browser_login_capabilities", None))
                     else {"enabled": False}
                 ),
+                "login_vaults": (
+                    client.login_vaults()
+                    if callable(getattr(client, "login_vaults", None)) else {}
+                ),
+                "connected_accounts": _known_ikabot_workers(client),
             }
             self.completed.emit("ssh_connect", {
                 "result": result, "client": client, "tunnel": tunnel,
@@ -421,6 +483,7 @@ class MainWindow(FluentWindow):
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
         self._active_backend_url: str | None = None
+        self._server_login_vaults: dict[str, dict[str, object]] = {}
         self._syncing_report_preferences = False
         try:
             self._gui_preferences = load_gui_preferences()
@@ -507,6 +570,12 @@ class MainWindow(FluentWindow):
         self.accounts_page.native_browser_login_requested.connect(self._begin_native_browser_login)
         self.accounts_page.automatic_login_requested.connect(self._begin_automatic_logins)
         self.accounts_page.automatic_login_cancel_requested.connect(self._cancel_automatic_logins)
+        self.accounts_page.sync_saved_logins_requested.connect(
+            lambda rows: self._request(
+                "login_vault_sync",
+                task_payload={"origin": self._active_backend_url, "accounts": rows},
+            )
+        )
         self.accounts_page.recovery_prepare_requested.connect(
             lambda account_id: self._request(
                 "recovery_prepare", account_id=account_id,
@@ -780,16 +849,26 @@ class MainWindow(FluentWindow):
             save_credentials = False
             try:
                 credentials = get_saved_login(origin, aid, world)
+                save_credentials = credentials is not None
+                if credentials is None:
+                    wrapped = self._server_login_vaults.get(aid)
+                    if isinstance(wrapped, dict):
+                        credentials = unseal_login(origin, aid, world, wrapped)
+                        save_credentials = credentials is not None
                 if credentials is None:
                     # Exact-alias reuse from the old local IkaBot warehouse bot,
                     # never a whole-file migration or guessed account mapping.
                     credentials = legacy_warehouse_login(record)
                     save_credentials = credentials is not None
             except LoginCredentialError:
-                self._notice("Mac Keychain unavailable", "Unlock macOS Keychain to reuse saved login.")
+                self._notice(
+                    "Saved login unavailable",
+                    "Unlock macOS Keychain to restore the encrypted server login.",
+                )
             if credentials is None:
                 dialog = SeleniumCredentialsDialog(
-                    player=str(record["player"]), world=world, parent=self,
+                    player=str(record["player"]), world=world,
+                    email=str(record.get("email") or ""), parent=self,
                 )
                 if dialog.exec() != QDialog.Accepted:
                     dialog.discard()
@@ -919,10 +998,22 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_automatic_login_busy(
             True, "Headless sign-in complete. Waiting for independent server player verification…"
         )
-        self._request(
-            "native_login_complete", account_id=aid,
-            task_payload={"ticket_id": challenge["ticket_id"], "envelope": envelope},
-        )
+        payload: dict[str, object] = {
+            "ticket_id": challenge["ticket_id"], "envelope": envelope,
+        }
+        if self._automatic_login_save_credentials:
+            try:
+                payload["vault"] = seal_login(
+                    str(self._active_backend_url), str(aid), str(record["world"]),
+                    self._automatic_login_credentials,
+                )
+            except LoginCredentialError:
+                # Do not block an authenticated session if backup fails.
+                self._notice(
+                    "Encrypted login backup unavailable",
+                    "Unlock macOS Keychain to preserve the password securely.",
+                )
+        self._request("native_login_complete", account_id=aid, task_payload=payload)
 
     def _selenium_failure(self, reason: str) -> None:
         self._notice("Automatic sign-in unsuccessful", reason)
@@ -1351,7 +1442,12 @@ class MainWindow(FluentWindow):
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
                 self.accounts_page.set_report_exclusions(excluded)
-                self.accounts_page.set_connected_ids(None)
+                self.accounts_page.set_connected_ids(
+                    payload.get("connected_accounts")
+                    if isinstance(payload.get("connected_accounts"), list) else None
+                )
+                vaults = payload.get("login_vaults")
+                self._server_login_vaults = vaults if isinstance(vaults, dict) else {}
                 self._show_accounts(payload["accounts"])
             finally:
                 self._syncing_report_preferences = False
@@ -1371,6 +1467,14 @@ class MainWindow(FluentWindow):
         elif action == "accounts":
             self._show_accounts(payload)
             logger.info("Accounts refreshed")
+        elif action == "login_vault_sync":
+            assert isinstance(payload, dict)
+            self._notice(
+                "Encrypted logins backed up",
+                f"{payload['saved']} stored securely on the server; "
+                f"{payload['missing']} not yet saved on this Mac; "
+                f"{payload['failed']} could not be backed up.",
+            )
         elif action == "account_config":
             assert isinstance(payload, dict)
             self.accounts_page.set_editable_config(payload)
@@ -1585,9 +1689,27 @@ class MainWindow(FluentWindow):
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
-        self.accounts_page.set_accounts(data)
-        self.warehouses_page.set_accounts(data)
-        self.home_page.set_accounts(data)
+        visible = []
+        for raw in data:
+            account = dict(raw)
+            # Local Keychain can also identify an imported account even when
+            # a previous backend version omits its protected email binding.
+            if (not account.get("email")
+                    and isinstance(self._active_backend_url, str)
+                    and self._active_backend_url.startswith("https://")):
+                try:
+                    saved = get_saved_login(
+                        self._active_backend_url,
+                        str(account["id"]), str(account["world"]),
+                    )
+                except (LoginCredentialError, KeyError):
+                    saved = None
+                if saved is not None:
+                    account["email"] = saved.email
+            visible.append(account)
+        self.accounts_page.set_accounts(visible)
+        self.warehouses_page.set_accounts(visible)
+        self.home_page.set_accounts(visible)
         # Refresh inclusion *after* the warehouse account map is replaced.
         # This also handles accounts newly created via metadata editing.
         self.warehouses_page.set_selected_accounts(

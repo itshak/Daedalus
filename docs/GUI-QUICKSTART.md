@@ -40,8 +40,11 @@ On the first use, Daedalus tries an exact account alias match in the previous
 local bot's owner-owned `~/.ikabot/config.ini` and an unexpired, exact-world
 session in `~/.ikabot/tokens.json`. Neither source is changed or copied into
 Daedalus settings. Otherwise you supply your Gameforge email/password **once**
-through a secure Mac form, and can save them to **macOS Keychain**, bound to
-the exact backend HTTPS origin, account ID and world. Subsequently those
+through a secure Mac form, and can save them to **macOS Keychain plus an encrypted
+server backup**, bound to the exact backend HTTPS origin, account ID and world.
+The server stores only encrypted material and cannot reconstruct the password
+without the same Mac's Keychain vault key. The **Accounts → More → Back up
+saved logins to server** action can migrate previously saved Mac logins. Subsequently those
 credentials are reused automatically and no password input is needed until
 they are unavailable or changed. They never leave the Mac for the Daedalus API.
 
