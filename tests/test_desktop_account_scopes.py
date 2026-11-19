@@ -52,8 +52,8 @@ def test_navigation_has_unique_icons_and_only_one_regular_automation(app, monkey
         assert NAV_ICONS["connection"] != NAV_ICONS["settings"]
         assert NAV_ICONS["automations"] != NAV_ICONS["activity"]
         assert window.tasks_page.objectName() == "tasks_page"
-        assert window.wine_page.objectName() == "wine_page"
-        assert window.construction_page.objectName() == "construction_page"
+        assert len(window._task_views) == 1
+        assert window._task_views[0] is window.tasks_page
         assert hasattr(window.home_page, "all_warehouse_card")
     finally:
         _dispose(window, app)
@@ -213,7 +213,9 @@ def test_multi_account_status_partial_result_is_not_fabricated(app):
 def test_fluent_automation_pivot_separates_configuration_and_history(app):
     page = TasksPage()
     try:
-        assert page.stack.count() == 4
+        assert page.stack.count() == 5
+        page._open_catalog()
+        assert page.stack.currentIndex() == 4
         page._show_section(3)
         assert page.stack.currentIndex() == 3
         page._show_section(1)
@@ -283,7 +285,7 @@ def test_automation_parameter_form_uses_compact_height_for_one_field(app):
         }], enabled=True)
         assert page.parameter_scroll.height() <= 95
         assert page.parameter_scroll.maximumHeight() <= 100
-        assert page.stack.count() == 4
+        assert page.stack.count() == 5
     finally:
         _dispose(page, app)
 
@@ -493,3 +495,313 @@ def test_bulk_launch_halts_if_successful_http_receipt_is_unconfirmed(app):
     assert result["submitted"] == []
     assert result["halted"]["account_id"] == "account-0"
     assert result["halted"]["status"] == "unconfirmed"
+
+
+def test_automation_approval_is_invalidated_by_parameter_and_scope_changes(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(3))
+        page.set_capabilities([{
+            "name": "alertAttacks", "kind": "background_task",
+            "config_fields": [{"name": "minutes", "type": "integer", "default": 20}],
+        }], enabled=True)
+        page.set_preflight({
+            "account_id": "account-0", "task": "alertAttacks",
+            "ready": True, "reason": "none",
+        })
+        page.confirm_box.setChecked(True)
+        assert page._reviewed
+        page._form_inputs["minutes"].setValue(21)
+        assert not page._reviewed
+        assert not page.confirm_box.isChecked()
+        page.confirm_box.setChecked(True)
+        page.select_account("account-2")
+        assert not page._reviewed
+        assert not page.start_button.isEnabled()
+        page.set_preflight({
+            "account_id": "account-2", "task": "alertAttacks",
+            "ready": True, "reason": "none",
+        })
+        assert page.start_button.isEnabled()
+        page.confirm_box.setChecked(True)
+        page._pending_launch = True
+        page._set_controls()
+        assert not page.start_button.isEnabled()
+        page.finish_launch()
+        assert page.start_button.isEnabled()
+        assert not page.confirm_box.isChecked()
+    finally:
+        _dispose(page, app)
+
+
+def test_backend_declared_enum_uses_typed_fluent_picker_not_guesswork(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(1))
+        page.set_capabilities([{
+            "name": "alertAttacks", "kind": "background_task",
+            "config_fields": [{
+                "name": "notification_mode", "type": "text", "required": True,
+                "default": "telegram", "choices": ["telegram", "discord"],
+            }],
+        }], enabled=True)
+        from qfluentwidgets import ComboBox
+        widget = page._form_inputs["notification_mode"]
+        assert isinstance(widget, ComboBox)
+        assert widget.currentText() == "telegram"
+        assert page._form_config() == {"notification_mode": "telegram"}
+        widget.setCurrentIndex(1)
+        assert page._form_config() == {"notification_mode": "discord"}
+    finally:
+        _dispose(page, app)
+
+
+def test_activity_is_bounded_filtered_and_does_not_expose_unrecognized_messages(app):
+    from daedalus.desktop.log_page import LogPage
+
+    page = LogPage()
+    try:
+        page.add_event("INFO", "Connected to Daedalus API")
+        assert "Connection established" in page.timeline.toPlainText()
+        page.add_event("INFO", "token=private-secret account=private-name")
+        assert "private-secret" not in page.timeline.toPlainText()
+        page.add_event("WARNING", "Backend task_start request failed")
+        assert "Action needs attention" in page.timeline.toPlainText()
+        page.severity_combo.setCurrentIndex(1)
+        assert "Connection established" in page.timeline.toPlainText()
+        assert "Action needs attention" not in page.timeline.toPlainText()
+        page.severity_combo.setCurrentIndex(2)
+        assert "Action needs attention" in page.timeline.toPlainText()
+        assert "Connection established" not in page.timeline.toPlainText()
+    finally:
+        _dispose(page, app)
+
+
+def test_accounts_master_detail_and_small_mac_layout(app, monkeypatch):
+    from PySide6.QtWidgets import QSplitter
+
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        window.resize(900, 650)
+        assert window.minimumWidth() == 900
+        assert window.minimumHeight() == 650
+        assert isinstance(window.accounts_page.master_detail, QSplitter)
+        assert window.accounts_page.master_detail.count() == 2
+        window._show_accounts(accounts(5))
+        assert window.accounts_page.table.rowCount() == 5
+        assert len(window._task_views) == 1
+        assert window._settings_shortcut.key().toString() == "Ctrl+,"
+        assert window._refresh_shortcut.key().toString() == "Ctrl+R"
+        assert window._search_shortcut.key().toString() == "Ctrl+F"
+    finally:
+        _dispose(window, app)
+
+
+def test_single_automation_launch_does_not_allow_second_click_while_pending(app, monkeypatch):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(1))
+        page.set_capabilities([{
+            "name": "alertAttacks", "kind": "background_task",
+            "config_fields": [{"name": "minutes", "type": "integer", "default": 20}],
+        }], enabled=True)
+        page.set_preflight({
+            "account_id": "account-0", "task": "alertAttacks",
+            "ready": True, "reason": "none",
+        })
+        emitted = []
+        page.launch_requested.connect(lambda *args: emitted.append(args))
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        page.confirm_box.setChecked(True)
+        page._start()
+        page._start()
+        assert len(emitted) == 1
+        assert not page.start_button.isEnabled()
+        page.finish_launch()
+        assert page.start_button.isEnabled()
+        assert not page.confirm_box.isChecked()
+    finally:
+        _dispose(page, app)
+
+
+def test_old_preflight_reply_cannot_unlock_reselected_same_account_task(app, monkeypatch):
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        window._show_accounts(accounts(2))
+        window._show_capabilities({
+            "operations": [{"name": "alertAttacks", "kind": "background_task"}],
+            "structured_engine_dispatch": True,
+        })
+        view = window.tasks_page
+        original_generation = view._selection_generation
+        view.select_account("account-1")
+        view.select_account("account-0")
+        assert view._selection_generation > original_generation
+
+        class PendingRead:
+            def __init__(self):
+                self.task_payload = {"task": "alertAttacks", "generation": original_generation}
+
+        window._worker = PendingRead()
+        window._on_completed("task_preflight", {
+            "account_id": "account-0", "task": "alertAttacks",
+            "ready": True, "reason": "none",
+        })
+        assert not view.start_button.isEnabled()
+        assert view._prereq_ready is None
+        window._worker = None
+    finally:
+        window._worker = None
+        _dispose(window, app)
+
+
+def test_catalog_is_embedded_and_routes_to_same_task_editor(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(1))
+        page.set_capabilities([
+            {"name": "alertAttacks", "kind": "background_task"},
+            {"name": "interactiveStatus", "kind": "interactive_menu"},
+        ], enabled=True)
+        page._open_catalog()
+        assert page.stack.currentWidget() is page.catalog_panel
+        assert page.catalog_panel.table.rowCount() == 2
+        assert page.select_task("alertAttacks")
+        assert page.stack.currentIndex() == 0
+        assert page.selected_task_name() == "alertAttacks"
+    finally:
+        _dispose(page, app)
+
+
+def test_activity_type_filter_is_not_a_fabricated_account_audit(app):
+    from daedalus.desktop.log_page import LogPage
+
+    page = LogPage()
+    try:
+        page.add_event("INFO", "Connected to Daedalus API")
+        page.add_event("INFO", "Multi-account warehouse report updated")
+        page.type_combo.setCurrentIndex(3)  # Warehouses
+        assert "Combined warehouses refreshed" in page.timeline.toPlainText()
+        assert "Connection established" not in page.timeline.toPlainText()
+        assert "Combined warehouses refreshed" not in page.log_view.toPlainText()
+    finally:
+        _dispose(page, app)
+
+
+def test_settings_reporting_scope_is_backend_local_and_read_only(app, monkeypatch):
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        window._show_accounts(accounts(4))
+        page = window.appearance_page
+        assert "4 of 4" in page.report_scope_status.text()
+        assert not page.report_all_button.isEnabled()
+        assert page.report_choose_button.isEnabled()
+        window.accounts_page.set_report_exclusions({"account-1", "account-3"})
+        assert window.warehouses_page._included_ids == ["account-0", "account-2"]
+        assert "2 of 4" in page.report_scope_status.text()
+        page.report_all_button.click()
+        assert window.accounts_page.report_exclusions() == set()
+        assert window.warehouses_page._included_ids == [
+            "account-0", "account-1", "account-2", "account-3"
+        ]
+        assert not page.report_all_button.isEnabled()
+    finally:
+        _dispose(window, app)
+
+
+def test_automation_discovery_cards_are_selection_only(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(2))
+        page.set_capabilities([
+            {"name": "tavernManager", "kind": "background_task"},
+            {"name": "alertAttacks", "kind": "background_task"},
+            {"name": "browserOnly", "kind": "interactive_menu"},
+        ], enabled=True)
+        launched = []
+        page.launch_requested.connect(lambda *args: launched.append(args))
+        page.batch_launch_requested.connect(lambda *args: launched.append(args))
+        assert page.discovery_layout.count() == 2
+        page.search_input.setText("tavern")
+        assert page.discovery_layout.count() == 1
+        page._select_discovered_task("tavernManager")
+        assert page.selected_task_name() == "tavernManager"
+        assert launched == []
+        assert not page.start_button.isEnabled()
+        page.reset_backend_context()
+        assert page.selected_account_id() is None
+        assert page.selected_task_name() is None
+        assert not page.confirm_box.isChecked()
+        assert not page.start_button.isEnabled()
+    finally:
+        _dispose(page, app)
+
+
+def test_history_and_running_hide_technical_ids_but_preserve_managed_action(app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(1))
+        page.set_capabilities([
+            {"name": "alertAttacks", "kind": "background_task"}
+        ], enabled=True)
+        page.set_tasks({
+            "engine_tasks": [{
+                "task": "alertAttacks", "status": "running",
+                "task_id": "task-allowed", "pid": 8421,
+            }],
+            "requests": [{
+                "task": "alertAttacks", "status": "unconfirmed",
+                "request_id": "request-allowed",
+            }],
+        })
+        assert "8421" not in page.task_table.item(0, 2).text()
+        assert "task-allowed" not in page.task_table.item(0, 3).text()
+        assert "request-allowed" not in page.request_table.item(0, 0).text()
+        page.task_table.setCurrentCell(0, 0)
+        page.request_table.setCurrentCell(0, 0)
+        stopped, reconciled = [], []
+        page.stop_requested.connect(lambda *args: stopped.append(args))
+        page.reconcile_requested.connect(lambda *args: reconciled.append(args))
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        page._stop()
+        page._reconcile()
+        assert stopped == [("account-0", "task-allowed")]
+        assert reconciled == [("account-0", "request-allowed")]
+    finally:
+        _dispose(page, app)
+
+
+def test_connection_progress_and_errors_never_echo_backend_secrets(app):
+    from daedalus.desktop.pages import ConnectionPage
+
+    page = ConnectionPage()
+    try:
+        page.token_input.setText("super-private-token")
+        page.set_connecting(True)
+        assert not page.connect_button.isEnabled()
+        assert "Checking secure connection" in page.status_label.text()
+        page.set_connection_error(
+            "unauthorized super-private-token in HTTP response"
+        )
+        assert "super-private-token" not in page.status_label.text()
+        assert "Access denied" in page.status_label.text()
+        page.set_connecting(False)
+        assert page.connect_button.isEnabled()
+        page.set_connection_error("certificate verify failed")
+        assert "Certificate not trusted" in page.status_label.text()
+    finally:
+        _dispose(page, app)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, ComboBox, PushButton, SubtitleLabel
 
 from daedalus.desktop.design_system import PageHeading
@@ -18,12 +18,22 @@ class AppearancePage(QWidget):
 
     preferences_changed = Signal(object)
     connection_settings_requested = Signal()
+    report_accounts_requested = Signal()
+    report_all_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("appearance_page")
         self._updating = False
-        layout = QVBoxLayout(self)
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidgetResizable(True)
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        shell.addWidget(scroll)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
         layout.addWidget(PageHeading(
@@ -44,6 +54,22 @@ class AppearancePage(QWidget):
         layout.addWidget(self.only_220k)
         self.group_island = CheckBox("Group warehouse results by island by default")
         layout.addWidget(self.group_island)
+        self.report_scope_status = CaptionLabel(
+            "Connect to manage the accounts included in combined warehouse reports."
+        )
+        self.report_scope_status.setWordWrap(True)
+        layout.addWidget(self.report_scope_status)
+        report_actions = QHBoxLayout()
+        self.report_all_button = PushButton("Include all accounts")
+        self.report_all_button.setEnabled(False)
+        self.report_all_button.clicked.connect(self.report_all_requested.emit)
+        report_actions.addWidget(self.report_all_button)
+        self.report_choose_button = PushButton("Choose report accounts…")
+        self.report_choose_button.setEnabled(False)
+        self.report_choose_button.clicked.connect(self.report_accounts_requested.emit)
+        report_actions.addWidget(self.report_choose_button)
+        report_actions.addStretch(1)
+        layout.addLayout(report_actions)
         layout.addWidget(SubtitleLabel("Connection"))
         layout.addWidget(CaptionLabel(
             "API access is saved only in macOS Keychain for the exact server you approved. "
@@ -56,6 +82,15 @@ class AppearancePage(QWidget):
         self.theme_combo.currentIndexChanged.connect(self._changed)
         self.only_220k.stateChanged.connect(self._changed)
         self.group_island.stateChanged.connect(self._changed)
+
+    def set_report_scope(self, total: int, selected: int) -> None:
+        """Display the local per-backend scope; no account/session mutations."""
+        self.report_scope_status.setText(
+            f"{selected} of {total} accounts included in combined warehouse reports."
+            if total else "No accounts available. Connect to manage report selection."
+        )
+        self.report_all_button.setEnabled(total > 0 and selected < total)
+        self.report_choose_button.setEnabled(total > 0)
 
     def set_preferences(self, prefs: GuiPreferences) -> None:
         self._updating = True

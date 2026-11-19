@@ -11,12 +11,12 @@ import re
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QMessageBox,
     QPlainTextEdit,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CardWidget,
     CheckBox,
     ComboBox,
     DoubleSpinBox,
@@ -41,7 +42,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
-from daedalus.desktop.design_system import style_form_input
+from daedalus.desktop.design_system import PageHeading, style_form_input
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
     configuration_summary,
@@ -116,12 +117,15 @@ class TasksPage(QWidget):
         self._all_task_names: list[str] = []
         self._dispatch_enabled = False
         self._prereq_ready: bool | None = None
+        self._selection_generation = 0
         self._unresolved = False
         self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
-        self._form_inputs: dict[str, LineEdit | CheckBox | QSpinBox | QDoubleSpinBox] = {}
+        self._form_inputs: dict[str, LineEdit | CheckBox | ComboBox | QSpinBox | QDoubleSpinBox] = {}
         self._form_dirty = False
+        self._reviewed = False
+        self._pending_launch = False
         self._bulk_account_ids: list[str] = []
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
@@ -142,7 +146,7 @@ class TasksPage(QWidget):
         outer.addWidget(self.stack, 1)
         self.stack.addWidget(scroll)
         self.pivot.addItem(
-            routeKey="configure", text="Configure",
+            routeKey="configure", text="Discover & configure",
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
@@ -153,7 +157,7 @@ class TasksPage(QWidget):
             "Construction automation" if workflow == "construction" else
             "Automations"
         )
-        layout.addWidget(SubtitleLabel(title))
+        layout.addWidget(PageHeading(title, "Discover, configure and review with account-specific controls."))
         if workflow is not None:
             layout.addWidget(CaptionLabel(
                 "Registered background tasks for this workflow use the same validated "
@@ -203,7 +207,7 @@ class TasksPage(QWidget):
         self.choose_bulk_button.clicked.connect(self._choose_bulk_accounts)
         scope_row.addWidget(self.choose_bulk_button)
         self.view_all_button = PushButton("View all task statuses")
-        self.view_all_button.setToolTip("Read-only task status for every configured enabled account")
+        self.view_all_button.setToolTip("Read-only task status for every configured account, including disabled accounts")
         self.view_all_button.clicked.connect(self._refresh_all)
         scope_row.addWidget(self.view_all_button)
         self.view_selected_button = PushButton("View selected statuses")
@@ -223,6 +227,26 @@ class TasksPage(QWidget):
         self.search_input.textChanged.connect(self._filter_tasks)
         filter_row.addWidget(self.search_input, 2)
         layout.addLayout(filter_row)
+
+        # Discover is a task gallery, not an unlabelled engine-name dropdown.
+        # These are read-only selection cards; only the separate, reviewed
+        # Start action can contact the backend with a game mutation.
+        layout.addWidget(SubtitleLabel("Discover"))
+        self.discovery_scroll = QScrollArea(self)
+        self.discovery_scroll.setWidgetResizable(True)
+        self.discovery_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.discovery_scroll.setMinimumHeight(100)
+        self.discovery_scroll.setMaximumHeight(260)
+        self.discovery_container = QWidget(self.discovery_scroll)
+        self.discovery_layout = QGridLayout(self.discovery_container)
+        self.discovery_layout.setContentsMargins(2, 2, 10, 2)
+        self.discovery_layout.setSpacing(10)
+        self.discovery_scroll.setWidget(self.discovery_container)
+        layout.addWidget(self.discovery_scroll)
+        self.discovery_note = CaptionLabel("")
+        self.discovery_note.setWordWrap(True)
+        layout.addWidget(self.discovery_note)
+        layout.addWidget(SubtitleLabel("Configure & review"))
 
         task_row = QHBoxLayout()
         task_row.addWidget(BodyLabel("Automation"))
@@ -249,7 +273,8 @@ class TasksPage(QWidget):
         ))
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
-        self.parameter_scroll.setMaximumHeight(320)
+        self.parameter_scroll.setMinimumHeight(110)
+        self.parameter_scroll.setMaximumHeight(440)
         self.parameter_container = QWidget()
         self.parameter_layout = QFormLayout(self.parameter_container)
         self.parameter_scroll.setWidget(self.parameter_container)
@@ -287,9 +312,13 @@ class TasksPage(QWidget):
 
         launch_row = QHBoxLayout()
         self.confirm_box = CheckBox("I reviewed this automation and approve starting it")
+        self.confirm_box.stateChanged.connect(self._approval_changed)
         launch_row.addWidget(self.confirm_box)
         launch_row.addStretch(1)
-        self.start_button = PrimaryPushButton("Start automation")
+        self.start_button = PrimaryPushButton("Review and start…")
+        self.start_button.setAccessibleDescription(
+            "Review the account, task, and settings in a separate confirmation dialog."
+        )
         self.start_button.clicked.connect(self._start)
         launch_row.addWidget(self.start_button)
         layout.addLayout(launch_row)
@@ -319,13 +348,33 @@ class TasksPage(QWidget):
             onClick=lambda: self._show_section(1),
         )
         layout.addWidget(SubtitleLabel("Running automations"))
-        self.task_table = _table(["Task", "Status", "PID", "Task ID"])
+        running_scope = QHBoxLayout()
+        running_scope.addWidget(BodyLabel("Selected account"))
+        self.running_account_combo = ComboBox()
+        self.running_account_combo.setAccessibleName("Account for running automations")
+        self.running_account_combo.currentIndexChanged.connect(
+            self.account_combo.setCurrentIndex
+        )
+        running_scope.addWidget(self.running_account_combo, 1)
+        self.running_all_button = PushButton("All account statuses")
+        self.running_all_button.clicked.connect(self._refresh_all)
+        running_scope.addWidget(self.running_all_button)
+        layout.addLayout(running_scope)
+        self.running_refresh_button = PushButton("Refresh selected account")
+        self.running_refresh_button.clicked.connect(self._refresh)
+        layout.addWidget(self.running_refresh_button)
+        self.task_table = _table(["Automation", "Status", "Started", "Scope"])
+        self.task_table.setAccessibleName("Daedalus-managed automations for the chosen account")
+        self.task_table.itemSelectionChanged.connect(self._set_controls)
         layout.addWidget(self.task_table, 2)
 
         stop_row = QHBoxLayout()
         self.stop_button = PushButton("Stop selected task")
         self.stop_button.clicked.connect(self._stop)
         stop_row.addWidget(self.stop_button)
+        self.running_details_button = PushButton("Task details…")
+        self.running_details_button.clicked.connect(self._show_running_details)
+        stop_row.addWidget(self.running_details_button)
         stop_row.addStretch(1)
         layout.addLayout(stop_row)
 
@@ -339,13 +388,33 @@ class TasksPage(QWidget):
             onClick=lambda: self._show_section(2),
         )
         layout.addWidget(SubtitleLabel("Request history & recovery"))
+        history_scope = QHBoxLayout()
+        history_scope.addWidget(BodyLabel("Selected account"))
+        self.history_account_combo = ComboBox()
+        self.history_account_combo.setAccessibleName("Account for request history")
+        self.history_account_combo.currentIndexChanged.connect(
+            self.account_combo.setCurrentIndex
+        )
+        history_scope.addWidget(self.history_account_combo, 1)
+        self.history_all_button = PushButton("All account statuses")
+        self.history_all_button.clicked.connect(self._refresh_all)
+        history_scope.addWidget(self.history_all_button)
+        layout.addLayout(history_scope)
+        self.history_refresh_button = PushButton("Refresh selected account")
+        self.history_refresh_button.clicked.connect(self._refresh)
+        layout.addWidget(self.history_refresh_button)
         layout.addWidget(CaptionLabel(
             "If a request is uncertain, review its game state before clearing it. "
             "Daedalus never retries it automatically."
         ))
-        self.request_table = _table(["Request ID", "Task", "Status", "Task ID"])
+        self.request_table = _table(["Automation", "Status", "Managed task", "Review"])
+        self.request_table.setAccessibleName("Account-scoped automation request history")
+        self.request_table.itemSelectionChanged.connect(self._set_controls)
         layout.addWidget(self.request_table, 1)
-        self.reconcile_button = PushButton("Mark checked request as reconciled")
+        self.request_details_button = PushButton("Request details…")
+        self.request_details_button.clicked.connect(self._show_request_details)
+        layout.addWidget(self.request_details_button)
+        self.reconcile_button = PushButton("Acknowledge manually verified request…")
         self.reconcile_button.setToolTip(
             "Only use after checking engine and game state to resolve an uncertain launch"
         )
@@ -371,12 +440,24 @@ class TasksPage(QWidget):
         self.multi_table.setMaximumHeight(185)
         layout.addWidget(self.multi_table)
         layout.addStretch(1)
+
+        # The capability catalog belongs to this same workspace. It is not
+        # a separate operations window with a second selection lifecycle.
+        from daedalus.desktop.pages import OperationsPage
+
+        self.catalog_panel = OperationsPage(self.stack)
+        self.stack.addWidget(self.catalog_panel)
+        self.pivot.addItem(
+            routeKey="catalog", text="Catalog",
+            onClick=lambda: self._show_section(4),
+        )
+        self.catalog_panel.configure_requested.connect(self.select_task)
         self._show_section(0)
         self._set_controls()
 
     def _show_section(self, index: int) -> None:
         """Fluent pivot for discover/configure, running, history and multi-account views."""
-        keys = ("configure", "running", "history", "accounts")
+        keys = ("configure", "running", "history", "accounts", "catalog")
         if not 0 <= index < len(keys):
             raise ValueError("Unknown automation section")
         self.stack.setCurrentIndex(index)
@@ -385,6 +466,22 @@ class TasksPage(QWidget):
     def selected_account_id(self) -> str | None:
         idx = self.account_combo.currentIndex()
         return self._account_ids[idx] if 0 <= idx < len(self._account_ids) else None
+
+    def reset_backend_context(self) -> None:
+        """Discard account IDs, task drafts and reviews after backend origin changes."""
+        self._selection_generation += 1
+        self._pending_launch = False
+        self._prereq_ready = None
+        self._unresolved = False
+        self._bulk_account_ids.clear()
+        self._template_filter = None
+        self.set_accounts([])
+        self.set_capabilities([], False)
+        self.multi_table.setRowCount(0)
+        self.multi_summary.setText(
+            "Connect to view authoritative task status for configured accounts."
+        )
+        self._show_section(0)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         previous = self.selected_account_id()
@@ -416,6 +513,14 @@ class TasksPage(QWidget):
             self.account_combo.blockSignals(False)
         if not self._bulk_account_ids:
             self._bulk_account_ids = list(self._account_ids)
+        for combo in (self.running_account_combo, self.history_account_combo):
+            with QSignalBlocker(combo):
+                combo.clear()
+                for account in self._account_metadata:
+                    combo.addItem(str(
+                        account.get("label") or account.get("player") or account["id"]
+                    ))
+                combo.setCurrentIndex(self.account_combo.currentIndex())
         self._update_bulk_buttons()
         self._account_changed()
 
@@ -442,6 +547,7 @@ class TasksPage(QWidget):
 
     def select_workflow(self, workflow: str) -> None:
         self._show_section(0)
+        self._invalidate_review()
         if workflow not in {"all", "wine", "construction"}:
             raise ValueError("Unsupported automation template")
         self._template_filter = None if workflow == "all" else workflow
@@ -450,24 +556,15 @@ class TasksPage(QWidget):
         self._filter_tasks()
 
     def _open_catalog(self) -> None:
-        """Read-only interactive and background capability inventory in one workspace."""
-        from daedalus.desktop.pages import OperationsPage
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Explore IkaBot operations")
-        dialog.resize(790, 540)
-        content = QVBoxLayout(dialog)
-        content.setContentsMargins(12, 12, 12, 12)
-        catalog = OperationsPage(dialog)
-        catalog.set_operations(self._catalog_operations)
-        catalog.configure_requested.connect(
-            lambda name: (dialog.accept(), self.select_task(name))
-        )
-        content.addWidget(catalog)
-        dialog.exec()
+        """Show interactive-only and dispatchable operations in the same workspace."""
+        self._show_section(4)
 
     def _account_changed(self, *_args: object) -> None:
+        for combo in (self.running_account_combo, self.history_account_combo):
+            with QSignalBlocker(combo):
+                combo.setCurrentIndex(self.account_combo.currentIndex())
         self._clear()
+        self._invalidate_review()
         self._selected_task_changed()
 
     def _choose_bulk_accounts(self) -> None:
@@ -484,6 +581,7 @@ class TasksPage(QWidget):
         )
         if dialog.exec() == dialog.Accepted:
             self._bulk_account_ids = dialog.selected_ids()
+            self._invalidate_review()
             self._update_bulk_buttons()
 
     def _update_bulk_buttons(self) -> None:
@@ -497,7 +595,8 @@ class TasksPage(QWidget):
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
         self.start_selected_button.setEnabled(
-            self._dispatch_enabled and can_start and bool(self._task_names)
+            self._dispatch_enabled and can_start
+            and not self._pending_launch and bool(self._task_names)
         )
         if count > 32:
             self.bulk_note.setText(
@@ -578,10 +677,17 @@ class TasksPage(QWidget):
     def _start_selected(self) -> None:
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
-        if (not self._dispatch_enabled or not self._bulk_account_ids
-                or len(self._bulk_account_ids) > 32
+        if (not self._dispatch_enabled or self._pending_launch
+                or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
-                or not self.confirm_box.isChecked() or not self.selected_task_name()):
+                or not self.selected_task_name()):
+            return
+        if not self._reviewed or not self.confirm_box.isChecked():
+            QMessageBox.information(
+                self, "Review selected accounts",
+                "Review the task settings and check the authorization box above "
+                "before asking to start for the selected accounts.",
+            )
             return
         if self._form_dirty and self._advanced_visible:
             QMessageBox.warning(
@@ -618,10 +724,12 @@ class TasksPage(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
+            self._pending_launch = True
             self.batch_launch_requested.emit(list(self._bulk_account_ids), task, config)
-            self.confirm_box.setChecked(False)
+            self._invalidate_review()
 
     def set_batch_launch_result(self, data: dict[str, object]) -> None:
+        self.finish_launch()
         self._show_section(3)
         submitted = data.get("submitted", [])
         blocked = data.get("blocked", [])
@@ -650,6 +758,7 @@ class TasksPage(QWidget):
     def set_capabilities(self, operations: list[dict[str, object]], enabled: bool) -> None:
         self._dispatch_enabled = enabled
         self._catalog_operations = [dict(item) for item in operations if isinstance(item, dict)]
+        self.catalog_panel.set_operations(self._catalog_operations)
         self._all_task_names = sorted((
             str(item["name"]) for item in operations
             if item.get("kind") == "background_task" and item.get("name")
@@ -675,10 +784,21 @@ class TasksPage(QWidget):
                         or field.get("type") not in {"boolean", "integer", "number", "text", "json"}
                     ):
                         continue
+                    # Accept only metadata supplied by the authenticated
+                    # backend, never guess valid city IDs or enum choices.
+                    choices = field.get("choices")
+                    safe_choices = (
+                        list(choices) if isinstance(choices, (tuple, list))
+                        and 0 < len(choices) <= 100
+                        and all(type(choice) in (str, int, float, bool)
+                                and len(str(choice)) <= 120 for choice in choices)
+                        else None
+                    )
                     fields.append({
                         "name": key, "type": field["type"],
                         "required": field.get("required") is True,
                         **({"default": field["default"]} if "default" in field else {}),
+                        **({"choices": safe_choices} if safe_choices is not None else {}),
                     })
             self._config_fields_by_task[str(name)] = present_fields(str(name), fields)
         self.status_label.setText(
@@ -712,7 +832,58 @@ class TasksPage(QWidget):
         finally:
             self.task_combo.blockSignals(False)
         self._selected_task_changed()
+        self._render_discovery()
         self._update_bulk_buttons()
+
+    def _render_discovery(self) -> None:
+        """Build a small Fluent gallery from the actual advertised registry."""
+        while self.discovery_layout.count():
+            item = self.discovery_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        shown = self._task_names[:24]
+        for index, name in enumerate(shown):
+            card = CardWidget(self.discovery_container)
+            card.setMinimumHeight(112)
+            panel = QVBoxLayout(card)
+            panel.setContentsMargins(13, 10, 13, 10)
+            panel.setSpacing(4)
+            heading = BodyLabel(_friendly_task(name))
+            heading.setAccessibleName(_friendly_task(name))
+            panel.addWidget(heading)
+            detail = CaptionLabel(
+                f"{_category(name)} · {task_explanation(name)}"
+            )
+            detail.setWordWrap(True)
+            panel.addWidget(detail)
+            panel.addStretch(1)
+            action = PushButton("Configure")
+            action.setAccessibleName(f"Configure {_friendly_task(name)}")
+            action.setToolTip(
+                "Choose this automation and inspect its settings; does not start it"
+            )
+            action.clicked.connect(
+                lambda _checked=False, task_name=name:
+                self._select_discovered_task(task_name)
+            )
+            panel.addWidget(action)
+            self.discovery_layout.addWidget(card, index // 2, index % 2)
+        self.discovery_note.setText(
+            "No matching background automations. Try another category or search."
+            if not self._task_names else
+            f"Showing 24 of {len(self._task_names)} matches. "
+            "Use the Automation selector for the full list."
+            if len(self._task_names) > 24 else
+            f"{len(self._task_names)} background automations available for selection. "
+            "Selection alone never starts an operation."
+        )
+        self.discovery_scroll.setVisible(bool(shown))
+
+    def _select_discovered_task(self, name: str) -> None:
+        if name in self._task_names:
+            self.task_combo.setCurrentIndex(self._task_names.index(name))
+            self.parameter_scroll.ensureVisible(0, 0)
+            self._show_section(0)
 
     def _toggle_advanced(self) -> None:
         self._advanced_visible = not self._advanced_visible
@@ -775,21 +946,40 @@ class TasksPage(QWidget):
             json.dumps(config, ensure_ascii=False, indent=2)
         )
         self._form_dirty = False
-        self.confirm_box.setChecked(False)
+        self._invalidate_review()
         QMessageBox.information(
             self, "Configuration loaded",
             "Review the advanced settings and confirm the correct account "
             "before starting anything. The backend will still validate the task.",
         )
 
+    def _approval_changed(self, *_args: object) -> None:
+        # Consent is scoped to the current account, task and configuration.
+        self._reviewed = self.confirm_box.isChecked()
+        self._set_controls()
+
+    def _invalidate_review(self) -> None:
+        self._reviewed = False
+        self.confirm_box.blockSignals(True)
+        try:
+            self.confirm_box.setChecked(False)
+        finally:
+            self.confirm_box.blockSignals(False)
+        self._set_controls()
+
     def _review_advanced_json(self) -> None:
         """Hand-edited JSON supersedes unbuilt form values deliberately."""
         self._form_dirty = False
+        self._invalidate_review()
 
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
+        self._invalidate_review()
 
     def _selected_task_changed(self, *_args: object) -> None:
+        # A response from a prior visit to the same account/task must not
+        # unlock the new draft merely because its identifiers match again.
+        self._selection_generation += 1
         while self.parameter_layout.rowCount():
             self.parameter_layout.removeRow(0)
         self._form_inputs.clear()
@@ -798,6 +988,10 @@ class TasksPage(QWidget):
         self.task_description.setText(
             f"{_friendly_task(name)}  ·  {_category(name)}. {task_explanation(name)}"
             if name else "No automations match this filter."
+        )
+        self.task_description.setAccessibleName(
+            f"Automation description: {_friendly_task(name)}" if name else
+            "No matching automations"
         )
         expert_needed = expert_configuration_needed(fields)
         self.expert_note.setVisible(expert_needed)
@@ -816,7 +1010,17 @@ class TasksPage(QWidget):
                 str(field.get("label") or key.replace("_", " ").capitalize())
                 + (" *" if field["required"] else "")
             )
-            if kind == "boolean":
+            if field.get("choices"):
+                widget = ComboBox()
+                choices = field["choices"]
+                for choice in choices:
+                    widget.addItem(str(choice))
+                if default in choices:
+                    widget.setCurrentIndex(choices.index(default))
+                else:
+                    widget.setCurrentIndex(-1)
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
+            elif kind == "boolean":
                 widget = CheckBox("Enabled")
                 widget.setChecked(default is True)
                 widget.stateChanged.connect(self._mark_form_dirty)
@@ -862,7 +1066,12 @@ class TasksPage(QWidget):
                 else:
                     widget.setPlaceholderText("Required" if field["required"] else "Optional")
                 widget.textChanged.connect(self._mark_form_dirty)
-            style_form_input(widget, label, str(field.get("help") or ""))
+            help_text = str(field.get("help") or "")
+            if kind == "json" and not field.get("choices"):
+                help_text = (help_text + " " if help_text else "") + (
+                    "Structured JSON input; do not guess game identifiers or required plan values."
+                )
+            style_form_input(widget, label, help_text)
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
         self.parameter_scroll.setVisible(bool(fields))
@@ -873,9 +1082,10 @@ class TasksPage(QWidget):
                 min(315, max(72, len(fields) * 44 + 24))
             )
         self.build_json_button.setEnabled(bool(fields))
-        self.confirm_box.setChecked(False)
+        self._invalidate_review()
         self.config_editor.setPlainText("{}")
         self._form_dirty = False
+        self._invalidate_review()
         self._prereq_ready = None
         self.prerequisite_label.setText(
             "Checking this account's task prerequisites…" if self._dispatch_enabled and name
@@ -925,6 +1135,15 @@ class TasksPage(QWidget):
             key = str(field["name"])
             kind = str(field["type"])
             widget = self._form_inputs[key]
+            if isinstance(widget, ComboBox):
+                index = widget.currentIndex()
+                choices = field["choices"]
+                if index < 0 or index >= len(choices):
+                    if field["required"]:
+                        raise ValueError(f"Choose an option for {key}")
+                    continue
+                config[key] = choices[index]
+                continue
             if isinstance(widget, CheckBox):
                 config[key] = widget.isChecked()
                 continue
@@ -976,21 +1195,36 @@ class TasksPage(QWidget):
             return
         self.config_editor.setPlainText(json.dumps(config, ensure_ascii=False, indent=2))
         self._form_dirty = False
+        self._invalidate_review()
 
     def set_tasks(self, data: dict[str, object]) -> None:
-        tasks = data.get("engine_tasks", [])
-        requests = data.get("requests", [])
+        task_rows = data.get("engine_tasks")
+        request_rows = data.get("requests")
+        tasks = [row for row in task_rows if isinstance(row, dict)] if isinstance(task_rows, list) else []
+        requests = [row for row in request_rows if isinstance(row, dict)] if isinstance(request_rows, list) else []
         self._unresolved = any(
             row.get("status") in {"dispatching", "unconfirmed"} for row in requests
         )
         _populate(self.task_table, [
-            [_friendly_task(str(task.get("task", ""))), task.get("status"),
-             task.get("pid"), task.get("task_id")] for task in tasks
+            [_friendly_task(str(task.get("task", ""))),
+             str(task.get("status", "unknown")).replace("_", " ").capitalize(),
+             task.get("started_at") or "Not provided", "Selected account"]
+            for task in tasks
         ])
+        for index, task in enumerate(tasks):
+            # Raw UUID/PID are available in deliberate Details, not the
+            # everyday table. Never use a process PID for Stop.
+            self.task_table.item(index, 0).setData(Qt.UserRole, task)
         _populate(self.request_table, [
-            [row.get("request_id"), _friendly_task(str(row.get("task", ""))),
-             row.get("status"), row.get("task_id")] for row in requests
+            [_friendly_task(str(row.get("task", ""))),
+             str(row.get("status", "unknown")).replace("_", " ").capitalize(),
+             "Tracked" if row.get("task_id") else "Not confirmed",
+             "Needs reconciliation" if row.get("status") in
+             {"dispatching", "unconfirmed"} else "Recorded"]
+            for row in requests
         ])
+        for index, row in enumerate(requests):
+            self.request_table.item(index, 0).setData(Qt.UserRole, row)
         if self._unresolved:
             self.prerequisite_label.setText(
                 "A previous request is unconfirmed. Check game state, then "
@@ -1009,21 +1243,39 @@ class TasksPage(QWidget):
         self.start_button.setEnabled(
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
+            and not self._pending_launch
         )
-        self.refresh_button.setEnabled(enabled)
-        self.stop_button.setEnabled(enabled)
-        self.reconcile_button.setEnabled(enabled)
+        # Status/history is read-only even on a backend that refuses dispatch.
+        has_read_scope = bool(self._account_ids)
+        self.refresh_button.setEnabled(has_read_scope)
+        self.running_refresh_button.setEnabled(has_read_scope)
+        self.history_refresh_button.setEnabled(has_read_scope)
+        selected_task = self._selected_running_record()
+        selected_request = self._selected_request_record()
+        self.stop_button.setEnabled(
+            enabled and isinstance(selected_task, dict)
+            and selected_task.get("status") == "running"
+            and bool(selected_task.get("task_id"))
+        )
+        self.running_details_button.setEnabled(isinstance(selected_task, dict))
+        self.request_details_button.setEnabled(isinstance(selected_request, dict))
+        self.reconcile_button.setEnabled(
+            enabled and isinstance(selected_request, dict)
+            and selected_request.get("status") in {"unconfirmed", "dispatching"}
+            and bool(selected_request.get("request_id"))
+        )
         self._update_bulk_buttons()
 
     def _refresh(self) -> None:
         account_id = self.selected_account_id()
-        if account_id and self._dispatch_enabled:
+        if account_id:
             self.refresh_requested.emit(account_id)
 
     def _start(self) -> None:
         account_id = self.selected_account_id()
         task = self.selected_task_name()
-        if not self._dispatch_enabled or account_id is None or task is None:
+        if (not self._dispatch_enabled or account_id is None or task is None
+                or self._pending_launch):
             return
         if self._unresolved:
             QMessageBox.warning(self, "Request needs review",
@@ -1033,7 +1285,7 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Task not ready",
                 "Check the setup message above. No game task was started.")
             return
-        if not self.confirm_box.isChecked():
+        if not self._reviewed or not self.confirm_box.isChecked():
             QMessageBox.warning(self, "Confirm automation",
                 "Check the authorization box before starting this automation.")
             return
@@ -1063,18 +1315,66 @@ class TasksPage(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
+        self._pending_launch = True
+        self._set_controls()
         self.launch_requested.emit(account_id, task, config, str(uuid.uuid4()))
-        self.confirm_box.setChecked(False)
+        self._invalidate_review()
+
+    def finish_launch(self) -> None:
+        """Restore controls only after the asynchronous response is handled."""
+        self._pending_launch = False
+        self._invalidate_review()
+
+    def _selected_running_record(self) -> dict[str, object] | None:
+        item = self.task_table.item(self.task_table.currentRow(), 0)
+        data = item.data(Qt.UserRole) if item else None
+        return data if isinstance(data, dict) else None
+
+    def _selected_request_record(self) -> dict[str, object] | None:
+        item = self.request_table.item(self.request_table.currentRow(), 0)
+        data = item.data(Qt.UserRole) if item else None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _display_identifier(value: object) -> str:
+        token = str(value or "")
+        return token if re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", token) else "Unavailable"
+
+    def _show_running_details(self) -> None:
+        task = self._selected_running_record()
+        if not task:
+            return
+        QMessageBox.information(
+            self, "Managed task details",
+            f"Automation: {_friendly_task(str(task.get('task', '')))}\n"
+            f"State: {str(task.get('status', 'unknown'))[:32]}\n"
+            f"Task ID: {self._display_identifier(task.get('task_id'))}\n"
+            f"Process ID (diagnostic only): {self._display_identifier(task.get('pid'))}\n"
+            "Only tasks managed by this backend can be stopped here.",
+        )
+
+    def _show_request_details(self) -> None:
+        record = self._selected_request_record()
+        if not record:
+            return
+        QMessageBox.information(
+            self, "Request details",
+            f"Automation: {_friendly_task(str(record.get('task', '')))}\n"
+            f"State: {str(record.get('status', 'unknown'))[:32]}\n"
+            f"Request ID: {self._display_identifier(record.get('request_id'))}\n"
+            f"Managed task: {self._display_identifier(record.get('task_id'))}\n"
+            "An unconfirmed request must be checked in the game and backend "
+            "before acknowledgement. Daedalus will not retry it automatically.",
+        )
 
     def _stop(self) -> None:
         account_id = self.selected_account_id()
-        row = self.task_table.currentRow()
-        if account_id is None or row < 0 or not self._dispatch_enabled:
+        task = self._selected_running_record()
+        if (account_id is None or not self._dispatch_enabled
+                or not task or task.get("status") != "running"
+                or not isinstance(task.get("task_id"), str)):
             return
-        item = self.task_table.item(row, 3)
-        if item is None:
-            return
-        task_id = item.text()
+        task_id = task["task_id"]
         answer = QMessageBox.question(
             self, "Stop IkaBot task",
             "Stop this Daedalus-managed background task? No unrelated task will be stopped.",
@@ -1085,12 +1385,10 @@ class TasksPage(QWidget):
 
     def _reconcile(self) -> None:
         account_id = self.selected_account_id()
-        row = self.request_table.currentRow()
-        if account_id is None or row < 0 or not self._dispatch_enabled:
-            return
-        status = self.request_table.item(row, 2)
-        item = self.request_table.item(row, 0)
-        if item is None or status is None or status.text() not in {"unconfirmed", "dispatching"}:
+        record = self._selected_request_record()
+        if (account_id is None or not self._dispatch_enabled or not record
+                or record.get("status") not in {"unconfirmed", "dispatching"}
+                or not isinstance(record.get("request_id"), str)):
             return
         answer = QMessageBox.question(
             self, "Manual game-state reconciliation",
@@ -1099,4 +1397,4 @@ class TasksPage(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
-            self.reconcile_requested.emit(account_id, item.text())
+            self.reconcile_requested.emit(account_id, record["request_id"])

@@ -31,7 +31,7 @@ All-account reports and read-only task status include **every configured account
 
 ## All and selected account automations
 
-Open **Automations**. The Fluent sections separate **Discover & configure**, **Running**, **History & recovery**, and **All accounts**.
+Open **Automations**. The single Fluent workspace separates **Configure**, **Running**, **History & recovery**, **All accounts**, and the embedded **Catalog**. Wine and Construction shortcuts change the filter inside this same workspace; they do not open separate editors or retain conflicting drafts.
 
 - **View all task statuses** queries each configured account (including disabled ones) and displays running count, unresolved request count, and unavailable account status. **Choose accounts…** followed by **View selected statuses** checks just the chosen group. These are read-only requests.
 - In **Discover & configure**, use Search, Category or Wine/Construction shortcuts to find a registered task. Tasks only appear executable if the backend advertises guarded dispatch. Known fields are ordinary controls; complex schema fields may still require Advanced JSON in this preview.
@@ -71,3 +71,49 @@ See also [GUI migration](GUI-MIGRATION.md), [native Mac login](NATIVE-MAC-LOGIN.
 | Automations | **View all task statuses**, including disabled accounts | **View selected statuses** for any count; separately authorize **Start for selected** for 1–32 enabled accounts only | Task stop, uncertain-request reconciliation and interactive login remain individually verified; disabled or excessive selections cannot start mutations |
 | Activity | Sanitized local desktop events only (not a fabricated backend audit) | Not supported: historical events are not consistently account-tagged | Consult per-account Automations History for authoritative request IDs |
 | Connection and Settings | Backend-wide connection and local preferences | Not applicable: these are backend/application settings | No account credential or session mutation from these destinations |
+
+
+## Redesign follow-up: guided discovery and scope continuity
+
+The Overview now presents independent backend-derived summaries for **session
+verification**, **warehouse reports**, and **task status**. Reports or task
+statuses that have not been read yet say *Not checked*; an account that failed
+to load is *Unavailable*, not zero. Switching to a different backend origin
+clears the prior backend's account and task draft context before new data is
+rendered.
+
+The Automations **Discover & configure** view has a searchable Fluent card
+gallery populated exclusively from the connected engine registry. Choosing
+**Configure** selects the associated task, never starts it. Category and
+search filters apply to both the gallery and complete selector; complex plans
+still require reviewed input or Advanced JSON when backend metadata lacks
+safe choices. **Running** and **History** now have explicit account
+selectors and a shortcut to **All account statuses**. Routine tables use
+human-readable status; select **Task details** or **Request details** for
+managed IDs and process/request identifiers. Stop only targets an authorized,
+running, backend-managed task; uncertain requests never retry themselves.
+
+Settings now includes a *Warehouse reporting* account-scope summary,
+**Choose report accounts** and **Include all accounts**, synchronized with
+the Accounts report checkboxes and the Warehouses picker. These choices are
+local display/report preferences scoped to the connected backend; they are
+not game mutations, and do not change account enablement. Connection displays
+explicit in-progress feedback and sanitized guidance for rejected tokens,
+untrusted TLS, unreachable servers and unavailable Keychain. Authentication
+remains a separate **Sign in on this Mac** step for the selected game account.
+
+## Navigation and keyboard shortcuts
+
+The Mac window supports **Cmd+,** for Settings, **Cmd+R** for a safe read-only refresh of the active Overview, Accounts, Warehouses or Automations screen, and **Cmd+F** to focus Automation search. Refresh never launches or reconciles a game operation. At the supported minimum window size (900×650 logical pixels), forms and Settings scroll vertically; Accounts uses a resizable list/detail splitter.
+
+## Guided automation form behavior
+
+The editor uses backend-advertised field types and defaults. A dropdown is shown only when the backend explicitly supplies a bounded list of permitted choices; Daedalus never guesses city IDs, game targets or enum values. Known Wine, Construction, alert, piracy and resource fields have task-specific help and units where source-reviewed. Required complex arrays/plans remain **Advanced structured input** until the engine advertises sufficient metadata to construct them safely. Do not invent game data merely to avoid JSON.
+
+The review checkbox is invalidated when the account, task, field values or imported JSON change. The separate review confirmation shows the account, task and safe settings summary. The Start action is blocked while its prior request is pending, including after double-clicks; an uncertain response must be inspected through History and is never retried automatically.
+
+## Activity and account workspace
+
+Accounts presents a resizable master/detail view: choose an account on the left and see the current verified status, contextual login and permitted metadata/recovery actions on the right. **All accounts** still includes disabled accounts for read-only warehouse/status views, while mutating tasks require enabled accounts and explicit consent.
+
+Activity is a filtered local timeline with generic nonsecret event descriptions. Filter by severity and event type; individual account filtering is unavailable because the local events are not reliably account-attributed. Select **Show advanced diagnostics** to inspect bounded technical client logs. Neither view is an authoritative server audit trail; use Automations → History to inspect request receipts and uncertain launches.

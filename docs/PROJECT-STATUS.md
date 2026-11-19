@@ -2,6 +2,21 @@
 
 Last reviewed: **2026-11-19** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
 
+## Active native Mac redesign
+
+The `redesign-macos-desktop-experience` OpenSpec change remains active while implementation work is completed incrementally. PR #63 merged the Fluent shell, first-class all-account warehouse reporting, selected-account task workflows and a macOS preview. The follow-up implementation consolidates three automation editors into one, adds Accounts master/detail, safe keyboard shortcuts, a filtered local Activity timeline, backend-grounded enum pickers, draft consent invalidation and duplicate-launch protection. Human macOS visual/VoiceOver walkthroughs and real-account acceptance are deferred to the owner and are **not** recorded as passing. Do not archive the redesign change until its remaining implementation tasks are reconciled.
+
+The latest implementation work also adds capability-derived automation
+discovery cards; account-selectable Running/History with opt-in expert IDs;
+an Overview whose read-only summaries distinguish unobserved, successful and
+unavailable snapshots; Settings controls for per-backend **all/selected**
+warehouse reporting; contextual HTTPS/Keychain failures; and explicit
+per-backend task/draft invalidation on origin change. Source-level Python
+compilation and patch whitespace checks passed on the development server;
+the PySide6-Fluent runtime, physical Mac layout/VoiceOver and live Gameforge
+workflow have **not** been exercised in this branch. The redesign OpenSpec
+remains active until reviewed build and UX gates are satisfied.
+
 ## Complete and archived
 
 The following changes have merged implementation and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:

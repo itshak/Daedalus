@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -35,7 +37,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
-from daedalus.desktop.design_system import StatusPanel
+from daedalus.desktop.design_system import PageHeading, StatusPanel
 from daedalus.desktop.widgets import OpaqueCardWidget, ScrollTableWidget
 from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
 
@@ -92,7 +94,7 @@ class ConnectionPage(QWidget):
         layout = QVBoxLayout(self.connection_card)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(13)
-        layout.addWidget(SubtitleLabel("Connect to Daedalus"))
+        layout.addWidget(PageHeading("Connect to Daedalus"))
         intro = CaptionLabel(
             "Connect securely over HTTPS. No SSH tunnel, Terminal or manual "
             "port forwarding is needed. Your server stays in control of game sessions."
@@ -104,6 +106,7 @@ class ConnectionPage(QWidget):
         layout.addWidget(BodyLabel("Server address"))
         self.url_input = LineEdit()
         self.url_input.setPlaceholderText("https://your-daedalus-server.example")
+        self.url_input.setAccessibleName("Secure Daedalus backend HTTPS address")
         # First run must not imply a backend runs on the Mac. A saved, exact
         # HTTPS origin is restored below when the user previously approved it.
         self.url_input.setText("")
@@ -121,6 +124,7 @@ class ConnectionPage(QWidget):
         self.token_input = LineEdit()
         self.token_input.setEchoMode(QLineEdit.Password)
         self.token_input.setPlaceholderText("Paste your API token once")
+        self.token_input.setAccessibleName("Daedalus API access token")
         layout.addWidget(self.token_input)
         tip = CaptionLabel(
             "Daedalus API token, not a Gameforge lobby token. After the first "
@@ -137,9 +141,14 @@ class ConnectionPage(QWidget):
         layout.addWidget(self.remember_checkbox)
 
         self.connect_button = PrimaryPushButton("Connect")
+        self.connect_button.setAccessibleDescription(
+            "Connect to the Daedalus backend API; does not log in to Gameforge."
+        )
         self.connect_button.clicked.connect(self._connect)
         layout.addWidget(self.connect_button)
-        self.status_label = CaptionLabel("Not connected")
+        self.status_label = CaptionLabel("Not connected. Enter a secure backend address to begin.")
+        self.status_label.setWordWrap(True)
+        self.status_label.setAccessibleName("Connection progress and status")
         layout.addWidget(self.status_label)
         self.overview_button = PushButton("Open Overview")
         self.overview_button.setEnabled(False)
@@ -215,12 +224,42 @@ class ConnectionPage(QWidget):
             self.ssh_host_input.text().strip(), self.token_input.text()
         )
 
+    def set_connecting(self, active: bool) -> None:
+        """Progress is explicit, without exposing the URL, token or transport errors."""
+        self.connect_button.setEnabled(not active)
+        self.ssh_button.setEnabled(not active)
+        self.reconnect_button.setEnabled(not active)
+        self.connect_button.setText("Connecting…" if active else "Connect")
+        if active:
+            self.status_label.setText(
+                "Checking secure connection, authorization and backend capabilities…"
+            )
+
+    def set_connection_error(self, reason: str) -> None:
+        """Classify safe failures; never display arbitrary backend response bodies."""
+        failure = reason.casefold()
+        if any(word in failure for word in ("certificate", "tls", "ssl", "trust")):
+            message = "Certificate not trusted. Check your server certificate; do not bypass TLS."
+        elif any(word in failure for word in ("401", "403", "unauthorized", "forbidden", "token")):
+            message = "Access denied. Check the API token for this exact server."
+        elif any(word in failure for word in ("keychain", "keyring", "credential")):
+            message = "Keychain unavailable. Unlock it or paste an API token for this session."
+        elif any(word in failure for word in ("url", "https", "address", "scheme")):
+            message = "Invalid server address. Use a trusted HTTPS URL."
+        elif any(word in failure for word in ("timeout", "unreachable", "connection", "network")):
+            message = "Server unreachable. Check the address, network and server status."
+        else:
+            message = "Unable to connect. Review the secure server address and API access."
+        self.status_label.setText(message)
+        self.overview_button.setEnabled(False)
+
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
         self.overview_button.setEnabled(connected)
         self.status_label.setText(
             "SYNTHETIC DEMO connected — no real game accounts or sessions"
             if connected and demo else
-            "Connected to Daedalus backend" if connected else "Not connected"
+            "Connected securely to the Daedalus backend. Open Overview to continue."
+            if connected else "Not connected. Enter a secure backend address to begin."
         )
         if connected:
             self.token_input.clear()
@@ -254,7 +293,9 @@ class AccountsPage(QWidget):
         layout.setContentsMargins(26, 24, 26, 24)
         layout.setSpacing(14)
         header = QHBoxLayout()
-        header.addWidget(SubtitleLabel("Accounts"))
+        header.addWidget(PageHeading(
+            "Accounts", "Your configured identities, sessions and recovery actions."
+        ))
         header.addStretch(1)
         self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
@@ -272,45 +313,69 @@ class AccountsPage(QWidget):
         self._editable_accounts: list[dict[str, object]] = []
         self._excluded_report_ids: set[str] = set()
         self._updating_report_checks = False
+        # Native master/detail workspace: persistent account list on the
+        # left, contextual status/actions on the right. Both panes remain
+        # accessible and resize together rather than stacking every action.
+        self.master_detail = QSplitter(Qt.Horizontal, container)
+        self.master_detail.setChildrenCollapsible(False)
+        master = QWidget(self.master_detail)
+        master_layout = QVBoxLayout(master)
+        master_layout.setContentsMargins(0, 0, 8, 0)
+        master_layout.setSpacing(12)
+        detail = QWidget(self.master_detail)
+        detail_layout = QVBoxLayout(detail)
+        detail_layout.setContentsMargins(8, 0, 0, 0)
+        detail_layout.setSpacing(12)
+        master.setMinimumWidth(270)
+        detail.setMinimumWidth(295)
+        self.master_detail.addWidget(master)
+        self.master_detail.addWidget(detail)
+        self.master_detail.setStretchFactor(0, 3)
+        self.master_detail.setStretchFactor(1, 2)
+        self.master_detail.setSizes([420, 340])
+        layout.addWidget(self.master_detail)
         self.select_all_reports = CheckBox("Include all accounts in warehouse reports")
         self.select_all_reports.setToolTip(
             "Local report selection only; does not start game tasks or change account enablement"
         )
         self.select_all_reports.setChecked(True)
         self.select_all_reports.stateChanged.connect(self._set_all_reports)
-        layout.addWidget(self.select_all_reports)
+        master_layout.addWidget(self.select_all_reports)
         self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
         self.table.itemChanged.connect(self._report_item_changed)
-        self.table.setMinimumHeight(205)
-        self.table.setMaximumHeight(290)
-        layout.addWidget(self.table)
+        # Keep seven columns readable on a compact Mac; deliberate horizontal
+        # scrolling beats seven unusably compressed columns.
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setMinimumHeight(265)
+        master_layout.addWidget(self.table, 1)
         self.selected_account_summary = StatusPanel(
             "Choose an account",
             "Select a row to see session status and available next steps.",
             self,
         )
-        layout.addWidget(self.selected_account_summary)
-        editor_actions = QHBoxLayout()
+        detail_layout.addWidget(self.selected_account_summary)
+        editor_actions = QGridLayout()
+        editor_actions.setSpacing(8)
         self.create_button = PushButton("Add account")
         self.edit_button = PushButton("Edit selected")
         self.toggle_button = PushButton("Enable / Disable")
         self.remove_button = PushButton("Remove selected")
-        for button, callback in (
+        for index, (button, callback) in enumerate((
             (self.create_button, self._create),
             (self.edit_button, self._edit),
             (self.toggle_button, self._toggle),
             (self.remove_button, self._remove),
-        ):
+        )):
             button.clicked.connect(callback)
             button.setEnabled(False)
-            editor_actions.addWidget(button)
-        editor_actions.addStretch(1)
-        layout.addLayout(editor_actions)
+            editor_actions.addWidget(button, index // 2, index % 2)
+        detail_layout.addLayout(editor_actions)
         self.editor_status = CaptionLabel("Account editing is disabled on this backend")
-        layout.addWidget(self.editor_status)
+        detail_layout.addWidget(self.editor_status)
         advanced_wrap = QVBoxLayout()
         advanced_wrap.setSpacing(12)
-        assistance_actions = QHBoxLayout()
+        assistance_actions = QVBoxLayout()
         self.assistance_check_button = PushButton("Check login assistance")
         self.assistance_approve_button = PushButton("Confirm manual step complete")
         self.assistance_check_button.clicked.connect(self._check_assistance)
@@ -322,9 +387,8 @@ class AccountsPage(QWidget):
         self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
         assistance_actions.addWidget(self.assistance_check_button)
         assistance_actions.addWidget(self.assistance_approve_button)
-        assistance_actions.addStretch(1)
         advanced_wrap.addLayout(assistance_actions)
-        native_login_actions = QHBoxLayout()
+        native_login_actions = QVBoxLayout()
         self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
         self.native_browser_login_button.setToolTip(
             "Human Gameforge browser login on this Mac; encrypted one-time handoff "
@@ -336,11 +400,12 @@ class AccountsPage(QWidget):
         self.native_login_status = CaptionLabel(
             "Native Mac browser login is available when your backend enables secure recovery."
         )
-        native_login_actions.addWidget(self.native_login_status, 1)
-        layout.addLayout(native_login_actions)
+        self.native_login_status.setWordWrap(True)
+        native_login_actions.addWidget(self.native_login_status)
+        detail_layout.addLayout(native_login_actions)
         self._native_browser_login_enabled = False
 
-        recovery_actions = QHBoxLayout()
+        recovery_actions = QVBoxLayout()
         self.recovery_guide_button = PushButton("Advanced: host recovery instructions")
         self.recovery_prepare_button = PushButton("Advanced: prepare host-side recovery")
         self.rebind_button = PushButton("Advanced: verify host-staged session")
@@ -354,7 +419,6 @@ class AccountsPage(QWidget):
         recovery_actions.addWidget(self.recovery_guide_button)
         recovery_actions.addWidget(self.recovery_prepare_button)
         recovery_actions.addWidget(self.rebind_button)
-        recovery_actions.addStretch(1)
         advanced_wrap.addLayout(recovery_actions)
         self.assistance_status = CaptionLabel("Select an account to check for manual help")
         advanced_wrap.addWidget(self.assistance_status)
@@ -372,8 +436,9 @@ class AccountsPage(QWidget):
         self.advanced_recovery_button.setAccessibleName(
             "Show or hide advanced account recovery actions"
         )
-        layout.addWidget(self.advanced_recovery_button)
-        layout.addWidget(self.advanced_recovery_panel)
+        detail_layout.addWidget(self.advanced_recovery_button)
+        detail_layout.addWidget(self.advanced_recovery_panel)
+        detail_layout.addStretch(1)
         self.advanced_recovery_panel.hide()
 
     def _toggle_advanced_recovery(self) -> None:
