@@ -368,6 +368,7 @@ def test_building_inventory_rejects_malformed_and_duplicate_positions(tmp_path):
                     {"position": 1, "level": 20, "name": "Academy",
                      "building": "academy", "busy": False, "can_upgrade": True},
                 ]}
-    with fake_worker(tmp_path, responder) as (client, _, _):
-        with pytest.raises(EngineIPCUnavailable, match="invalid building"):
-            client.buildings(ALPHA, 42)
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="invalid building"
+    ):
+        client.buildings(ALPHA, 42)
