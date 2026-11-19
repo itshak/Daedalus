@@ -93,6 +93,53 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "type": "hidden_derived",
         "help": "City IDs are derived from the reviewed donation table.",
     },
+    ("resourceTransportManager", "mode"): {
+        "type": "text", "choices": ["consolidate", "distribute"],
+        "choice_labels": ["Many source cities → One destination",
+                          "One source city → Many destinations"],
+        "label": "Transport strategy",
+    },
+    ("resourceTransportManager", "origin_cities"): {
+        "type": "city_list", "label": "Sending cities",
+        "help": "Select one or more of your own source cities.",
+    },
+    ("resourceTransportManager", "destination_city"): {
+        "type": "city_picker", "label": "Receiving city",
+    },
+    ("resourceTransportManager", "origin_city"): {
+        "type": "city_picker", "label": "Sending city",
+    },
+    ("resourceTransportManager", "destination_cities"): {
+        "type": "city_list", "label": "Receiving cities",
+        "help": "Choose the receiving cities in this account.",
+    },
+    ("resourceTransportManager", "resource_config"): {
+        "type": "resource_config", "label": "Five resource policies",
+        "help": "Use Ignore to exclude a resource, 0 for send-all in Keep mode, or a positive amount.",
+    },
+    ("resourceTransportManager", "send_mode"): {
+        "type": "text", "choices": ["keep", "send"],
+        "choice_labels": ["Keep a reserve; send any surplus", "Send these amounts"],
+        "label": "Resource amount interpretation",
+    },
+    ("resourceTransportManager", "island"): {
+        "type": "hidden_derived",
+        "help": "External destination islands need a separately verified lookup and are expert-only.",
+    },
+    ("resourceTransportManager", "interval_hours"): {
+        "type": "integer", "minimum": 0, "maximum": 720,
+        "label": "Repeat every", "suffix": " hours",
+        "help": "0 sends only once; a positive value runs periodically.",
+    },
+    ("resourceTransportManager", "notify"): {
+        "type": "text", "choices": ["none", "start", "all"],
+        "choice_labels": ["No extra notifications", "At the start of each cycle",
+                          "For every shipment"],
+        "label": "Notifications",
+    },
+    ("resourceTransportManager", "info"): {"type": "hidden_derived"},
+    ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
+    ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},
     ("research", "qty"): {
         "type": "integer", "label": "Experiments (one city)",
         "minimum": 0, "maximum": 9999, "omit_zero": True,
