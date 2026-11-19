@@ -389,16 +389,19 @@ class AccountsPage(QWidget):
         assistance_actions.addWidget(self.assistance_approve_button)
         advanced_wrap.addLayout(assistance_actions)
         native_login_actions = QVBoxLayout()
-        self.native_browser_login_button = PrimaryPushButton("Sign in on this Mac")
+        self.native_browser_login_button = PrimaryPushButton("Sign in automatically")
         self.native_browser_login_button.setToolTip(
-            "Human Gameforge browser login on this Mac; encrypted one-time handoff "
-            "to your verified backend worker"
+            "Restore a saved Gameforge session or log in headlessly with the "
+            "original IkaBot Selenium engine. Only a detected CAPTCHA "
+            "opens Chrome for human interaction; the world session is encrypted "
+            "to your verified backend worker."
         )
         self.native_browser_login_button.setEnabled(False)
         self.native_browser_login_button.clicked.connect(self._native_browser_login)
         native_login_actions.addWidget(self.native_browser_login_button)
         self.native_login_status = CaptionLabel(
-            "Native Mac browser login is available when your backend enables secure recovery."
+            "Selenium signs in headlessly and reuses saved sessions. "
+            "Only CAPTCHA requires manual action; first use needs credentials."
         )
         self.native_login_status.setWordWrap(True)
         native_login_actions.addWidget(self.native_login_status)
