@@ -275,6 +275,7 @@ class AccountsPage(QWidget):
     recovery_prepare_requested = Signal(str)
     rebind_requested = Signal(str, str)
     native_browser_login_requested = Signal(str)
+    native_browser_login_batch_requested = Signal(object)
     monitor_requested = Signal(str)
     report_selection_changed = Signal(object)
 
@@ -399,6 +400,24 @@ class AccountsPage(QWidget):
         self.native_browser_login_button.setEnabled(False)
         self.native_browser_login_button.clicked.connect(self._native_browser_login)
         native_login_actions.addWidget(self.native_browser_login_button)
+        multi_login_actions = QHBoxLayout()
+        self.auto_login_all_button = PushButton("Sign in all accounts")
+        self.auto_login_all_button.setAccessibleName("Automatically sign in every disconnected account")
+        self.auto_login_all_button.setToolTip(
+            "Restore or sign in headlessly for every enabled account, in sequence. "
+            "A browser opens only if CAPTCHA is detected."
+        )
+        self.auto_login_all_button.clicked.connect(self._native_browser_login_all)
+        self.auto_login_all_button.setEnabled(False)
+        multi_login_actions.addWidget(self.auto_login_all_button)
+        self.auto_login_selected_button = PushButton("Sign in selected…")
+        self.auto_login_selected_button.setToolTip(
+            "Choose the accounts to sign in automatically; no game operations start"
+        )
+        self.auto_login_selected_button.clicked.connect(self._native_browser_login_selected)
+        self.auto_login_selected_button.setEnabled(False)
+        multi_login_actions.addWidget(self.auto_login_selected_button)
+        native_login_actions.addLayout(multi_login_actions)
         self.native_login_status = CaptionLabel(
             "Selenium signs in headlessly and reuses saved sessions. "
             "Only CAPTCHA requires manual action; first use needs credentials."
@@ -569,6 +588,37 @@ class AccountsPage(QWidget):
         )
         self._update_assistance_buttons()
 
+    def _native_browser_login_all(self) -> None:
+        if not self._native_browser_login_enabled:
+            return
+        accounts = [
+            str(row["id"]) for row in self._accounts
+            if row.get("enabled") is True and isinstance(row.get("id"), str)
+        ]
+        if accounts:
+            self.native_browser_login_batch_requested.emit(accounts)
+
+    def _native_browser_login_selected(self) -> None:
+        if not self._native_browser_login_enabled:
+            return
+        from daedalus.desktop.account_scope import AccountSelectionDialog
+
+        accounts = [
+            row for row in self._accounts
+            if row.get("enabled") is True and isinstance(row.get("id"), str)
+        ]
+        dialog = AccountSelectionDialog(
+            accounts, [str(a["id"]) for a in accounts], self,
+            title="Choose accounts for automatic Gameforge sign-in",
+            explanation=(
+                "Only disconnected accounts are signed in. Selenium starts "
+                "headless and asks for input only if credentials are missing "
+                "or Gameforge displays a CAPTCHA. No automation tasks start."
+            ),
+        )
+        if dialog.exec() == QDialog.Accepted and dialog.selected_ids():
+            self.native_browser_login_batch_requested.emit(dialog.selected_ids())
+
     def _native_browser_login(self) -> None:
         account_id = self._selected_visible_id()
         account = self.account_record(account_id) if account_id else None
@@ -607,6 +657,16 @@ class AccountsPage(QWidget):
         self.native_browser_login_button.setEnabled(
             self._native_browser_login_enabled and account_id is not None
             and selected is not None and selected.get("enabled") is True
+        )
+        any_enabled = any(
+            row.get("enabled") is True and isinstance(row.get("id"), str)
+            for row in self._accounts
+        )
+        self.auto_login_all_button.setEnabled(
+            self._native_browser_login_enabled and any_enabled
+        )
+        self.auto_login_selected_button.setEnabled(
+            self._native_browser_login_enabled and any_enabled
         )
         self.assistance_check_button.setEnabled(account_id is not None)
         self.recovery_guide_button.setEnabled(account_id is not None)
