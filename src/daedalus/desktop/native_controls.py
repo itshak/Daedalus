@@ -274,8 +274,10 @@ class ResourceAmountsEditor(QWidget):
             result = [None if value == -1 else value for value in values]
         else:
             result = [0 if value == -1 else value for value in values]
-        if not any(value is not None and value > 0 for value in result):
-            raise ValueError("Enter at least one amount to send or retain")
+        if ignore_allowed and all(value is None for value in result):
+            raise ValueError("Select at least one resource to retain or send")
+        if not ignore_allowed and not any(value > 0 for value in result):
+            raise ValueError("Enter a positive resource amount to send")
         return result
 
 
