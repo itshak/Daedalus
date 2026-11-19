@@ -19,6 +19,7 @@ from daedalus.desktop.native_controls import (
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
+    WorkshopUpgradesEditor,
 )
 from daedalus.desktop.task_page import TasksPage
 
@@ -291,4 +292,83 @@ def test_donation_policy_and_map_editor_use_no_json_fields(page):
     assert page._form_config()["coords"] == [9, 17]
     page._form_inputs["shallow"].setChecked(True)
     with pytest.raises(ValueError, match="cannot be limited"):
+        page._form_config()
+
+
+def test_workshop_editor_loads_real_unit_levels_and_refuses_cross_city_data(app):
+    widget = WorkshopUpgradesEditor()
+    try:
+        seen = []
+        widget.city_requested.connect(seen.append)
+        widget.set_cities(CITIES)
+        assert widget.table.rowCount() == 0
+        widget.city_picker.setCurrentIndex(1)
+        assert seen == [101]
+        with pytest.raises(ValueError, match="load its verified unit levels"):
+            widget.to_config()
+        units = [
+            {"unit_id": "12", "name": "Swordsman", "upgrade_type": "offensive",
+             "description": "Attack", "current_level": 3, "max_level": 15},
+            {"unit_id": "12", "name": "Swordsman", "upgrade_type": "defensive",
+             "description": "Defense", "current_level": 6, "max_level": 15},
+        ]
+        widget.set_workshop_data(102, units, 15)
+        assert widget.table.rowCount() == 0
+        widget.set_workshop_data(101, units, 15)
+        assert widget.table.rowCount() == 2
+        with pytest.raises(ValueError, match="Select 1 to 50"):
+            widget.to_config()
+        target = widget.table.cellWidget(0, 4)
+        target.setValue(7)
+        widget.table.item(0, 0).setCheckState(Qt.Checked)
+        assert widget.to_config() == [{
+            "city_id": 101, "upgrades": [{
+                "unitId": "12", "upgradeType": "offensive", "target": 7
+            }],
+        }]
+        widget.city_picker.setCurrentIndex(2)
+        assert seen == [101, 102]
+        with pytest.raises(ValueError, match="load its verified"):
+            widget.to_config()
+        widget.set_unavailable(101)  # late error for a different city
+        assert "Reading" in widget.description.text()
+        widget.set_unavailable(102)
+        assert "No verified" in widget.description.text()
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_upgrade_units_is_prepared_from_actual_unit_choices_not_untrusted_json(page):
+    requests = []
+    page.workshop_requested.connect(
+        lambda account_id, city_id: requests.append((account_id, city_id))
+    )
+    set_native(page, "UpgradeUnits", [field("jobs", required=True)])
+    widget = page._form_inputs["jobs"]
+    assert isinstance(widget, WorkshopUpgradesEditor)
+    widget.city_picker.setCurrentIndex(1)
+    assert requests == [("alpha", 101)]
+    page.set_workshop_upgrades({
+        "account_id": "beta", "city_id": 101, "workshop_level": 12,
+        "upgrades": [],
+    })
+    assert widget.table.rowCount() == 0
+    page.set_workshop_upgrades({
+        "account_id": "alpha", "city_id": 101, "workshop_level": 12,
+        "upgrades": [{
+            "unit_id": "99", "name": "Ram", "upgrade_type": "offensive",
+            "description": "Attack", "current_level": 5, "max_level": 12,
+        }],
+    })
+    assert widget.table.rowCount() == 1
+    widget.table.cellWidget(0, 4).setValue(6)
+    widget.table.item(0, 0).setCheckState(Qt.Checked)
+    assert page._form_config()["jobs"] == [{
+        "city_id": 101, "upgrades": [{
+            "unitId": "99", "upgradeType": "offensive", "target": 6,
+        }],
+    }]
+    page.set_cities_unavailable("alpha")
+    with pytest.raises(ValueError, match="load its verified"):
         page._form_config()
