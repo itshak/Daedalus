@@ -28,7 +28,7 @@ _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
-    "validate_session_existing", "task_preflight_existing",
+    "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
 })
 
 
@@ -118,13 +118,14 @@ class ExistingIPCClient:
                 raise EngineIPCUnavailable("Cannot verify IkaBot IPC owner") from exc
         return port, authkey
 
-    def request(self, action: str, *, account: Account | None = None) -> dict[str, Any]:
+    def request(self, action: str, *, account: Account | None = None,
+                city_id: int | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
-            "task_preflight_existing",
+            "task_preflight_existing", "list_buildings_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -132,6 +133,12 @@ class ExistingIPCClient:
         payload: dict[str, object] = {"action": action}
         if account is not None:
             payload.update(world=account.world, player=account.player)
+        if action == "list_buildings_existing":
+            if type(city_id) is not int or not 0 < city_id < 10**12:
+                raise ValueError("Choose a valid city")
+            payload["city_id"] = city_id
+        elif city_id is not None:
+            raise ValueError("City argument is not supported for this IPC action")
         return self._exchange(payload)
 
     def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0,
@@ -248,6 +255,43 @@ class ExistingIPCClient:
                 }
             )
         return result
+
+    def buildings(self, account: Account, city_id: int) -> list[dict[str, object]]:
+        """Return sanitized existing-session building slots from an owned city."""
+        if type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid city ID")
+        # Independent membership check at both the controller and IkaBot IPC.
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("City does not belong to this account")
+        response = self.request("list_buildings_existing", account=account, city_id=city_id)
+        if (str(response.get("world", "")).casefold() != account.world.casefold()
+                or str(response.get("username", "")).casefold() != account.player.casefold()
+                or response.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot IPC returned another account's building data")
+        rows = response.get("buildings")
+        if not isinstance(rows, list) or len(rows) > 80:
+            raise EngineIPCUnavailable("IkaBot IPC returned invalid buildings")
+        validated = []
+        positions: set[int] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Malformed building row")
+            slot, level = row.get("position"), row.get("level")
+            name, building = row.get("name"), row.get("building")
+            if (type(slot) is not int or not 0 <= slot <= 80 or slot in positions
+                    or type(level) is not int or not 0 <= level <= 150
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(building, str) or not 0 < len(building) <= 64
+                    or type(row.get("busy")) is not bool
+                    or type(row.get("can_upgrade")) is not bool):
+                raise EngineIPCUnavailable("IkaBot IPC returned invalid building data")
+            positions.add(slot)
+            validated.append({
+                "position": slot, "level": level, "name": name,
+                "building": building, "busy": row["busy"],
+                "can_upgrade": row["can_upgrade"],
+            })
+        return validated
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
