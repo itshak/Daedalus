@@ -274,7 +274,8 @@ def test_https_keychain_save_is_default_and_optional_ssh_is_hidden(app, monkeypa
         assert page.connect_button.text() == "Connect"
         assert page.url_input.text() == ""  # no fake local backend on a fresh Mac
         assert page.advanced_panel.isHidden()
-        assert "HTTPS" in page.layout().itemAt(1).widget().text()
+        assert "HTTPS" in page.intro_label.text()
+        assert page.demo_button.isHidden() is False or page.demo_button.parent() is page.connection_card
         page.advanced_button.click()
         assert not page.advanced_panel.isHidden()
         assert page.ssh_button.text() == "Use SSH fallback"

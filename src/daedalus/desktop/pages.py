@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -35,7 +36,7 @@ from qfluentwidgets import (
 )
 
 from daedalus.desktop.design_system import StatusPanel
-from daedalus.desktop.widgets import ScrollTableWidget
+from daedalus.desktop.widgets import OpaqueCardWidget, ScrollTableWidget
 from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
 
 
@@ -71,8 +72,25 @@ class ConnectionPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("connection_page")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        self.content_scroll = QScrollArea(self)
+        self.content_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.content_scroll.setWidgetResizable(True)
+        host = QWidget(self.content_scroll)
+        center = QHBoxLayout(host)
+        center.setContentsMargins(24, 28, 24, 28)
+        center.setSpacing(0)
+        center.addStretch(1)
+        self.connection_card = OpaqueCardWidget(host)
+        self.connection_card.setMaximumWidth(680)
+        self.connection_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        center.addWidget(self.connection_card, 0, Qt.AlignTop)
+        center.addStretch(1)
+        self.content_scroll.setWidget(host)
+        shell.addWidget(self.content_scroll)
+        layout = QVBoxLayout(self.connection_card)
+        layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(13)
         layout.addWidget(SubtitleLabel("Connect to Daedalus"))
         intro = CaptionLabel(
@@ -80,6 +98,7 @@ class ConnectionPage(QWidget):
             "port forwarding is needed. Your server stays in control of game sessions."
         )
         intro.setWordWrap(True)
+        self.intro_label = intro
         layout.addWidget(intro)
 
         layout.addWidget(BodyLabel("Server address"))
@@ -170,10 +189,9 @@ class ConnectionPage(QWidget):
         self.demo_button.setToolTip(
             "Run an isolated synthetic preview on loopback; never access saved accounts"
         )
-        advanced.addWidget(self.demo_button)
+        layout.addWidget(self.demo_button)
         layout.addWidget(self.advanced_panel)
         self.advanced_panel.hide()
-        layout.addStretch(1)
 
     def _toggle_advanced(self) -> None:
         opened = not self.advanced_panel.isVisible()

@@ -286,3 +286,23 @@ def test_automation_parameter_form_uses_compact_height_for_one_field(app):
         assert page.stack.count() == 4
     finally:
         _dispose(page, app)
+
+
+def test_templates_include_wine_and_construction_related_tasks(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([
+            {"name": name, "kind": "background_task"} for name in (
+                "tavernManager", "alertLowWine", "constructionList",
+                "research", "alertAttacks",
+            )
+        ], enabled=True)
+        page.select_workflow("wine")
+        assert set(page._task_names) == {"tavernManager", "alertLowWine"}
+        page.select_workflow("construction")
+        assert set(page._task_names) == {"constructionList", "research"}
+        page.select_workflow("all")
+        assert len(page._task_names) == 5
+    finally:
+        _dispose(page, app)

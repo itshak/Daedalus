@@ -29,10 +29,13 @@ from qfluentwidgets import (
     CaptionLabel,
     CheckBox,
     ComboBox,
+    DoubleSpinBox,
     LineEdit,
     Pivot,
     PrimaryPushButton,
     PushButton,
+    SearchLineEdit,
+    SpinBox,
     SubtitleLabel,
 )
 
@@ -56,6 +59,10 @@ _TASK_LABELS = {
 }
 _CATEGORIES = ("All automations", "Alerts & monitoring", "Resources & trade",
                "City management", "Military & missions", "Advanced")
+_TEMPLATE_TASKS = {
+    "wine": {"alertLowWine", "tavernManager"},
+    "construction": {"constructionList", "research"},
+}
 _TASK_CATEGORIES = {
     "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces"},
     "Resources & trade": {"buyResources", "sellResources", "sendResources",
@@ -93,6 +100,7 @@ class TasksPage(QWidget):
         if workflow not in {None, "wine", "construction"}:
             raise ValueError("Unsupported native task workflow")
         self._workflow = workflow
+        self._template_filter: str | None = None
         self.setObjectName("tasks_page" if workflow is None else f"{workflow}_page")
         self._account_ids: list[str] = []
         self._task_names: list[str] = []
@@ -199,7 +207,7 @@ class TasksPage(QWidget):
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
         filter_row.addWidget(self.category_combo, 1)
-        self.search_input = LineEdit()
+        self.search_input = SearchLineEdit()
         self.search_input.setPlaceholderText("Search automations")
         self.search_input.textChanged.connect(self._filter_tasks)
         filter_row.addWidget(self.search_input, 2)
@@ -394,6 +402,7 @@ class TasksPage(QWidget):
     def select_task(self, task_name: str) -> bool:
         if task_name not in self._all_task_names:
             return False
+        self._template_filter = None
         self.category_combo.setCurrentIndex(0)
         self.search_input.clear()
         self._filter_tasks()
@@ -405,8 +414,9 @@ class TasksPage(QWidget):
         self._show_section(0)
         if workflow not in {"all", "wine", "construction"}:
             raise ValueError("Unsupported automation template")
+        self._template_filter = None if workflow == "all" else workflow
         self.category_combo.setCurrentIndex(0)
-        self.search_input.setText("" if workflow == "all" else workflow)
+        self.search_input.clear()
         self._filter_tasks()
 
     def _open_catalog(self) -> None:
@@ -627,6 +637,8 @@ class TasksPage(QWidget):
         search = self.search_input.text().strip().casefold()
         self._task_names = [name for name in self._all_task_names
             if (category == "All automations" or _category(name) == category)
+            and (self._template_filter is None
+                 or name in _TEMPLATE_TASKS[self._template_filter])
             and (not search or search in _friendly_task(name).casefold()
                  or search in name.casefold())]
         self.task_combo.blockSignals(True)
@@ -691,7 +703,7 @@ class TasksPage(QWidget):
                 widget.setChecked(default is True)
                 widget.stateChanged.connect(self._mark_form_dirty)
             elif kind == "integer" and type(default) is int and -1_000_000 <= default <= 1_000_000:
-                widget = QSpinBox()
+                widget = SpinBox()
                 widget.setRange(-1_000_000, 1_000_000)
                 widget.setValue(default)
                 if key == "minutes" and name == "alertAttacks":
@@ -699,7 +711,7 @@ class TasksPage(QWidget):
                     widget.setSuffix(" min")
                 widget.valueChanged.connect(self._mark_form_dirty)
             elif kind == "number" and type(default) in (int, float) and -1_000_000 <= default <= 1_000_000:
-                widget = QDoubleSpinBox()
+                widget = DoubleSpinBox()
                 widget.setRange(-1_000_000, 1_000_000)
                 widget.setDecimals(2)
                 widget.setValue(float(default))
