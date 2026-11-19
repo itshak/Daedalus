@@ -30,10 +30,10 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     LineEdit,
+    Pivot,
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
-    Pivot,
 )
 
 from daedalus.desktop.pages import _populate, _table

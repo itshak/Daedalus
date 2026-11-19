@@ -1203,7 +1203,7 @@ class WarehousesPage(QWidget):
             return
         try:
             from PySide6.QtGui import QFont, QTextDocument
-            from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
+            from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 
             document = QTextDocument(self)
             document.setDefaultFont(QFont("Menlo", 10))
