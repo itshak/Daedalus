@@ -423,6 +423,9 @@ def test_construction_preview_readonly_and_city_scoped(tmp_path):
 
 def test_construction_preview_rejects_wrong_account_identity(tmp_path):
     def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
         if msg["action"] == "list_cities_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
@@ -430,7 +433,7 @@ def test_construction_preview_rejects_wrong_account_identity(tmp_path):
         return {"status": "ok", "world": "s302-en", "username": "WrongPlayer", "city_id": 42,
                 "plan": {"ready": True}}
     with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
-        EngineIPCUnavailable, match="invalid session metadata"
+        EngineIPCUnavailable, match="different game account"
     ):
         client.construction_preview(ALPHA, 42, [{"position": 1, "target_level": 7}])
 
@@ -453,6 +456,9 @@ def test_workshop_upgrades_are_account_bound_and_never_start_game_tasks(tmp_path
 
 def test_workshop_malformed_engine_response_rejected_before_ui(tmp_path):
     def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
         if msg["action"] == "list_cities_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
