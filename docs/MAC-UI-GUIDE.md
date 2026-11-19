@@ -90,9 +90,9 @@ were used during implementation.
 
 ## Accounts and sign-in
 
-The Accounts table summarizes each account and its worker state. Choose an account to see contextual health and **Sign in automatically (headless)** when the backend enables secure browser handoff. This opens a temporary browser for you to complete Gameforge/MFA/CAPTCHA manually, then uses the previously specified encrypted, one-use account-bound handoff. The backend independently verifies the exact world/player before accepting the result. Browser acknowledgment alone is **not authentication**.
+The Accounts table summarizes each account and its worker state. Choose an account to see contextual health and **Sign in automatically (headless)** when the backend enables secure browser handoff. Selenium fills the login and opens visible Chrome only if CAPTCHA requires your intervention, then uses the one-use encrypted, account-bound handoff. The backend independently verifies the exact world/player before accepting the result. Browser acknowledgment alone is **not authentication**.
 
-Account editing is permitted only when the controller enables its protected metadata editing mode. More technical monitoring, manual assistance and host recovery actions are under **Advanced recovery and monitoring**. Their per-account security confirmations remain mandatory; there is deliberately no unsafe single-click mass account login.
+Account editing is permitted only when the controller enables its protected metadata editing mode. More technical monitoring, manual assistance and host recovery actions are under **Advanced recovery and monitoring**. Their per-account security confirmations remain mandatory; multi-account sign-in proceeds one account at a time and cannot start tasks or bypass server ownership.
 
 ## Appearance, layout and diagnostics
 
@@ -146,8 +146,7 @@ the Accounts report checkboxes and the Warehouses picker. These choices are
 local display/report preferences scoped to the connected backend; they are
 not game mutations, and do not change account enablement. Connection displays
 explicit in-progress feedback and sanitized guidance for rejected tokens,
-untrusted TLS, unreachable servers and unavailable Keychain. Authentication
-remains a separate **Sign in on this Mac** step for the selected game account.
+untrusted TLS, unreachable servers and unavailable Keychain. Authentication uses **Sign in automatically (headless)** for one, all or selected accounts and can run from warehouse refresh when a session is missing. The older manual browser remains an Advanced fallback.
 
 ## Navigation and keyboard shortcuts
 

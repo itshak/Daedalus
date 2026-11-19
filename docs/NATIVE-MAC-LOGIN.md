@@ -1,6 +1,6 @@
 # Native Mac Gameforge authentication — headless Selenium default, manual fallback
 
-**Implementation:** native Mac Qt WebEngine + a one-use, encrypted handoff to the one authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
+**Implementation:** automatic headless Selenium Chrome with CAPTCHA-only visible handoff; the older native Qt WebEngine browser remains an Advanced manual fallback. Both paths use one-use encrypted session handoff to the authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
 
 **The historical native Qt WebEngine instructions below describe only the advanced manual fallback.**
 
