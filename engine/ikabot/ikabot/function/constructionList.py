@@ -329,7 +329,7 @@ def getCostsReducers(city):
     return reducers_per_material
 
 
-def getResourcesNeeded(session, city, building, current_level, final_level, simulated_reducers=None):
+def getResourcesNeeded(session, city, building, current_level, final_level, simulated_reducers=None, *, noninteractive=False):
     """
     Parameters
     ----------
@@ -398,7 +398,8 @@ def getResourcesNeeded(session, city, building, current_level, final_level, simu
         # if the user has all the resource saving studies, save that in the session data
         if costs_reduction == 14:
             sessionData["reduccion_inv_max"] = True
-            session.setSessionData(sessionData)
+            if not noninteractive:
+                session.setSessionData(sessionData)
 
     # calculate cost reductions
     costs_reduction /= 100
@@ -486,6 +487,8 @@ def getResourcesNeeded(session, city, building, current_level, final_level, simu
             costs_reductions[4] = min(50, costs_reductions[4] + 1)
 
     if levels_to_upgrade < final_level - current_level:
+        if noninteractive:
+            raise ValueError("The target building level is not available in the game")
         print(
             "This building only allows you to expand {:d} more levels".format(
                 levels_to_upgrade
@@ -768,7 +771,128 @@ def checkhash(url):
     return material
 
 
-@task("constructionList")
+def preview_native_construction(session, city_id, upgrades):
+    """Read and prepare a city-specific construction queue without game mutations.
+
+    Upgrade planning delegates actual resource and duration calculation to
+    getResourcesNeeded (the same upstream routine as the original CLI).
+    External transport orchestration is intentionally excluded: the caller
+    must already have all required resources. At dispatch, the engine prepares
+    the same plan again to reject stale building levels and cost assumptions.
+    """
+    from ikabot.helpers.taskConfig import requireOwnCity
+
+    if type(city_id) is not int or not 0 < city_id < 10**12:
+        raise ValueError("Invalid construction city")
+    if not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12:
+        raise ValueError("Choose 1 to 12 actual building upgrades")
+
+    owned = requireOwnCity(session, city_id, "city_id")
+    city = getCity(session.get(city_url + str(owned)))
+    if int(city["id"]) != city_id:
+        raise ValueError("The game returned a different construction city")
+    resources = city.get("availableResources")
+    if (not isinstance(resources, list) or len(resources) != 5
+            or any(type(v) is not int or v < 0 for v in resources)):
+        raise ValueError("Current city resource amounts are unavailable")
+    stock = list(resources)
+    reductions = getCostsReducers(city)
+    chosen = []
+    seen = set()
+    costs = [0] * 5
+    for upgrade in upgrades:
+        if not isinstance(upgrade, dict):
+            raise ValueError("Expected a building target")
+        slot = upgrade.get("position")
+        target = upgrade.get("target_level")
+        if (type(slot) is not int or not 0 <= slot <= 80 or slot in seen
+                or type(target) is not int or not 0 < target <= 150):
+            raise ValueError("Invalid or duplicate building upgrade target")
+        seen.add(slot)
+        building = next(
+            (row for row in city["position"] if row.get("position") == slot
+             and row.get("building") != "empty"), None
+        )
+        if building is None or building.get("isBusy") is True or building.get("isMaxLevel") is True:
+            raise ValueError("Chosen building is absent, already upgrading, or fully upgraded")
+        current = building.get("level")
+        if (type(current) is not int or not current < target <= current + 10):
+            raise ValueError("Choose a higher target level, up to ten levels per preview")
+        candidate = dict(building)
+        candidate["upgradeTo"] = target
+        updated_reductions = list(reductions)
+        needed = getResourcesNeeded(
+            session, city, candidate, current, target,
+            updated_reductions, noninteractive=True,
+        )
+        if (not isinstance(needed, list) or len(needed) != 5
+                or any(type(value) is not int or value < 0 for value in needed)):
+            raise ValueError("Could not determine authoritative building costs")
+        durations = candidate.get("constructionTimes")
+        if (not isinstance(durations, list) or len(durations) != target - current
+                or any(type(duration) is not int or duration <= 0 for duration in durations)):
+            raise ValueError("IkaBot cannot estimate all construction durations safely")
+        for i in range(5):
+            costs[i] += needed[i]
+            stock[i] = max(0, stock[i] - needed[i])
+        reductions = updated_reductions
+        chosen.append({
+            "position": slot, "name": str(building["name"])[:100],
+            "building": str(building["building"])[:64],
+            "level": current, "isBusy": False, "upgradeTo": target,
+            "constructionTime": sum(durations),
+            "constructionTimes": durations,
+        })
+    queue = [duration for building in chosen for duration in building["constructionTimes"]]
+    total_seconds = sum(queue)
+    active_time = int(city.get("endUpgradeTime") or 0) - int(time.time())
+    total_seconds += max(0, active_time)
+    missing = [max(0, costs[i] - resources[i]) for i in range(5)]
+    config = {
+        "city_id": city_id, "city_name": str(city["name"])[:100],
+        "buildings": chosen, "shipments": [], "expand_overall": True,
+        "wait_resources": False, "construction_queue": queue,
+        "total_time": total_seconds,
+    }
+    return {
+        "config": config, "costs": costs, "available": list(resources),
+        "missing": missing, "estimated_seconds": total_seconds,
+        "ready": all(amount == 0 for amount in missing),
+    }
+
+
+def prepare_constructionList(session, city_id, city_name, buildings, shipments,
+                             expand_overall, wait_resources, construction_queue, total_time):
+    """Independently recompute a UI-prepared plan immediately before task launch."""
+    if (not isinstance(buildings, list) or not 0 < len(buildings) <= 12
+            or not isinstance(shipments, list) or shipments
+            or expand_overall is not True or wait_resources is not False):
+        raise ValueError("Construction needs an engine-reviewed, self-funded plan")
+    try:
+        upgrades = [
+            {"position": row["position"], "target_level": row["upgradeTo"]}
+            for row in buildings
+        ]
+    except (TypeError, KeyError) as exc:
+        raise ValueError("Invalid construction building records") from exc
+    result = preview_native_construction(session, city_id, upgrades)
+    if not result["ready"]:
+        raise ValueError("Construction resources changed; review the shortage and preview again")
+    expected = result["config"]
+    supplied = {
+        "city_id": city_id, "city_name": city_name, "buildings": buildings,
+        "shipments": shipments, "expand_overall": expand_overall,
+        "wait_resources": wait_resources, "construction_queue": construction_queue,
+    }
+    check = {key: val for key, val in expected.items() if key != "total_time"}
+    if supplied != check or type(total_time) is not int or abs(
+        total_time - expected["total_time"]
+    ) > 120:
+        raise ValueError("Construction plan is stale or does not match verified game state")
+    return expected
+
+
+@task("constructionList", prepare=prepare_constructionList)
 def do_it(session, city_id, city_name, buildings, shipments, expand_overall, wait_resources,
           construction_queue, total_time):
     session.setStatus(
