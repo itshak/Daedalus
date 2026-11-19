@@ -299,13 +299,16 @@ class ExistingIPCClient:
                     or not isinstance(name, str) or not 0 < len(name) <= 100
                     or not isinstance(building, str) or not 0 < len(building) <= 64
                     or type(row.get("busy")) is not bool
-                    or type(row.get("can_upgrade")) is not bool):
+                    or type(row.get("can_upgrade")) is not bool
+                    or (row.get("can_upgrade_now") is not None
+                        and type(row["can_upgrade_now"]) is not bool)):
                 raise EngineIPCUnavailable("IkaBot IPC returned invalid building data")
             positions.add(slot)
             validated.append({
                 "position": slot, "level": level, "name": name,
                 "building": building, "busy": row["busy"],
                 "can_upgrade": row["can_upgrade"],
+                "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
 
