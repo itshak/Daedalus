@@ -683,10 +683,11 @@ class TasksPage(QWidget):
                 or not self.selected_task_name()):
             return
         if not self._reviewed or not self.confirm_box.isChecked():
-            QMessageBox.information(
-                self, "Review selected accounts",
-                "Review the task settings and check the authorization box above "
-                "before asking to start for the selected accounts.",
+            # Invalid consent should be contextual, not an unexpected modal.
+            # A modal also traps offscreen/keyboard-only users in this path.
+            self.bulk_note.setText(
+                "Review this automation and check the authorization box above "
+                "before starting tasks for selected accounts."
             )
             return
         if self._form_dirty and self._advanced_visible:
