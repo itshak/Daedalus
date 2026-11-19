@@ -220,7 +220,7 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             assert not page.start_button.isEnabled()
             page.set_preflight({"account_id": "alpha", "task": expected,
                                 "ready": True, "reason": "none"})
-            assert page.start_button.isEnabled()
+            assert page.start_button.isEnabled() is (kind == "wine")
             if kind == "wine":
                 page._form_inputs["threshold"].setText("1000")
                 page._build_config_from_form()
