@@ -44,6 +44,16 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("trainArmy", "city"): {
+        "type": "train_units", "label": "Recruit from barracks or shipyard",
+        "help": "Choose a real city and actual unit types. Available resources and unit costs come from IkaBot.",
+    },
+    ("trainArmy", "tranings"): {"type": "hidden_derived"},
+    ("trainArmy", "trainTroops"): {"type": "hidden_derived"},
+    ("trainArmy", "replicate"): {"type": "hidden_derived"},
+    ("trainArmy", "countRepeat"): {"type": "hidden_derived"},
+    ("trainArmy", "cityTrainings"): {"type": "hidden_derived"},
+    ("trainArmy", "units"): {"type": "hidden_derived"},
     ("UpgradeUnits", "jobs"): {
         "type": "workshop_jobs", "label": "Workshop upgrade plan",
         "help": "Choose a real city, then available unit and ship upgrades from its IkaBot workshop.",
