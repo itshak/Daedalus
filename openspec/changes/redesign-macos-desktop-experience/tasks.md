@@ -50,6 +50,13 @@ All tasks are intentionally open. This change contains planning only; do not mar
 - [ ] 4.4 Consolidate local appearance/reporting preferences and contextual connection controls into Settings while retaining explicit credential deletion and safe persisted preference validation.
 - [ ] 4.5 Unify all screen-level loading/empty/error/offline/permission/demo/partial/uncertain messaging, consistency of terminology and localization-ready string sourcing.
 
+## Cross-cutting multi-account design (owner request)
+
+- [x] Provide an All accounts warehouse action, a custom multi-account picker, and a selected-account reporting action using existing read-only transport and unchanged export semantics; test partially unavailable accounts and more than 32 chosen accounts offline.
+- [x] Provide all/selected read-only automation status viewing and reviewed multi-account task starts with individual preflights/UUIDs, fail-closed blocking and halt-on-ambiguous-request behavior; cover offline synthetic cases.
+- [ ] Audit every account-facing screen for an all-account or selected-account action, and document/implement a truthful unavailable state wherever a safe multi-account backend operation cannot be exposed.
+- [ ] Review the multi-account mutation consent screen on real macOS and verify account names, scope labels, choice persistence and accessibility with synthetic fixtures.
+
 ## Phase 5 — QA, accessibility, packaging and completion gates
 
 - [ ] 5.1 Verify keyboard-only navigation, macOS accessibility names/roles, screen-reader focus, dynamic/high-contrast text, visual focus and icon-independent status across every critical workflow.
