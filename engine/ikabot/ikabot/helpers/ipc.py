@@ -748,6 +748,8 @@ class IPCServer:
                     return self._list_buildings_existing(request)
                 if action == "preview_construction_existing":
                     return self._preview_construction_existing(request)
+                if action == "list_workshop_upgrades_existing":
+                    return self._list_workshop_upgrades_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -881,6 +883,67 @@ class IPCServer:
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,
             "plan": result,
+        }
+
+    def _list_workshop_upgrades_existing(self, request):
+        """Enumerate real workshop unit levels without starting upgrades."""
+        from ikabot.function.UpgradeUnits import find_workshop, workshop_upgrades
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid workshop city")
+        ids, _cities = getIdsOfCities(session)
+        if city_id not in {_existing_city_id(value) for value in ids}:
+            raise ValueError("Workshop city is not owned by the selected account")
+        city, workshop = find_workshop(session, str(city_id))
+        if _existing_city_id(city.get("id")) != city_id:
+            raise ValueError("Game returned a different workshop city")
+        if workshop is None:
+            return {
+                "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "city_id": city_id,
+                "workshop_level": 0, "upgrades": [],
+            }
+        maximum = min(25, int(workshop.get("level") or 0))
+        if not 0 <= maximum <= 25:
+            raise ValueError("Invalid workshop level")
+        available = workshop_upgrades(session, str(city_id), workshop["position"])
+        if not isinstance(available, dict) or len(available) > 100:
+            raise ValueError("Unbounded workshop upgrade inventory")
+        upgrades = []
+        for unit_id, unit in available.items():
+            if (not isinstance(unit_id, str) or not unit_id.isdigit()
+                    or not isinstance(unit, dict)):
+                raise ValueError("Invalid workshop unit")
+            name = str(unit.get("name") or "")[:100]
+            if not name:
+                raise ValueError("Missing workshop unit name")
+            types = unit.get("types")
+            if not isinstance(types, dict) or len(types) > 5:
+                raise ValueError("Invalid workshop upgrade types")
+            for upgrade_type, state in types.items():
+                if (not isinstance(upgrade_type, str)
+                        or not re.fullmatch(r"[a-zA-Z_]{1,40}", upgrade_type)
+                        or not isinstance(state, dict)):
+                    raise ValueError("Invalid unit upgrade")
+                level = state.get("level")
+                if type(level) is not int or not 0 <= level <= 25:
+                    raise ValueError("Invalid current unit upgrade level")
+                upgrades.append({
+                    "unit_id": unit_id, "name": name,
+                    "upgrade_type": upgrade_type,
+                    "description": str(state.get("desc") or upgrade_type)[:100],
+                    "current_level": level,
+                    "max_level": maximum,
+                })
+        if len(upgrades) > 250:
+            raise ValueError("Unbounded workshop upgrade choices")
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "workshop_level": maximum, "upgrades": upgrades,
         }
 
     def _warehouse_snapshots_existing(self, request):
