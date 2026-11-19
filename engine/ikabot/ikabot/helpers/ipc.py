@@ -750,6 +750,8 @@ class IPCServer:
                     return self._preview_construction_existing(request)
                 if action == "list_workshop_upgrades_existing":
                     return self._list_workshop_upgrades_existing(request)
+                if action == "list_trainables_existing":
+                    return self._list_trainables_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -944,6 +946,23 @@ class IPCServer:
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,
             "workshop_level": maximum, "upgrades": upgrades,
+        }
+
+    def _list_trainables_existing(self, request):
+        """Inspect actual barracks/shipyard unit costs without recruiting."""
+        from ikabot.function.trainArmy import available_trainable_units
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        train_troops = request.get("train_troops")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(train_troops) is not bool):
+            raise ValueError("Choose a valid training city and troop/ship mode")
+        snapshot = available_trainable_units(session, city_id, train_troops)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            **snapshot,
         }
 
     def _warehouse_snapshots_existing(self, request):
