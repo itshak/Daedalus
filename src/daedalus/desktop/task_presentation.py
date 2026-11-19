@@ -44,6 +44,25 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    # Daily collection city destinations and favour keys are taken verbatim
+    # from loginDaily.prepare_loginDaily and TASK_FUNCTIONS.
+    ("loginDaily", "wine_city"): {
+        "type": "city_picker", "label": "Daily wine reward city",
+        "help": "Choose which of your actual cities receives the daily wine reward.",
+    },
+    ("loginDaily", "wood_city"): {
+        "type": "city_picker", "label": "Cinetheatre wood reward city",
+        "help": "Optional: leave skipped if you do not want the wood cinetheatre reward.",
+    },
+    ("loginDaily", "luxury_city"): {
+        "type": "city_picker", "label": "Cinetheatre luxury reward city",
+        "help": "Optional: leave skipped if you do not want the luxury cinetheatre reward.",
+    },
+    ("loginDaily", "favour_tasks"): {
+        "type": "choices_list", "choices": ["resource", "look", "online", "complete"],
+        "label": "Daily favour tasks",
+        "help": "Optional tasks: collect resource favour, visit information pages, stay online or collect completed tasks.",
+    },
     # These are literal upstream enums in distributeResources.py, not guesses.
     ("distributeResources", "resource"): {
         "type": "text",
