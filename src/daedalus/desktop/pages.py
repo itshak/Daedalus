@@ -949,15 +949,9 @@ class WarehousesPage(QWidget):
             )
         )
 
+        # Combined reports are the primary path. Individual account inspection
+        # is still available, but intentionally secondary on compact Macs.
         controls = QHBoxLayout()
-        controls.addWidget(BodyLabel("Account"))
-        self.account_combo = ComboBox()
-        controls.addWidget(self.account_combo, 1)
-        self.load_button = PushButton("This account")
-        self.load_button.setToolTip("Refresh this account's warehouse report")
-        self.load_button.clicked.connect(self._load)
-        controls.addWidget(self.load_button)
-
         self.load_all_button = PrimaryPushButton("All accounts")
         self.load_all_button.setAccessibleName("Load warehouses for all accounts")
         self.load_all_button.setToolTip(
@@ -983,7 +977,18 @@ class WarehousesPage(QWidget):
         self.choose_accounts_button.clicked.connect(self._choose_accounts)
         self.choose_accounts_button.setEnabled(False)
         controls.addWidget(self.choose_accounts_button)
+        controls.addStretch(1)
         layout.addLayout(controls)
+
+        account_controls = QHBoxLayout()
+        account_controls.addWidget(BodyLabel("Single account"))
+        self.account_combo = ComboBox()
+        account_controls.addWidget(self.account_combo, 1)
+        self.load_button = PushButton("This account")
+        self.load_button.setToolTip("Refresh only this account's warehouse report")
+        self.load_button.clicked.connect(self._load)
+        account_controls.addWidget(self.load_button)
+        layout.addLayout(account_controls)
         filters = QHBoxLayout()
 
         self.only_220k = CheckBox("Only 220K+")
@@ -1095,6 +1100,10 @@ class WarehousesPage(QWidget):
         dialog = AccountSelectionDialog(
             list(self._accounts.values()), list(self._included_ids), self,
             title="Warehouse report accounts",
+            explanation=(
+                "Select accounts for combined read-only warehouse reports. "
+                "No game tasks are started; unavailable snapshots appear separately."
+            ),
         )
         if dialog.exec() == QDialog.Accepted:
             selected = dialog.selected_ids()

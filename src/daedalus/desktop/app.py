@@ -185,13 +185,15 @@ class APIWorker(QThread):
                 }
             elif self.action in {"warehouses_batch", "warehouses_all"} and self.task_payload is not None:
                 ids = self.task_payload.get("account_ids")
-                limit = 32 if self.action == "warehouses_batch" else 100
+                limit = 32 if self.action == "warehouses_batch" else None
                 if (
-                    not isinstance(ids, list) or not 1 <= len(ids) <= limit
+                    not isinstance(ids, list) or not ids
+                    or (limit is not None and len(ids) > limit)
                     or any(not isinstance(aid, str) for aid in ids)
                     or len(set(ids)) != len(ids)
                 ):
-                    raise ValueError(f"Select between 1 and {limit} distinct report accounts")
+                    raise ValueError("Select nonempty, distinct report accounts"
+                                     + (" (up to 32)" if limit is not None else ""))
                 result = []
                 for aid in ids:
                     try:
@@ -214,11 +216,11 @@ class APIWorker(QThread):
             elif self.action == "task_list_batch" and self.task_payload is not None:
                 ids = self.task_payload.get("account_ids")
                 if (
-                    not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                    not isinstance(ids, list) or not ids
                     or any(not isinstance(aid, str) for aid in ids)
                     or len(set(ids)) != len(ids)
                 ):
-                    raise ValueError("Choose between 1 and 100 distinct accounts")
+                    raise ValueError("Choose at least one distinct account")
                 result = []
                 for aid in ids:
                     try:
@@ -267,9 +269,20 @@ class APIWorker(QThread):
                             receipt = self.client.start_task(
                                 aid, task, config, rid, confirmed=True,
                             )
+                            # An HTTP 200 can still carry a durable
+                            # "unconfirmed" or "dispatching" receipt.
+                            # Treat everything except a verified started
+                            # receipt as uncertain; never launch the next
+                            # account or silently label it successful.
+                            if (not isinstance(receipt, dict)
+                                    or receipt.get("status") not in {"started", "running"}
+                                    or receipt.get("account_id") not in {None, aid}):
+                                halted = {"account_id": aid, "request_id": rid,
+                                          "status": "unconfirmed"}
+                                break
                             submitted.append({
                                 "account_id": aid, "request_id": rid,
-                                "status": str(receipt.get("status") or "submitted"),
+                                "status": str(receipt["status"]),
                             })
                         except (ValueError, APIConnectionError):
                             # Transport uncertainty MAY mean execution occurred.

@@ -406,3 +406,90 @@ def test_configuration_dialog_summary_avoids_echoing_complex_private_values():
     assert "routes: configured" in summary
     assert "do-not-show-me" not in summary
     assert "a-sensitive-value" not in summary
+
+
+
+def test_all_account_warehouse_scope_is_not_silently_truncated_at_100(app):
+    all_rows = accounts(125)
+    picker = AccountSelectionDialog(all_rows, [a["id"] for a in all_rows])
+    page = WarehousesPage()
+    try:
+        assert len(picker.selected_ids()) == 125
+        page.set_accounts(all_rows)
+        emitted = []
+        page.load_all_requested.connect(emitted.append)
+        page.load_all_button.click()
+        assert emitted == [[a["id"] for a in all_rows]]
+
+        class FakeReads:
+            def warehouses(self, account_id):
+                return []
+
+        result = _run_batch(APIWorker(FakeReads(), "warehouses_all", task_payload={
+            "account_ids": emitted[0]
+        }))
+        assert len(result) == 125
+        assert all(row["cities"] == [] for row in result)
+    finally:
+        _dispose(picker, app)
+        _dispose(page, app)
+
+
+def test_all_account_automation_status_includes_disabled_without_bulk_mutation(app):
+    rows = accounts(4)
+    rows[1]["enabled"] = False
+    page = TasksPage()
+    try:
+        page.set_accounts(rows)
+        emitted = []
+        page.batch_status_requested.connect(emitted.append)
+        page.view_all_button.click()
+        assert emitted == [[a["id"] for a in rows]]
+        page.set_batch_status([
+            {"account_id": a["id"], "engine_tasks": [], "requests": []}
+            for a in rows
+        ])
+        assert page.multi_table.item(1, 3).text() == "Disabled account"
+        page.set_capabilities([{"name": "alertAttacks", "kind": "background_task"}], True)
+        page._bulk_account_ids = ["account-0", "account-1"]
+        page._update_bulk_buttons()
+        assert not page.start_selected_button.isEnabled()
+        assert "enabled accounts only" in page.bulk_note.text()
+        page._bulk_account_ids = [a["id"] for a in rows if a["enabled"]]
+        page._update_bulk_buttons()
+        assert page.start_selected_button.isEnabled()
+    finally:
+        _dispose(page, app)
+
+
+def test_read_only_task_status_has_no_100_account_cutoff(app):
+    class FakeReads:
+        def tasks(self, account_id):
+            return {"account_id": account_id, "engine_tasks": [], "requests": []}
+
+    result = _run_batch(APIWorker(FakeReads(), "task_list_batch", task_payload={
+        "account_ids": [a["id"] for a in accounts(125)]
+    }))
+    assert len(result) == 125
+    assert all(row["requests"] == [] for row in result)
+
+
+
+def test_bulk_launch_halts_if_successful_http_receipt_is_unconfirmed(app):
+    class Backend:
+        def __init__(self):
+            self.started = []
+        def task_preflight(self, account_id, task):
+            return {"ready": True, "unresolved_request": False}
+        def start_task(self, account_id, task, config, rid, *, confirmed):
+            self.started.append(account_id)
+            return {"account_id": account_id, "status": "unconfirmed"}
+
+    backend = Backend()
+    result = _run_batch(APIWorker(backend, "task_start_batch", task_payload={
+        "account_ids": ["account-0", "account-1"], "task": "alertAttacks", "config": {}
+    }))
+    assert backend.started == ["account-0"]
+    assert result["submitted"] == []
+    assert result["halted"]["account_id"] == "account-0"
+    assert result["halted"]["status"] == "unconfirmed"

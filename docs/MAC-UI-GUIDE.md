@@ -27,16 +27,16 @@ A connected backend is necessary for actual account snapshots. The desktop does 
 4. To limit the report, click **Choose accounts…**, select any group and choose **Use selected accounts**, then **Selected (N)**. The selected accounts are remembered as nonsecret, per-backend report preferences. **This account** provides the legacy focused view.
 5. If a snapshot is unavailable or a partial refresh fails, the status line identifies it; do not interpret the absence of a city as a zero resource amount. You can refresh read-only reporting safely.
 
-The all-account report supports up to 100 selected configured accounts in the desktop read-only client path; this is a guardrail, not a claim of support for larger backend installations. Read-only reporting does not start, stop or interfere with game operations.
+All-account reports and read-only task status include **every configured account**, without silently discarding accounts after the first 100. Large account lists may take longer to query sequentially, and individual errors appear as unavailable rather than false zero values. Read-only reporting does not start, stop or interfere with game operations.
 
 ## All and selected account automations
 
 Open **Automations**. The Fluent sections separate **Discover & configure**, **Running**, **History & recovery**, and **All accounts**.
 
-- **View all task statuses** queries each configured enabled account and displays running count, unresolved request count, and unavailable account status. **Choose accounts…** followed by **View selected statuses** checks just the chosen group. These are read-only requests.
+- **View all task statuses** queries each configured account (including disabled ones) and displays running count, unresolved request count, and unavailable account status. **Choose accounts…** followed by **View selected statuses** checks just the chosen group. These are read-only requests.
 - In **Discover & configure**, use Search, Category or Wine/Construction shortcuts to find a registered task. Tasks only appear executable if the backend advertises guarded dispatch. Known fields are ordinary controls; complex schema fields may still require Advanced JSON in this preview.
 - A **single-account Start** requires passing backend preflight, a reviewed configuration, an explicit approval checkbox and a separate confirmation dialog.
-- **Start for selected (N)…** is an advanced group action and can change game state on multiple independently owned accounts. Review the exact names, task and settings. The worker checks all accounts' prerequisites before starting any; one blocked account blocks the cohort. Each approved account gets its own unique authenticated request. If one start result is uncertain, the process **halts without retrying** or silently treating the request as successful. Review the account's request history and game state before further action.
+- **Start for selected (N)…** is available only for a selection of 1–32 enabled accounts; disabled accounts remain included for read-only status. It is an advanced group action and can change game state on multiple independently owned accounts. Review the exact names, task and settings. The worker checks all accounts' prerequisites before starting any; one blocked account blocks the cohort. Each approved account gets its own unique authenticated request. If one start result is uncertain, the process **halts without retrying** or silently treating the request as successful. Review the account's request history and game state before further action.
 - The **Running** section retains per-account managed-task Stop with separate confirmation. The **History & recovery** section retains manual reconciliation for an unconfirmed request. Never press reconciliation merely to clear a warning without independent checks.
 
 The user interface does not bypass backend permissions, task leases, idempotency, game engine validation or CAPTCHA. Multi-account task starts are intended for deliberate operator-authorized use, not automatic unattended all-account launch.
@@ -59,3 +59,15 @@ Settings controls theme (System/Light/Dark), default warehouse filters and secur
 - Test in synthetic demo first. When you authorize a real workflow, begin with **read-only All accounts warehouses** and Print preview. Report only sanitized status/errors, not tokens, cookies, private account files or session logs.
 
 See also [GUI migration](GUI-MIGRATION.md), [native Mac login](NATIVE-MAC-LOGIN.md), [live acceptance](LIVE-ACCEPTANCE.md), and the active [OpenSpec UX blueprint](../openspec/changes/redesign-macos-desktop-experience/ux-blueprint.md).
+
+
+## Account scope by screen
+
+| Screen | All configured accounts | Selected accounts | Single-account or restricted action |
+| --- | --- | --- | --- |
+| Overview | Direct jump to combined Warehouses and all-account Automation status | Choose subsets on the destination screen | Account cards open that account's context |
+| Accounts | Refresh configured accounts, check attached IkaBot sessions, include all in reports | Report checkboxes choose an arbitrary subset, synchronized with Warehouses | Browser sign-in, metadata editing, recovery and removal remain account-specific; multi-login and bulk destructive editing are intentionally unavailable |
+| Warehouses | Primary **All accounts** read-only combined report and print/export | **Choose accounts…** and **Selected (N)**; same combined export formats | **This account** is a secondary focused report |
+| Automations | **View all task statuses**, including disabled accounts | **View selected statuses** for any count; separately authorize **Start for selected** for 1–32 enabled accounts only | Task stop, uncertain-request reconciliation and interactive login remain individually verified; disabled or excessive selections cannot start mutations |
+| Activity | Sanitized local desktop events only (not a fabricated backend audit) | Not supported: historical events are not consistently account-tagged | Consult per-account Automations History for authoritative request IDs |
+| Connection and Settings | Backend-wide connection and local preferences | Not applicable: these are backend/application settings | No account credential or session mutation from these destinations |

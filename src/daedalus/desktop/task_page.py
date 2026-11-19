@@ -124,6 +124,8 @@ class TasksPage(QWidget):
         self._form_dirty = False
         self._bulk_account_ids: list[str] = []
         self._account_metadata: list[dict[str, object]] = []
+        self._all_account_metadata: list[dict[str, object]] = []
+        self._status_account_ids: list[str] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
         outer = QVBoxLayout(self)
@@ -386,12 +388,19 @@ class TasksPage(QWidget):
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         previous = self.selected_account_id()
+        # Read-only "All accounts" includes disabled accounts; only enabled
+        # accounts can be offered as candidates for task mutation.
+        self._all_account_metadata = [
+            dict(a) for a in accounts
+            if isinstance(a.get("id"), str) and a["id"]
+        ]
+        self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
         self._account_metadata = [
-            dict(a) for a in accounts if a.get("id") and a.get("enabled")
+            a for a in self._all_account_metadata if a.get("enabled") is True
         ]
         self._account_ids = [str(a["id"]) for a in self._account_metadata]
         self._bulk_account_ids = [
-            aid for aid in self._bulk_account_ids if aid in self._account_ids
+            aid for aid in self._bulk_account_ids if aid in self._status_account_ids
         ]
         self.account_combo.blockSignals(True)
         try:
@@ -465,8 +474,13 @@ class TasksPage(QWidget):
         from daedalus.desktop.account_scope import AccountSelectionDialog
 
         dialog = AccountSelectionDialog(
-            self._account_metadata, self._bulk_account_ids, self,
+            self._all_account_metadata, self._bulk_account_ids, self,
             title="Choose automation accounts",
+            explanation=(
+                "View task status for any chosen accounts, including disabled accounts. "
+                "Starting an automation is separate and requires explicit approval, "
+                "at most 32 enabled accounts, and individual backend preflights."
+            ),
         )
         if dialog.exec() == dialog.Accepted:
             self._bulk_account_ids = dialog.selected_ids()
@@ -474,22 +488,40 @@ class TasksPage(QWidget):
 
     def _update_bulk_buttons(self) -> None:
         count = len(self._bulk_account_ids)
-        self.view_all_button.setEnabled(bool(self._account_ids))
+        self.view_all_button.setEnabled(bool(self._status_account_ids))
         self.view_selected_button.setEnabled(bool(count))
-        self.choose_bulk_button.setEnabled(bool(self._account_ids))
+        self.choose_bulk_button.setEnabled(bool(self._status_account_ids))
         self.view_selected_button.setText(f"View selected ({count})")
         self.start_selected_button.setText(f"Start for selected ({count})…")
+        ineligible = [aid for aid in self._bulk_account_ids
+                      if aid not in self._account_ids]
+        can_start = bool(count) and count <= 32 and not ineligible
         self.start_selected_button.setEnabled(
-            self._dispatch_enabled and bool(count) and bool(self._task_names)
+            self._dispatch_enabled and can_start and bool(self._task_names)
         )
+        if count > 32:
+            self.bulk_note.setText(
+                "View status for any number of accounts. To start tasks, "
+                "choose at most 32 accounts and review each one."
+            )
+        elif ineligible:
+            self.bulk_note.setText(
+                "Status viewing includes disabled accounts. To start tasks, "
+                "select enabled accounts only."
+            )
+        else:
+            self.bulk_note.setText(
+                "Multi-account starts require approval and an independent preflight "
+                "for each account. A blocked account stops the batch."
+            )
 
     def _refresh_all(self) -> None:
-        if self._account_ids:
+        if self._status_account_ids:
             self._show_section(3)
             self.multi_summary.setText(
-                f"Checking tasks across all {len(self._account_ids)} accounts…"
+                f"Checking tasks across all {len(self._status_account_ids)} accounts…"
             )
-            self.batch_status_requested.emit(list(self._account_ids))
+            self.batch_status_requested.emit(list(self._status_account_ids))
 
     def _refresh_selected(self) -> None:
         if self._bulk_account_ids:
@@ -504,21 +536,25 @@ class TasksPage(QWidget):
         data = []
         error_count = 0
         for row in rows:
-            if not isinstance(row, dict) or row.get("account_id") not in self._account_ids:
+            if not isinstance(row, dict) or row.get("account_id") not in self._status_account_ids:
                 continue
             account = next(
-                (a for a in self._account_metadata if a["id"] == row["account_id"]), {}
+                (a for a in self._all_account_metadata if a["id"] == row["account_id"]), {}
             )
             label = str(account.get("label") or account.get("player") or row["account_id"])
             if row.get("error"):
                 error_count += 1
-                data.append([label, "—", "—", "Unavailable"])
+                data.append([label, "—", "—",
+                             "Disabled · unavailable" if not account.get("enabled")
+                             else "Unavailable"])
                 continue
             tasks = row.get("engine_tasks")
             requests = row.get("requests")
             if not isinstance(tasks, list) or not isinstance(requests, list):
                 error_count += 1
-                data.append([label, "—", "—", "Unavailable"])
+                data.append([label, "—", "—",
+                             "Disabled · unavailable" if not account.get("enabled")
+                             else "Unavailable"])
                 continue
             running = sum(
                 isinstance(item, dict) and item.get("status") == "running" for item in tasks
@@ -529,7 +565,9 @@ class TasksPage(QWidget):
                 for item in requests
             )
             data.append([label, running, unresolved,
-                         "Needs review" if unresolved else "Up to date"])
+                         "Needs review" if unresolved else
+                         "Disabled account" if not account.get("enabled") else
+                         "Up to date"])
         _populate(self.multi_table, data)
         self.multi_summary.setText(
             f"{len(data)} accounts checked"
@@ -541,6 +579,8 @@ class TasksPage(QWidget):
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or not self._bulk_account_ids
+                or len(self._bulk_account_ids) > 32
+                or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.confirm_box.isChecked() or not self.selected_task_name()):
             return
         if self._form_dirty and self._advanced_visible:

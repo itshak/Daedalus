@@ -54,7 +54,7 @@ All tasks are intentionally open. This change contains planning only; do not mar
 
 - [x] Provide an All accounts warehouse action, a custom multi-account picker, and a selected-account reporting action using existing read-only transport and unchanged export semantics; test partially unavailable accounts and more than 32 chosen accounts offline.
 - [x] Provide all/selected read-only automation status viewing and reviewed multi-account task starts with individual preflights/UUIDs, fail-closed blocking and halt-on-ambiguous-request behavior; cover offline synthetic cases.
-- [ ] Audit every account-facing screen for an all-account or selected-account action, and document/implement a truthful unavailable state wherever a safe multi-account backend operation cannot be exposed.
+- [x] Audit every account-facing screen for an all-account or selected-account action, and document/implement a truthful unavailable state wherever a safe multi-account backend operation cannot be exposed (scope matrix in docs/MAC-UI-GUIDE.md; synthetic tests in tests/test_desktop_account_scopes.py).
 - [ ] Review the multi-account mutation consent screen on real macOS and verify account names, scope labels, choice persistence and accessibility with synthetic fixtures.
 
 ## Phase 5 — QA, accessibility, packaging and completion gates

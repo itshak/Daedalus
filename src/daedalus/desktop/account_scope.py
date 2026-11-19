@@ -16,24 +16,34 @@ class AccountSelectionDialog(QDialog):
 
     def __init__(
         self, accounts: list[dict[str, object]], selected: list[str], parent=None,
-        *, title: str = "Choose accounts", max_accounts: int = 100,
+        *, title: str = "Choose accounts", max_accounts: int | None = None,
+        explanation: str | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(410, 500)
         self.setMinimumSize(340, 330)
+        # A silent list cutoff would make "All accounts" dishonest. The
+        # surrounding view decides whether an action needs a smaller safety
+        # limit (for example, mutating batch dispatch).
         self._accounts = [
             dict(row) for row in accounts
             if isinstance(row.get("id"), str) and row["id"]
-        ][:max_accounts]
+        ]
+        if max_accounts is not None and len(self._accounts) > max_accounts:
+            raise ValueError(
+                f"Account picker has {len(self._accounts)} entries, "
+                f"exceeding its declared limit of {max_accounts}"
+            )
         selected_ids = set(selected)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(METRICS.xl, METRICS.lg, METRICS.xl, METRICS.lg)
         outer.setSpacing(METRICS.md)
-        outer.addWidget(SubtitleLabel("Choose accounts"))
+        outer.addWidget(SubtitleLabel(title))
         note = CaptionLabel(
-            "Select the accounts to include. Read-only reports do not start game tasks. "
-            "Unavailable accounts will be reported separately."
+            explanation or
+            "Select accounts to include in this action. Account permissions "
+            "and any required confirmation are checked independently."
         )
         note.setWordWrap(True)
         outer.addWidget(note)
