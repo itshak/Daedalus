@@ -44,6 +44,154 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    # Source-verified compound editors. These field maps follow the actual
+    # upstream prepare_* contract; options and amounts remain subject to
+    # independent engine-side validation.
+    ("sendResources", "routes"): {
+        "type": "shipment_routes", "label": "Shipments",
+        "help": "Add origin, destination and resource quantities for each route. Own cities only.",
+    },
+    ("consolidateResources", "limits"): {
+        "type": "resource_limits", "label": "Retain in source cities",
+        "help": "Choose how many resources to keep in each source city; keep all means do not ship.",
+    },
+    ("consolidateResources", "sourceCityIds"): {
+        "type": "city_list", "label": "Source cities",
+        "help": "Choose the owned cities whose excess resources should be consolidated.",
+    },
+    ("consolidateResources", "destinationCityId"): {
+        "type": "city_picker", "label": "Destination city",
+        "help": "Receive excess resources in this account's city.",
+    },
+    ("consolidateResources", "intervalInHours"): {
+        "type": "integer", "label": "Repeat every",
+        "minimum": 1, "maximum": 336, "suffix": " h",
+        "explicit_input": True, "help": "Full hours between consolidation checks.",
+    },
+    ("consolidateResources", "shipType"): {
+        "type": "integer", "choices": [1, 2, 3],
+        "choice_labels": ["Trade ships", "Freighters", "Both fleets"],
+        "label": "Fleet type",
+    },
+    ("donationBot", "cities_dict"): {
+        "type": "donation_policies", "label": "Donation by city",
+        "help": "Choose each city's island project and share or amount.",
+    },
+    ("donationBot", "donate_method"): {
+        "type": "integer", "choices": [1, 2, 3],
+        "choice_labels": ["Keep storage below a percentage",
+                          "Donate a percentage of production",
+                          "Donate a fixed resource amount"],
+        "label": "Donation policy",
+    },
+    ("donationBot", "waiting_time"): {
+        "type": "integer", "label": "Repeat donations every",
+        "minimum": 1, "maximum": 10080, "suffix": " min",
+        "help": "Actual IkaBot donation polling interval.",
+    },
+    ("donationBot", "cities_ids"): {
+        "type": "hidden_derived",
+        "help": "City IDs are derived from the reviewed donation table.",
+    },
+    ("research", "qty"): {
+        "type": "integer", "label": "Experiments (one city)",
+        "minimum": 0, "maximum": 9999, "omit_zero": True,
+        "help": "0 means automatic experiments. Positive count requires exactly one academy city.",
+    },
+    ("research", "mode"): {"type": "hidden_derived"},
+    ("research", "experiments"): {"type": "hidden_derived"},
+    ("research", "automatic"): {"type": "hidden_derived"},
+    ("research", "cities"): {"type": "hidden_derived"},
+    ("research", "info"): {"type": "hidden_derived"},
+    ("tavernManager", "cities"): {"type": "hidden_derived"},
+    ("activateMiracle", "wonder"): {
+        "type": "text", "choices": ["hephaistos", "hades", "demeter", "athene",
+                                   "hermes", "ares", "poseidon", "colossus"],
+        "choice_labels": ["Hephaistos", "Hades", "Demeter", "Athena",
+                          "Hermes", "Ares", "Poseidon", "Colossus"],
+        "label": "Miracle",
+        "help": "Engine verifies that this account owns an eligible temple of the chosen wonder.",
+    },
+    ("activateMiracle", "iterations"): {
+        "type": "integer", "minimum": 1, "maximum": 100,
+        "label": "Number of activations",
+    },
+    ("activateMiracle", "island"): {
+        "type": "hidden_derived",
+        "help": "IkaBot finds an eligible owned temple for the chosen wonder.",
+    },
+    ("activateShrine", "godids"): {
+        "type": "choices_list", "choices": [1, 2, 3, 4, 5, 6],
+        "choice_labels": ["Pan", "Dionysus", "Tyche", "Plutus", "Theia", "Hephaestus"],
+        "label": "Gods to activate", "help": "Requires an actual Shrine of Olympus in this account.",
+    },
+    ("activateShrine", "mode"): {
+        "type": "integer", "choices": [1, 2, 3],
+        "choice_labels": ["Activate a number of times", "Repeat every 70 hours", "Both"],
+        "label": "Activation schedule",
+    },
+    ("activateShrine", "times"): {
+        "type": "integer", "minimum": 1, "maximum": 10,
+        "label": "Number of activations", "help": "Used in First and Both schedules.",
+    },
+    ("activateShrine", "selected_gods"): {"type": "hidden_derived"},
+    ("activateShrine", "wait_time"): {"type": "hidden_derived"},
+    ("searchForIslandSpaces", "islandList"): {
+        "type": "island_list", "label": "Islands to monitor",
+        "help": "Optionally select islands already hosting your cities; otherwise IkaBot searches all owned islands.",
+    },
+    ("searchForIslandSpaces", "time"): {
+        "type": "integer", "minimum": 3, "maximum": 1440,
+        "label": "Check every", "suffix": " min", "explicit_input": True,
+    },
+    ("searchForIslandSpaces", "fights"): {
+        "type": "boolean", "label": "Also monitor fighting on these islands",
+    },
+    ("dumpWorld", "coords"): {
+        "type": "map_center", "label": "Map area",
+        "help": "Optionally select an area; leave disabled to scan the whole world.",
+    },
+    ("dumpWorld", "radius"): {
+        "type": "hidden_derived", "help": "Radius is entered beside the optional map center.",
+    },
+    ("dumpWorld", "waiting_time"): {
+        "type": "number", "label": "Delay between island requests",
+        "minimum": 0.1, "maximum": 60.0, "suffix": " s",
+        "help": "Avoid aggressive world requests. Default is 1.5 seconds.",
+    },
+    ("dumpWorld", "show_progress"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateCount"): {
+        "type": "integer", "minimum": 1, "maximum": 100000, "explicit_input": True,
+        "label": "Number of missions",
+    },
+    ("autoPirate", "pirateMissionChoice"): {
+        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "label": "Mission", "help": "Required without the day/night schedule.",
+    },
+    ("autoPirate", "pirateMissionDayChoice"): {
+        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "label": "Day mission", "help": "Required when scheduled.",
+    },
+    ("autoPirate", "pirateMissionNightChoice"): {
+        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "label": "Night mission", "help": "Required when scheduled.",
+    },
+    ("autoPirate", "dayStart"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
+    ("autoPirate", "dayEnd"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
+    ("autoPirate", "nightStart"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
+    ("autoPirate", "nightEnd"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
+    ("autoPirate", "autoConvert"): {"type": "boolean", "label": "Convert capture points automatically"},
+    ("autoPirate", "convertPerMission"): {
+        "type": "integer", "minimum": 0, "maximum": 1000000, "label": "Convert after each mission",
+    },
+    ("autoPirate", "maxRandomWaitingTime"): {
+        "type": "integer", "minimum": 0, "maximum": 3600,
+        "label": "Random additional waiting", "suffix": " s",
+    },
+    ("autoPirate", "piracyCities"): {
+        "type": "hidden_derived",
+        "help": "Engine selects the first eligible real pirate fortress for the chosen mission.",
+    },
     # Daily collection city destinations and favour keys are taken verbatim
     # from loginDaily.prepare_loginDaily and TASK_FUNCTIONS.
     ("loginDaily", "wine_city"): {
