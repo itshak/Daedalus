@@ -4,6 +4,31 @@ Last reviewed: **2026-11-19** (limited field smoke; acceptance still open). The 
 
 ## Active native Mac redesign
 
+### Original warehouse-bot headless Selenium sign-in (PR #65, implementation review)
+
+Following the owner's correction, Daedalus's Mac UI now calls source-preserving
+copies of the original `itshak/ikabot` Selenium Chrome browser factory,
+Gameforge LoginFlow and humanized mouse/click/typing helpers. An approved
+account starts **headless**, first attempts to restore its saved game session,
+then logs in automatically. A **visible Chrome window opens only when a
+CAPTCHA is detected**; the human solves it and the original login resumes.
+On first use, the account's email/password must be supplied; with explicit
+consent, credentials and session cookies live only in the exact
+backend/account/world/player macOS Keychain scope, *not* in the former
+plaintext config.ini or tokens.json. The Mac sends only the selected world's
+encrypted cookie to the authoritative backend, which independently checks
+world/player/worker lease. Accounts support single/all/selected sequential
+sign-in; Warehouses has one-click **Auto sign-in + load all** with partial
+failure reporting. No game automation is automatically launched.
+
+This is an **implementation preview**, not acceptance of real-world login.
+The owner's real Gameforge/MFA/CAPTCHA, Mac Keychain persistence and session
+handoff/worker verification still require supervised testing (issue #60).
+Old archived manual Qt WebEngine recovery documentation records its former
+implementation, which this new headless login supersedes in the UI.
+
+
+
 The `redesign-macos-desktop-experience` OpenSpec change remains active while implementation work is completed incrementally. PR #63 merged the Fluent shell, first-class all-account warehouse reporting, selected-account task workflows and a macOS preview. The follow-up implementation consolidates three automation editors into one, adds Accounts master/detail, safe keyboard shortcuts, a filtered local Activity timeline, backend-grounded enum pickers, draft consent invalidation and duplicate-launch protection. Human macOS visual/VoiceOver walkthroughs and real-account acceptance are deferred to the owner and are **not** recorded as passing. Do not archive the redesign change until its remaining implementation tasks are reconciled.
 
 The latest implementation work also adds capability-derived automation
