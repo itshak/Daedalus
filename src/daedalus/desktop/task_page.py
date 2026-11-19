@@ -42,7 +42,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
-from daedalus.desktop.design_system import PageHeading, style_form_input
+from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
     configuration_summary,
@@ -170,11 +170,13 @@ class TasksPage(QWidget):
         layout.addWidget(self.status_label)
 
         template_row = QHBoxLayout()
-        self.wine_template_button = PushButton("Wine")
+        self.wine_template_button = PushButton("Wine", icon=FEATURE_ICONS["wine"])
         self.wine_template_button.setToolTip("Find tavern and low-wine automations")
         self.wine_template_button.clicked.connect(lambda: self.select_workflow("wine"))
         template_row.addWidget(self.wine_template_button)
-        self.construction_template_button = PushButton("Construction")
+        self.construction_template_button = PushButton(
+            "Construction", icon=FEATURE_ICONS["construction"]
+        )
         self.construction_template_button.setToolTip(
             "Find construction and research automations"
         )
@@ -185,7 +187,7 @@ class TasksPage(QWidget):
         self.all_templates_button = PushButton("All automations")
         self.all_templates_button.clicked.connect(lambda: self.select_workflow("all"))
         template_row.addWidget(self.all_templates_button)
-        self.catalog_button = PushButton("Explore catalog…")
+        self.catalog_button = PushButton("Explore catalog…", icon=FEATURE_ICONS["catalog"])
         self.catalog_button.clicked.connect(self._open_catalog)
         template_row.addWidget(self.catalog_button)
         template_row.addStretch(1)
@@ -707,17 +709,16 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
         task = self.selected_task_name()
+        # Display the *entire* approved scope, including worlds. Never hide
+        # 20 accounts behind "and more" before an irreversible group action.
         names = [
-            str(a.get("label") or a.get("player") or a["id"])
-            for a in self._account_metadata if a["id"] in self._bulk_account_ids
+            self._account_description(aid) for aid in self._bulk_account_ids
         ]
-        summary = ", ".join(names[:12])
-        if len(names) > 12:
-            summary += f" and {len(names) - 12} more"
+        summary = "\n".join(f"• {name}" for name in names)
         answer = QMessageBox.question(
             self, "Review multi-account automation",
             f"Start {_friendly_task(task)} for {len(names)} selected accounts?\n\n"
-            f"Accounts: {summary}\n\n"
+            f"Accounts (review all):\n{summary}\n\n"
             f"Settings: {configuration_summary(config)}\n\n"
             "Daedalus checks every account's readiness before starting any. "
             "Each account gets its own validated request; on an uncertain result "
@@ -857,8 +858,21 @@ class TasksPage(QWidget):
             )
             detail.setWordWrap(True)
             panel.addWidget(detail)
+            permission_note = CaptionLabel(
+                "Review and preflight required" if self._dispatch_enabled
+                else "Read-only: backend task starts unavailable"
+            )
+            permission_note.setWordWrap(True)
+            panel.addWidget(permission_note)
             panel.addStretch(1)
-            action = PushButton("Configure")
+            category = _category(name)
+            feature = (
+                "alerts" if category == "Alerts & monitoring"
+                else "resources" if category == "Resources & trade"
+                else "construction" if category == "City management"
+                else "catalog"
+            )
+            action = PushButton("Configure", icon=FEATURE_ICONS[feature])
             action.setAccessibleName(f"Configure {_friendly_task(name)}")
             action.setToolTip(
                 "Choose this automation and inspect its settings; does not start it"
@@ -1272,6 +1286,15 @@ class TasksPage(QWidget):
         if account_id:
             self.refresh_requested.emit(account_id)
 
+    def _account_description(self, account_id: str) -> str:
+        record = next(
+            (a for a in self._all_account_metadata if a["id"] == account_id),
+            {},
+        )
+        label = str(record.get("label") or record.get("player") or account_id)
+        world = str(record.get("world") or "world unspecified")
+        return f"{label} · {world} (account {account_id})"
+
     def _start(self) -> None:
         account_id = self.selected_account_id()
         task = self.selected_task_name()
@@ -1307,7 +1330,8 @@ class TasksPage(QWidget):
         params = configuration_summary(config)
         answer = QMessageBox.question(
             self, "Review automation",
-            f"Start {_friendly_task(task)} for {account_id}?\n\n"
+            f"Start {_friendly_task(task)} for "
+            f"{self._account_description(account_id)}?\n\n"
             f"Settings: {params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
