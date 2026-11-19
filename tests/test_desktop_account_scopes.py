@@ -242,6 +242,7 @@ def test_print_action_only_enabled_for_real_report_rows(app):
 
 def test_overview_scrolls_in_a_short_mac_window(app):
     from PySide6.QtWidgets import QScrollArea
+
     from daedalus.desktop.home_page import HomePage
 
     page = HomePage()
@@ -282,6 +283,6 @@ def test_automation_parameter_form_uses_compact_height_for_one_field(app):
         }], enabled=True)
         assert page.parameter_scroll.height() <= 95
         assert page.parameter_scroll.maximumHeight() <= 100
-        assert page.pivot.item("configure").text() == "Configure"
+        assert page.stack.count() == 4
     finally:
         _dispose(page, app)
