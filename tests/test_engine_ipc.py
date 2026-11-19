@@ -60,6 +60,17 @@ def fake_worker(tmp_path, responder=None):
                         {"position": 3, "name": "Academy", "building": "academy",
                          "level": 6, "busy": True, "can_upgrade": False},
                     ]}
+        if msg["action"] == "list_workshop_upgrades_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "workshop_level": 12,
+                    "upgrades": [
+                        {"unit_id": "101", "name": "Swordsman",
+                         "upgrade_type": "offensive", "description": "Attack",
+                         "current_level": 4, "max_level": 12},
+                        {"unit_id": "101", "name": "Swordsman",
+                         "upgrade_type": "defensive", "description": "Defense",
+                         "current_level": 5, "max_level": 12},
+                    ]}
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
@@ -422,3 +433,36 @@ def test_construction_preview_rejects_wrong_account_identity(tmp_path):
         EngineIPCUnavailable, match="invalid session metadata"
     ):
         client.construction_preview(ALPHA, 42, [{"position": 1, "target_level": 7}])
+
+
+def test_workshop_upgrades_are_account_bound_and_never_start_game_tasks(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        data = client.workshop_upgrades(ALPHA, 42)
+        assert data["workshop_level"] == 12
+        assert [(row["unit_id"], row["upgrade_type"]) for row in data["upgrades"]] == [
+            ("101", "offensive"), ("101", "defensive")
+        ]
+        assert requests[-1] == {
+            "action": "list_workshop_upgrades_existing",
+            "world": "s301-en", "player": "ExamplePlayer", "city_id": 42,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.workshop_upgrades(ALPHA, 99)
+        assert not any("start_task" in row["action"] for row in requests)
+
+
+def test_workshop_malformed_engine_response_rejected_before_ui(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": 42, "workshop_level": 10, "upgrades": [{
+                    "unit_id": "101", "name": "Sword", "upgrade_type": "offensive",
+                    "description": "Attack", "current_level": 4, "max_level": 99,
+                }]}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="Malformed workshop"
+    ):
+        client.workshop_upgrades(ALPHA, 42)
