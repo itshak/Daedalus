@@ -54,7 +54,13 @@ class SeleniumLoginWorker(QThread):
 
     def run(self) -> None:
         try:
-            cached = self.store.get_session() if self.remember else None
+            try:
+                cached = self.store.get_session() if self.remember else None
+            except GameforgeCredentialError:
+                # An expired/invalid local browser cache is never a reason to
+                # require manual login. Follow the old bot: fall back to headless.
+                cached = None
+                self.progress.emit("Saved session unavailable; logging in headlessly")
             session = login_headless_first(
                 credentials=self.credentials, world=self.world, player=self.player,
                 cached_session=cached, progress=self.progress.emit,
