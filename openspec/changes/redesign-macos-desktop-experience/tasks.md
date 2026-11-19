@@ -25,7 +25,7 @@ This change now contains merged implementation plus continued UX hardening. Chec
 - [ ] 2.2 Redesign the connected Connection screen as status/details/reconnect/forget plus Advanced SSH fallback; test missing/untrusted TLS, unauthorized token, unavailable keyring and trusted SSH fail-closed handling.
 - [ ] 2.3 Replace simple Home action grid with an account-scoped Overview showing truthful backend/worker health, quick actions, summaries and source/refresh/empty/partial states.
 - [ ] 2.4 Redesign Accounts as an accessible master/detail workspace with clear account identity, session status and contextual primary action while preserving account create/edit/enable/disable/remove rules and confirmations.
-- [ ] 2.5 Implement a guided Sign in on this Mac dialog/sheet with explicit account/world, manual CAPTCHA expectations, one-use challenge progress, cancel, timeout and independently verified success; never surface secret material.
+- [ ] 2.5 Restore the exact original warehouse bot's headless Selenium login with optional one-time credentials, session restore, humanized visible CAPTCHA-only fallback, one-use encrypted world-cookie handoff, cancellation and independently verified server-side player success. The code and synthetic tests are in PR #65; real Mac CAPTCHA/Keychain behavior and live backend acceptance still require owner verification.
 - [ ] 2.6 Move manual assistance, monitoring and host-side recovery into separated permission-gated secondary flows with verified lease/status handling, stale-ticket guards and no implicit worker authentication.
 - [ ] 2.7 Add offscreen synthetic UI coverage for disconnected, read-only, demo, unverified, paused, needs assistance, worker-busy and multiactive account states; ensure zero accidental game requests.
 
@@ -117,3 +117,19 @@ The separate active validate-live-authentication change tracks owner-supervised 
   its label, world and stable account ID (never abbreviates the remaining
   cohort); semantic Fluent icons distinguish Wine, Construction, alerts and
   resources in the task discovery workflow.
+
+## Original IkaBot Selenium sign-in parity (owner correction)
+
+- [x] Copy the original user's `itshak/ikabot` browser, LoginFlow and
+  humanization source into Daedalus with only namespace import changes.
+- [x] Use that exact LoginFlow for Keychain session restore and headless login;
+  visible Chrome is reserved for a detected CAPTCHA, with the copied
+  humanization code and manual user resolution, never automated solving.
+- [x] Replace original plaintext credential config and token cache with
+  Keychain-only, exact origin/account/world/player storage; keep the existing
+  encrypted world-cookie handoff and independent worker verification.
+- [x] Add one-account and sequential all/selected-account automatic sign-in,
+  plus an Auto sign-in + load all warehouse shortcut.
+- [ ] Confirm the updated full CI, real Mac packaged app with installed Chrome,
+  actual Gameforge world/player/Keychain test and CAPTCHA recovery; these
+  cannot be accepted based on mocked synthetic tests alone.
