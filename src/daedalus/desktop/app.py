@@ -718,7 +718,10 @@ class MainWindow(FluentWindow):
             chosen.append(account_id)
         self._automatic_login_origin = self._active_backend_url
         self._automatic_login_queue = chosen
-        self._automatic_login_report = list(seen) if report_after else None
+        self._automatic_login_report = (
+            list(dict.fromkeys(aid for aid in account_ids if isinstance(aid, str)))
+            if report_after else None
+        )
         self._automatic_login_attempts = 0
         self._continue_automatic_login_batch()
 
@@ -1132,9 +1135,9 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True, demo=demo)
             self.home_page.set_connected(True, demo=demo)
             browser_capability = payload.get("native_browser_login") or {}
-            self.accounts_page.set_native_browser_login_enabled(
-                not demo and browser_capability.get("enabled") is True
-            )
+            secure_login_available = not demo and browser_capability.get("enabled") is True
+            self.accounts_page.set_native_browser_login_enabled(secure_login_available)
+            self.warehouses_page.set_login_available(secure_login_available)
             self.warehouses_page.set_demo(demo)
             self.warehouses_page.clear_reports()
             self.setWindowTitle("Daedalus for Ikariam — SYNTHETIC DEMO" if demo else "Daedalus for Ikariam")
