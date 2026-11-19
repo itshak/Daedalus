@@ -227,8 +227,12 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
                 assert '"threshold": 1000' in page.config_editor.toPlainText()
             page.confirm_box.setChecked(True)
             page._start()
-            assert seen[-1][0:2] == ("alpha", expected)
-            assert seen[-1][2] == ({"threshold": 1000} if kind == "wine" else {})
+            if kind == "wine":
+                assert seen[-1][0:2] == ("alpha", expected)
+                assert seen[-1][2] == {"threshold": 1000}
+            else:
+                # No prepared plan was supplied; merely having an @task is not enough.
+                assert seen == []
             assert "constructBuilding" not in page._task_names
         finally:
             _dispose(page, qt_app)
