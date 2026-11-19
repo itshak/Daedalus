@@ -29,7 +29,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_construction_existing",
+    "preview_construction_existing", "list_workshop_upgrades_existing",
 })
 
 
@@ -128,7 +128,7 @@ class ExistingIPCClient:
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_construction_existing",
+            "preview_construction_existing", "list_workshop_upgrades_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -136,7 +136,8 @@ class ExistingIPCClient:
         payload: dict[str, object] = {"action": action}
         if account is not None:
             payload.update(world=account.world, player=account.player)
-        if action in {"list_buildings_existing", "preview_construction_existing"}:
+        if action in {"list_buildings_existing", "preview_construction_existing",
+                      "list_workshop_upgrades_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
                 raise ValueError("Choose a valid city")
             payload["city_id"] = city_id
@@ -389,6 +390,55 @@ class ExistingIPCClient:
         return {
             "account_id": account.id, "city_id": city_id, "ready": plan["ready"],
             "config": config, "estimated_seconds": seconds, **numbers,
+        }
+
+    def workshop_upgrades(self, account: Account, city_id: int) -> dict[str, object]:
+        """Return verified current account workshop levels and upgrade choices."""
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid workshop city")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Workshop city not owned by account")
+        data = self.request(
+            "list_workshop_upgrades_existing", account=account, city_id=city_id,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot returned another account's workshop")
+        level = data.get("workshop_level")
+        choices = data.get("upgrades")
+        if (type(level) is not int or not 0 <= level <= 25
+                or not isinstance(choices, list) or len(choices) > 250):
+            raise EngineIPCUnavailable("Invalid IkaBot workshop inventory")
+        result = []
+        seen = set()
+        for item in choices:
+            if not isinstance(item, dict):
+                raise EngineIPCUnavailable("Invalid workshop upgrade")
+            uid, name, upgrade_type = (
+                item.get("unit_id"), item.get("name"), item.get("upgrade_type")
+            )
+            current, maximum = item.get("current_level"), item.get("max_level")
+            description = item.get("description")
+            if (not isinstance(uid, str) or not uid.isdecimal()
+                    or not 0 < len(uid) <= 16
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(upgrade_type, str)
+                    or not re.fullmatch(r"[a-zA-Z_]{1,40}", upgrade_type)
+                    or not isinstance(description, str) or len(description) > 100
+                    or type(current) is not int or not 0 <= current <= 25
+                    or type(maximum) is not int or maximum != level
+                    or (uid, upgrade_type) in seen):
+                raise EngineIPCUnavailable("Malformed workshop upgrade data")
+            seen.add((uid, upgrade_type))
+            result.append({
+                "unit_id": uid, "name": name, "upgrade_type": upgrade_type,
+                "description": description, "current_level": current,
+                "max_level": maximum,
+            })
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "workshop_level": level, "upgrades": result,
         }
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
