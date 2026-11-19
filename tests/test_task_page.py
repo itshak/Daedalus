@@ -390,6 +390,10 @@ def test_distribution_uses_verified_resource_policy_and_actual_city_multiselect(
     resource = page._form_inputs["resource"]
     values = [resource.itemText(i) for i in range(resource.count())]
     assert values == ["wood", "wine", "marble", "crystal", "sulfur"]
+    # Required resource is deliberately not assumed: user must choose one.
+    with pytest.raises(ValueError, match="Choose an option for resource"):
+        page._form_config()
+    resource.setCurrentIndex(0)
     assert page._form_config()["resource"] == "wood"
     assert "cities_ids" not in page._form_config()  # all cities through upstream default
 
