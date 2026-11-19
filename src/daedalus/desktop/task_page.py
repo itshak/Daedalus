@@ -155,7 +155,7 @@ class TasksPage(QWidget):
         outer.addWidget(self.stack, 1)
         self.stack.addWidget(scroll)
         self.pivot.addItem(
-            routeKey="configure", text="Discover & configure",
+            routeKey="configure", text="Configure",
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
@@ -254,7 +254,7 @@ class TasksPage(QWidget):
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
         # These are read-only selection cards; only the separate, reviewed
         # Start action can contact the backend with a game mutation.
-        self.browse_button = PushButton("Browse automation gallery ▾")
+        self.browse_button = PushButton("Browse actions ▾")
         self.browse_button.setToolTip("Show or hide available automation choices")
         self._gallery_open = False
         self.browse_button.clicked.connect(self._toggle_gallery)
@@ -1224,6 +1224,10 @@ class TasksPage(QWidget):
             )
         for field in fields:
             key = str(field["name"])
+            if name == "constructionList" and key not in {"city_id", "city_name"}:
+                # Complex planner internals belong to an expert imported plan,
+                # never to the normal construction interface.
+                continue
             if name == "constructionList" and key == "city_name":
                 # The paired, verified name comes from the selected city's read-only record.
                 continue
@@ -1313,9 +1317,11 @@ class TasksPage(QWidget):
         if fields:
             # Match the form to its contents instead of leaving a large empty
             # box under single-parameter workflows.
-            list_extra = 78 if any(field.get("type") == "city_list" for field in fields) else 0
+            visible_fields = [f for f in fields if name != "constructionList"
+                              or f.get("name") == "city_id"]
+            list_extra = 78 if any(field.get("type") == "city_list" for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
-                min(315, max(72, len(fields) * 44 + 24 + list_extra))
+                min(315, max(72, len(visible_fields) * 44 + 24 + list_extra))
             )
         self.build_json_button.setEnabled(bool(fields))
         self._invalidate_review()
@@ -1373,7 +1379,9 @@ class TasksPage(QWidget):
         config: dict[str, object] = {}
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
-            if name == "constructionList" and key in {"city_id", "city_name"}:
+            if name == "constructionList":
+                # Only the live city choice is exposed in the guided editor.
+                # Full engine-prepared construction internals are expert-only.
                 continue
             kind = str(field["type"])
             widget = self._form_inputs[key]
