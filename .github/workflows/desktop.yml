@@ -38,7 +38,12 @@ jobs:
       - name: Confirm desktop CLI is installed
         run: python -c "from daedalus.desktop import main; assert callable(main)"
       - name: Capture credential-free Fluent desktop screenshots
-        run: python scripts/capture_native_ui.py --output-dir synthetic-ui-screenshots
+        env:
+          # Cocoa on hosted runners has no user display/session for window.grab().
+          # Keep Cocoa for real widget tests, use offscreen only for snapshots.
+          QT_QPA_PLATFORM: offscreen
+          PYTHONFAULTHANDLER: "1"
+        run: python -X faulthandler scripts/capture_native_ui.py --output-dir synthetic-ui-screenshots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
