@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtCore import QObject, QRect, QSize, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QSizePolicy, QSpacerItem
 from qfluentwidgets import (
     FluentWindow,
@@ -62,6 +63,7 @@ class QtLogBridge(QObject):
     """Keep the legacy GUI's queued-signal logging to avoid cross-thread Qt crashes."""
 
     message = Signal(str)
+    activity = Signal(str, str)
 
     def __init__(self, widget: QPlainTextEdit, parent=None) -> None:
         super().__init__(parent)
@@ -76,13 +78,19 @@ class QtLogBridge(QObject):
 
 
 class QtLogHandler(logging.Handler):
-    def __init__(self, widget: QPlainTextEdit) -> None:
+    def __init__(self, widget: QPlainTextEdit, activity_page: LogPage | None = None) -> None:
         super().__init__()
         self.bridge = QtLogBridge(widget)
+        if activity_page is not None:
+            self.bridge.activity.connect(activity_page.add_event)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             self.bridge.message.emit(self.format(record))
+            # The timeline uses a strict allowlist of generic messages and
+            # never displays raw backend exception bodies or account IDs.
+            if record.name == "daedalus.desktop":
+                self.bridge.activity.emit(record.levelname, record.getMessage())
         except RuntimeError:
             pass
 
@@ -384,7 +392,7 @@ class MainWindow(FluentWindow):
         self._worker: APIWorker | None = None
         # Follow-up API reads run only after QThread.finished. A zero-delay
         # timer fired from completed may race with finished and be discarded.
-        self._preflight_queue: list[tuple[str, str]] = []
+        self._preflight_queue: list[tuple[str, str, int]] = []
         self._pending_task_refresh: str | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
@@ -406,10 +414,10 @@ class MainWindow(FluentWindow):
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
         self.operations_page = OperationsPage(self)
+        # One authoritative automation workspace. Wine and Construction are
+        # contextual filters, never duplicate editors with divergent drafts.
         self.tasks_page = TasksPage(self)
-        self.wine_page = TasksPage(self, workflow="wine")
-        self.construction_page = TasksPage(self, workflow="construction")
-        self._task_views = (self.tasks_page, self.wine_page, self.construction_page)
+        self._task_views = (self.tasks_page,)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
         self.appearance_page = AppearancePage(self)
@@ -451,6 +459,12 @@ class MainWindow(FluentWindow):
         self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
         self.appearance_page.connection_settings_requested.connect(
             lambda: self.switchTo(self.connection_page)
+        )
+        self.appearance_page.report_accounts_requested.connect(
+            self.warehouses_page._choose_accounts
+        )
+        self.appearance_page.report_all_requested.connect(
+            self._include_all_report_accounts
         )
         self.accounts_page.report_selection_changed.connect(self._on_report_selection_changed)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
@@ -545,7 +559,7 @@ class MainWindow(FluentWindow):
                 )
             )
 
-        self._log_handler = QtLogHandler(self.log_page.log_view)
+        self._log_handler = QtLogHandler(self.log_page.log_view, self.log_page)
         self._log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
         logger.addHandler(self._log_handler)
         logger.setLevel(logging.INFO)
@@ -553,6 +567,16 @@ class MainWindow(FluentWindow):
         self.setWindowTitle("Daedalus for Ikariam")
         self.setWindowIcon(application_icon())
         self.resize(1130, 780)
+        self.setMinimumSize(900, 650)
+        # Mac-standard shortcuts; refresh is read-only, never a task start.
+        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self._settings_shortcut.activated.connect(
+            lambda: self.switchTo(self.appearance_page)
+        )
+        self._refresh_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
+        self._refresh_shortcut.activated.connect(self._refresh_current_view)
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._search_shortcut.activated.connect(self._focus_search)
         logger.info("Desktop ready; HTTPS and OS-keychain access are preferred")
         # Keychain access is deferred until the native window has rendered.
         # Only previously approved HTTPS endpoints are auto-connected; an old
@@ -564,6 +588,28 @@ class MainWindow(FluentWindow):
         if sys.platform != "darwin":
             return super().systemTitleBarRect(size)
         return QRect(0, 0 if self.isFullScreen() else 8, 75, size.height())
+
+    def _refresh_current_view(self) -> None:
+        """Only read-only refresh actions may be reached by a global shortcut."""
+        if self.client is None or self._worker is not None:
+            return
+        current = self.stackedWidget.currentWidget()
+        if current is self.accounts_page:
+            self._request("accounts")
+        elif current is self.warehouses_page:
+            self.warehouses_page._load_all()
+        elif current is self.tasks_page:
+            self.tasks_page._refresh_all()
+        elif current is self.home_page:
+            self._request("accounts")
+        elif current is self.operations_page:
+            self._request("capabilities")
+
+    def _focus_search(self) -> None:
+        if self.stackedWidget.currentWidget() is self.tasks_page:
+            self.tasks_page._show_section(0)
+            self.tasks_page.search_input.setFocus(Qt.ShortcutFocusReason)
+            self.tasks_page.search_input.selectAll()
 
     def _save_gui_preferences(self) -> None:
         try:
@@ -704,8 +750,19 @@ class MainWindow(FluentWindow):
         else:
             self._request("task_list", account_id=account_id)
 
+    def _include_all_report_accounts(self) -> None:
+        """Settings and Warehouses share one persisted account selection."""
+        # Setting exclusions updates and persists the warehouse scope through
+        # the existing report_selection_changed signal (no duplicate write).
+        self.accounts_page.set_report_exclusions(set())
+
     def _on_report_selection_changed(self, selected: list[str]) -> None:
         self.warehouses_page.set_selected_accounts(selected)
+        self.appearance_page.set_report_scope(
+            len(self.warehouses_page._account_ids), len(
+                self.warehouses_page._included_ids
+            ),
+        )
         if self._syncing_report_preferences or self._active_backend_url is None:
             return
         try:
@@ -782,8 +839,7 @@ class MainWindow(FluentWindow):
         )
         worker = SecureSSHConnectionWorker(destination, token, parent=self)
         self._worker = worker
-        self.connection_page.connect_button.setEnabled(False)
-        self.connection_page.ssh_button.setEnabled(False)
+        self.connection_page.set_connecting(True)
         worker.completed.connect(self._on_completed)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_worker_finished)
@@ -887,8 +943,13 @@ class MainWindow(FluentWindow):
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
-        """Defer harmless readiness probes until the single HTTP worker is free."""
-        key = (account_id, task)
+        """Queue only current-generation readiness checks for the single workspace."""
+        view = self.tasks_page
+        if view.selected_account_id() != account_id or view.selected_task_name() != task:
+            return
+        key = (account_id, task, view._selection_generation)
+        # Superseded drafts should never consume a queued request slot.
+        self._preflight_queue = [item for item in self._preflight_queue if item == key]
         if key not in self._preflight_queue:
             self._preflight_queue.append(key)
         if self._worker is None:
@@ -899,15 +960,14 @@ class MainWindow(FluentWindow):
             return
         # A prior selection may have become obsolete during the last network call.
         while self._preflight_queue:
-            account_id, task = self._preflight_queue.pop(0)
-            if any(
-                view.selected_account_id() == account_id
-                and view.selected_task_name() == task
-                for view in self._task_views
-            ):
+            account_id, task, generation = self._preflight_queue.pop(0)
+            view = self.tasks_page
+            if (view.selected_account_id() == account_id
+                    and view.selected_task_name() == task
+                    and view._selection_generation == generation):
                 self._launch(
                     self.client, "task_preflight", account_id=account_id,
-                    task_payload={"task": task},
+                    task_payload={"task": task, "generation": generation},
                 )
                 return
 
@@ -919,8 +979,8 @@ class MainWindow(FluentWindow):
             client, action, account_id=account_id, task_payload=task_payload, parent=self,
         )
         self._worker = worker
-        self.connection_page.connect_button.setEnabled(False)
-        self.connection_page.ssh_button.setEnabled(False)
+        if action == "connect":
+            self.connection_page.set_connecting(True)
         worker.completed.connect(self._on_completed)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_worker_finished)
@@ -979,11 +1039,22 @@ class MainWindow(FluentWindow):
             try:
                 # SSH forwarding uses a different random local port on every
                 # launch; scope private report choices by the trusted host.
+                prior_backend_url = self._active_backend_url
                 self._active_backend_url = (
                     "ssh://" + self._active_ssh_destination
                     if self._ssh_tunnel is not None and self._active_ssh_destination
                     else getattr(self.client, "_server", None)
                 )
+                if (prior_backend_url is not None
+                        and prior_backend_url != self._active_backend_url):
+                    # Equal account IDs on two servers are not equal authority.
+                    # Never carry a prior backend's task review, preflight,
+                    # selection or cached account summary into the new session.
+                    self._preflight_queue.clear()
+                    self._pending_task_refresh = None
+                    self._pending_batch_status = None
+                    self.tasks_page.reset_backend_context()
+                    self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
                 self.accounts_page.set_report_exclusions(excluded)
                 self.accounts_page.set_connected_ids(None)
@@ -1113,19 +1184,34 @@ class MainWindow(FluentWindow):
         elif action == "warehouses":
             assert isinstance(payload, dict)
             self.warehouses_page.set_snapshots(payload["account_id"], payload["cities"])
+            self.home_page.set_warehouse_report(1)
             logger.info("Warehouse snapshot report updated")
         elif action in {"warehouses_batch", "warehouses_all"}:
             assert isinstance(payload, list)
             self.warehouses_page.set_batch_snapshots(payload)
+            successful = sum(
+                isinstance(item, dict) and isinstance(item.get("cities"), list)
+                and not item.get("error") for item in payload
+            )
+            self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
         elif action == "task_preflight":
             assert isinstance(payload, dict)
-            for view in self._task_views:
+            worker = self._worker
+            request = getattr(worker, "task_payload", None)
+            generation = request.get("generation") if isinstance(request, dict) else None
+            view = self.tasks_page
+            if generation is None or generation == view._selection_generation:
                 view.set_preflight(payload)
         elif action == "task_list_batch":
             assert isinstance(payload, list)
             for view in self._task_views:
                 view.set_batch_status(payload)
+            successful = sum(
+                isinstance(item, dict) and not item.get("error")
+                and isinstance(item.get("engine_tasks"), list) for item in payload
+            )
+            self.home_page.set_task_report(successful, len(payload) - successful)
             logger.info("Multi-account read-only managed task statuses refreshed")
         elif action == "task_start_batch":
             assert isinstance(payload, dict)
@@ -1163,6 +1249,9 @@ class MainWindow(FluentWindow):
             logger.info("Managed tasks refreshed")
         elif action in {"task_start", "task_stop", "task_reconcile"}:
             assert isinstance(payload, dict)
+            if action == "task_start":
+                for view in self._task_views:
+                    view.finish_launch()
             logger.info("Task operation acknowledged: %s", action)
             self._notice("Task operation accepted", str(payload.get("status", "Complete")))
             account_id = payload.get("account_id")
@@ -1178,6 +1267,10 @@ class MainWindow(FluentWindow):
         # This also handles accounts newly created via metadata editing.
         self.warehouses_page.set_selected_accounts(
             self.accounts_page.selected_report_account_ids()
+        )
+        self.appearance_page.set_report_scope(
+            len(self.warehouses_page._account_ids),
+            len(self.warehouses_page._included_ids),
         )
         for view in self._task_views:
             view.set_accounts(data)
@@ -1197,8 +1290,14 @@ class MainWindow(FluentWindow):
         if action == "native_login_start":
             self._pending_native_login_challenge = None
         if action == "task_preflight":
+            worker = self._worker
+            request = getattr(worker, "task_payload", None)
+            generation = request.get("generation") if isinstance(request, dict) else None
+            if generation is None or generation == self.tasks_page._selection_generation:
+                self.tasks_page.set_preflight_unavailable()
+        if action in {"task_start_batch", "task_start"}:
             for view in self._task_views:
-                view.set_preflight_unavailable()
+                view.finish_launch()
         if action == "task_start_batch":
             # Failure could have happened after an irreversible request;
             # do not rerun or automatically acknowledge a task.
@@ -1227,7 +1326,11 @@ class MainWindow(FluentWindow):
             if self._pending_client is not None:
                 self._pending_client.close()
                 self._pending_client = None
-            self.connection_page.set_connected(self.client is not None)
+            if self.client is None:
+                self.connection_page.set_connection_error(error)
+            else:
+                # A failed reconnect must not hide an existing authorized session.
+                self.connection_page.set_connected(True)
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight"}:
             if action.startswith("native_login_"):
@@ -1242,6 +1345,11 @@ class MainWindow(FluentWindow):
                     "Check that the worker is idle, prior uncertain tasks are reconciled, "
                     "and the selected account is configured on the server.",
                 )
+            elif action in {"connect", "ssh_connect"}:
+                self._notice(
+                    "Secure connection failed",
+                    self.connection_page.status_label.text(),
+                )
             elif action == "task_start":
                 self._notice("Automation not started", error)
             elif action in {"task_stop", "task_reconcile"}:
@@ -1251,8 +1359,7 @@ class MainWindow(FluentWindow):
 
     def _on_worker_finished(self) -> None:
         self._worker = None
-        self.connection_page.connect_button.setEnabled(True)
-        self.connection_page.ssh_button.setEnabled(True)
+        self.connection_page.set_connecting(False)
         challenge, self._pending_native_login_challenge = (
             self._pending_native_login_challenge, None
         )

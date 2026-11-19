@@ -56,6 +56,8 @@ class HomePage(QWidget):
         self._account_ids: list[str] = []
         self._connected = False
         self._demo = False
+        self._warehouse_report_note = "Not checked yet — open Warehouses to refresh."
+        self._task_report_note = "Not checked yet — open Automations to refresh."
 
         shell = QVBoxLayout(self)
         shell.setContentsMargins(0, 0, 0, 0)
@@ -95,6 +97,36 @@ class HomePage(QWidget):
         self.selected_status = CaptionLabel("Select a connected account to view live data.")
         overview_row.addWidget(self.selected_status)
         layout.addWidget(overview)
+
+        # Honest summary cards: absence of a read never becomes a fabricated
+        # zero or a guessed last-refresh timestamp.
+        summary_row = QGridLayout()
+        summary_row.setSpacing(12)
+        self.session_card = CardWidget(self)
+        session_layout = QVBoxLayout(self.session_card)
+        session_layout.setContentsMargins(16, 14, 16, 14)
+        session_layout.addWidget(SubtitleLabel("Sessions"))
+        self.session_metric = CaptionLabel("Not checked")
+        self.session_metric.setWordWrap(True)
+        session_layout.addWidget(self.session_metric)
+        summary_row.addWidget(self.session_card, 0, 0)
+        self.report_card = CardWidget(self)
+        report_layout = QVBoxLayout(self.report_card)
+        report_layout.setContentsMargins(16, 14, 16, 14)
+        report_layout.addWidget(SubtitleLabel("Warehouse reports"))
+        self.report_metric = CaptionLabel(self._warehouse_report_note)
+        self.report_metric.setWordWrap(True)
+        report_layout.addWidget(self.report_metric)
+        summary_row.addWidget(self.report_card, 0, 1)
+        self.task_status_card = CardWidget(self)
+        task_layout = QVBoxLayout(self.task_status_card)
+        task_layout.setContentsMargins(16, 14, 16, 14)
+        task_layout.addWidget(SubtitleLabel("Task status"))
+        self.task_metric = CaptionLabel(self._task_report_note)
+        self.task_metric.setWordWrap(True)
+        task_layout.addWidget(self.task_metric)
+        summary_row.addWidget(self.task_status_card, 0, 2)
+        layout.addLayout(summary_row)
 
         layout.addWidget(SubtitleLabel("Quick actions"))
         self.actions = QGridLayout()
@@ -145,11 +177,29 @@ class HomePage(QWidget):
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
         self._connected = connected
         self._demo = demo
+        self._warehouse_report_note = "Not checked yet — open Warehouses to refresh."
+        self._task_report_note = "Not checked yet — open Automations to refresh."
+        self._update_controls()
+
+    def set_warehouse_report(self, count: int, unavailable: int = 0) -> None:
+        self._warehouse_report_note = (
+            f"Latest read: {count} account reports"
+            + (f" · {unavailable} unavailable" if unavailable else "")
+            + ". Source: backend snapshot."
+        )
+        self._update_controls()
+
+    def set_task_report(self, count: int, unavailable: int = 0) -> None:
+        self._task_report_note = (
+            f"Latest read: {count} accounts"
+            + (f" · {unavailable} unavailable" if unavailable else "")
+            + ". Source: backend task ledger."
+        )
         self._update_controls()
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
         before = self.selected_account_id()
-        self._accounts = [dict(a) for a in accounts if a.get("id") and a.get("enabled")]
+        self._accounts = [dict(a) for a in accounts if a.get("id")]
         self._account_ids = [str(a["id"]) for a in self._accounts]
         self.account_combo.blockSignals(True)
         try:
@@ -195,6 +245,16 @@ class HomePage(QWidget):
                 f"{len(self._accounts)} accounts  ·  "
                 f"{connected_count} authenticated sessions"
             )
+        authenticated = sum(
+            a.get("session_status") == "authenticated" for a in self._accounts
+        )
+        self.session_metric.setText(
+            f"{authenticated} of {len(self._accounts)} authenticated"
+            if self._connected and self._accounts
+            else "No account sessions available."
+        )
+        self.report_metric.setText(self._warehouse_report_note)
+        self.task_metric.setText(self._task_report_note)
         account_id = self.selected_account_id()
         selected = next((a for a in self._accounts if str(a["id"]) == account_id), None)
         status = str(selected.get("session_status", "not_connected")) if selected else "not_connected"
@@ -208,7 +268,9 @@ class HomePage(QWidget):
         ready = bool(self._connected and selected)
         self.account_combo.setEnabled(ready)
         self.warehouse_card.open_button.setEnabled(ready and status == "authenticated")
-        self.automation_card.open_button.setEnabled(ready and status == "authenticated")
+        self.automation_card.open_button.setEnabled(
+            ready and selected.get("enabled") is True and status == "authenticated"
+        )
         self.accounts_card.open_button.setEnabled(self._connected)
         self.all_warehouse_card.open_button.setEnabled(
             self._connected and bool(self._accounts)

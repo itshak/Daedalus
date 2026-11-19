@@ -79,6 +79,69 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
 }
 
 
+# Labels and guidance are presentation-only. They never substitute values,
+# allowed IDs, resource quantities, route definitions or building queues.
+FIELD_GUIDANCE: dict[tuple[str, str], tuple[str, str]] = {
+    ("constructionList", "city_id"): (
+        "City identifier", "Choose an existing city from your reviewed construction plan; do not guess an ID."
+    ),
+    ("constructionList", "city_name"): (
+        "City name", "Use the name paired with the city in the reviewed plan."
+    ),
+    ("constructionList", "buildings"): (
+        "Building upgrades", "Prepared ordered building upgrades from IkaBot; supply structured plan data."
+    ),
+    ("constructionList", "construction_queue"): (
+        "Construction queue", "Use the queue from an existing validated plan; the Mac app cannot invent steps."
+    ),
+    ("research", "cities_ids"): (
+        "Research cities", "Optional array of existing city identifiers, from your engine configuration."
+    ),
+    ("research", "experiments"): (
+        "Academy experiments", "Review experiment quantities and academy prerequisites in the engine plan."
+    ),
+    ("resourceTransportManager", "origin_cities"): (
+        "Source cities", "Use only authorized source city identifiers from your existing route plan."
+    ),
+    ("resourceTransportManager", "destination_city"): (
+        "Destination city", "Use the exact destination city in your reviewed route plan."
+    ),
+    ("resourceTransportManager", "interval_hours"): (
+        "Transport interval", "Hours between transport checks; 0 is the engine default."
+    ),
+    ("sendResources", "routes"): (
+        "Transport routes", "Required structured routes: source, destination, resource and quantity."
+    ),
+    ("alertAttacks", "minutes"): (
+        "Check for attacks every", "Polling interval in minutes. Notifications must be configured in IkaBot."
+    ),
+    ("tavernManager", "cities_ids"): (
+        "Tavern cities", "Optional array of known city identifiers; omit for engine defaults."
+    ),
+    ("autoPirate", "dayStart"): (
+        "Day schedule begins", "Hour on the game's configured schedule; check the upstream time convention."
+    ),
+    ("autoPirate", "dayEnd"): (
+        "Day schedule ends", "Hour on the game's configured schedule; check the upstream time convention."
+    ),
+    ("autoPirate", "nightStart"): (
+        "Night schedule begins", "Hour on the game's configured schedule; check the upstream time convention."
+    ),
+    ("autoPirate", "nightEnd"): (
+        "Night schedule ends", "Hour on the game's configured schedule; check the upstream time convention."
+    ),
+    ("consolidateResources", "intervalInHours"): (
+        "Consolidation interval", "Hours between resource consolidation checks."
+    ),
+    ("distributeResources", "useFreighters"): (
+        "Use freighters", "Use freighters only if this route and account support them."
+    ),
+    ("dumpWorld", "waiting_time"): (
+        "Wait between queries", "Engine-provided interval; avoid aggressive map requests."
+    ),
+}
+
+
 def present_fields(task_name: str, fields: list[dict[str, object]]) -> list[dict[str, object]]:
     """Return an enriched, side-effect-free copy of validated backend fields."""
     rendered: list[dict[str, object]] = []
@@ -87,6 +150,10 @@ def present_fields(task_name: str, fields: list[dict[str, object]]) -> list[dict
         metadata = REVIEWED_FIELD_CONTROLS.get((task_name, str(field.get("name"))), {})
         if metadata:
             field.update(metadata)
+        guidance = FIELD_GUIDANCE.get((task_name, str(field.get("name"))))
+        if guidance:
+            field.setdefault("label", guidance[0])
+            field.setdefault("help", guidance[1])
         rendered.append(field)
     return rendered
 

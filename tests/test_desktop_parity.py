@@ -234,16 +234,14 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             _dispose(page, qt_app)
 
 
-def test_native_navigation_exposes_readonly_gated_workflow_pages(qt_app, monkeypatch):
+def test_native_navigation_uses_one_contextual_automation_workspace(qt_app, monkeypatch):
     import daedalus.desktop.app as module
     from daedalus.gui_preferences import GuiPreferences
 
     monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
     window = MainWindow()
     try:
-        assert window.wine_page.objectName() == "wine_page"
-        assert window.construction_page.objectName() == "construction_page"
-        assert window.wine_page._workflow == "wine"
+        assert window._task_views == (window.tasks_page,)
         operations = [
             {"name": "alertLowWine", "kind": "background_task"},
             {"name": "constructionList", "kind": "background_task"},
@@ -251,25 +249,39 @@ def test_native_navigation_exposes_readonly_gated_workflow_pages(qt_app, monkeyp
         window._show_accounts([{
             "id": "alpha", "player": "Example", "world": "s1-en", "enabled": True,
         }])
-        window._show_capabilities({"operations": operations, "structured_engine_dispatch": False})
-        assert window.wine_page._task_names == ["alertLowWine"]
-        assert window.construction_page._task_names == ["constructionList"]
-        assert not window.wine_page.start_button.isEnabled()
-        assert not window.construction_page.start_button.isEnabled()
-        window._show_capabilities({"operations": operations, "structured_engine_dispatch": True})
-        assert not window.wine_page.start_button.isEnabled()
-        assert not window.construction_page.start_button.isEnabled()
-        window.wine_page.set_preflight({"account_id": "alpha", "task": "alertLowWine", "ready": True, "reason": "none"})
-        window.construction_page.set_preflight({"account_id": "alpha", "task": "constructionList", "ready": True, "reason": "none"})
-        assert window.wine_page.start_button.isEnabled()
-        assert window.construction_page.start_button.isEnabled()
+        window._show_capabilities({
+            "operations": operations, "structured_engine_dispatch": False
+        })
+        page = window.tasks_page
+        page.select_workflow("wine")
+        assert page._task_names == ["alertLowWine"]
+        assert not page.start_button.isEnabled()
+        page.select_workflow("construction")
+        assert page._task_names == ["constructionList"]
+        assert not page.start_button.isEnabled()
+        window._show_capabilities({
+            "operations": operations, "structured_engine_dispatch": True
+        })
+        page.select_workflow("wine")
+        assert not page.start_button.isEnabled()
+        page.set_preflight({
+            "account_id": "alpha", "task": "alertLowWine",
+            "ready": True, "reason": "none"
+        })
+        assert page.start_button.isEnabled()
+        page.select_workflow("construction")
+        assert not page.start_button.isEnabled()  # no inherited preflight
+        page.set_preflight({
+            "account_id": "alpha", "task": "constructionList",
+            "ready": True, "reason": "none"
+        })
+        assert page.start_button.isEnabled()
         window._on_completed("task_list", {
             "account_id": "alpha", "engine_tasks": [
                 {"task": "alertLowWine", "status": "running", "pid": 1001,
                  "task_id": "a" * 24},
             ], "requests": [],
         })
-        assert window.wine_page.task_table.rowCount() == 1
-        assert window.construction_page.task_table.rowCount() == 1
+        assert page.task_table.rowCount() == 1
     finally:
         _dispose(window, qt_app)
