@@ -21,19 +21,21 @@ from daedalus.desktop.design_system import PageHeading
 
 
 class _ActionCard(CardWidget):
+    """A compact Ecobot-style action row, not a text-heavy dashboard tile."""
+
     def __init__(self, title: str, subtitle: str, button: str, action, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(146)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(9)
-        label = SubtitleLabel(title)
-        layout.addWidget(label)
-        description = CaptionLabel(subtitle)
-        description.setWordWrap(True)
-        layout.addWidget(description)
-        layout.addStretch(1)
+        self.setMinimumHeight(58)
+        self.setMaximumHeight(72)
+        self.setToolTip(subtitle)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(8)
+        label = BodyLabel(title)
+        label.setToolTip(subtitle)
+        layout.addWidget(label, 1)
         self.open_button = PushButton(button)
+        self.open_button.setToolTip(subtitle)
         self.open_button.clicked.connect(action)
         layout.addWidget(self.open_button)
 
@@ -56,8 +58,8 @@ class HomePage(QWidget):
         self._account_ids: list[str] = []
         self._connected = False
         self._demo = False
-        self._warehouse_report_note = "Not checked yet — open Warehouses to refresh."
-        self._task_report_note = "Not checked yet — open Automations to refresh."
+        self._warehouse_report_note = "Not loaded"
+        self._task_report_note = "Not checked"
 
         shell = QVBoxLayout(self)
         shell.setContentsMargins(0, 0, 0, 0)
@@ -68,8 +70,8 @@ class HomePage(QWidget):
         self.content_scroll.setWidget(content)
         shell.addWidget(self.content_scroll)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(28, 26, 28, 28)
-        layout.setSpacing(18)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
         layout.addWidget(PageHeading(
             "Overview",
             "Everything you need for your accounts, reports and automations.",
@@ -78,8 +80,8 @@ class HomePage(QWidget):
 
         overview = CardWidget(self)
         overview_row = QVBoxLayout(overview)
-        overview_row.setContentsMargins(20, 15, 20, 15)
-        overview_row.setSpacing(10)
+        overview_row.setContentsMargins(12, 10, 12, 10)
+        overview_row.setSpacing(5)
         self.connection_status = SubtitleLabel("Not connected")
         overview_row.addWidget(self.connection_status)
         self.account_summary = CaptionLabel("Connect to load your game accounts.")
@@ -101,10 +103,10 @@ class HomePage(QWidget):
         # Honest summary cards: absence of a read never becomes a fabricated
         # zero or a guessed last-refresh timestamp.
         summary_row = QGridLayout()
-        summary_row.setSpacing(12)
+        summary_row.setSpacing(8)
         self.session_card = CardWidget(self)
         session_layout = QVBoxLayout(self.session_card)
-        session_layout.setContentsMargins(16, 14, 16, 14)
+        session_layout.setContentsMargins(12, 8, 12, 8)
         session_layout.addWidget(SubtitleLabel("Sessions"))
         self.session_metric = CaptionLabel("Not checked")
         self.session_metric.setWordWrap(True)
@@ -112,7 +114,7 @@ class HomePage(QWidget):
         summary_row.addWidget(self.session_card, 0, 0)
         self.report_card = CardWidget(self)
         report_layout = QVBoxLayout(self.report_card)
-        report_layout.setContentsMargins(16, 14, 16, 14)
+        report_layout.setContentsMargins(12, 8, 12, 8)
         report_layout.addWidget(SubtitleLabel("Warehouse reports"))
         self.report_metric = CaptionLabel(self._warehouse_report_note)
         self.report_metric.setWordWrap(True)
@@ -120,7 +122,7 @@ class HomePage(QWidget):
         summary_row.addWidget(self.report_card, 0, 1)
         self.task_status_card = CardWidget(self)
         task_layout = QVBoxLayout(self.task_status_card)
-        task_layout.setContentsMargins(16, 14, 16, 14)
+        task_layout.setContentsMargins(12, 8, 12, 8)
         task_layout.addWidget(SubtitleLabel("Task status"))
         self.task_metric = CaptionLabel(self._task_report_note)
         self.task_metric.setWordWrap(True)
@@ -130,7 +132,7 @@ class HomePage(QWidget):
 
         layout.addWidget(SubtitleLabel("Quick actions"))
         self.actions = QGridLayout()
-        self.actions.setSpacing(14)
+        self.actions.setSpacing(8)
         self.warehouse_card = _ActionCard(
             "Warehouses", "See the resources in your cities. Viewing does not change your game.",
             "View warehouses", self._open_warehouses, self,
@@ -164,7 +166,7 @@ class HomePage(QWidget):
             "The Operations catalog is a reference list, not a Start button."
         )
         self.help_text.setWordWrap(True)
-        layout.addWidget(self.help_text)
+        self.help_text.hide()
         layout.addStretch(1)
         self._update_controls()
 
@@ -177,23 +179,21 @@ class HomePage(QWidget):
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
         self._connected = connected
         self._demo = demo
-        self._warehouse_report_note = "Not checked yet — open Warehouses to refresh."
-        self._task_report_note = "Not checked yet — open Automations to refresh."
+        self._warehouse_report_note = "Not loaded"
+        self._task_report_note = "Not checked"
         self._update_controls()
 
     def set_warehouse_report(self, count: int, unavailable: int = 0) -> None:
         self._warehouse_report_note = (
-            f"Latest read: {count} account reports"
+            f"{count} account reports"
             + (f" · {unavailable} unavailable" if unavailable else "")
-            + ". Source: backend snapshot."
         )
         self._update_controls()
 
     def set_task_report(self, count: int, unavailable: int = 0) -> None:
         self._task_report_note = (
-            f"Latest read: {count} accounts"
+            f"{count} accounts"
             + (f" · {unavailable} unavailable" if unavailable else "")
-            + ". Source: backend task ledger."
         )
         self._update_controls()
 

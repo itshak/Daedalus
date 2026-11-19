@@ -43,8 +43,8 @@ class LogPage(QWidget):
         self.setObjectName("log_page")
         self._events: list[tuple[str, str, str, str, str]] = []
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 24, 24, 24)
-        root.setSpacing(12)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(9)
         root.addWidget(PageHeading(
             "Activity", "Recent events on this Mac, across all configured accounts.", self
         ))
@@ -53,7 +53,8 @@ class LogPage(QWidget):
             "For task request IDs and uncertain launches, use Automations → History."
         )
         note.setWordWrap(True)
-        root.addWidget(note)
+        self.timeline_explanation = note
+        self.setToolTip(note.text())
         filters = QHBoxLayout()
         filters.addWidget(BodyLabel("Show"))
         self.severity_combo = ComboBox()
@@ -68,7 +69,7 @@ class LogPage(QWidget):
         self.type_combo.currentIndexChanged.connect(self._render_events)
         filters.addWidget(self.type_combo)
         filters.addStretch()
-        self.diagnostics_button = PushButton("Show advanced diagnostics")
+        self.diagnostics_button = PushButton("Diagnostics ▾")
         self.diagnostics_button.clicked.connect(self._toggle_diagnostics)
         filters.addWidget(self.diagnostics_button)
         root.addLayout(filters)

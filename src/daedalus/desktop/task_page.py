@@ -150,20 +150,16 @@ class TasksPage(QWidget):
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(9)
         title = (
             "Wine automation" if workflow == "wine" else
             "Construction automation" if workflow == "construction" else
             "Automations"
         )
-        layout.addWidget(PageHeading(title, "Discover, configure and review with account-specific controls."))
-        if workflow is not None:
-            layout.addWidget(CaptionLabel(
-                "Registered background tasks for this workflow use the same validated "
-                "parameter forms, existing authenticated engine session and separate "
-                "confirmation as the Tasks view. Interactive-only operations are read-only."
-            ))
+        layout.addWidget(PageHeading(
+            title, "Choose an automation, review its settings, then start."
+        ))
         self.status_label = CaptionLabel(
             "Connect to your backend to configure an automation."
         )
@@ -191,7 +187,15 @@ class TasksPage(QWidget):
         self.catalog_button.clicked.connect(self._open_catalog)
         template_row.addWidget(self.catalog_button)
         template_row.addStretch(1)
-        layout.addLayout(template_row)
+        if workflow is None:
+            layout.addLayout(template_row)
+        else:
+            for button in (
+                self.wine_template_button, self.construction_template_button,
+                self.all_templates_button, self.catalog_button,
+            ):
+                button.setParent(self)
+                button.hide()
 
         account_row = QHBoxLayout()
         account_row.addWidget(BodyLabel("Account"))
@@ -233,12 +237,16 @@ class TasksPage(QWidget):
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
         # These are read-only selection cards; only the separate, reviewed
         # Start action can contact the backend with a game mutation.
-        layout.addWidget(SubtitleLabel("Discover"))
+        self.browse_button = PushButton("Browse automation gallery ▾")
+        self.browse_button.setToolTip("Show or hide available automation choices")
+        self._gallery_open = False
+        self.browse_button.clicked.connect(self._toggle_gallery)
+        layout.addWidget(self.browse_button)
         self.discovery_scroll = QScrollArea(self)
         self.discovery_scroll.setWidgetResizable(True)
         self.discovery_scroll.setFrameShape(QScrollArea.NoFrame)
         self.discovery_scroll.setMinimumHeight(100)
-        self.discovery_scroll.setMaximumHeight(260)
+        self.discovery_scroll.setMaximumHeight(185)
         self.discovery_container = QWidget(self.discovery_scroll)
         self.discovery_layout = QGridLayout(self.discovery_container)
         self.discovery_layout.setContentsMargins(2, 2, 10, 2)
@@ -247,8 +255,9 @@ class TasksPage(QWidget):
         layout.addWidget(self.discovery_scroll)
         self.discovery_note = CaptionLabel("")
         self.discovery_note.setWordWrap(True)
-        layout.addWidget(self.discovery_note)
-        layout.addWidget(SubtitleLabel("Configure & review"))
+        self.discovery_note.hide()
+        self.discovery_scroll.hide()
+        layout.addWidget(SubtitleLabel("Configure"))
 
         task_row = QHBoxLayout()
         task_row.addWidget(BodyLabel("Automation"))
@@ -269,14 +278,10 @@ class TasksPage(QWidget):
         layout.addWidget(self.prerequisite_label)
 
 
-        layout.addWidget(CaptionLabel(
-            "Settings are built from the engine's registered parameters. "
-            "You can use the defaults or change the fields below."
-        ))
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
         self.parameter_scroll.setMinimumHeight(110)
-        self.parameter_scroll.setMaximumHeight(440)
+        self.parameter_scroll.setMaximumHeight(290)
         self.parameter_container = QWidget()
         self.parameter_layout = QFormLayout(self.parameter_container)
         self.parameter_scroll.setWidget(self.parameter_container)
@@ -331,7 +336,8 @@ class TasksPage(QWidget):
             "checked independently; dispatch stops if any account is not ready."
         )
         self.bulk_note.setWordWrap(True)
-        batch_row.addWidget(self.bulk_note, 1)
+        self.bulk_note.hide()
+        batch_row.addStretch(1)
         self.start_selected_button = PushButton("Start for selected…")
         self.start_selected_button.setToolTip(
             "Review all chosen accounts and run a distinct authorized task request per account"
@@ -405,10 +411,6 @@ class TasksPage(QWidget):
         self.history_refresh_button = PushButton("Refresh selected account")
         self.history_refresh_button.clicked.connect(self._refresh)
         layout.addWidget(self.history_refresh_button)
-        layout.addWidget(CaptionLabel(
-            "If a request is uncertain, review its game state before clearing it. "
-            "Daedalus never retries it automatically."
-        ))
         self.request_table = _table(["Automation", "Status", "Managed task", "Review"])
         self.request_table.setAccessibleName("Account-scoped automation request history")
         self.request_table.itemSelectionChanged.connect(self._set_controls)
@@ -437,7 +439,7 @@ class TasksPage(QWidget):
             "View all accounts or selected accounts to see their task status side by side."
         )
         self.multi_summary.setWordWrap(True)
-        layout.addWidget(self.multi_summary)
+        self.multi_summary.hide()
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
         self.multi_table.setMaximumHeight(185)
         layout.addWidget(self.multi_table)
@@ -456,6 +458,15 @@ class TasksPage(QWidget):
         self.catalog_panel.configure_requested.connect(self.select_task)
         self._show_section(0)
         self._set_controls()
+
+    def _toggle_gallery(self) -> None:
+        self._gallery_open = not self._gallery_open
+        self.discovery_scroll.setVisible(self._gallery_open and bool(self._task_names))
+        self.discovery_note.setVisible(self._gallery_open)
+        self.browse_button.setText(
+            "Hide automation gallery" if self._gallery_open
+            else "Browse automation gallery ▾"
+        )
 
     def _show_section(self, index: int) -> None:
         """Fluent pivot for discover/configure, running, history and multi-account views."""
@@ -846,7 +857,7 @@ class TasksPage(QWidget):
         shown = self._task_names[:24]
         for index, name in enumerate(shown):
             card = CardWidget(self.discovery_container)
-            card.setMinimumHeight(112)
+            card.setMinimumHeight(88)
             panel = QVBoxLayout(card)
             panel.setContentsMargins(13, 10, 13, 10)
             panel.setSpacing(4)
@@ -863,7 +874,7 @@ class TasksPage(QWidget):
                 else "Read-only: backend task starts unavailable"
             )
             permission_note.setWordWrap(True)
-            panel.addWidget(permission_note)
+            card.setToolTip(permission_note.text())
             panel.addStretch(1)
             category = _category(name)
             feature = (
@@ -892,7 +903,8 @@ class TasksPage(QWidget):
             f"{len(self._task_names)} background automations available for selection. "
             "Selection alone never starts an operation."
         )
-        self.discovery_scroll.setVisible(bool(shown))
+        self.discovery_scroll.setVisible(self._gallery_open and bool(shown))
+        self.discovery_note.setVisible(self._gallery_open)
 
     def _select_discovered_task(self, name: str) -> None:
         if name in self._task_names:
