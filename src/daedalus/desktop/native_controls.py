@@ -463,3 +463,153 @@ class WorkshopUpgradesEditor(QWidget):
         if not 0 < len(jobs) <= 50:
             raise ValueError("Select 1 to 50 actual unit upgrades")
         return [{"city_id": city_id, "upgrades": jobs}]
+
+
+class TrainableUnitsEditor(QWidget):
+    """Actual barracks/shipyard catalog and quantity plan, without raw JSON."""
+
+    changed = Signal()
+    city_requested = Signal(int, bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        selector = QHBoxLayout()
+        selector.addWidget(QLabel("Recruit"))
+        self.mode = ComboBox()
+        self.mode.addItems(["Land units", "Warships"])
+        self.mode.setAccessibleName("Training: troops or ships")
+        self.mode.setCurrentIndex(0)
+        self.mode.currentIndexChanged.connect(self._reset_selection)
+        selector.addWidget(self.mode)
+        selector.addWidget(QLabel("In city"))
+        self.city_picker = ComboBox()
+        self.city_picker.setAccessibleName("Choose barracks or shipyard city")
+        self.city_picker.currentIndexChanged.connect(self._reset_selection)
+        selector.addWidget(self.city_picker, 1)
+        layout.addLayout(selector)
+        self.table = _table(("Unit", "Real per-unit costs", "Quantity"))
+        self.table.setMinimumHeight(240)
+        self.table.setAccessibleName("Available recruitable units and quantities")
+        layout.addWidget(self.table)
+        self.description = QLabel(
+            "Choose a city and training mode to load actual IkaBot unit options."
+        )
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._selected: tuple[int, bool] | None = None
+        self._loaded: tuple[int, bool] | None = None
+        self._snapshot: dict[str, object] | None = None
+        self.set_cities([])
+
+    def set_cities(self, cities: list[dict[str, object]]) -> None:
+        self._selected = None
+        self._loaded = None
+        self._snapshot = None
+        self.table.setRowCount(0)
+        with QSignalBlocker(self.city_picker):
+            self.city_picker.clear()
+            self.city_picker.addItem("Choose verified city")
+            for city in cities:
+                coords = str(city.get("coords") or "")
+                text = str(city["name"])
+                self.city_picker.addItem(
+                    f"{text} ({coords})" if coords else text, userData=city["id"]
+                )
+            self.city_picker.setCurrentIndex(0)
+        self.description.setText("Choose a city with barracks or a shipyard.")
+        self.changed.emit()
+
+    def _reset_selection(self, *_args: object) -> None:
+        self._loaded = None
+        self._snapshot = None
+        self.table.setRowCount(0)
+        city_id = self.city_picker.currentData(Qt.UserRole)
+        train_troops = self.mode.currentIndex() == 0
+        self._selected = (city_id, train_troops) if type(city_id) is int else None
+        self.description.setText(
+            "Reading live recruiting options from the game…" if self._selected else
+            "Choose a city with barracks or a shipyard."
+        )
+        self.changed.emit()
+        if self._selected is not None:
+            self.city_requested.emit(*self._selected)
+
+    def set_trainables(self, snapshot: dict[str, object]) -> None:
+        scope = (snapshot.get("city_id"), snapshot.get("train_troops"))
+        if scope != self._selected:
+            return
+        units = snapshot.get("units")
+        if not isinstance(units, list):
+            return
+        self._snapshot = snapshot
+        self._loaded = self._selected
+        self.table.setRowCount(len(units))
+        for row, unit in enumerate(units):
+            name = QTableWidgetItem(str(unit["local_name"]))
+            name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.table.setItem(row, 0, name)
+            costs = unit.get("costs", {})
+            price = ", ".join(
+                f"{key.capitalize()} {value:g}" for key, value in costs.items()
+                if isinstance(value, (int, float)) and value > 0
+            )
+            price_cell = QTableWidgetItem(price or "No listed cost")
+            price_cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.table.setItem(row, 1, price_cell)
+            quantity = _amount(label=f"Train {unit['local_name']} quantity")
+            quantity.setMaximum(100000)
+            quantity.valueChanged.connect(self.changed.emit)
+            self.table.setCellWidget(row, 2, quantity)
+        self.description.setText(
+            f"{len(units)} actual unit types. "
+            f"Free citizens: {snapshot['free_citizens']:,}. "
+            "Costs are from this game's unit catalog and revalidated at launch."
+        )
+        self.changed.emit()
+
+    def set_unavailable(self, city_id: int, train_troops: bool) -> None:
+        if self._selected != (city_id, train_troops):
+            return
+        self._loaded = None
+        self._snapshot = None
+        self.table.setRowCount(0)
+        self.description.setText(
+            "No verified recruitable units for this city and fleet type. "
+            "Check the game session, barracks or shipyard."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> dict[str, object]:
+        if self._snapshot is None or self._loaded != self._selected:
+            raise ValueError("Choose a city and load its actual recruitable units")
+        units = self._snapshot["units"]
+        selected = []
+        spent: dict[str, float] = {key: 0 for key in (
+            "wood", "wine", "marble", "crystal", "sulfur", "citizens",
+        )}
+        for row, unit in enumerate(units):
+            quantity = self.table.cellWidget(row, 2)
+            if not isinstance(quantity, SpinBox):
+                raise ValueError("Training quantities unavailable")
+            amount = quantity.value()
+            if amount == 0:
+                continue
+            selected.append({"unit_type_id": unit["unit_type_id"], "cantidad": amount})
+            for resource in spent:
+                spent[resource] += unit["costs"].get(resource, 0) * amount
+        if not 0 < len(selected) <= 50:
+            raise ValueError("Enter a positive quantity for at least one actual unit")
+        stocks = [*self._snapshot["available"], self._snapshot["free_citizens"]]
+        for resource, amount in zip(spent, stocks):
+            if spent[resource] > amount:
+                raise ValueError(
+                    f"Not enough {resource} in the selected city for this training plan"
+                )
+        return {
+            "city": dict(self._snapshot["city"]),
+            "tranings": [selected], "trainTroops": self._snapshot["train_troops"],
+            "replicate": "n", "countRepeat": 0,
+            "cityTrainings": [], "units": [],
+        }
