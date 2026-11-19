@@ -1,4 +1,8 @@
-"""One-time encrypted native-Mac browser cookie exchange, no automated login.
+"""One-time encrypted native-Mac browser cookie exchange.
+
+Local Selenium may log in automatically in headless Chrome, but this module
+still receives only the operator-approved account-bound encrypted world cookie.
+No password or lobby session is sent to the backend.
 
 The client obtains an ephemeral Curve25519 public key from the same TLS
 origin that it authenticated with its Daedalus API bearer. The encrypted
