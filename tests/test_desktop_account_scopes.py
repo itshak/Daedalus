@@ -306,3 +306,103 @@ def test_templates_include_wine_and_construction_related_tasks(app):
         assert len(page._task_names) == 5
     finally:
         _dispose(page, app)
+
+
+def test_wine_alert_has_native_required_hours_and_safe_transfer_toggle(app):
+    from PySide6.QtWidgets import QSpinBox
+
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([{
+            "name": "alertLowWine", "kind": "background_task",
+            "config_fields": [
+                {"name": "hours", "type": "json", "required": True},
+                {"name": "auto_transfer", "type": "boolean", "default": False},
+                {"name": "transfer_amount", "type": "integer", "default": 0},
+            ],
+        }], enabled=True)
+        hours = page._form_inputs["hours"]
+        assert isinstance(hours, QSpinBox)
+        with pytest.raises(ValueError, match="Choose a value"):
+            page._form_config()  # no invented threshold
+
+        hours.setValue(12)
+        config = page._form_config()
+        assert config == {"hours": 12, "auto_transfer": False, "transfer_amount": 0}
+        page._form_inputs["auto_transfer"].setChecked(True)
+        with pytest.raises(ValueError, match="positive transfer amount"):
+            page._form_config()
+        page._form_inputs["transfer_amount"].setValue(500)
+        assert page._form_config()["transfer_amount"] == 500
+    finally:
+        _dispose(page, app)
+
+
+def test_tavern_manager_native_hour_spinner_allows_explicit_one_time_run(app):
+    from PySide6.QtWidgets import QSpinBox
+
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([{
+            "name": "tavernManager", "kind": "background_task",
+            "config_fields": [
+                {"name": "run_hours", "type": "json", "required": True},
+                {"name": "cities_ids", "type": "json", "default": None},
+            ],
+        }], enabled=True)
+        spinner = page._form_inputs["run_hours"]
+        assert isinstance(spinner, QSpinBox)
+        with pytest.raises(ValueError, match="Choose a value"):
+            page._form_config()
+        spinner.setValue(0)
+        assert page._form_config() == {"run_hours": 0}
+    finally:
+        _dispose(page, app)
+
+
+def test_import_prepared_config_is_bounded_and_never_starts_task(
+    app, monkeypatch, tmp_path,
+):
+    from PySide6.QtWidgets import QFileDialog
+
+    import daedalus.desktop.task_page as module
+
+    path = tmp_path / "prepared.json"
+    path.write_text('{"run_hours": 3}', encoding="utf-8")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName",
+        lambda *_a, **_kw: (str(path), "JSON files (*.json)"),
+    )
+    monkeypatch.setattr(module.QMessageBox, "information", lambda *_a, **_kw: None)
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([{
+            "name": "tavernManager", "kind": "background_task",
+            "config_fields": [{"name": "run_hours", "type": "json", "required": True}],
+        }], enabled=True)
+        launches = []
+        page.launch_requested.connect(lambda *args: launches.append(args))
+        page._import_advanced_config()
+        assert page._advanced_visible
+        assert '"run_hours": 3' in page.config_editor.toPlainText()
+        assert not launches
+        assert not page.confirm_box.isChecked()
+    finally:
+        _dispose(page, app)
+
+
+def test_configuration_dialog_summary_avoids_echoing_complex_private_values():
+    from daedalus.desktop.task_presentation import configuration_summary
+
+    summary = configuration_summary({
+        "run_hours": 3,
+        "routes": [{"private_secret": "do-not-show-me"}],
+        "api_token": "a-sensitive-value",
+    })
+    assert "run hours: 3" in summary
+    assert "routes: configured" in summary
+    assert "do-not-show-me" not in summary
+    assert "a-sensitive-value" not in summary
