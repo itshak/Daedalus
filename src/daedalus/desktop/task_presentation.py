@@ -44,6 +44,34 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    # These are literal upstream enums in distributeResources.py, not guesses.
+    ("distributeResources", "resource"): {
+        "type": "text",
+        "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
+        "label": "Resource to distribute",
+        "help": "The IkaBot engine calculates actual shipment amounts at the time of dispatch.",
+    },
+    ("distributeResources", "mode"): {
+        "type": "text",
+        "choices": ["even", "producers"],
+        "label": "Distribution policy",
+        "help": "Even: balance amounts; Producers: ship from producers to non-producers.",
+    },
+    ("distributeResources", "cities_ids"): {
+        "type": "city_list",
+        "label": "Participating cities",
+        "help": "Leave all unchecked to use every city. Choose at least two for a custom subset.",
+    },
+    ("tavernManager", "cities_ids"): {
+        "type": "city_list",
+        "label": "Tavern cities",
+        "help": "Leave all unchecked to have IkaBot select its default tavern cities.",
+    },
+    ("research", "cities_ids"): {
+        "type": "city_list",
+        "label": "Academy cities",
+        "help": "Leave all unchecked to include the engine's default eligible academies.",
+    },
     ("tavernManager", "run_hours"): {
         "type": "integer",
         "label": "Check tavern balance every",
