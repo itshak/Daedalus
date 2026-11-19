@@ -46,6 +46,13 @@ from qfluentwidgets import (
 )
 
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
+from daedalus.desktop.native_controls import (
+    DonationPoliciesEditor,
+    MapAreaEditor,
+    ResourceAmountsEditor,
+    ResourceLimitsEditor,
+    ShipmentRoutesEditor,
+)
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
     configuration_summary,
@@ -127,7 +134,7 @@ class TasksPage(QWidget):
         self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
-        self._form_inputs: dict[str, LineEdit | CheckBox | ComboBox | QSpinBox | QDoubleSpinBox | QListWidget] = {}
+        self._form_inputs: dict[str, QWidget] = {}
         self._form_dirty = False
         self._reviewed = False
         self._pending_launch = False
@@ -652,6 +659,22 @@ class TasksPage(QWidget):
             "City list unavailable — connect the account and refresh"
         )
 
+    def _populate_island_list(self, widget: QListWidget) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        seen: set[str] = set()
+        with QSignalBlocker(widget):
+            widget.clear()
+            for city in cities:
+                coords = str(city.get("coords") or "").strip()
+                if not re.fullmatch(r"\d{1,3}:\d{1,3}", coords) or coords in seen:
+                    continue
+                seen.add(coords)
+                entry = QListWidgetItem(f"{coords} · {city['name']}")
+                entry.setData(Qt.UserRole, coords)
+                entry.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                entry.setCheckState(Qt.Unchecked)
+                widget.addItem(entry)
+
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
         if account_id not in self._account_ids:
             return
@@ -671,13 +694,26 @@ class TasksPage(QWidget):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
             for key, input_widget in self._form_inputs.items():
-                if isinstance(input_widget, QListWidget) and input_widget.property("city_scope") is True:
-                    self._populate_city_list(input_widget)
+                if isinstance(input_widget, QListWidget):
+                    if input_widget.property("city_scope") is True:
+                        self._populate_city_list(input_widget)
+                    elif input_widget.property("island_scope") is True:
+                        self._populate_island_list(input_widget)
+                    else:
+                        continue
                     self._invalidate_review()
                 elif (isinstance(input_widget, ComboBox)
                       and input_widget.property("city_picker") is True):
-                    self._populate_city_picker(input_widget, optional=key != "wine_city")
+                    self._populate_city_picker(input_widget, optional=not
+                                               self._field_is_required(key))
                     self._invalidate_review()
+                elif isinstance(input_widget, (ShipmentRoutesEditor, DonationPoliciesEditor)):
+                    input_widget.set_cities(self._cities_by_account.get(account_id, []))
+                    self._invalidate_review()
+
+    def _field_is_required(self, key: str) -> bool:
+        return any(field["name"] == key and field["required"]
+                   for field in self._config_fields_by_task.get(self.selected_task_name() or "", []))
 
     def _selected_construction_city(self) -> int | None:
         if self.selected_task_name() != "constructionList":
@@ -756,12 +792,21 @@ class TasksPage(QWidget):
                 self._populate_city_picker(picker)
                 self._construction_city_changed()
             for key, input_widget in self._form_inputs.items():
-                if isinstance(input_widget, QListWidget) and input_widget.property("city_scope") is True:
-                    self._populate_city_list(input_widget)
+                if isinstance(input_widget, QListWidget):
+                    if input_widget.property("city_scope") is True:
+                        self._populate_city_list(input_widget)
+                    elif input_widget.property("island_scope") is True:
+                        self._populate_island_list(input_widget)
+                    else:
+                        continue
                     self._invalidate_review()
                 elif (isinstance(input_widget, ComboBox)
                       and input_widget.property("city_picker") is True):
-                    self._populate_city_picker(input_widget, optional=key != "wine_city")
+                    self._populate_city_picker(input_widget, optional=not
+                                               self._field_is_required(key))
+                    self._invalidate_review()
+                elif isinstance(input_widget, (ShipmentRoutesEditor, DonationPoliciesEditor)):
+                    input_widget.set_cities(self._cities_by_account.get(account_id, []))
                     self._invalidate_review()
 
     def _choose_bulk_accounts(self) -> None:
@@ -1239,6 +1284,8 @@ class TasksPage(QWidget):
                 # Complex planner internals belong to an expert imported plan,
                 # never to the normal construction interface.
                 continue
+            if field.get("type") == "hidden_derived":
+                continue
             if name == "constructionList" and key == "city_name":
                 # The paired, verified name comes from the selected city's read-only record.
                 continue
@@ -1248,7 +1295,31 @@ class TasksPage(QWidget):
                 str(field.get("label") or key.replace("_", " ").capitalize())
                 + (" *" if field["required"] else "")
             )
-            if kind == "city_list":
+            if kind == "resource_limits":
+                widget = ResourceLimitsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "resource_config":
+                widget = ResourceAmountsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "shipment_routes":
+                widget = ShipmentRoutesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "donation_policies":
+                widget = DonationPoliciesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "map_center":
+                widget = MapAreaEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "island_list":
+                widget = QListWidget(self)
+                widget.setProperty("island_scope", True)
+                widget.setMinimumHeight(110)
+                widget.setMaximumHeight(140)
+                self._populate_island_list(widget)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "city_list":
                 widget = QListWidget(self)
                 widget.setProperty("city_scope", True)
                 widget.setAccessibleName(f"Choose account cities for {label}")
@@ -1261,9 +1332,10 @@ class TasksPage(QWidget):
                 widget.setAccessibleName(f"Choose options for {label}")
                 widget.setMinimumHeight(105)
                 widget.setMaximumHeight(135)
-                for choice in field["choices"]:
-                    item = QListWidgetItem(str(choice))
-                    item.setData(Qt.UserRole, str(choice))
+                for idx, choice in enumerate(field["choices"]):
+                    labels = field.get("choice_labels", [])
+                    item = QListWidgetItem(str(labels[idx] if idx < len(labels) else choice))
+                    item.setData(Qt.UserRole, choice)
                     item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
                     item.setCheckState(Qt.Unchecked)
                     widget.addItem(item)
@@ -1282,8 +1354,10 @@ class TasksPage(QWidget):
             elif field.get("choices"):
                 widget = ComboBox()
                 choices = field["choices"]
-                for choice in choices:
-                    widget.addItem(str(choice))
+                choice_labels = field.get("choice_labels", [])
+                for idx, choice in enumerate(choices):
+                    text = choice_labels[idx] if idx < len(choice_labels) else choice
+                    widget.addItem(str(text))
                 if default in choices:
                     widget.setCurrentIndex(choices.index(default))
                 else:
@@ -1317,9 +1391,12 @@ class TasksPage(QWidget):
                 widget.valueChanged.connect(self._mark_form_dirty)
             elif kind == "number" and type(default) in (int, float) and -1_000_000 <= default <= 1_000_000:
                 widget = DoubleSpinBox()
-                widget.setRange(-1_000_000, 1_000_000)
+                widget.setRange(float(field.get("minimum", -1_000_000)),
+                                float(field.get("maximum", 1_000_000)))
                 widget.setDecimals(2)
                 widget.setValue(float(default))
+                if field.get("suffix"):
+                    widget.setSuffix(str(field["suffix"]))
                 widget.valueChanged.connect(self._mark_form_dirty)
             else:
                 widget = LineEdit()
@@ -1343,16 +1420,37 @@ class TasksPage(QWidget):
             style_form_input(widget, label, help_text)
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
-        self.parameter_scroll.setVisible(bool(fields))
+        self.parameter_scroll.setVisible(bool(self._form_inputs))
+        if name == "donationBot":
+            method = self._form_inputs.get("donate_method")
+            policy = self._form_inputs.get("cities_dict")
+            if isinstance(method, ComboBox) and isinstance(policy, DonationPoliciesEditor):
+                method.currentIndexChanged.connect(
+                    lambda _index: policy.update_method(
+                        [1, 2, 3][method.currentIndex()]
+                        if 0 <= method.currentIndex() < 3 else 1
+                    )
+                )
+                policy.update_method([1, 2, 3][method.currentIndex()]
+                                     if 0 <= method.currentIndex() < 3 else 1)
+        if name in {"autoPirate", "activateShrine", "resourceTransportManager"}:
+            driver = self._form_inputs.get("pirateSchedule" if name == "autoPirate" else "mode")
+            if isinstance(driver, ComboBox):
+                driver.currentIndexChanged.connect(self._update_native_visibility)
+            elif isinstance(driver, CheckBox):
+                driver.stateChanged.connect(self._update_native_visibility)
+            self._update_native_visibility()
         if fields:
             # Match the form to its contents instead of leaving a large empty
             # box under single-parameter workflows.
-            visible_fields = [f for f in fields if name != "constructionList"
-                              or f.get("name") == "city_id"]
-            list_extra = 78 if any(field.get("type") in {"city_list", "choices_list"}
-                                   for field in visible_fields) else 0
+            visible_fields = [f for f in fields if f.get("type") != "hidden_derived"
+                              and (name != "constructionList" or f.get("name") == "city_id")]
+            list_extra = 135 if any(field.get("type") in {
+                "city_list", "choices_list", "island_list", "shipment_routes",
+                "donation_policies", "resource_limits", "resource_config",
+            } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
-                min(315, max(72, len(visible_fields) * 44 + 24 + list_extra))
+                min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
             )
         self.build_json_button.setEnabled(bool(fields))
         self._invalidate_review()
@@ -1370,8 +1468,44 @@ class TasksPage(QWidget):
             self.preflight_requested.emit(account_id, name)
         if (account_id and account_id not in self._cities_by_account
                 and (name == "constructionList"
-                     or any(field.get("type") in {"city_list", "city_picker"} for field in fields))):
+                     or any(field.get("type") in {
+                         "city_list", "city_picker", "island_list", "shipment_routes",
+                         "donation_policies",
+                     } for field in fields))):
             self.cities_requested.emit(account_id)
+
+    def _update_native_visibility(self, *_args: object) -> None:
+        """Hide irrelevant options in multi-mode upstream planners."""
+        name = self.selected_task_name()
+        visible: dict[str, bool] = {}
+        if name == "autoPirate":
+            schedule = self._form_inputs.get("pirateSchedule")
+            active = isinstance(schedule, CheckBox) and schedule.isChecked()
+            visible["pirateMissionChoice"] = not active
+            for key in ("pirateMissionDayChoice", "pirateMissionNightChoice",
+                        "dayStart", "dayEnd", "nightStart", "nightEnd"):
+                visible[key] = active
+        elif name == "activateShrine":
+            mode = self._form_inputs.get("mode")
+            visible["times"] = not (isinstance(mode, ComboBox)
+                                    and mode.currentIndex() == 1)
+        elif name == "resourceTransportManager":
+            mode = self._form_inputs.get("mode")
+            index = mode.currentIndex() if isinstance(mode, ComboBox) else -1
+            for key in ("origin_cities", "destination_city", "send_mode"):
+                visible[key] = index == 0
+            for key in ("origin_city", "destination_cities"):
+                visible[key] = index == 1
+            visible["island"] = False  # external routes require separate verified location
+        for key, show in visible.items():
+            widget = self._form_inputs.get(key)
+            if widget is None:
+                continue
+            widget.setVisible(show)
+            label = self.parameter_layout.labelForField(widget)
+            if label is not None:
+                label.setVisible(show)
+        self._mark_form_dirty()
 
     def set_preflight(self, result: dict[str, object]) -> None:
         if (result.get("account_id") != self.selected_account_id()
