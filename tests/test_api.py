@@ -347,3 +347,44 @@ def test_api_responses_for_remote_https_never_cache_private_account_data(account
         assert response.headers["Pragma"] == "no-cache"
         assert response.headers["X-Content-Type-Options"] == "nosniff"
         assert response.headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_building_inventory_api_authorizes_account_city_and_never_dispatches(account_file):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    class BuildingIPC:
+        def __init__(self):
+            self.calls = []
+
+        def buildings(self, account, city_id):
+            self.calls.append((account.id, account.world, account.player, city_id))
+            if city_id != 42:
+                raise ValueError("Different city")
+            return [{"position": 1, "level": 8, "name": "Town Hall",
+                     "building": "townHall", "busy": False, "can_upgrade": True}]
+
+    ipc = BuildingIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    url = "/api/v1/accounts/alpha/cities/42/buildings"
+    assert client.get(url).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/cities/42/buildings", headers=auth).status_code == 404
+    assert client.get("/api/v1/accounts/alpha/cities/0/buildings", headers=auth).status_code == 422
+    assert ipc.calls == []
+    response = client.get(url, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["buildings"][0]["name"] == "Town Hall"
+    assert ipc.calls == [("alpha", "s301-en", "ExamplePlayer", 42)]
+    assert client.get("/api/v1/accounts/alpha/cities/99/buildings", headers=auth).status_code == 404
+    assert client.post(url, headers=auth).status_code == 405
+    assert len(ipc.calls) == 2
+
+    class BrokenIPC:
+        def buildings(self, _account, _city_id):
+            raise EngineIPCUnavailable("private-credential-value")
+
+    broken = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   ipc_client=BrokenIPC()))
+    failed = broken.get(url, headers=auth)
+    assert failed.status_code == 503
+    assert "private-credential" not in failed.text
