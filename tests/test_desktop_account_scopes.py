@@ -238,3 +238,50 @@ def test_print_action_only_enabled_for_real_report_rows(app):
         ]
     finally:
         _dispose(page, app)
+
+
+def test_overview_scrolls_in_a_short_mac_window(app):
+    from PySide6.QtWidgets import QScrollArea
+    from daedalus.desktop.home_page import HomePage
+
+    page = HomePage()
+    try:
+        assert isinstance(page.content_scroll, QScrollArea)
+        page.resize(900, 650)
+        page.show()
+        app.processEvents()
+        assert page.all_warehouse_card.open_button.text() == "Load all warehouses"
+        # Layout must scroll rather than clipping the final row of quick actions.
+        assert page.content_scroll.verticalScrollBar().maximum() >= 0
+        assert page.content_scroll.widget().layout().count() >= 5
+    finally:
+        _dispose(page, app)
+
+
+def test_warehouse_print_toolbar_precedes_large_result_table(app):
+    page = WarehousesPage()
+    try:
+        layout = page.layout()
+        status_index = layout.indexOf(page.status_label)
+        table_index = layout.indexOf(page.table)
+        assert status_index > 0
+        assert table_index > status_index
+        assert layout.itemAt(status_index - 1).layout() is not None
+        assert page.print_button.isEnabled() is False
+    finally:
+        _dispose(page, app)
+
+
+def test_automation_parameter_form_uses_compact_height_for_one_field(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts())
+        page.set_capabilities([{
+            "name": "alertAttacks", "kind": "background_task",
+            "config_fields": [{"name": "minutes", "type": "integer", "default": 20}],
+        }], enabled=True)
+        assert page.parameter_scroll.height() <= 95
+        assert page.parameter_scroll.maximumHeight() <= 100
+        assert page.pivot.item("configure").text() == "Configure"
+    finally:
+        _dispose(page, app)
