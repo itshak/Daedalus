@@ -2,6 +2,8 @@
 
 **Implementation:** native Mac Qt WebEngine + a one-use, encrypted handoff to the one authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
 
+For release preflight, use `daedalus doctor --smoke --deployment-check` on the Linux host. This reads no credential values or game pages and reports unresolved task receipts and evidence (not proof) of persistent keyring provisioning. See [owner-supervised Mac-first acceptance](LIVE-ACCEPTANCE.md) before restarting an existing worker.
+
 ## What the operator sees
 
 1. Install a fresh Daedalus.app preview with the native browser dependency included, then connect to a trusted **HTTPS** Daedalus server. The Mac securely remembers the API token in Keychain. An administrator must opt in to backend native browser login first.

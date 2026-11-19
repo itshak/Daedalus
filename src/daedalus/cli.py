@@ -36,6 +36,12 @@ def main(argv: list[str] | None = None) -> int:
         "--smoke", action="store_true",
         help="Check the real API using an in-process synthetic demo; no game network",
     )
+    doctor.add_argument(
+        "--deployment-check", action="store_true",
+        help="Read-only local ledger/keyring metadata preflight; never authorizes production",
+    )
+    doctor.add_argument("--task-ledger", help="Private task-ledger path for deployment check")
+    doctor.add_argument("--keyring-directory", help="Keyring metadata directory for deployment check")
 
     engine = subcommands.add_parser("engine", help="Inspect public IkaBot engine source")
     engine.add_argument("action", choices=["inventory"], help="Inspect available engine operations")
@@ -106,6 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         from daedalus.readiness import OfflineSmokeError, offline_readiness, synthetic_smoke
 
         report = offline_readiness()
+        if (args.task_ledger or args.keyring_directory) and not args.deployment_check:
+            parser.error("Deployment metadata paths require --deployment-check")
+        if args.deployment_check:
+            from daedalus.deployment_readiness import deployment_preflight
+
+            report["deployment_preflight"] = deployment_preflight(
+                ledger_path=args.task_ledger,
+                keyring_directory=args.keyring_directory,
+            )
         if args.smoke:
             try:
                 report["offline_smoke"] = synthetic_smoke()
@@ -276,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
     elif args.command == "serve":
         if args.host not in {"127.0.0.1", "::1"}:
-            parser.error("Only loopback binding is supported; use SSH/Tailscale tunnel for remote use")
+            parser.error("Only loopback binding is supported; use authenticated HTTPS for remote access")
         try:
             from daedalus.account_editor import AccountEditUnavailable
             from daedalus.account_sessions import AccountSessionCoordinator, SessionBusyError

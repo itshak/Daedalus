@@ -64,6 +64,18 @@ artifact is required to test redesigned native controls.
 
 The completed `native-mac-browser-login` implementation now offers first-class **Sign in on this Mac**, a temporary off-record Qt WebEngine Gameforge browser, optional encrypted email binding, single-use account-bound X25519/AES-GCM cookie exchange over authenticated HTTPS, and server-side independent player verification. It preserves an idle dedicated worker's account lease and denies recovery for active or unconfirmed tasks. Synthetic offline API, engine, GUI, WebEngine cleanup and cryptography tests passed; the Mac build pipeline must still validate the final packaged .app. **The live production backend is not restarted automatically**: its current owner and any unconfirmed dispatches require a controlled operational rollout. The owner-dependent field acceptance is still open in `validate-live-authentication`. See [native Mac login](NATIVE-MAC-LOGIN.md).
 
+## Secret-free deployment preflight (2026-11-19)
+
+The operator can run `daedalus doctor --smoke --deployment-check` to obtain a
+read-only ledger/keyring metadata audit. On the current Monjo host, the audit
+reports one unresolved task receipt and no durable protected keyring collection
+file (the active Secret Service default points to `session`), so production
+cutover and a live worker restart remain blocked. The isolated new-version
+backend's encrypted browser challenge start/cancel workflow passed with
+synthetic account metadata and **no** Gameforge network requests; this does
+not replace owner-run Mac login, game task or reboot acceptance. The full
+Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
+
 ## Still active
 
 One umbrella change remains **open** for owner-supervised **real-account** acceptance. The native Mac browser and encrypted world-cookie handoff, backend independent game-world player attestation, and exclusive-worker recovery implementation have passed synthetic tests; none of these can stand in for owner-supervised real Gameforge/MFA/CAPTCHA, task-dispatch, daemon keyring persistence or production cutover acceptance.
