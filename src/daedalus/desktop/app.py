@@ -2,7 +2,7 @@
 
 The read-only views remain safe by default. An explicitly enabled backend can
 accept user-confirmed task start/stop actions through existing-session IPC.
-No Selenium login or new game worker is started from this desktop shell.
+The original IkaBot Selenium login runs locally in a headless Qt worker;\nonly a detected CAPTCHA opens Chrome for manual assistance.
 """
 
 from __future__ import annotations
@@ -668,25 +668,21 @@ class MainWindow(FluentWindow):
             self._request_task_refresh(account_id)
 
     def _begin_native_browser_login(self, account_id: str) -> None:
+        """One-click headless Selenium, not a manual Gameforge login workflow.
+
+        The user explicitly initiated this action on the Accounts screen.
+        API consent, ticket ownership and secure session handoff remain enforced.
+        """
         if self.client is None or self._worker is not None:
-            self._notice("Cannot open login", "Connect and finish the current request first.")
+            self._notice("Cannot sign in yet", "Connect and finish the current request first.")
             return
         account = self.accounts_page.account_record(account_id)
         if account is None or account.get("enabled") is not True:
             return
-        answer = QMessageBox.question(
-            self, "Secure Gameforge browser login on your Mac",
-            "An isolated Mac browser will open official Gameforge pages. "
-            "You enter your password and complete any CAPTCHA yourself. "
-            "When you approve the handoff, only the selected world's secure "
-            "session cookie is encrypted to your backend. The server will "
-            "independently verify your player before replacing any worker. "
-            "Existing tasks are NEVER replayed. A dedicated worker must be idle "
-            "and may be paused for recovery. Continue?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if answer == QMessageBox.Yes:
-            self._request("native_login_start", account_id=account_id)
+        if self._active_backend_url is None:
+            self._notice("No backend", "Connect to the selected backend before signing in.")
+            return
+        self._request("native_login_start", account_id=account_id)
 
     def _open_native_browser_login(self, challenge: dict[str, object]) -> None:
         account_id = challenge.get("account_id")
@@ -699,15 +695,23 @@ class MainWindow(FluentWindow):
                               task_payload={"ticket_id": challenge["ticket_id"]})
             return
         try:
-            from daedalus.desktop.native_login_dialog import NativeLoginDialog
+            from daedalus.desktop.selenium_login_dialog import SeleniumLoginDialog
 
-            dialog = NativeLoginDialog(
+            if self._active_backend_url is None:
+                raise RuntimeError("Backend identity missing")
+            dialog = SeleniumLoginDialog(
+                backend_url=self._active_backend_url,
+                account_id=str(record["id"]),
                 world=str(record["world"]), player=str(record["player"]),
                 ttl_seconds=int(challenge["expires_in_seconds"]), parent=self,
             )
         except (ImportError, RuntimeError, ValueError):
-            logger.warning("Native browser could not open")
-            self._notice("Native browser unavailable", "This preview needs the Qt WebEngine runtime.")
+            logger.warning("Automatic local Selenium login could not open")
+            self._notice(
+                "Automatic sign-in unavailable",
+                "Install the native Mac app with Selenium and Chrome support, "
+                "then retry the selected account.",
+            )
             self._request("native_login_cancel", account_id=account_id,
                           task_payload={"ticket_id": challenge["ticket_id"]})
             return
