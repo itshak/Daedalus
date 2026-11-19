@@ -140,7 +140,8 @@ def test_task_page_requires_backend_enablement_before_actions(qt_app):
         ], enabled=True)
         assert not page.start_button.isEnabled()  # readiness must be checked
         page.set_preflight({"account_id": "alpha", "task": "constructionList", "ready": True, "reason": "none"})
-        assert page.start_button.isEnabled()
+        # Readiness is not a substitute for an actual validated construction queue.
+        assert not page.start_button.isEnabled()
         assert page.refresh_button.isEnabled()
         captured = []
         page.refresh_requested.connect(captured.append)
