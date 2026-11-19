@@ -248,6 +248,9 @@ def test_prior_warehouse_session_is_restored_without_password_or_visible_chrome(
 
 def test_secondary_game_tab_captcha_is_detected_before_timeout(monkeypatch):
     """Gameforge can challenge the new game tab rather than the lobby."""
+    # Lean core/development environments do not install desktop Selenium.
+    # The fixture runs with the daedalus[desktop] dependencies.
+    pytest.importorskip("selenium")
     import time
 
     class Tabs:
