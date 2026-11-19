@@ -396,6 +396,13 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
+        # Original warehouse bot's account loop, now scoped to the current
+        # backend and strictly sequential to preserve one account owner.
+        self._automatic_login_queue: list[str] = []
+        self._automatic_login_origin: str | None = None
+        self._automatic_login_current: str | None = None
+        self._automatic_login_report: list[str] | None = None
+        self._automatic_login_attempts = 0
         self._recovery_followup: tuple[str, str] | None = None
         self._embedded_demo = None
         self._seen_assistance_ids: set[str] = set()
@@ -484,6 +491,9 @@ class MainWindow(FluentWindow):
             lambda account_id: self._request("recovery_guide", account_id=account_id)
         )
         self.accounts_page.native_browser_login_requested.connect(self._begin_native_browser_login)
+        self.accounts_page.native_browser_login_batch_requested.connect(
+            self._start_automatic_login_batch
+        )
         self.accounts_page.recovery_prepare_requested.connect(
             lambda account_id: self._request(
                 "recovery_prepare", account_id=account_id,
@@ -524,6 +534,9 @@ class MainWindow(FluentWindow):
         )
         self.warehouses_page.load_all_requested.connect(
             lambda ids: self._request("warehouses_all", task_payload={"account_ids": ids})
+        )
+        self.warehouses_page.sign_in_all_requested.connect(
+            lambda ids: self._start_automatic_login_batch(ids, report_after=True)
         )
         self.warehouses_page.report_scope_changed.connect(
             lambda ids: self.accounts_page.set_report_exclusions(
@@ -666,6 +679,88 @@ class MainWindow(FluentWindow):
         account_id = self.tasks_page.selected_account_id()
         if account_id:
             self._request_task_refresh(account_id)
+
+    def _start_automatic_login_batch(
+        self, account_ids: list[str], *, report_after: bool = False,
+    ) -> None:
+        """Sequential headless sign-in, like the old all-account warehouse runner.
+
+        Bulk sign-in is explicitly triggered from Accounts or Warehouses; no
+        task starts or network retries occur automatically after an ambiguity.
+        """
+        if (
+            self.client is None or self._active_backend_url is None
+            or self._worker is not None or self._automatic_login_current is not None
+            or self._automatic_login_queue
+        ):
+            self._notice("Sign-in already in progress", "Finish the current account first.")
+            return
+        if not self.accounts_page._native_browser_login_enabled:
+            self._notice(
+                "Automatic sign-in unavailable",
+                "This backend does not currently support secure session recovery.",
+            )
+            return
+        if not isinstance(account_ids, list) or len(account_ids) > 100:
+            self._notice("Invalid account selection", "Choose up to 100 configured accounts.")
+            return
+        chosen: list[str] = []
+        seen: set[str] = set()
+        for account_id in account_ids:
+            if not isinstance(account_id, str) or account_id in seen:
+                continue
+            seen.add(account_id)
+            record = self.accounts_page.account_record(account_id)
+            if record is None or record.get("enabled") is not True:
+                continue
+            if str(record.get("session_status")) == "authenticated":
+                continue  # preserve the existing verified worker and task lease
+            chosen.append(account_id)
+        self._automatic_login_origin = self._active_backend_url
+        self._automatic_login_queue = chosen
+        self._automatic_login_report = list(seen) if report_after else None
+        self._automatic_login_attempts = 0
+        self._continue_automatic_login_batch()
+
+    def _continue_automatic_login_batch(self) -> None:
+        """Queue the next account only after the prior API/browser step finished."""
+        if self._automatic_login_origin is None:
+            return
+        if (
+            self.client is None
+            or self._active_backend_url != self._automatic_login_origin
+        ):
+            self._automatic_login_queue.clear()
+            self._automatic_login_origin = None
+            self._automatic_login_current = None
+            self._automatic_login_report = None
+            return
+        if self._worker is not None or self._automatic_login_current is not None:
+            return
+        if self._automatic_login_queue:
+            account_id = self._automatic_login_queue.pop(0)
+            self._automatic_login_current = account_id
+            self._automatic_login_attempts += 1
+            self.accounts_page.native_login_status.setText(
+                f"Headless login {self._automatic_login_attempts}: "
+                "authenticating one account, then continuing with the next."
+            )
+            self._begin_native_browser_login(account_id)
+            return
+        report, self._automatic_login_report = self._automatic_login_report, None
+        attempted = self._automatic_login_attempts
+        self._automatic_login_origin = None
+        self._automatic_login_current = None
+        self._automatic_login_attempts = 0
+        self.accounts_page.native_login_status.setText(
+            f"Automatic sign-in requests finished for {attempted} account(s). "
+            "Check authoritative session status; CAPTCHA is the only manual "
+            "browser step when credentials are saved."
+        )
+        if report:
+            # Always show per-account failures honestly; a login can finish
+            # without starting a dedicated authoritative worker.
+            self._request("warehouses_all", task_payload={"account_ids": report})
 
     def _begin_native_browser_login(self, account_id: str) -> None:
         """One-click headless Selenium, not a manual Gameforge login workflow.
@@ -1366,6 +1461,7 @@ class MainWindow(FluentWindow):
                 self._notice("Backend unavailable", error)
 
     def _on_worker_finished(self) -> None:
+        finished_action = getattr(self._worker, "action", None)
         self._worker = None
         self.connection_page.set_connecting(False)
         challenge, self._pending_native_login_challenge = (
@@ -1374,6 +1470,12 @@ class MainWindow(FluentWindow):
         if challenge is not None and self.client is not None:
             QTimer.singleShot(0, lambda: self._open_native_browser_login(challenge))
             return
+        if finished_action in {
+            "native_login_start", "native_login_complete", "native_login_cancel",
+        }:
+            # A completed/missing handoff cannot hold up the next account;
+            # the backend still owns verification and individual session state.
+            self._automatic_login_current = None
         followup, self._recovery_followup = self._recovery_followup, None
         if followup is not None and self.client is not None:
             action, account_id = followup
@@ -1387,6 +1489,8 @@ class MainWindow(FluentWindow):
             self._pending_batch_status = None
             self._request("task_list_batch", task_payload={"account_ids": ids})
         if self._worker is None:
+            self._continue_automatic_login_batch()
+        if self._worker is None:
             self._run_next_preflight()
 
     def _notice(self, title: str, message: str) -> None:
@@ -1395,6 +1499,9 @@ class MainWindow(FluentWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._automatic_login_queue.clear()
+        self._automatic_login_origin = None
+        self._automatic_login_report = None
         self._assistance_poll.stop()
         # Preserve the old GUI's rule: never destroy a live QThread.
         if (
