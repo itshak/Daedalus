@@ -426,3 +426,33 @@ def test_tavern_cities_are_native_and_never_fabricated(page):
     # Uses engine default without explicitly choosing a city.
     page._form_inputs["run_hours"].setValue(1)
     assert page._form_config() == {"run_hours": 1}
+
+
+def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": [
+            {"name": key, "type": "json", "required": True}
+            for key in ("city_id", "city_name", "buildings", "shipments", "expand_overall",
+                        "wait_resources", "construction_queue", "total_time")
+        ],
+    }], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Olympia"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_preflight({"account_id": "alpha", "task": "constructionList",
+                        "ready": True, "reason": "none"})
+    page._toggle_advanced()
+    assert page.start_button.isEnabled()
+    emitted = []
+    page.launch_requested.connect(lambda *args: emitted.append(args))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
+    page.config_editor.setPlainText(json.dumps({
+        "city_id": 999, "city_name": "OtherPlayer", "buildings": [],
+        "shipments": [], "expand_overall": True, "wait_resources": False,
+        "construction_queue": [], "total_time": 0,
+    }))
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert warnings
+    assert emitted == []
