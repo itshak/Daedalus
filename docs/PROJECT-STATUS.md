@@ -95,12 +95,16 @@ synthetic account metadata and **no** Gameforge network requests; this does
 not replace owner-run Mac login, game task or reboot acceptance. The full
 Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
-## OpenSpec implementation closed; owner acceptance remains open
+## Current OpenSpec work and owner acceptance
 
-**No active OpenSpec implementation changes** remain after
-`validate-live-authentication` was archived on 2026-11-19. Its seven
-implementation/preflight tasks were checked and verified. The three former
-unchecked owner-only tasks were **transferred as unperformed** into
+**One OpenSpec implementation change is active:** `redesign-macos-desktop-experience`.
+Its native Fluent UX work is in progress, with tested initial navigation, multi-account
+warehouse reporting, selected-account task status/dispatch guards and contextual
+settings. The full visual design, native Mac screenshots, task-specific forms,
+accessibility audit and owner approval are **not complete** and the change is
+not archived. The earlier `validate-live-authentication` was archived on
+2026-11-19 after its seven implementation/preflight tasks were verified.
+Its three former unchecked owner-only tasks were **transferred as unperformed** into
 [owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60)
 and [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md), not marked passed or waived.
 
@@ -119,6 +123,25 @@ synthetic Playwright, Qt/Fluent, Linux/Windows/macOS, packaging and OpenSpec)
 does not replace live acceptance. The OpenSpec hygiene regression checks
 now allow an empty active-change set but continue to reject unchecked
 archived tasks and require visible owner acceptance tracking.
+
+## Native Fluent desktop redesign (implementation in progress, 2026-11-19)
+
+The active `redesign-macos-desktop-experience` change now has an account-aware
+five-destination Fluent shell (Overview, Accounts, Warehouses, Automations, Activity),
+distinct Connection and Settings icons, scrolled settings/account/task pages,
+and consolidated Wine/Construction entry points in the Automations workspace.
+Warehouses expose **All accounts** (one click), **Selected accounts** (custom picker)
+and **This account**, preserving island grouping, the 220K filter, missing-vs-zero
+semantics and grouped text/CSV/JSON exports. Automations can inspect running
+statuses for all or selected accounts. Starting a task for selected accounts
+requires an explicit review, checks each account before any dispatch, generates
+a unique request per account and halts on the first uncertain receipt without
+retrying. The backend remains the authority and no live operations were run by
+the synthetic UI implementation.
+
+This is an incremental implementation, not yet complete production/visual
+acceptance. macOS preview/CI results and remaining tasks are tracked in the
+open change; issue #60 separately tracks owner-only real-game approval.
 
 ## Opt-in account metadata editor (shipped)
 
