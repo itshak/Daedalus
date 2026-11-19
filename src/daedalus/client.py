@@ -501,6 +501,33 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid city data")
         return data
 
+    def construction_preview(
+        self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+    ) -> dict[str, object]:
+        """Ask the existing IkaBot worker for a read-only, account-scoped plan."""
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or not 0 < city_id < 10**12 or not isinstance(upgrades, list)
+                or not 0 < len(upgrades) <= 12):
+            raise ValueError("Invalid construction preview scope")
+        for upgrade in upgrades:
+            if (not isinstance(upgrade, dict)
+                    or set(upgrade) != {"position", "target_level"}
+                    or type(upgrade["position"]) is not int
+                    or type(upgrade["target_level"]) is not int):
+                raise ValueError("Invalid construction preview target")
+        data = self._write(
+            f"accounts/{account_id}/cities/{city_id}/construction-preview",
+            {"upgrades": upgrades},
+        )
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or type(data.get("ready")) is not bool
+                or not isinstance(data.get("config"), dict)
+                or any(not isinstance(data.get(name), list)
+                       or len(data[name]) != 5 for name in ("costs", "missing", "available"))
+                or type(data.get("estimated_seconds")) is not int):
+            raise APIConnectionError("Backend returned an invalid construction preview")
+        return data
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
