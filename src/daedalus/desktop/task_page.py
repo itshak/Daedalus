@@ -1558,7 +1558,7 @@ class TasksPage(QWidget):
         account_id = self.selected_account_id()
         task = self.selected_task_name()
         if (not self._dispatch_enabled or account_id is None or task is None
-                or self._pending_launch):
+                or self._pending_launch or not self.start_button.isEnabled()):
             return
         if self._unresolved:
             QMessageBox.warning(self, "Request needs review",
