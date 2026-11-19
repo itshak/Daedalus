@@ -9,7 +9,15 @@ result before starting any task.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFormLayout, QHBoxLayout, QHeaderView, QLabel, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from qfluentwidgets import ComboBox, PushButton, SpinBox
 
 _RESOURCES = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
