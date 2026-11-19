@@ -219,3 +219,56 @@ The desktop SHALL provide keyboard-operable, screen-reader-labeled and focus-vis
 - **GIVEN** synthetic flows and automated tests pass
 - **WHEN** a redesign implementation is proposed for archival
 - **THEN** reviewed Mac screenshots/layouts in both appearance modes, accessibility QA, strict OpenSpec validation, secret scan and packaged-app tests are documented before completion is claimed.
+### Requirement: First-class all-account and selected-account workflows
+
+Every user-facing screen that operates on account-scoped data SHALL provide
+an unambiguous all-account view or action and a discoverable selection of
+multiple accounts wherever the backend supports meaningful, authorized bulk
+operation. Safe read-only aggregation SHOULD be one click; scoped mutations
+MUST list the affected accounts, require separate explicit approval, preserve
+each account's independent game-session ownership, and fail closed if any
+prerequisite is missing. Screens for which true multi-account action is not
+supported MUST state that limitation rather than silently acting on one
+account or pretending that all accounts were processed.
+
+#### Scenario: Print all account warehouses without individually selecting accounts
+
+- **GIVEN** a backend has multiple configured accounts with different session states
+- **WHEN** the operator selects All accounts in Warehouses
+- **THEN** the desktop requests a single combined read-only report across every
+  configured account (including explicit partial failures) with unchanged island
+  grouping, 220K filtering, unknown-value handling and clipboard/CSV/JSON/TXT
+  output across the included accounts
+
+#### Scenario: Choose a subset of warehouse report accounts
+
+- **GIVEN** several configured accounts are available
+- **WHEN** the operator opens Choose accounts and checks a subset
+- **THEN** the chosen IDs are displayed with an accurate selection count,
+  subsequent Selected accounts reports include only that subset, and the
+  nonsecret per-backend selection is retained without changing game account
+  enablement or credentials
+
+#### Scenario: Read task status across all accounts
+
+- **WHEN** the operator chooses View all task statuses or View selected statuses
+- **THEN** the desktop queries each authorized account, shows running and
+  uncertain counts separately, and labels failed accounts unavailable rather
+  than fabricating zero running tasks
+
+#### Scenario: Review a mutating automation across selected accounts
+
+- **GIVEN** the operator selects more than one account and a dispatchable task
+- **WHEN** the operator reviews the account list, config and multi-account warning
+  and explicitly approves the action
+- **THEN** the desktop checks preflight for every selected account before the first
+  mutating request, uses separate account-bound UUIDs and backend validation for
+  each start, and stops dispatch on the first uncertain result without retrying
+  or automatically reconciling any request
+
+#### Scenario: One selected account has failed readiness
+
+- **GIVEN** one account in the chosen cohort is not ready or has unresolved receipts
+- **WHEN** multi-account preflight runs
+- **THEN** no account in that cohort receives a new start request, and the user
+  sees exactly which account requires attention
