@@ -744,6 +744,8 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action == "list_buildings_existing":
+                    return self._list_buildings_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -796,6 +798,55 @@ class IPCServer:
             # Preserve upstream CLI semantics, including the email field.
             result["email"] = session.mail
         return result
+
+    def _list_buildings_existing(self, request):
+        """Read only one owned city's building slots from an existing session.
+
+        All upstream game HTML is parsed and discarded within IkaBot. This
+        action never prepares or starts an upgrade, alters worker production,
+        or restores a session. The request city must belong to this player.
+        """
+        from ikabot.config import city_url
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building inventory city")
+        ids, _cities = getIdsOfCities(session)
+        if city_id not in {_existing_city_id(value) for value in ids}:
+            raise ValueError("Building inventory city is not owned by this session")
+        html = session.get(city_url + str(city_id))
+        city = getCity(html)
+        if _existing_city_id(city.get("id")) != city_id:
+            raise ValueError("The game returned a different city")
+        buildings = []
+        for item in city.get("position", []):
+            if not isinstance(item, dict) or item.get("building") == "empty":
+                continue
+            slot, level = item.get("position"), item.get("level")
+            if (type(slot) is not int or not 0 <= slot <= 80
+                    or type(level) is not int or not 0 <= level <= 150):
+                raise ValueError("Invalid building position or level")
+            title = item.get("name")
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError("Invalid building name")
+            buildings.append({
+                "position": slot,
+                "building": str(item.get("building") or "")[:64],
+                "name": title[:100],
+                "level": level,
+                "busy": item.get("isBusy") is True,
+                "can_upgrade": item.get("canUpgrade") is True,
+            })
+        if len(buildings) > 80 or len({item["position"] for item in buildings}) != len(buildings):
+            raise ValueError("Invalid building inventory")
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "buildings": buildings,
+        }
 
     def _warehouse_snapshots_existing(self, request):
         """Read numeric-only plunderable values from a real owned warehouse.
