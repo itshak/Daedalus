@@ -163,16 +163,21 @@ def _await_world(driver, world_host: str, *, deadline: float,
     while time.monotonic() < deadline:
         if cancelled():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
-        if challenge_present(driver):
-            if headless:
-                raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
-            _wait_challenge(driver, deadline=deadline, notify=notify, cancelled=cancelled)
         for handle in list(driver.window_handles):
             try:
                 driver.switch_to.window(handle)
             except Exception:  # noqa: BLE001 - a stale tab is not a valid session
                 log.debug("Gameforge tab no longer exists")
                 continue
+            # Gameforge can open a CAPTCHA in the secondary game tab after
+            # the lobby Play click. Detect it there too rather than treating
+            # the resulting world timeout as an ordinary login failure.
+            if challenge_present(driver):
+                if headless:
+                    raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                _wait_challenge(
+                    driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                )
             if _world_ready(driver, world_host):
                 return
         try:

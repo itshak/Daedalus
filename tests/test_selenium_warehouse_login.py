@@ -243,3 +243,39 @@ def test_prior_warehouse_session_is_restored_without_password_or_visible_chrome(
         ),
     ) == "x" * 48
     assert modes == [True]
+
+
+
+def test_secondary_game_tab_captcha_is_detected_before_timeout(monkeypatch):
+    """Gameforge can challenge the new game tab rather than the lobby."""
+    import time
+
+    class Tabs:
+        def __init__(self, driver):
+            self.driver = driver
+
+        def window(self, handle):
+            self.driver.current_window_handle = handle
+
+    class Driver:
+        def __init__(self):
+            self.window_handles = ["lobby", "game"]
+            self.current_window_handle = "lobby"
+            self.switch_to = Tabs(self)
+
+        def find_elements(self, *_args):
+            return []
+
+    browser = Driver()
+    monkeypatch.setattr(
+        auth, "challenge_present",
+        lambda driver: driver.current_window_handle == "game",
+    )
+    monkeypatch.setattr(auth, "_world_ready", lambda *_args: False)
+    with pytest.raises(auth.ManualChallengeRequired, match="CAPTCHA"):
+        auth._await_world(
+            browser, "s53-ru.ikariam.gameforge.com",
+            deadline=time.monotonic() + 3,
+            headless=True, notify=lambda _event: None,
+            cancelled=lambda: False,
+        )

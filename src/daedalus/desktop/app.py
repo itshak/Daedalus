@@ -832,7 +832,14 @@ class MainWindow(FluentWindow):
         report, self._automatic_login_report = self._automatic_login_report, None
         if report is not None and not cancelled:
             self.switchTo(self.warehouses_page)
+            # A successful login binds the verified cookie; a separate
+            # authoritative worker is still needed to obtain snapshots.
+            # Always ask the backend for a partial read-only result rather
+            # than claiming all newly bound cookies are active workers.
+            self._recovery_followup = ("accounts", "")
             self._perform_warehouse_scope(*report)
+        elif self.client is not None and self._worker is None:
+            self._request("accounts")
 
     def _cancel_automatic_logins(self) -> None:
         if not self._automatic_login_active:
@@ -1412,8 +1419,11 @@ class MainWindow(FluentWindow):
             logger.info("One-time Mac browser login prepared; no game action started")
         elif action == "native_login_complete":
             assert isinstance(payload, dict)
-            if (self._automatic_login_active and
-                    payload.get("account_id") == self._automatic_login_current):
+            automatic_result = (
+                self._automatic_login_active
+                and payload.get("account_id") == self._automatic_login_current
+            )
+            if automatic_result:
                 if self._automatic_login_save_credentials:
                     creds = self._automatic_login_credentials
                     record = self.accounts_page.account_record(self._automatic_login_current)
@@ -1444,7 +1454,11 @@ class MainWindow(FluentWindow):
                     "The server stored a verified world session in its OS keyring. "
                     "Start or attach a dedicated worker before running tasks.",
                 )
-            self._recovery_followup = ("accounts", "")
+            # The cohort queue must advance before refreshing account status:
+            # a refresh launched here consumes the only APIWorker slot and
+            # strands the next Selenium account in a busy state.
+            if not automatic_result:
+                self._recovery_followup = ("accounts", "")
         elif action == "native_login_cancel":
             if self._automatic_login_active and self._automatic_login_current:
                 self._automatic_login_failures += 1

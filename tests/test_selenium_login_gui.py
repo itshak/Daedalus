@@ -172,3 +172,68 @@ def test_completed_automatic_login_marks_verified_only_after_server_receipt(wind
     assert window._automatic_login_successes == 1
     assert window._automatic_login_current is None
     assert window._automatic_login_pending_advance is True
+
+
+
+def test_successful_login_advances_before_refreshing_accounts(window, monkeypatch, app):
+    """A premature accounts fetch monopolizes the API slot and strands cohort B."""
+    from daedalus.desktop import app as desktop
+
+    monkeypatch.setattr(desktop, "remember_login", lambda *_args: None)
+    advanced, requested = [], []
+    monkeypatch.setattr(window, "_advance_automatic_login", lambda: advanced.append(True))
+    monkeypatch.setattr(window, "_request", lambda action, **kw: requested.append(action))
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._automatic_login_queue = ["account-b"]
+    window._automatic_login_credentials = GameforgeCredentials("test@example.invalid", "synthetic")
+    window._on_completed("native_login_complete", {
+        "account_id": "account-a", "status": "worker_recovered_verified",
+    })
+    assert window._recovery_followup is None
+    assert window._automatic_login_pending_advance
+    window._on_worker_finished()
+    app.processEvents()
+    assert advanced == [True]
+    assert requested == []
+
+
+def test_end_of_cohort_refreshes_accounts_after_warehouse_request(window, monkeypatch):
+    requested = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: requested.append(action))
+    window._automatic_login_active = True
+    window._automatic_login_successes = 2
+    window._automatic_login_report = ("warehouses_all", ["account-a", "account-b"])
+    window._finish_automatic_logins()
+    assert requested == ["warehouses_all"]
+    assert window._recovery_followup == ("accounts", "")
+    assert window._automatic_login_active is False
+
+
+def test_end_of_login_only_cohort_refreshes_accounts(window, monkeypatch):
+    requested = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: requested.append(action))
+    window._automatic_login_active = True
+    window._finish_automatic_logins()
+    assert requested == ["accounts"]
+
+
+def test_credential_dialog_uses_masked_password(app):
+    from PySide6.QtWidgets import QLineEdit
+
+    from daedalus.desktop.selenium_credentials_dialog import SeleniumCredentialsDialog
+
+    dialog = SeleniumCredentialsDialog(player="Synthetic", world="s53-ru")
+    try:
+        assert dialog.password_input.echoMode() == QLineEdit.Password
+        assert dialog.remember.isChecked()
+        dialog.email_input.setText("synthetic@example.invalid")
+        dialog.password_input.setText("synthetic-only")
+        dialog._accept()
+        assert dialog.credentials() == GameforgeCredentials(
+            "synthetic@example.invalid", "synthetic-only"
+        )
+        dialog.discard()
+        assert not dialog.password_input.text()
+    finally:
+        dialog.deleteLater()
