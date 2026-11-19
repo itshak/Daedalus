@@ -279,7 +279,7 @@ def test_native_navigation_uses_one_contextual_automation_workspace(qt_app, monk
             "account_id": "alpha", "task": "constructionList",
             "ready": True, "reason": "none"
         })
-        assert page.start_button.isEnabled()
+        assert not page.start_button.isEnabled()  # no reviewed construction plan
         window._on_completed("task_list", {
             "account_id": "alpha", "engine_tasks": [
                 {"task": "alertLowWine", "status": "running", "pid": 1001,
