@@ -460,3 +460,54 @@ def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
     page._start()
     assert warnings
     assert emitted == []
+
+
+def test_daily_rewards_use_three_actual_city_pickers_and_native_favour_options(page):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    requested = []
+    page.cities_requested.connect(requested.append)
+    page.set_capabilities([{
+        "name": "loginDaily", "kind": "background_task",
+        "config_fields": [
+            {"name": "wine_city", "type": "json", "required": True},
+            {"name": "wood_city", "type": "json", "required": False},
+            {"name": "luxury_city", "type": "json", "required": False},
+            {"name": "favour_tasks", "type": "json", "required": False},
+            {"name": "collect_ambrosia", "type": "boolean", "required": False},
+        ],
+    }], enabled=True)
+    assert requested == ["alpha"]
+    with pytest.raises(ValueError, match="Select an actual city for wine_city"):
+        page._form_config()
+    page.set_cities("alpha", [
+        {"id": 101, "name": "Olympia", "coords": "15:20"},
+        {"id": 102, "name": "Sparta", "coords": "15:22"},
+    ])
+    wine = page._form_inputs["wine_city"]
+    wood = page._form_inputs["wood_city"]
+    luxury = page._form_inputs["luxury_city"]
+    assert wine.count() == 3
+    assert wood.itemText(0) == "Skip optional reward"
+    assert luxury.itemText(0) == "Skip optional reward"
+    wine.setCurrentIndex(1)
+    assert page._form_config()["wine_city"] == 101
+    assert "wood_city" not in page._form_config()
+    wood.setCurrentIndex(2)
+    assert page._form_config()["wood_city"] == 102
+    options = page._form_inputs["favour_tasks"]
+    assert isinstance(options, QListWidget)
+    assert [options.item(i).text() for i in range(options.count())] == [
+        "resource", "look", "online", "complete"
+    ]
+    options.item(0).setCheckState(Qt.Checked)
+    options.item(3).setCheckState(Qt.Checked)
+    assert page._form_config()["favour_tasks"] == ["resource", "complete"]
+    # No city data available after session revocation: old IDs must not persist.
+    page.set_cities_unavailable("alpha")
+    assert wine.currentIndex() == 0
+    assert wood.currentIndex() == 0
+    with pytest.raises(ValueError, match="Select an actual city"):
+        page._form_config()
+    assert options.item(0).checkState() == Qt.Checked
