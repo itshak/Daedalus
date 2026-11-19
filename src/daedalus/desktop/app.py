@@ -206,6 +206,11 @@ class APIWorker(QThread):
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "task_workshop" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                if type(city_id) is not int:
+                    raise ValueError("Invalid workshop city")
+                result = self.client.workshop_upgrades(self.account_id, city_id)
             elif self.action == "task_buildings" and self.account_id and self.task_payload:
                 city_id = self.task_payload.get("city_id")
                 if type(city_id) is not int:
@@ -424,6 +429,7 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_task_cities: str | None = None
         self._pending_task_buildings: tuple[str, int] | None = None
+        self._pending_workshop: tuple[str, int] | None = None
         self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
@@ -578,6 +584,7 @@ class MainWindow(FluentWindow):
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
             view.buildings_requested.connect(self._queue_task_buildings)
+            view.workshop_requested.connect(self._queue_workshop)
             view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
@@ -1314,6 +1321,26 @@ class MainWindow(FluentWindow):
                 task_payload={"city_id": scope[1], "upgrades": scope[2]},
             )
 
+    def _queue_workshop(self, account_id: str, city_id: int) -> None:
+        """Read eligible upgrade rows for the current account-owned city."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "UpgradeUnits"):
+            return
+        self._pending_workshop = (account_id, city_id)
+        self._run_next_workshop()
+
+    def _run_next_workshop(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_workshop
+        self._pending_workshop = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() == "UpgradeUnits"):
+            self._launch(
+                self.client, "task_workshop", account_id=scope[0],
+                task_payload={"city_id": scope[1]},
+            )
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1427,6 +1454,7 @@ class MainWindow(FluentWindow):
                     self._pending_batch_status = None
                     self._pending_task_cities = None
                     self._pending_task_buildings = None
+                    self._pending_workshop = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
@@ -1604,6 +1632,9 @@ class MainWindow(FluentWindow):
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
+        elif action == "task_workshop":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_workshop_upgrades(payload)
         elif action == "task_buildings":
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
@@ -1714,6 +1745,13 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.tasks_page.set_cities_unavailable(account_id)
+        if action == "task_workshop":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            if isinstance(account_id, str) and type(city_id) is int:
+                self.tasks_page.set_workshop_unavailable(account_id, city_id)
         if action == "task_buildings":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)
@@ -1772,7 +1810,7 @@ class MainWindow(FluentWindow):
                 self.connection_page.set_connected(True)
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight", "task_cities",
-                          "task_buildings", "task_construction_preview"}:
+                          "task_buildings", "task_construction_preview", "task_workshop"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -1831,6 +1869,8 @@ class MainWindow(FluentWindow):
             self._run_next_task_buildings()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_construction_preview()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_workshop()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
