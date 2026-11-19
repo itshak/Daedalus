@@ -105,3 +105,28 @@ def expert_configuration_needed(fields: list[dict[str, object]]) -> bool:
         field.get("required") is True and field.get("type") == "json"
         for field in fields
     )
+
+
+# Intentionally allow-listed primitive display values. Advanced free-form values
+# may contain private game data; do not echo them into dialogs or logs.
+_SUMMARY_SAFE_SCALARS = frozenset({
+    "minutes", "hours", "run_hours", "auto_transfer", "transfer_amount",
+    "check_now", "notification_mode", "intervalInHours", "interval_hours",
+    "useFreighters", "shallow", "non_empty_islands", "show_progress",
+})
+
+
+def configuration_summary(config: dict[str, object]) -> str:
+    """Human-readable, secret-free summary; never print arbitrary game data."""
+    if not config:
+        return "Use registered defaults"
+    items = []
+    for key, value in list(config.items())[:32]:
+        if not isinstance(key, str):
+            continue
+        title = key.replace("_", " ")
+        if key in _SUMMARY_SAFE_SCALARS and type(value) in (bool, int, float):
+            items.append(f"{title}: {value}")
+        else:
+            items.append(f"{title}: configured")
+    return ", ".join(items)[:600]
