@@ -21,7 +21,9 @@
 - [ ] research: academies/cities, experiments, count/mode, crystal cost and cooldown preview.
 - [ ] tavernManager, alertLowWine: city table, wine level/threshold, recurrence, transfer plan and alert destination.
 - [ ] modifyProduction, modifyAcademyWorkers, modifyTempleWorkers, reorganizeCityBuildings: native, reversible controls and plan/confirmation appropriate to each operation.
-- [ ] loginDaily, activateMiracle, activateShrine: city reward destinations, shrine/wonder identity, schedule and per-account readiness.
+- [x] loginDaily: choose real wine/wood/luxury city reward destinations, reviewed favour-task checklist and collection switch; existing engine prepare validates owned IDs.
+- [ ] loginDaily: reward eligibility and current state preview from upstream game data.
+- [ ] activateMiracle, activateShrine: shrine/wonder identity, schedule and per-account readiness.
 
 ## Domain workflows: resources and trade
 - [ ] sendResources, consolidateResources, distributeResources, resourceTransportManager: city/route matrix with resource quantity editors, ship type, recurrence, capacities and validation.
