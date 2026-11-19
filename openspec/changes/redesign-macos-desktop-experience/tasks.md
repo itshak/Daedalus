@@ -38,7 +38,7 @@ This change now contains merged implementation plus continued UX hardening. Chec
 - [ ] 3.5 Build dedicated Alerts/Monitoring and Resources/Trade forms for the supported registered tasks, including field help, units, validation and safe fallback for nested/unsupported schemas.
 - [ ] 3.6 Cover military, miracle, daily, piracy and all remaining registered operations with reviewed typed presentation or prominently explained expert/unsupported paths; verify catalog coverage against registry.
 - [ ] 3.7 Implement a one-screen review summary and separate explicit start authorization bound to account/world/task/config revision and fresh preflight; preserve backend UUID/idempotency and dispatch permission checks.
-- [ ] 3.8 Implement human-readable managed task lifecycle/stop/detail views using account-bound managed IDs and explicit stop consent, with refresh and nonblocking status.
+- [x] 3.8 Implement human-readable managed task lifecycle/stop/detail views using account-bound managed IDs and explicit stop consent, with refresh and nonblocking status.
 - [ ] 3.9 Add safe history and uncertain-request reconciliation detail flow: no automatic retry, authoritative state guidance and expert-only acknowledgement; ensure sanitized copy and no false Running/Success.
 - [ ] 3.10 Test complete automation flows using synthetic capability registry changes, disabled backend, dirty drafts, stale replies, preflight rejection, double click, task start timeout and receipt ambiguity.
 
@@ -112,3 +112,8 @@ The separate active validate-live-authentication change tracks owner-supervised 
 - **Verification still due:** actual Qt/macOS render and keyboard/VoiceOver
   checks, full offline pytest/ruff/macos packaging CI, and owner approval of
   all UX journeys. These are not marked complete here.
+
+- The reviewed group confirmation now enumerates every selected account with
+  its label, world and stable account ID (never abbreviates the remaining
+  cohort); semantic Fluent icons distinguish Wine, Construction, alerts and
+  resources in the task discovery workflow.

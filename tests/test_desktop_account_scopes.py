@@ -54,6 +54,7 @@ def test_navigation_has_unique_icons_and_only_one_regular_automation(app, monkey
         assert window.tasks_page.objectName() == "tasks_page"
         assert len(window._task_views) == 1
         assert window._task_views[0] is window.tasks_page
+        assert window.operations_page is window.tasks_page.catalog_panel
         assert hasattr(window.home_page, "all_warehouse_card")
     finally:
         _dispose(window, app)
@@ -118,7 +119,11 @@ def test_automation_bulk_start_requires_approval_and_exact_accounts(app, monkeyp
         page._bulk_account_ids = ["account-0", "account-2"]
         emitted = []
         page.batch_launch_requested.connect(lambda *args: emitted.append(args))
-        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        confirmation_text = []
+        def approve(*args, **kwargs):
+            confirmation_text.append(str(args[2]))
+            return QMessageBox.Yes
+        monkeypatch.setattr(QMessageBox, "question", approve)
         page._start_selected()
         assert emitted == []
         page.confirm_box.setChecked(True)
@@ -128,6 +133,10 @@ def test_automation_bulk_start_requires_approval_and_exact_accounts(app, monkeyp
         assert ids == ["account-0", "account-2"]
         assert task == "alertAttacks"
         assert config == {"minutes": 20}
+        assert len(confirmation_text) == 1
+        assert "Town 0 · s1-en (account account-0)" in confirmation_text[0]
+        assert "Town 2 · s1-en (account account-2)" in confirmation_text[0]
+        assert "Town 1" not in confirmation_text[0]
     finally:
         _dispose(page, app)
 

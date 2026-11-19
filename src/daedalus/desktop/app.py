@@ -35,7 +35,7 @@ from daedalus.desktop.branding import application_icon
 from daedalus.desktop.design_system import NAV_ICONS
 from daedalus.desktop.home_page import HomePage
 from daedalus.desktop.log_page import LogPage
-from daedalus.desktop.pages import AccountsPage, ConnectionPage, OperationsPage, WarehousesPage
+from daedalus.desktop.pages import AccountsPage, ConnectionPage, WarehousesPage
 from daedalus.desktop.ssh_tunnel import (
     LocalSSHTunnel,
     SSHConnectionUnavailable,
@@ -413,10 +413,11 @@ class MainWindow(FluentWindow):
         self.home_page = HomePage(self)
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
-        self.operations_page = OperationsPage(self)
-        # One authoritative automation workspace. Wine and Construction are
-        # contextual filters, never duplicate editors with divergent drafts.
+        # One authoritative automation workspace and one catalog instance.
+        # Preserve the public operations_page alias for legacy navigation
+        # callers without constructing a disconnected second catalog.
         self.tasks_page = TasksPage(self)
+        self.operations_page = self.tasks_page.catalog_panel
         self._task_views = (self.tasks_page,)
         self.log_page = LogPage(self)
         self.connection_page = ConnectionPage(self)
@@ -510,8 +511,11 @@ class MainWindow(FluentWindow):
         self.home_page.view_all_warehouses.connect(self._view_all_warehouses)
         self.home_page.view_all_automations.connect(self._view_all_automations)
         self.home_page.manage_automations.connect(self._view_home_automations)
-        self.operations_page.configure_requested.connect(self._configure_catalog_task)
-        self.operations_page.refresh_requested.connect(lambda: self._request("capabilities"))
+        # The embedded catalog directly selects its task in TasksPage.
+        # Its read-only refresh remains independently routed to the backend.
+        self.operations_page.refresh_requested.connect(
+            lambda: self._request("capabilities")
+        )
         self.warehouses_page.load_requested.connect(
             lambda account_id: self._request("warehouses", account_id=account_id)
         )
@@ -599,11 +603,12 @@ class MainWindow(FluentWindow):
         elif current is self.warehouses_page:
             self.warehouses_page._load_all()
         elif current is self.tasks_page:
-            self.tasks_page._refresh_all()
+            if self.tasks_page.stack.currentIndex() == 4:
+                self._request("capabilities")
+            else:
+                self.tasks_page._refresh_all()
         elif current is self.home_page:
             self._request("accounts")
-        elif current is self.operations_page:
-            self._request("capabilities")
 
     def _focus_search(self) -> None:
         if self.stackedWidget.currentWidget() is self.tasks_page:
@@ -1277,7 +1282,6 @@ class MainWindow(FluentWindow):
 
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
-        self.operations_page.set_operations(data["operations"])
         for view in self._task_views:
             view.set_capabilities(
                 data["operations"], bool(data.get("structured_engine_dispatch", False)),

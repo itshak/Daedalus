@@ -83,7 +83,7 @@ clears the prior backend's account and task draft context before new data is
 rendered.
 
 The Automations **Discover & configure** view has a searchable Fluent card
-gallery populated exclusively from the connected engine registry. Choosing
+gallery with semantic icons populated exclusively from the connected engine registry. Choosing
 **Configure** selects the associated task, never starts it. Category and
 search filters apply to both the gallery and complete selector; complex plans
 still require reviewed input or Advanced JSON when backend metadata lacks
@@ -91,7 +91,7 @@ safe choices. **Running** and **History** now have explicit account
 selectors and a shortcut to **All account statuses**. Routine tables use
 human-readable status; select **Task details** or **Request details** for
 managed IDs and process/request identifiers. Stop only targets an authorized,
-running, backend-managed task; uncertain requests never retry themselves.
+running, backend-managed task; uncertain requests never retry themselves. Every multi-account start consent names **all** selected account labels, worlds and IDs, including groups larger than 12.
 
 Settings now includes a *Warehouse reporting* account-scope summary,
 **Choose report accounts** and **Include all accounts**, synchronized with
