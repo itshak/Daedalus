@@ -345,3 +345,23 @@ def test_monitor_client_detects_cross_account_notifications_and_error_redacts():
 def test_monitoring_client_graceful_fallback_on_older_backend():
     with mock_client(lambda _req: httpx.Response(404)) as client:
         assert client.pending_assistance() == {"enabled": False, "tickets": []}
+
+
+def test_only_fixed_task_prerequisite_errors_are_shown_to_user():
+    def respond(req):
+        if req.method == "GET":
+            return httpx.Response(200, json={"account_id": "alpha", "task": "alertAttacks",
+                    "ready": False, "reason": "notifications_required", "checked": ["notifications"],
+                    "unresolved_request": False})
+        return httpx.Response(409, json={"detail":
+            "Configure Telegram or Discord notifications before starting this alert"})
+    with mock_client(respond) as client:
+        assert client.task_preflight("alpha", "alertAttacks")["ready"] is False
+        with pytest.raises(APIConnectionError, match="Configure Telegram or Discord"):
+            client.start_task("alpha", "alertAttacks", {},
+                "12345678-1234-4123-8123-123456789abc", confirmed=True)
+    with mock_client(lambda _r: httpx.Response(409,json={"detail": "private-secret-cookie"})) as c:
+        with pytest.raises(APIConnectionError) as err:
+            c.start_task("alpha", "alertAttacks", {},
+                "12345678-1234-4123-8123-123456789abc", confirmed=True)
+        assert "private-secret" not in str(err.value)

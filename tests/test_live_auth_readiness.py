@@ -66,6 +66,10 @@ class IPC:
         return account == self.account
     def list_managed_tasks(self, _account):
         return []
+    def preflight_task(self, account, task):
+        return {"task": task, "ready": True, "reason": "none",
+                "notifications_required": False, "checked": []}
+
     def start_managed_task(self, *args):
         self.start_calls.append(args)
         return {"task_id": "a" * 24, "pid": 42, "status": "running"}

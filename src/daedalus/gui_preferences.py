@@ -46,8 +46,23 @@ class GuiPreferences:
 
 
 def backend_scope(server_url: str) -> str:
-    """Only the URL hash is persisted; bearer credentials never enter settings."""
-    return hashlib.sha256(_validated_url(server_url).encode("utf-8")).hexdigest()
+    """Hash only a validated stable endpoint identity, never a bearer token.
+
+    An SSH tunnel uses an ephemeral port and therefore cannot be scoped by its
+    loopback URL; prefer the authenticated SSH host alias. Do not persist the
+    raw SSH target or leak it into reports, only its opaque SHA-256 digest.
+    """
+    if server_url.startswith("ssh://"):
+        destination = server_url[len("ssh://"):]
+        if not re.fullmatch(
+            r"(?:[A-Za-z_][A-Za-z0-9_.-]{0,63}@)?[A-Za-z0-9][A-Za-z0-9._-]{0,252}\Z",
+            destination,
+        ):
+            raise ValueError("Invalid SSH backend identity")
+        normalized = "ssh://" + destination.casefold()
+    else:
+        normalized = _validated_url(server_url)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def default_gui_path() -> Path:

@@ -11,7 +11,12 @@ from contextlib import contextmanager
 import pytest
 
 from daedalus.accounts import Account
-from daedalus.engine_ipc import ControlledIPCClient, EngineIPCUnavailable, ExistingIPCClient
+from daedalus.engine_ipc import (
+    ControlledIPCClient,
+    EngineIPCUnavailable,
+    EngineTaskRejected,
+    ExistingIPCClient,
+)
 
 ACCOUNT = Account("alpha", "s301-en", "ExamplePlayer", "Primary", True)
 KEY = "a" * 64
@@ -65,6 +70,10 @@ def server(tmp_path, responder):
 
 def reply(message):
     action = message["action"]
+    if action == "task_preflight_existing":
+        return {"status": "ok", "world": ACCOUNT.world, "player": ACCOUNT.player,
+                "task": message["task"], "ready": True, "reason": "none",
+                "notifications_required": False, "checked": []}
     if action == "start_task_existing":
         return {"status": "ok", "world": ACCOUNT.world, "username": ACCOUNT.player,
                 "task_id": "f" * 24, "pid": 4242}
@@ -130,3 +139,24 @@ def test_wrong_account_in_task_receipt_is_rejected(tmp_path):
         client = ControlledIPCClient(path)
         with pytest.raises(EngineIPCUnavailable, match="receipt"):
             client.start_managed_task(ACCOUNT, "alertAttacks", {}, "12345678-1234-4123-8123-123456789abc")
+
+
+def test_typed_pre_spawn_rejection_never_exposes_raw_engine_details(tmp_path):
+    def responder(message):
+        if message["action"] == "task_preflight_existing":
+            return {"status": "ok", "world": ACCOUNT.world, "player": ACCOUNT.player,
+                "task": message["task"], "ready": False,
+                "reason": "notifications_required", "notifications_required": True,
+                "checked": ["notifications"]}
+        return {"status": "rejected", "reason": "invalid_configuration",
+                "secret": "sensitive-engine-session-material"}
+    with server(tmp_path, responder) as (path, calls):
+        client = ControlledIPCClient(path)
+        assert client.preflight_task(ACCOUNT, "alertAttacks")["ready"] is False
+        with pytest.raises(EngineTaskRejected) as exc:
+            client.start_managed_task(ACCOUNT, "alertAttacks", {"minutes": 2},
+                                      "12345678-1234-4123-8123-123456789abc")
+        assert exc.value.reason == "invalid_configuration"
+        assert "sensitive" not in str(exc.value)
+        assert [c["action"] for c in calls] == [
+            "task_preflight_existing", "start_task_existing"]

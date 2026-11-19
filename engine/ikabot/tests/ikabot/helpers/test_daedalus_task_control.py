@@ -77,6 +77,7 @@ def prepared():
         patch("ikabot.helpers.ipc.multiprocessing.Process", FakeProcess),
         patch("ikabot.helpers.ipc.multiprocessing.Event", FakeEvent),
         patch("ikabot.helpers.ipc.updateProcessList") as update_processes,
+        patch("ikabot.helpers.botComm.telegramDataIsValid", return_value=True),
     ):
         yield engine, update_processes
 

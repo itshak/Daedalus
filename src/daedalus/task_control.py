@@ -25,7 +25,7 @@ from daedalus.account_sessions import (
     SessionPhase,
 )
 from daedalus.accounts import Account
-from daedalus.engine_ipc import ControlledIPCClient
+from daedalus.engine_ipc import ControlledIPCClient, EngineTaskRejected
 from daedalus.engine_registry import inspect_engine
 
 _REQUEST_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
@@ -37,6 +37,26 @@ _SECRET_WORDS = frozenset({
 
 class TaskUnavailable(RuntimeError):
     """The task cannot run safely through the currently attached engine."""
+
+
+class TaskRejected(TaskUnavailable):
+    """Game task was provably not launched; retry only with new user approval."""
+
+    def __init__(self, reason: str) -> None:
+        if reason != "invalid_configuration":
+            raise ValueError("Unknown deterministic rejection")
+        self.reason = reason
+        super().__init__("Invalid automation parameters. Review the fields and try again.")
+
+
+class TaskPrerequisiteMissing(TaskUnavailable):
+    """A known, deterministic nonsecret prerequisite failed before dispatch."""
+
+    def __init__(self, reason: str) -> None:
+        if reason != "notifications_required":
+            raise ValueError("Unknown task prerequisite")
+        self.reason = reason
+        super().__init__("Configure Telegram or Discord notifications before starting this alert")
 
 
 class TaskConflict(RuntimeError):
@@ -143,6 +163,30 @@ class TaskLedger:
             )
             return True, {"account_id": account_id, "request_id": request_id,
                           "task": task, "status": "dispatching", "task_id": None, "pid": None}
+
+    def existing(self, account_id: str, request_id: str, task: str,
+                 digest: str) -> dict[str, object] | None:
+        """Return the original result before new preflight; never replay it."""
+        with self._mutex, closing(self._database()) as conn:
+            prior = conn.execute(
+                "SELECT task, payload_hash, status, engine_task_id, pid FROM requests "
+                "WHERE account_id = ? AND request_id = ?", (account_id, request_id),
+            ).fetchone()
+        if prior is None:
+            return None
+        if prior[0] != task or prior[1] != digest:
+            raise TaskConflict("Request ID already refers to a different task")
+        return {"account_id": account_id, "request_id": request_id,
+                "task": task, "status": prior[2], "task_id": prior[3], "pid": prior[4]}
+
+    def has_unresolved(self, account_id: str) -> bool:
+        """Nonsecret read-only check that never reserves a dispatch."""
+        with self._mutex, closing(self._database()) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM requests WHERE account_id = ? "
+                "AND status IN ('dispatching', 'unconfirmed') LIMIT 1", (account_id,),
+            ).fetchone()
+        return row is not None
 
     def unresolved_except(self, account_id: str, request_id: str) -> bool:
         with self._mutex, closing(self._database()) as conn:
@@ -294,6 +338,15 @@ class TaskController:
         with self._mutex:
             return tuple(self._owned.values())
 
+    def preflight(self, account_id: str, task: str) -> dict[str, object]:
+        """Never reserve a dispatch; return only checked prerequisites."""
+        if task not in self._supported:
+            raise ValueError("Unsupported engine task")
+        account = self._account(account_id)
+        result = self._ipc.preflight_task(account, task)
+        return {"account_id": account_id, **result,
+                "unresolved_request": self._ledger.has_unresolved(account_id)}
+
     def start(
         self, account_id: str, task: str, config: object,
         request_id: str, *, confirmed: bool,
@@ -312,6 +365,15 @@ class TaskController:
         with self._mutex:
             if self._ledger.unresolved_except(account.id, request_id):
                 raise TaskUnavailable("An earlier task dispatch is unresolved; reconcile before restarting")
+            existing = self._ledger.existing(account.id, request_id, task, digest)
+            if existing is not None:
+                return existing
+            # Preflight happens BEFORE durable dispatch reservation. A known
+            # prerequisite failure is not an uncertain in-game launch.
+            # Unknown/unavailable preflight also refuses dispatch, fail closed.
+            prereq = self._ipc.preflight_task(account, task)
+            if not prereq["ready"]:
+                raise TaskPrerequisiteMissing(prereq["reason"])
             fresh, receipt = self._ledger.reserve(account.id, request_id, task, digest)
             if not fresh:
                 # Never dispatch again after an ambiguous failure or controller restart.
@@ -319,8 +381,15 @@ class TaskController:
             try:
                 self._lease(account)
                 started = self._ipc.start_managed_task(account, task, clean, request_id)
+            except EngineTaskRejected as exc:
+                # This specific typed IPC reply proves there was no process
+                # start. Do not block a corrected future request.
+                self._ledger.finish(account.id, request_id, status="rejected")
+                if exc.reason == "notifications_required":
+                    raise TaskPrerequisiteMissing(exc.reason) from exc
+                raise TaskRejected(exc.reason) from exc
             except BaseException:
-                # Do not retry: the IPC reply may have been lost after game acceptance.
+                # Unknown IPC results could have started a real game operation.
                 self._ledger.finish(account.id, request_id, status="unconfirmed")
                 raise
             self._ledger.finish(

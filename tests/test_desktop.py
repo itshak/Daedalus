@@ -138,6 +138,8 @@ def test_task_page_requires_backend_enablement_before_actions(qt_app):
         page.set_capabilities([
             {"name": "constructionList", "kind": "background_task"},
         ], enabled=True)
+        assert not page.start_button.isEnabled()  # readiness must be checked
+        page.set_preflight({"account_id": "alpha", "task": "constructionList", "ready": True, "reason": "none"})
         assert page.start_button.isEnabled()
         assert page.refresh_button.isEnabled()
         captured = []
@@ -446,7 +448,9 @@ def test_native_oneclick_demo_does_not_persist_ephemeral_bearer(qt_app, monkeypa
     attempted = []
     monkeypatch.setattr(
         window, "_connect",
-        lambda url, token: attempted.append((url, token)),
+        lambda url, token: attempted.append(
+            (url, token, window.connection_page.remember_checkbox.isChecked())
+        ),
     )
     try:
         window.connection_page.remember_checkbox.setChecked(True)
@@ -454,10 +458,11 @@ def test_native_oneclick_demo_does_not_persist_ephemeral_bearer(qt_app, monkeypa
         assert window._embedded_demo is not None
         assert window._embedded_demo.running
         assert attempted
-        url, token = attempted[0]
+        url, token, saved_during_demo = attempted[0]
         assert url.startswith("http://127.0.0.1:")
         assert len(token) >= 32
-        assert not window.connection_page.remember_checkbox.isChecked()
+        assert saved_during_demo is False
+        assert window.connection_page.remember_checkbox.isChecked()
         assert window.connection_page.token_input.text() == ""
         # Reusing the same explicitly started demo does not spawn another backend.
         window._start_offline_demo()

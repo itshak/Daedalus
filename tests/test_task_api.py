@@ -27,13 +27,23 @@ class MockIPC:
     def __init__(self):
         self.calls = []
         self.fail_once = False
+        self.notifications_ready = True
+        self.reject_bad_config = False
 
     def has_account(self, account):
         self.calls.append(("verify", account.id))
         return True
 
+    def preflight_task(self, account, task):
+        return {"task": task, "ready": self.notifications_ready,
+                "reason": "none" if self.notifications_ready else "notifications_required",
+                "notifications_required": True, "checked": ["notifications"]}
+
     def start_managed_task(self, account, task, config, request_id):
         self.calls.append(("start", account.id, task, config))
+        if self.reject_bad_config:
+            from daedalus.engine_ipc import EngineTaskRejected
+            raise EngineTaskRejected("invalid_configuration")
         if self.fail_once:
             self.fail_once = False
             raise EngineIPCUnavailable("secret-server-error-should-be-redacted")
@@ -157,3 +167,39 @@ def test_timeout_is_unconfirmed_and_requires_manual_reconciliation(setup):
     next_run = client.post(target, json=request(), headers=auth())
     assert next_run.status_code == 200
     assert len([call for call in ipc.calls if call[0] == "start"]) == 2
+
+
+def test_task_readiness_is_readonly_and_missing_notification_is_clear_409(setup):
+    client, ipc, _manager, _coordinator = setup
+    target = "/api/v1/accounts/alpha/tasks"
+    prereq = target + "/preflight?task=alertAttacks"
+    assert client.get(prereq).status_code == 401
+    ipc.notifications_ready = False
+    readiness = client.get(prereq, headers=auth())
+    assert readiness.status_code == 200
+    assert readiness.json()["reason"] == "notifications_required"
+    assert readiness.json()["ready"] is False
+    assert readiness.json()["unresolved_request"] is False
+    assert client.get(target, headers=auth()).json()["requests"] == []
+    launch = client.post(target, json=request(), headers=auth())
+    assert launch.status_code == 409
+    assert "Configure Telegram or Discord" in launch.json()["detail"]
+    assert client.get(target, headers=auth()).json()["requests"] == []
+    assert not any(call[0]=="start" for call in ipc.calls)
+    ipc.notifications_ready = True
+    assert client.get(prereq, headers=auth()).json()["ready"] is True
+    assert client.post(target, json=request(), headers=auth()).status_code == 200
+
+
+def test_definite_preparation_error_returns_safe_422_without_uncertain_request(setup):
+    client, ipc, _manager, _coordinator = setup
+    target = "/api/v1/accounts/alpha/tasks"
+    ipc.reject_bad_config = True
+    payload = request(config={"minutes": "invalid"})
+    failure = client.post(target, json=payload, headers=auth())
+    assert failure.status_code == 422
+    assert "Invalid automation parameters" in failure.json()["detail"]
+    rows = client.get(target, headers=auth()).json()["requests"]
+    assert rows[0]["status"] == "rejected"
+    ipc.reject_bad_config = False
+    assert client.post(target, json=request(), headers=auth()).status_code == 200

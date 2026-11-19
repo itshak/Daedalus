@@ -93,3 +93,17 @@ def test_gui_preference_values_are_bounded(tmp_path):
     prefs = GuiPreferences()
     with pytest.raises(GuiPreferenceError):
         prefs.set_excluded("http://127.0.0.1:8765", {f"acc{i}" for i in range(101)})
+
+
+def test_ssh_backend_scope_uses_private_stable_host_not_ephemeral_port():
+    from daedalus.gui_preferences import GuiPreferences, backend_scope
+    prefs = GuiPreferences()
+    url = "ssh://debian@aiserver"
+    prefs.set_excluded(url, {"alpha"})
+    assert prefs.excluded_for("ssh://debian@aiserver") == {"alpha"}
+    assert prefs.excluded_for("ssh://other@aiserver") == set()
+    assert backend_scope(url) == backend_scope("ssh://debian@AISERVER")
+    assert len(backend_scope(url)) == 64
+    for bad in ("ssh://-oProxyCommand=x", "ssh://../a", "ssh://host?cookie=secret"):
+        with pytest.raises(ValueError):
+            backend_scope(bad)

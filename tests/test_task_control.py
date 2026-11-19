@@ -10,11 +10,13 @@ import pytest
 
 from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
 from daedalus.accounts import Account
-from daedalus.engine_ipc import EngineIPCUnavailable
+from daedalus.engine_ipc import EngineIPCUnavailable, EngineTaskRejected
 from daedalus.task_control import (
     TaskConflict,
     TaskController,
     TaskLedger,
+    TaskPrerequisiteMissing,
+    TaskRejected,
     TaskUnavailable,
     validated_configuration,
 )
@@ -28,6 +30,10 @@ class FakeTaskIPC:
 
     def has_account(self, account):
         return self.online and account.player == "ExamplePlayer"
+
+    def preflight_task(self, account, task):
+        return {"task": task, "ready": True, "reason": "none",
+                "notifications_required": False, "checked": []}
 
     def start_managed_task(self, account, task, config, request_id):
         self.sent.append((account.id, task, config))
@@ -131,6 +137,7 @@ def test_unconfirmed_ipc_result_cannot_be_automatically_replayed(fixtures):
     result = controller.start("alpha", "alertAttacks", {}, request_id, confirmed=True)
     assert result["status"] == "unconfirmed"
     assert result["task_id"] is None
+    assert controller.preflight("alpha", "alertAttacks")["unresolved_request"] is True
 
 
 def test_list_stop_reports_only_current_engine_managed_tasks(fixtures):
@@ -168,3 +175,61 @@ def test_ledger_reserve_creates_no_directory_before_first_write(tmp_path):
     assert receipt["status"] == "dispatching"
     assert (tmp_path / "private").exists()
     assert len(ledger.entries("alpha")) == 1
+
+
+def test_missing_notifications_fail_before_ledger_reservation(fixtures):
+    controller, ipc, _owner, temp = fixtures
+    def missing(_account, task):
+        return {"task": task, "ready": False,
+                "reason": "notifications_required", "checked": ["notifications"],
+                "notifications_required": True}
+    ipc.preflight_task = missing
+    request_id = str(uuid.uuid4())
+    assert controller.preflight("alpha", "alertAttacks")["ready"] is False
+    with pytest.raises(TaskPrerequisiteMissing, match="Configure Telegram or Discord"):
+        controller.start("alpha", "alertAttacks", {}, request_id, confirmed=True)
+    assert ipc.sent == []
+    assert TaskLedger(temp / "ledger.sqlite3").entries("alpha") == []
+    # Prerequisites that become available later can be tried safely.
+    ipc.preflight_task = lambda a, t: {"ready": True, "reason": "none"}
+    assert controller.start("alpha", "alertAttacks", {}, request_id, confirmed=True)["status"] == "started"
+
+
+def test_unknown_preflight_does_not_mark_task_unconfirmed(fixtures):
+    controller, ipc, _owner, temp = fixtures
+    def unreachable(*args):
+        raise EngineIPCUnavailable("preflight probe unavailable")
+    ipc.preflight_task = unreachable
+    with pytest.raises(EngineIPCUnavailable):
+        controller.start("alpha", "alertAttacks", {}, str(uuid.uuid4()), confirmed=True)
+    assert TaskLedger(temp / "ledger.sqlite3").entries("alpha") == []
+    assert not ipc.sent
+
+
+def test_duplicate_request_id_remains_readable_even_if_prerequisites_change(fixtures):
+    manager, ipc, _owner, _path = fixtures
+    rid = str(uuid.uuid4())
+    first = manager.start("alpha", "alertAttacks", {"minutes": 10}, rid, confirmed=True)
+    ipc.preflight_task = lambda *_args: {"ready": False, "reason": "notifications_required"}
+    assert manager.start("alpha", "alertAttacks", {"minutes": 10}, rid, confirmed=True) == first
+    assert len(ipc.sent) == 1
+
+
+def test_engine_pre_spawn_rejection_is_definite_and_does_not_block_future_requests(fixtures):
+    controller, ipc, _owner, _temp = fixtures
+    def definite(*_args):
+        raise EngineTaskRejected("invalid_configuration")
+    ipc.start_managed_task = definite
+    request_id = str(uuid.uuid4())
+    with pytest.raises(TaskRejected, match="Invalid automation parameters"):
+        controller.start("alpha", "alertAttacks", {"minutes": "bad"}, request_id,
+                         confirmed=True)
+    receipts = controller.list_tasks("alpha")["requests"]
+    assert receipts[0]["status"] == "rejected"
+    assert receipts[0]["task_id"] is None
+    assert controller.start("alpha", "alertAttacks", {"minutes": "bad"}, request_id,
+                            confirmed=True)["status"] == "rejected"
+    ipc.start_managed_task = lambda a, t, c, rid: {
+        "task_id": "f" * 24, "pid": 4242, "task": t, "status": "running"}
+    assert controller.start("alpha", "alertAttacks", {"minutes": 20},
+                            str(uuid.uuid4()), confirmed=True)["status"] == "started"

@@ -24,6 +24,10 @@ def synthetic_engine(msg):
     action = msg["action"]
     if action == "list_sessions":
         return {"status": "ok", "sessions": [identity]}
+    if action == "task_preflight_existing":
+        return {"status": "ok", **identity, "task": msg["task"],
+                "ready": True, "reason": "none", "notifications_required": False,
+                "checked": []}
     if action == "start_task_existing":
         assert msg["world"] == identity["world"]
         assert msg["player"] == identity["player"]
@@ -57,7 +61,8 @@ def test_desktop_task_lifecycle_full_stack_without_real_game(tmp_path):
 
         def forward(request):
             response = api.request(
-                request.method, request.url.path, headers=dict(request.headers),
+                request.method, request.url.path + ("?" + request.url.query.decode()
+                    if request.url.query else ""), headers=dict(request.headers),
                 content=request.content,
             )
             return httpx.Response(response.status_code, content=response.content)
@@ -69,6 +74,7 @@ def test_desktop_task_lifecycle_full_stack_without_real_game(tmp_path):
             assert desktop.health()["mode"] == "task_control_opt_in"
             assert desktop.accounts()[0]["id"] == "alpha"
             assert desktop.capabilities()["structured_engine_dispatch"] is True
+            assert desktop.task_preflight("alpha", "alertAttacks")["unresolved_request"] is False
             assert desktop.connected_accounts() == ["alpha"]
             request_id = str(uuid.uuid4())
             result = desktop.start_task(
@@ -90,8 +96,8 @@ def test_desktop_task_lifecycle_full_stack_without_real_game(tmp_path):
             tasks.close()
 
         assert [call["action"] for call in ipc_calls] == [
-            "list_sessions", "list_sessions", "start_task_existing",
-            "list_tasks_existing", "stop_task_existing",
+            "task_preflight_existing", "list_sessions", "task_preflight_existing",
+            "list_sessions", "start_task_existing", "list_tasks_existing", "stop_task_existing",
         ]
         assert sum(call["action"] == "start_task_existing" for call in ipc_calls) == 1
         assert not any("email" in call for call in ipc_calls)

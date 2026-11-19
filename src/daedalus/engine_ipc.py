@@ -28,12 +28,22 @@ _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
-    "validate_session_existing",
+    "validate_session_existing", "task_preflight_existing",
 })
 
 
 class EngineIPCUnavailable(RuntimeError):
     """A safe, nonsecret reason why no compatible engine is reachable."""
+
+
+class EngineTaskRejected(RuntimeError):
+    """Proven engine-side rejection before any child task process starts."""
+
+    def __init__(self, reason: str):
+        if reason not in {"invalid_configuration", "notifications_required"}:
+            raise EngineIPCUnavailable("Engine task rejection contained an invalid reason")
+        self.reason = reason
+        super().__init__("Engine rejected this task before launch")
 
 
 def default_ipc_descriptor_path() -> Path:
@@ -113,7 +123,8 @@ class ExistingIPCClient:
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
-            "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing"
+            "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
+            "task_preflight_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -123,7 +134,8 @@ class ExistingIPCClient:
             payload.update(world=account.world, player=account.player)
         return self._exchange(payload)
 
-    def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0) -> dict[str, Any]:
+    def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0,
+                  allow_task_rejection: bool = False) -> dict[str, Any]:
         """Internal authenticated transport; public read bridge remains allowlisted."""
         port, secret = self._descriptor()
         wire_data = {**payload, "authkey": secret}
@@ -150,6 +162,10 @@ class ExistingIPCClient:
             reply = json.loads(bytes(data).split(b"\n", 1)[0])
         except (ValueError, UnicodeError) as exc:
             raise EngineIPCUnavailable("IkaBot IPC reply is not JSON") from exc
+        if (allow_task_rejection and isinstance(reply, dict)
+                and reply.get("status") == "rejected"):
+            # Never expose raw engine error/traceback, only an audited code.
+            raise EngineTaskRejected(reply.get("reason"))
         if not isinstance(reply, dict) or reply.get("status") != "ok":
             # Engine errors may contain account data or cookie fragments.
             raise EngineIPCUnavailable("IkaBot IPC request failed")
@@ -301,6 +317,32 @@ class ControlledIPCClient(ExistingIPCClient):
             raise ValueError("Account is disabled")
         return {"world": account.world, "player": account.player}
 
+    def preflight_task(self, account: Account, task: str) -> dict[str, object]:
+        """Nonmutating prerequisites with strict identity and typed reason codes."""
+        if not isinstance(task, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", task):
+            raise ValueError("Invalid task name")
+        result = self._exchange({
+            "action": "task_preflight_existing", **self._identity(account), "task": task,
+        })
+        if (
+            str(result.get("world", "")).casefold() != account.world.casefold()
+            or str(result.get("player", "")).casefold() != account.player.casefold()
+            or str(result.get("task", "")).casefold() != task.casefold()
+            or type(result.get("ready")) is not bool
+            or type(result.get("notifications_required")) is not bool
+            or result.get("reason") not in {"none", "notifications_required"}
+            or not isinstance(result.get("checked"), list)
+            or any(not isinstance(item, str) for item in result["checked"])
+            or set(result["checked"]) - {"notifications"}
+            or (not result["ready"]) != (result["reason"] == "notifications_required")
+            or (result["reason"] == "notifications_required" and not result["notifications_required"])
+        ):
+            raise EngineIPCUnavailable("Invalid authenticated task preflight reply")
+        return {"task": task, "ready": result["ready"],
+                "reason": result["reason"],
+                "notifications_required": result["notifications_required"],
+                "checked": list(result["checked"])}
+
     def start_managed_task(
         self, account: Account, task: str, config: dict[str, object], request_id: str
     ) -> dict[str, object]:
@@ -316,7 +358,7 @@ class ControlledIPCClient(ExistingIPCClient):
         response = self._exchange(
             {"action": "start_task_existing", **self._identity(account),
              "task": task, "config": config, "request_id": request_id},
-            read_timeout=120.0,
+            read_timeout=120.0, allow_task_rejection=True,
         )
         task_id, pid = response.get("task_id"), response.get("pid")
         if (

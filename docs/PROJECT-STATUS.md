@@ -42,6 +42,24 @@ The completed `connect-existing-ipc` change was merged through PR #12, verified 
 
 PR #41 merged the opt-in single-account worker: it can start a dedicated IPC server from a previously saved and exactly verified world session, retain the account lease, and optionally share it with the existing task controller. The normative worker requirements were subsequently reconciled and archived in `cookie-only-worker-bootstrap`. It cannot initiate Gameforge login or CAPTCHA; one subsequent isolated saved-cookie live validation passed, while task execution and recovery acceptance remain pending. See [saved worker](SAVED-WORKER.md). This is not production readiness.
 
+## Guided desktop and task safety improvements (2026-11-19, synthetic validation)
+
+A focused feature branch introduces account-first Home navigation, simpler
+Automations categories and native parameter widgets, server-side alerts
+prerequisite checks, clear deterministic pre-launch rejection statuses, and
+direct private-origin HTTPS, default macOS Keychain credential saving and
+automatic saved-HTTPS reconnection. An opt-in Mac-owned SSH tunnel remains only
+an advanced fallback; normal operation requires no SSH on the Mac.
+The existing Gameforge cookie and Daedalus API bearer remain distinct;
+notification webhooks and bot tokens are never accepted in task JSON.
+
+The implementation change `guided-automations-and-desktop-redesign` is tracked
+separately from the three remaining owner-dependent real-account acceptance
+gates. The owner has confirmed the live Mac warehouse path but has **not**
+verified game task launch/stop, remote login recovery, reboot keyring
+persistence or a production-wide cutover. Installing a new macOS CI preview
+artifact is required to test redesigned native controls.
+
 ## Still active
 
 One umbrella change remains **open** for owner-supervised **real-account**
