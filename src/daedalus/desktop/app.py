@@ -789,7 +789,8 @@ class MainWindow(FluentWindow):
                 self._notice("Mac Keychain unavailable", "Unlock macOS Keychain to reuse saved login.")
             if credentials is None:
                 dialog = SeleniumCredentialsDialog(
-                    player=str(record["player"]), world=world, parent=self,
+                    player=str(record["player"]), world=world,
+                    email=str(record.get("email") or ""), parent=self,
                 )
                 if dialog.exec() != QDialog.Accepted:
                     dialog.discard()
@@ -1585,9 +1586,27 @@ class MainWindow(FluentWindow):
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
-        self.accounts_page.set_accounts(data)
-        self.warehouses_page.set_accounts(data)
-        self.home_page.set_accounts(data)
+        visible = []
+        for raw in data:
+            account = dict(raw)
+            # Local Keychain can also identify an imported account even when
+            # a previous backend version omits its protected email binding.
+            if (not account.get("email")
+                    and isinstance(self._active_backend_url, str)
+                    and self._active_backend_url.startswith("https://")):
+                try:
+                    saved = get_saved_login(
+                        self._active_backend_url,
+                        str(account["id"]), str(account["world"]),
+                    )
+                except (LoginCredentialError, KeyError):
+                    saved = None
+                if saved is not None:
+                    account["email"] = saved.email
+            visible.append(account)
+        self.accounts_page.set_accounts(visible)
+        self.warehouses_page.set_accounts(visible)
+        self.home_page.set_accounts(visible)
         # Refresh inclusion *after* the warehouse account map is replaced.
         # This also handles accounts newly created via metadata editing.
         self.warehouses_page.set_selected_accounts(

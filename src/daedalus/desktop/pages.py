@@ -6,8 +6,10 @@ window feeds them typed data from the Daedalus backend API.
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QBrush, QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -67,6 +69,70 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
         for column_index, value in enumerate(values):
             label = "—" if value is None else str(value)
             table.setItem(row_index, column_index, QTableWidgetItem(label))
+
+
+
+_WORLD_CODE = re.compile(r"^s([0-9]+)-([a-z]{2,4})$", re.IGNORECASE)
+_IMPORTED_LABEL = re.compile(r"Imported IkaBot account(?: [0-9]+)?", re.IGNORECASE)
+
+
+def _account_title(account: dict[str, object]) -> str:
+    """Prefer the saved identity over an obsolete imported placeholder."""
+    email = account.get("email")
+    if (isinstance(email, str) and "@" in email
+            and not any(char in email for char in "\r\n\x00")):
+        return email
+    label = str(account.get("label") or "")
+    if label and not _IMPORTED_LABEL.fullmatch(label.strip()):
+        return label
+    return str(account.get("player") or account.get("id") or "—")
+
+
+def _world_title(account: dict[str, object]) -> str:
+    """Show a world name only if the backend actually provides one."""
+    world = str(account.get("world") or "")
+    match = _WORLD_CODE.fullmatch(world)
+    if match is None:
+        return world or "—"
+    flag = "🇷🇺" if match.group(2).casefold() == "ru" else "🌐"
+    server = f"S{int(match.group(1))}"
+    name = account.get("world_name")
+    if isinstance(name, str) and 0 < len(name.strip()) <= 80 and name.isprintable():
+        return f"{flag} {name.strip()} · {server}"
+    return f"{flag} {server}"
+
+
+def _status_item(symbol: str, explanation: str, color: str) -> QTableWidgetItem:
+    """A styled status glyph with a readable tooltip and accessibility value."""
+    item = QTableWidgetItem(symbol)
+    item.setTextAlignment(Qt.AlignCenter)
+    item.setToolTip(explanation)
+    item.setData(Qt.AccessibleTextRole, explanation)
+    item.setForeground(QBrush(QColor(color)))
+    font = item.font()
+    font.setBold(True)
+    font.setPointSize(13)
+    item.setFont(font)
+    return item
+
+
+def _session_status_item(value: object) -> QTableWidgetItem:
+    status = str(value or "not_connected")
+    if status == "authenticated":
+        return _status_item("✓", "Game session authenticated", "#2BAF65")
+    if status in {"validating_session", "validating_handoff", "assisted_login"}:
+        return _status_item("…", "Game session: " + status.replace("_", " "), "#D69E27")
+    if status == "paused":
+        return _status_item("‖", "Game session paused", "#D69E27")
+    if status in {"not_connected", "failed", "needs_assistance", "disabled"}:
+        meanings = {
+            "not_connected": "No authenticated game session",
+            "failed": "Game session failed",
+            "needs_assistance": "Game session needs sign-in assistance",
+            "disabled": "Game account disabled",
+        }
+        return _status_item("✕", meanings[status], "#D95455")
+    return _status_item("?", "Game session status is unknown", "#8D96A3")
 
 
 class ConnectionPage(QWidget):
@@ -355,10 +421,13 @@ class AccountsPage(QWidget):
 
         self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
         self.table.setAccessibleName("Configured accounts and warehouse report inclusion")
+        self.table.horizontalHeaderItem(5).setToolTip(
+            "Whether an existing IkaBot worker is attached; not a Gameforge login status"
+        )
         self.table.setToolTip("Select an account; tick Report to include it in warehouse printing")
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setMinimumHeight(290)
-        for col, width in enumerate((170, 110, 140, 70, 150, 115, 72)):
+        for col, width in enumerate((240, 145, 140, 70, 90, 80, 72)):
             self.table.setColumnWidth(col, width)
         self.table.itemChanged.connect(self._report_item_changed)
         self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
@@ -558,20 +627,35 @@ class AccountsPage(QWidget):
                 self.table,
                 [
                     [
-                        acc.get("label") or acc.get("id"),
-                        acc.get("world"),
+                        _account_title(acc),
+                        _world_title(acc),
                         acc.get("player"),
-                        "Yes" if acc.get("enabled") else "No",
-                        acc.get("session_status") or "not_connected",
-                        "Not checked" if self._connected_ids is None else (
-                            "Attached" if acc.get("id") in self._connected_ids else "Not attached"
-                        ),
+                        "", "", "",
                         "",
                     ]
                     for acc in self._accounts
                 ],
             )
             for index, account in enumerate(self._accounts):
+                self.table.setItem(
+                    index, 3,
+                    _status_item("✓", "Account enabled", "#2BAF65") if account.get("enabled")
+                    else _status_item("✕", "Account disabled", "#D95455"),
+                )
+                self.table.setItem(index, 4, _session_status_item(account.get("session_status")))
+                if self._connected_ids is None:
+                    worker_status = _status_item(
+                        "?", "IkaBot worker attachment has not been checked", "#8D96A3",
+                    )
+                elif account.get("id") in self._connected_ids:
+                    worker_status = _status_item(
+                        "✓", "An IkaBot worker is attached", "#2BAF65",
+                    )
+                else:
+                    worker_status = _status_item(
+                        "✕", "No IkaBot worker is attached", "#D95455",
+                    )
+                self.table.setItem(index, 5, worker_status)
                 item = self.table.item(index, 6)
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
                 item.setCheckState(
@@ -677,7 +761,7 @@ class AccountsPage(QWidget):
                 "disabled": "Account is disabled on the authoritative backend.",
             }.get(session, "Session: " + session.replace("_", " "))
             self.selected_account_summary.set_status(
-                str(selected.get("label") or selected.get("player") or selected["id"]),
+                _account_title(selected),
                 message,
             )
         else:
@@ -685,9 +769,19 @@ class AccountsPage(QWidget):
                 "Choose an account", "Select a row for status and sign-in options."
             )
         if selected:
-            label = str(selected.get("label") or selected.get("player") or selected["id"])
+            label = _account_title(selected)
             session = str(selected.get("session_status") or "not_connected")
-            self.selection_status.setText(f"{label}  ·  {session.replace('_', ' ')}")
+            friendly = {
+                "authenticated": "Session ready",
+                "not_connected": "Not connected",
+                "needs_assistance": "Sign-in needed",
+                "failed": "Login failed",
+                "paused": "Paused",
+                "validating_session": "Verifying session",
+                "validating_handoff": "Verifying login",
+                "assisted_login": "Assisted login",
+            }.get(session, "Status unknown")
+            self.selection_status.setText(f"{label}  ·  {friendly}")
         else:
             self.selection_status.setText(
                 f"{len(self._accounts)} accounts" if self._accounts

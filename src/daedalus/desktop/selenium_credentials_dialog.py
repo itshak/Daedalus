@@ -16,7 +16,7 @@ from daedalus.desktop.selenium_auth import GameforgeCredentials, SeleniumLoginUn
 
 
 class SeleniumCredentialsDialog(QDialog):
-    def __init__(self, *, player: str, world: str, parent=None) -> None:
+    def __init__(self, *, player: str, world: str, email: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Set up automatic Gameforge sign-in")
         self.resize(480, 300)
@@ -35,6 +35,7 @@ class SeleniumCredentialsDialog(QDialog):
         self.email_input = LineEdit(self)
         self.email_input.setPlaceholderText("Gameforge email")
         self.email_input.setAccessibleName("Gameforge account email")
+        self.email_input.setText(email if isinstance(email, str) else "")
         form.addRow(BodyLabel("Email"), self.email_input)
         self.password_input = LineEdit(self)
         self.password_input.setEchoMode(QLineEdit.Password)

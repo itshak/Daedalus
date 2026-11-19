@@ -33,6 +33,7 @@ from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
 from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
 from daedalus.engine_registry import inspect_engine
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
+from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
 from daedalus.task_control import (
@@ -452,6 +453,18 @@ def create_app(
         for account in configured_accounts:
             entry = account.to_dict()
             entry["session_status"] = owner.status(account.id)
+            if not demo_mode:
+                # Only the already-bound email is exposed to authenticated
+                # clients for identity display and login prefill; no password.
+                credentials = (
+                    native_browser_handoff.credentials if native_browser_handoff is not None
+                    else saved_worker._credentials if saved_worker is not None
+                    else None
+                )
+                try:
+                    entry["email"] = _email_binding(account, credentials)
+                except SavedSessionUnavailable:
+                    pass
             if demo_mode:
                 entry["synthetic"] = True
             entries.append(entry)
