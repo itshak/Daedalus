@@ -336,7 +336,7 @@ def test_construction_table_renders_real_building_levels_and_draft_target(page):
     assert target.isEnabled()
     target.setValue(12)
     assert page.building_table.cellWidget(1, 4).isEnabled() is False
-    assert "cannot be started" in page.building_note.text()
+    assert "actual IkaBot planner" in page.building_note.text()
     page.set_preflight({"account_id": "alpha", "task": "constructionList",
                         "ready": True, "reason": "none", "unresolved_request": False})
     # Rendering a read-only inventory is not permission to start an unprepared task.
@@ -511,3 +511,114 @@ def test_daily_rewards_use_three_actual_city_pickers_and_native_favour_options(p
     with pytest.raises(ValueError, match="Select an actual city"):
         page._form_config()
     assert options.item(0).checkState() == Qt.Checked
+
+
+def test_construction_preview_launch_requires_fresh_verified_queue(page, monkeypatch):
+    from PySide6.QtCore import Qt
+
+    fields = [{"name": name, "type": "json", "required": True}
+              for name in ("city_id", "city_name", "buildings", "shipments",
+                           "expand_overall", "wait_resources", "construction_queue",
+                           "total_time")]
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": fields,
+    }], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Olympia"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_buildings("alpha", 101, [{
+        "position": 2, "level": 10, "name": "Town Hall", "building": "townHall",
+        "busy": False, "can_upgrade": True,
+    }])
+    page.set_preflight({
+        "account_id": "alpha", "task": "constructionList",
+        "ready": True, "reason": "none", "unresolved_request": False,
+    })
+    button = page.construction_preview_button
+    assert button.isEnabled()
+    assert not page.start_button.isEnabled()
+    target = page.building_table.cellWidget(0, 4)
+    target.setValue(11)
+    choice = page.building_table.item(0, 0)
+    choice.setCheckState(Qt.Checked)
+    requests = []
+    page.construction_preview_requested.connect(
+        lambda aid, city, upgrades: requests.append((aid, city, upgrades))
+    )
+    page._request_construction_preview()
+    assert requests == [("alpha", 101, [{"position": 2, "target_level": 11}])]
+    assert not page.start_button.isEnabled()
+    config = {
+        "city_id": 101, "city_name": "Olympia", "buildings": [{
+            "position": 2, "level": 10, "name": "Town Hall",
+            "building": "townHall", "upgradeTo": 11, "isBusy": False,
+            "constructionTime": 90, "constructionTimes": [90],
+        }],
+        "shipments": [], "expand_overall": True, "wait_resources": False,
+        "construction_queue": [90], "total_time": 90,
+    }
+    page.set_construction_preview({
+        "account_id": "disabled", "city_id": 101, "ready": True,
+        "config": config, "costs": [400, 0, 0, 0, 0],
+        "missing": [0] * 5, "estimated_seconds": 90,
+    })
+    assert not page.start_button.isEnabled()
+    page.set_construction_preview({
+        "account_id": "alpha", "city_id": 101, "ready": True,
+        "config": config, "costs": [400, 0, 0, 0, 0],
+        "missing": [0] * 5, "estimated_seconds": 90,
+    })
+    assert page.start_button.isEnabled()
+    assert "Actual IkaBot costs" in page.building_note.text()
+    emitted = []
+    page.launch_requested.connect(lambda *args: emitted.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert len(emitted) == 1
+    assert emitted[0][0:3] == ("alpha", "constructionList", config)
+
+
+def test_editing_construction_queue_after_preview_revokes_approval(page):
+    from PySide6.QtCore import Qt
+
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": [
+            {"name": key, "type": "json", "required": True}
+            for key in ("city_id", "city_name", "buildings", "shipments",
+                        "expand_overall", "wait_resources", "construction_queue",
+                        "total_time")
+        ],
+    }], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Olympia"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_buildings("alpha", 101, [{
+        "position": 2, "level": 10, "name": "Town Hall", "building": "townHall",
+        "busy": False, "can_upgrade": True,
+    }])
+    target = page.building_table.cellWidget(0, 4)
+    target.setValue(11)
+    page.building_table.item(0, 0).setCheckState(Qt.Checked)
+    page._request_construction_preview()
+    page.set_construction_preview({
+        "account_id": "alpha", "city_id": 101, "ready": False,
+        "config": {"city_id": 101}, "costs": [400, 0, 0, 0, 0],
+        "missing": [300, 0, 0, 0, 0], "estimated_seconds": 90,
+    })
+    assert page._construction_prepared is None
+    assert "Missing: Wood" in page.building_note.text()
+    page._request_construction_preview()
+    page.set_construction_preview({
+        "account_id": "alpha", "city_id": 101, "ready": True,
+        "config": {"city_id": 101}, "costs": [400, 0, 0, 0, 0],
+        "missing": [0] * 5, "estimated_seconds": 90,
+    })
+    assert page._construction_preview_ready
+    target.setValue(12)
+    assert not page._construction_preview_ready
+    assert page._construction_prepared is None
+    assert page._pending_preview_key is None
+    page.set_cities_unavailable("alpha")
+    assert not page._construction_preview_ready
+    assert page.building_table.rowCount() == 0
