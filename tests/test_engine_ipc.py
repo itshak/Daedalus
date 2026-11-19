@@ -419,6 +419,6 @@ def test_construction_preview_rejects_wrong_account_identity(tmp_path):
         return {"status": "ok", "world": "s302-en", "username": "WrongPlayer", "city_id": 42,
                 "plan": {"ready": True}}
     with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
-        EngineIPCUnavailable, match="different game account"
+        EngineIPCUnavailable, match="invalid session metadata"
     ):
         client.construction_preview(ALPHA, 42, [{"position": 1, "target_level": 7}])
