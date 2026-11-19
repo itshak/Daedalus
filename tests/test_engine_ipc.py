@@ -35,6 +35,23 @@ def fake_worker(tmp_path, responder=None):
         if msg["action"] == "list_cities_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "cities": [{"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}]}
+        if msg["action"] == "preview_construction_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"],
+                    "plan": {"ready": True, "costs": [1000, 0, 100, 0, 0],
+                             "missing": [0, 0, 0, 0, 0],
+                             "available": [3000, 0, 500, 0, 0],
+                             "estimated_seconds": 120,
+                             "config": {
+                                 "city_id": msg["city_id"], "city_name": "Athens",
+                                 "buildings": [{
+                                     "position": 1, "name": "Town Hall", "building": "townHall",
+                                     "level": 11, "isBusy": False, "upgradeTo": 12,
+                                     "constructionTime": 120, "constructionTimes": [120],
+                                 }],
+                                 "shipments": [], "expand_overall": True, "wait_resources": False,
+                                 "construction_queue": [120], "total_time": 120,
+                             }}}
         if msg["action"] == "list_buildings_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "city_id": msg["city_id"], "buildings": [
@@ -372,3 +389,36 @@ def test_building_inventory_rejects_malformed_and_duplicate_positions(tmp_path):
         EngineIPCUnavailable, match="invalid building"
     ):
         client.buildings(ALPHA, 42)
+
+
+def test_construction_preview_readonly_and_city_scoped(tmp_path):
+    upgrades = [{"position": 1, "target_level": 12}]
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.construction_preview(ALPHA, 42, upgrades)
+        assert result["ready"] is True
+        assert result["config"]["buildings"][0]["upgradeTo"] == 12
+        assert result["costs"] == [1000, 0, 100, 0, 0]
+        assert requests[-1] == {
+            "action": "preview_construction_existing",
+            "world": "s301-en", "player": "ExamplePlayer", "city_id": 42,
+            "upgrades": upgrades,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.construction_preview(ALPHA, 99, upgrades)
+        with pytest.raises(ValueError, match="Invalid construction upgrade"):
+            client.construction_preview(ALPHA, 42, [{"position": "x", "target_level": 10}])
+        assert all("start_task" not in request["action"] for request in requests)
+
+
+def test_construction_preview_rejects_wrong_account_identity(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s302-en", "username": "WrongPlayer", "city_id": 42,
+                "plan": {"ready": True}}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="different game account"
+    ):
+        client.construction_preview(ALPHA, 42, [{"position": 1, "target_level": 7}])
