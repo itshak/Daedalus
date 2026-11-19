@@ -29,7 +29,7 @@ jobs:
           daedalus --version
           daedalus doctor
       - name: Upload distribution candidate (not PyPI)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: daedalus-source-packages
           path: dist/*
