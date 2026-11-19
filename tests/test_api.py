@@ -388,3 +388,56 @@ def test_building_inventory_api_authorizes_account_city_and_never_dispatches(acc
     failed = broken.get(url, headers=auth)
     assert failed.status_code == 503
     assert "private-credential" not in failed.text
+
+
+def test_readonly_construction_preview_requires_auth_and_does_not_start_tasks(account_file):
+    class PlanningIPC:
+        def __init__(self):
+            self.calls = []
+
+        def construction_preview(self, account, city_id, upgrades):
+            self.calls.append((account.id, city_id, upgrades))
+            return {"account_id": account.id, "city_id": city_id,
+                    "ready": True, "costs": [1000, 0, 0, 0, 0],
+                    "available": [2000, 0, 0, 0, 0],
+                    "missing": [0] * 5, "estimated_seconds": 120,
+                    "config": {"city_id": city_id, "city_name": "Athens",
+                               "buildings": [], "shipments": [], "expand_overall": True,
+                               "wait_resources": False, "construction_queue": [],
+                               "total_time": 120}}
+
+    ipc = PlanningIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/cities/42/construction-preview"
+    upgrades = [{"position": 3, "target_level": 10}]
+    assert client.post(path, json={"upgrades": upgrades}).status_code == 401
+    assert client.post("/api/v1/accounts/unknown/cities/42/construction-preview",
+                       json={"upgrades": upgrades}, headers=auth).status_code == 404
+    assert client.post(path, json={"upgrades": [{"position": 2, "target_level": -1}]},
+                       headers=auth).status_code == 422
+    assert ipc.calls == []
+    response = client.post(path, json={"upgrades": upgrades}, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert ipc.calls == [("alpha", 42, upgrades)]
+    assert client.get(path, headers=auth).status_code == 405
+
+
+def test_construction_preview_sanitizes_engine_exceptions(account_file):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    class BrokenIPC:
+        def construction_preview(self, _account, _city_id, _upgrades):
+            raise EngineIPCUnavailable("private-game-cookie-string")
+
+    client = TestClient(create_app(
+        accounts_path=account_file, api_token=TOKEN, ipc_client=BrokenIPC(),
+    ))
+    result = client.post(
+        "/api/v1/accounts/alpha/cities/42/construction-preview",
+        json={"upgrades": [{"position": 3, "target_level": 6}]},
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert result.status_code == 503
+    assert "private-game-cookie" not in result.text
