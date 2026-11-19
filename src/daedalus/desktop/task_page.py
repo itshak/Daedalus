@@ -123,7 +123,7 @@ class TasksPage(QWidget):
         outer.addWidget(self.stack, 1)
         self.stack.addWidget(scroll)
         self.pivot.addItem(
-            routeKey="configure", text="Discover & configure",
+            routeKey="configure", text="Configure",
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
@@ -304,7 +304,7 @@ class TasksPage(QWidget):
         layout.setSpacing(14)
         self.stack.addWidget(history_panel)
         self.pivot.addItem(
-            routeKey="history", text="History & recovery",
+            routeKey="history", text="History",
             onClick=lambda: self._show_section(2),
         )
         layout.addWidget(SubtitleLabel("Request history & recovery"))
@@ -721,6 +721,12 @@ class TasksPage(QWidget):
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
         self.parameter_scroll.setVisible(bool(fields))
+        if fields:
+            # Match the form to its contents instead of leaving a large empty
+            # box under single-parameter workflows.
+            self.parameter_scroll.setFixedHeight(
+                min(315, max(72, len(fields) * 44 + 24))
+            )
         self.build_json_button.setEnabled(bool(fields))
         self.confirm_box.setChecked(False)
         self.config_editor.setPlainText("{}")

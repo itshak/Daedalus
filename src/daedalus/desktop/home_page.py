@@ -7,7 +7,7 @@ The home page never sees a Gameforge token or starts a worker/task itself.
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -57,7 +57,15 @@ class HomePage(QWidget):
         self._connected = False
         self._demo = False
 
-        layout = QVBoxLayout(self)
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        self.content_scroll = QScrollArea(self)
+        self.content_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.content_scroll.setWidgetResizable(True)
+        content = QWidget(self.content_scroll)
+        self.content_scroll.setWidget(content)
+        shell.addWidget(self.content_scroll)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(28, 26, 28, 28)
         layout.setSpacing(18)
         layout.addWidget(PageHeading(

@@ -263,8 +263,9 @@ class AccountsPage(QWidget):
         layout.addWidget(self.select_all_reports)
         self.table = _table(["Account", "World", "Player", "Enabled", "Session", "IkaBot", "Report"])
         self.table.itemChanged.connect(self._report_item_changed)
-        self.table.setMinimumHeight(245)
-        layout.addWidget(self.table, 1)
+        self.table.setMinimumHeight(205)
+        self.table.setMaximumHeight(290)
+        layout.addWidget(self.table)
         self.selected_account_summary = StatusPanel(
             "Choose an account",
             "Select a row to see session status and available next steps.",
@@ -1022,7 +1023,8 @@ class WarehousesPage(QWidget):
             button.setVisible(False)
             actions.addWidget(button)  # Compatibility for existing test/API callers.
         actions.addStretch(1)
-        layout.addLayout(actions)
+        # Keep Print/Export visible above the potentially tall warehouse table.
+        layout.insertLayout(layout.indexOf(self.status_label), actions)
 
     def set_demo(self, enabled: bool) -> None:
         self.demo_note.setText(
