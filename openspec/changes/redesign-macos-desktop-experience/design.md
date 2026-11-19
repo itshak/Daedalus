@@ -68,8 +68,32 @@ Run pytest, ruff, OpenSpec strict validation, secret scan and macOS packaging jo
 
 - Reject full Electron/Web rewrite: loses native app and existing reliable Fluent warehouse widgets.
 - Reject three separately maintained Wine/Construction/Automations pages: inconsistent UX and duplicated state.
-- Reject direct browser/engine interaction from GUI: violates ADR-001/003/004 and account ownership.
+- Permit local Mac Selenium authentication while rejecting GUI-owned game task execution or direct session replacement. Selenium only collects a temporary account-bound world cookie; the existing encrypted handoff and independent backend player attestation/lease checks remain authoritative (ADR-001/003/004).
 - Reject hiding hard safety constraints merely to make UI simpler. Disclose them as understandable explanations and maintain backend checks.
 - Risk: qfluentwidgets version differs across environments. Verify widget imports in CI and provide lightweight wrappers before choosing a specific class.
 - Risk: premium visual effects harm contrast, scrolling, performance, Mac signing or resize. Favor accessible, static native-feeling surfaces and smoke-test packaged app.
 - Risk: visual polish masks readiness gaps. Every nonready backend/capability remains visibly disabled with next-step guidance.
+## Owner-required original IkaBot Selenium parity
+
+The owner's previous [itshak/ikabot](https://github.com/itshak/ikabot)
+`browser.py`, `login.py` and `humanize.py` are copied into
+`desktop/legacy_selenium/` intact apart from the two login-package
+imports. The new Qt worker actually calls those modules' `create_driver`,
+`LoginFlow.try_restore`, `LoginFlow.log_in`, and `quit_driver`;
+this is not a visual imitation of the prior flow. Preserve its Chrome
+compatibility, headless flags, login/Play-button logic, session restore,
+humanized visible movement/typing and account-isolated retry behavior.
+
+Deliberate safety adaptations: credentials and saved game cookies are
+macOS Keychain-only and bound to the exact connected backend and configured
+account/world/player, replacing the original plaintext config.ini/tokens.json.
+Normal Selenium always starts headless. It opens visible Chrome only after
+detecting an actual CAPTCHA; humans complete it, then the original
+humanized visible login resumes. First-time credentials may be requested
+once. The existing one-use encrypted handoff transfers only the selected
+world's secure game cookie plus optional encrypted email to the backend;
+server-owned worker identity, leases and task receipts are unchanged.
+Accounts and Warehouses expose sequential all/selected-account login.
+Synthetic tests MUST prove no visible Chrome for ordinary failures or valid
+cached sessions, no cross-origin cookie or credential reuse and no
+automatic CAPTCHA solving; live Gameforge verification remains owner-only.
