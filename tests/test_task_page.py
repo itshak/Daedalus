@@ -297,3 +297,65 @@ def test_category_pivot_mirrors_existing_canonical_task_filter(page):
     assert page._task_names == ["constructionList"]
     assert page.category_combo.currentIndex() == 3
     assert page.group_tabs.isEnabled()
+
+
+def test_construction_table_renders_real_building_levels_and_draft_target(page):
+    requests = []
+    page.buildings_requested.connect(lambda account_id, city_id: requests.append((account_id, city_id)))
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": [
+            {"name": "city_id", "type": "json", "required": True},
+            {"name": "city_name", "type": "json", "required": True},
+            {"name": "buildings", "type": "json", "required": True},
+            {"name": "shipments", "type": "json", "required": True},
+            {"name": "expand_overall", "type": "json", "required": True},
+            {"name": "wait_resources", "type": "json", "required": True},
+            {"name": "construction_queue", "type": "json", "required": True},
+            {"name": "total_time", "type": "json", "required": True},
+        ],
+    }], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Olympia"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    assert requests == [("alpha", 101)]
+    page.set_buildings("disabled", 101, [])
+    assert page.building_table.rowCount() == 0
+    page.set_buildings("alpha", 102, [])
+    assert page.building_table.rowCount() == 0
+    page.set_buildings("alpha", 101, [
+        {"position": 2, "level": 10, "name": "Town Hall", "building": "townHall",
+         "busy": False, "can_upgrade": True},
+        {"position": 4, "level": 5, "name": "Academy", "building": "academy",
+         "busy": True, "can_upgrade": False},
+    ])
+    assert page.building_table.rowCount() == 2
+    assert page.building_table.item(0, 1).text() == "Town Hall"
+    assert page.building_table.item(0, 3).text() == "10"
+    target = page.building_table.cellWidget(0, 4)
+    assert target.value() == 10
+    assert target.isEnabled()
+    target.setValue(12)
+    assert page.building_table.cellWidget(1, 4).isEnabled() is False
+    assert "cannot be started" in page.building_note.text()
+    page.set_preflight({"account_id": "alpha", "task": "constructionList",
+                        "ready": True, "reason": "none", "unresolved_request": False})
+    # Rendering a read-only inventory is not permission to start an unprepared task.
+    assert page.start_button.isEnabled() is False
+    page._form_inputs["city_id"].setCurrentIndex(0)
+    assert page.building_table.rowCount() == 0
+
+
+def test_construction_advanced_mode_does_not_require_making_up_queue_values(page, monkeypatch):
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": [
+            {"name": key, "type": "json", "required": True}
+            for key in ("city_id", "city_name", "buildings", "shipments",
+                        "expand_overall", "wait_resources", "construction_queue", "total_time")
+        ],
+    }], enabled=True)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
+    page._toggle_advanced()
+    assert warnings == []  # Opening expert mode does not fabricate a plan.
+    assert page.config_editor.toPlainText() == "{}"
