@@ -746,6 +746,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_construction_existing":
+                    return self._preview_construction_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -846,6 +848,38 @@ class IPCServer:
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
+        }
+
+    def _preview_construction_existing(self, request):
+        """Read-only construction cost/queue preparation for a verified owned city.
+
+        Only sanitized game-calculated quantities and a bounded exact task
+        config leave the existing session; never HTML or login/session state.
+        """
+        from ikabot.function.constructionList import preview_native_construction
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        upgrades = request.get("upgrades")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12):
+            raise ValueError("Invalid construction preview request")
+        reviewed = []
+        for item in upgrades:
+            if (not isinstance(item, dict)
+                    or type(item.get("position")) is not int
+                    or type(item.get("target_level")) is not int
+                    or not 0 <= item["position"] <= 80
+                    or not 1 <= item["target_level"] <= 150):
+                raise ValueError("Invalid building preview target")
+            reviewed.append({
+                "position": item["position"], "target_level": item["target_level"]
+            })
+        result = preview_native_construction(session, city_id, reviewed)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "plan": result,
         }
 
     def _warehouse_snapshots_existing(self, request):
