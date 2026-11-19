@@ -20,7 +20,6 @@ from daedalus.desktop import app as desktop_app
 from daedalus.desktop.theme import apply_app_palette
 from daedalus.gui_preferences import GuiPreferences
 
-
 SYNTHETIC_ACCOUNTS = [
     {
         "id": "synthetic-alpha", "label": "Orion (sample)",
