@@ -37,6 +37,12 @@ jobs:
           python -m pytest -q tests/test_task_page.py tests/test_live_auth_gui.py
       - name: Confirm desktop CLI is installed
         run: python -c "from daedalus.desktop import main; assert callable(main)"
+      - name: Verify optional synthetic screenshot harness is available
+        # Hosted macOS lacks a real logged-in Cocoa desktop; constructing a
+        # frameless native window for screenshots segfaults in qframelesswindow.
+        # Real Cocoa widget smoke above remains required. Screenshot capture
+        # is available for an interactive Mac or offscreen Linux dev machine.
+        run: python -c "from scripts.capture_native_ui import capture; assert callable(capture)"
 
   browser-recovery:
     name: Synthetic Playwright / Chromium cookie isolation
