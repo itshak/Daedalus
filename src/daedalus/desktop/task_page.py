@@ -1081,6 +1081,7 @@ class TasksPage(QWidget):
         )
         if self._advanced_visible and self.selected_task_name() != "constructionList":
             self._build_config_from_form()
+        self._set_controls()
 
     def _import_advanced_config(self) -> None:
         """User-directed bounded JSON import, never a system or account-file search."""
