@@ -1359,6 +1359,11 @@ class TasksPage(QWidget):
 
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
+        if self.selected_task_name() == "constructionList":
+            self._construction_prepared = None
+            self._construction_preview_ready = False
+            self._pending_preview_key = None
+            self.construction_preview_button.setEnabled(bool(self._building_rows))
         self._invalidate_review()
 
     def _selected_task_changed(self, *_args: object) -> None:
@@ -1871,7 +1876,8 @@ class TasksPage(QWidget):
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
             # Live building selection alone is NOT a prepared engine plan.
-            and (self.selected_task_name() != "constructionList" or self._advanced_visible)
+            and (self.selected_task_name() != "constructionList"
+                 or self._advanced_visible or self._construction_preview_ready)
         )
         # Status/history is read-only even on a backend that refuses dispatch.
         has_read_scope = bool(self._account_ids)
@@ -1951,7 +1957,12 @@ class TasksPage(QWidget):
                     )):
                         raise ValueError("Import a complete upstream-prepared construction plan")
             else:
-                config = self._form_config()
+                if task == "constructionList":
+                    if not self._construction_preview_ready or self._construction_prepared is None:
+                        raise ValueError("Calculate and approve the actual IkaBot construction preview first")
+                    config = dict(self._construction_prepared)
+                else:
+                    config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
