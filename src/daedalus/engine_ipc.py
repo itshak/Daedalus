@@ -33,7 +33,7 @@ _ALLOWED = frozenset({
     "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
-    "list_miracles_existing",
+    "list_miracles_existing", "shrine_status_existing",
 })
 
 
@@ -138,7 +138,7 @@ class ExistingIPCClient:
             "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
-            "list_miracles_existing",
+            "list_miracles_existing", "shrine_status_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -744,6 +744,32 @@ class ExistingIPCClient:
                 "available": enabled, "available_in_seconds": seconds,
             })
         return {"account_id": account.id, "miracles": result}
+
+    def shrine_status(self, account: Account) -> dict[str, object]:
+        """Verified account-local Shrine of Olympus, never a guessed favour balance."""
+        data = self.request("shrine_status_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Shrine status belongs to another game account")
+        shrine = data.get("shrine")
+        if shrine is not None:
+            if not isinstance(shrine, dict):
+                raise EngineIPCUnavailable("Malformed IkaBot shrine status")
+            city_id = shrine.get("city_id")
+            name = shrine.get("city_name")
+            position = shrine.get("position")
+            favor = shrine.get("favor")
+            if (type(city_id) is not int
+                    or city_id not in {city["id"] for city in self.cities(account)}
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(position) is not int or not 0 <= position <= 80
+                    or (favor is not None and (
+                        type(favor) is not int or not 0 <= favor <= 10**12
+                    ))):
+                raise EngineIPCUnavailable("Invalid or foreign Shrine of Olympus")
+            shrine = {"city_id": city_id, "city_name": name,
+                      "position": position, "favor": favor}
+        return {"account_id": account.id, "shrine": shrine}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
