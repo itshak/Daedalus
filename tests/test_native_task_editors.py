@@ -21,6 +21,7 @@ from daedalus.desktop.native_controls import (
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
+    TavernCitiesEditor,
     TrainableUnitsEditor,
     WorkshopUpgradesEditor,
 )
@@ -648,4 +649,77 @@ def test_research_task_uses_real_academy_rows_not_city_json(page):
     assert page._form_config()["qty"] == 2
     page.set_academies_unavailable("alpha")
     with pytest.raises(ValueError, match="Load actual academies"):
+        page._form_config()
+
+
+TAVERNS = [
+    {"city_id": 101, "city_name": "Athens", "wine": 20000,
+     "has_tavern": True, "serving_level": 5, "wine_per_hour": 24,
+     "satisfaction": 40, "population": 300, "capacity": 500},
+    {"city_id": 102, "city_name": "Sparta", "wine": 4000,
+     "has_tavern": False, "serving_level": None, "wine_per_hour": None,
+     "satisfaction": None, "population": 200, "capacity": 600},
+    {"city_id": 103, "city_name": "Olympia", "wine": 1000,
+     "has_tavern": True, "serving_level": 3, "wine_per_hour": 50,
+     "satisfaction": -10, "population": 500, "capacity": 600},
+]
+
+
+def test_tavern_editor_displays_actual_wine_and_manages_all_or_selected(app):
+    editor = TavernCitiesEditor()
+    try:
+        with pytest.raises(ValueError, match="Load real tavern"):
+            editor.to_config()
+        editor.set_taverns(TAVERNS)
+        assert editor.table.rowCount() == 3
+        assert editor.table.item(0, 2).text() == "20,000"
+        assert editor.table.item(2, 5).text() == "-10"
+        config = editor.to_config()
+        assert config == {
+            "cities_ids": None, "run_hours": 2, "notification_mode": 2,
+        }
+        editor.all_cities.setChecked(False)
+        editor.table.item(0, 0).setCheckState(Qt.Checked)
+        editor.interval.setValue(0)
+        editor.notifications.setCurrentIndex(2)
+        assert editor.to_config() == {
+            "cities_ids": ["101"], "run_hours": 0, "notification_mode": 3,
+        }
+        editor.table.item(0, 0).setCheckState(Qt.Unchecked)
+        with pytest.raises(ValueError, match="at least one"):
+            editor.to_config()
+        editor.set_taverns([TAVERNS[1]])
+        editor.all_cities.setChecked(True)
+        with pytest.raises(ValueError, match="No actual taverns"):
+            editor.to_config()
+        editor.set_unavailable()
+        with pytest.raises(ValueError, match="Load real tavern"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_tavern_task_uses_real_city_status_not_optional_json(page):
+    requests = []
+    page.taverns_requested.connect(requests.append)
+    set_native(page, "tavernManager", [
+        field("run_hours", required=True), field("cities_ids"),
+        field("cities"), field("notification_mode", default=2),
+        field("check_now", default=True),
+    ])
+    editor = page._form_inputs["cities_ids"]
+    assert isinstance(editor, TavernCitiesEditor)
+    page.set_taverns({"account_id": "beta", "taverns": TAVERNS})
+    with pytest.raises(ValueError, match="Load real tavern"):
+        page._form_config()
+    page.set_taverns({"account_id": "alpha", "taverns": TAVERNS})
+    assert page._form_config() == {
+        "cities_ids": None, "run_hours": 2, "notification_mode": 2,
+    }
+    editor.all_cities.setChecked(False)
+    editor.table.item(2, 0).setCheckState(Qt.Checked)
+    assert page._form_config()["cities_ids"] == ["103"]
+    page.set_taverns_unavailable("alpha")
+    with pytest.raises(ValueError, match="Load real tavern"):
         page._form_config()
