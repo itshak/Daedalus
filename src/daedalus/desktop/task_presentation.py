@@ -44,6 +44,10 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("research", "cities_ids"): {
+        "type": "academy_research", "label": "Academy experiments",
+        "help": "Select live academy cities and review crystal and cooldown before starting.",
+    },
     ("buyResources", "city"): {
         "type": "market_buy", "label": "Buy at this trading post",
         "help": "Choose live seller offers from this account's trading-post city.",
@@ -171,11 +175,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("resourceTransportManager", "info"): {"type": "hidden_derived"},
     ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
     ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},
-    ("research", "qty"): {
-        "type": "integer", "label": "Experiments (one city)",
-        "minimum": 0, "maximum": 9999, "omit_zero": True,
-        "help": "0 means automatic experiments. Positive count requires exactly one academy city.",
-    },
+    ("research", "qty"): {"type": "hidden_derived"},
     ("research", "mode"): {"type": "hidden_derived"},
     ("research", "experiments"): {"type": "hidden_derived"},
     ("research", "automatic"): {"type": "hidden_derived"},
