@@ -267,7 +267,10 @@ def createOffer(session, my_offering_market_city, resource_type):
     }
 
 
-@task("sellResources")
+from ikabot.function.nativeMarket import prepare_sellResources
+
+
+@task("sellResources", prepare=prepare_sellResources)
 def do_it(session, mode, amount_to_sell=None, offers=None, resource_type=None, city_to_buy_from=None, price=None, sell_market_capacity=None, city=None):
     if mode == "sell_to_offers":
         info = "\nI sell {} of {} in {}\n".format(
