@@ -42,10 +42,8 @@ from daedalus.desktop.selenium_credentials import (
     LoginCredentialError,
     get_saved_login,
     legacy_warehouse_login,
-    remember_login,
 )
 from daedalus.desktop.selenium_credentials_dialog import SeleniumCredentialsDialog
-from daedalus.desktop.selenium_vault import seal_login, unseal_login
 from daedalus.desktop.selenium_worker import SeleniumLoginWorker
 from daedalus.desktop.ssh_tunnel import (
     LocalSSHTunnel,
@@ -542,7 +540,13 @@ class MainWindow(FluentWindow):
         self._automatic_login_queue: list[str] = []
         self._automatic_login_current: str | None = None
         self._automatic_login_credentials: GameforgeCredentials | None = None
+        self._automatic_login_email: str | None = None
         self._automatic_login_save_credentials = False
+        self._automatic_login_sealed_vault: dict[str, object] | None = None
+        self._automatic_login_needs_credentials = False
+        self._automatic_login_cancel_sent = False
+        self._pending_selenium_cancel: dict[str, object] | None = None
+        self._closing_requested = False
         self._automatic_login_challenge: dict[str, object] | None = None
         self._automatic_login_pending_advance = False
         self._automatic_login_successes = 0
@@ -562,6 +566,11 @@ class MainWindow(FluentWindow):
         self._assistance_poll = QTimer(self)
         self._assistance_poll.setInterval(30_000)
         self._assistance_poll.timeout.connect(self._poll_pending_assistance)
+
+        # Hard upper bound even if ChromeDriver or Keychain never responds.
+        self._selenium_watchdog = QTimer(self)
+        self._selenium_watchdog.setSingleShot(True)
+        self._selenium_watchdog.timeout.connect(self._selenium_timeout)
 
         self.home_page = HomePage(self)
         self.accounts_page = AccountsPage(self)
@@ -756,6 +765,8 @@ class MainWindow(FluentWindow):
         self._refresh_shortcut.activated.connect(self._refresh_current_view)
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._focus_search)
+        self._quit_shortcut = QShortcut(QKeySequence.StandardKey.Quit, self)
+        self._quit_shortcut.activated.connect(self.close)
         logger.info("Desktop ready; HTTPS and OS-keychain access are preferred")
         # Keychain access is deferred until the native window has rendered.
         # Only previously approved HTTPS endpoints are auto-connected; an old
@@ -929,50 +940,18 @@ class MainWindow(FluentWindow):
             if not record or record.get("enabled") is not True:
                 self._automatic_login_failures += 1
                 continue
-            world = str(record.get("world") or "")
-            origin = str(self._active_backend_url)
-            credentials = None
-            save_credentials = False
-            try:
-                credentials = get_saved_login(origin, aid, world)
-                save_credentials = credentials is not None
-                if credentials is None:
-                    wrapped = self._server_login_vaults.get(aid)
-                    if isinstance(wrapped, dict):
-                        credentials = unseal_login(origin, aid, world, wrapped)
-                        save_credentials = credentials is not None
-                if credentials is None:
-                    # Exact-alias reuse from the old local IkaBot warehouse bot,
-                    # never a whole-file migration or guessed account mapping.
-                    credentials = legacy_warehouse_login(record)
-                    save_credentials = credentials is not None
-            except LoginCredentialError:
-                self._notice(
-                    "Saved login unavailable",
-                    "Unlock macOS Keychain to restore the encrypted server login.",
-                )
-            if credentials is None:
-                dialog = SeleniumCredentialsDialog(
-                    player=str(record["player"]), world=world,
-                    email=str(record.get("email") or ""), parent=self,
-                )
-                if dialog.exec() != QDialog.Accepted:
-                    dialog.discard()
-                    dialog.deleteLater()
-                    self._automatic_login_failures += 1
-                    continue
-                try:
-                    credentials = dialog.credentials()
-                    save_credentials = dialog.remember.isChecked()
-                finally:
-                    dialog.discard()
-                    dialog.deleteLater()
+            # Never call macOS Keychain on the GUI event loop. The isolated
+            # helper resolves saved logins and launches Chrome in a killable
+            # child process, after a one-time backend handoff is prepared.
             self._automatic_login_current = aid
-            self._automatic_login_credentials = credentials
-            self._automatic_login_save_credentials = save_credentials
+            logger.info("Beginning isolated login for account %s", aid)
+            self._automatic_login_credentials = None
+            self._automatic_login_email = None
+            self._automatic_login_save_credentials = False
+            self._automatic_login_sealed_vault = None
+            self._automatic_login_cancel_sent = False
             self.accounts_page.set_automatic_login_busy(
-                True, f"Signing in {record.get('label') or record.get('player')} "
-                "with headless Selenium Chrome…",
+                True, f"Preparing isolated sign-in for {record.get('label') or record.get('player')}…",
             )
             self._request("native_login_start", account_id=aid)
             return
@@ -984,9 +963,13 @@ class MainWindow(FluentWindow):
         cancelled = self._automatic_login_cancelled
         self._automatic_login_active = False
         self._automatic_login_cancelled = False
+        self._selenium_watchdog.stop()
         self._automatic_login_queue.clear()
         self._automatic_login_current = None
         self._automatic_login_credentials = None
+        self._automatic_login_email = None
+        self._automatic_login_sealed_vault = None
+        self._automatic_login_needs_credentials = False
         self._automatic_login_challenge = None
         self.accounts_page.set_automatic_login_busy(
             False,
@@ -1017,32 +1000,94 @@ class MainWindow(FluentWindow):
         )
         if self._selenium_worker is not None:
             self._selenium_worker.cancel()
+        elif self._automatic_login_challenge is not None:
+            self._cancel_selenium_handoff(self._automatic_login_challenge)
         elif self._worker is None:
             self._finish_automatic_logins()
+
+    def _selenium_timeout(self) -> None:
+        if self._selenium_worker is not None and self._selenium_worker.isRunning():
+            self._notice(
+                "Automatic sign-in timed out",
+                "The isolated Chrome process exceeded its time limit and was terminated.",
+            )
+            self._cancel_automatic_logins()
 
     def _launch_headless_selenium(self, challenge: dict[str, object]) -> None:
         aid = self._automatic_login_current
         record = self.accounts_page.account_record(aid) if aid else None
-        if (self._automatic_login_cancelled or not self._automatic_login_active
+        if (self._automatic_login_cancelled or self._closing_requested
+                or not self._automatic_login_active
                 or record is None or challenge.get("account_id") != aid
-                or record.get("world") != challenge.get("world")
-                or self._automatic_login_credentials is None):
+                or record.get("world") != challenge.get("world") or self._selenium_worker is not None):
             self._cancel_selenium_handoff(challenge)
             return
         self._automatic_login_challenge = challenge
         worker = SeleniumLoginWorker(
-            str(record["world"]), self._automatic_login_credentials, self
+            str(record["world"]), self._automatic_login_credentials, self,
+            origin=str(self._active_backend_url), account_id=aid,
+            record=record, sealed_vault=self._server_login_vaults.get(aid),
+            remember=self._automatic_login_save_credentials,
         )
         self._selenium_worker = worker
         worker.stage_changed.connect(self._selenium_progress)
+        worker.credentials_resolved.connect(self._selenium_credentials_resolved)
+        worker.credentials_required.connect(self._selenium_credentials_required)
+        worker.vault_ready.connect(self._selenium_vault_ready)
         worker.cookie_ready.connect(self._selenium_success)
         worker.login_failed.connect(self._selenium_failure)
         worker.finished.connect(self._selenium_finished)
+        self._selenium_watchdog.start(330_000)
         worker.start()
+        # The helper holds its own copy while Chrome runs. A manually entered
+        # password must not linger in MainWindow state after launch.
+        self._automatic_login_credentials = None
+
+    def _selenium_credentials_resolved(self, email: str, remember: bool) -> None:
+        if not self._automatic_login_cancelled and not self._closing_requested:
+            self._automatic_login_email = email
+            self._automatic_login_save_credentials = remember
+            # Display-only metadata: no Keychain call on the Qt event loop.
+            for account in self.accounts_page._accounts:
+                if account.get("id") == self._automatic_login_current:
+                    account["email"] = email
+                    break
+
+    def _selenium_credentials_required(self) -> None:
+        self._automatic_login_needs_credentials = True
+
+    def _selenium_vault_ready(self, vault: dict[str, object]) -> None:
+        if not self._automatic_login_cancelled:
+            self._automatic_login_sealed_vault = vault
+
+    def _prompt_automatic_login_credentials(self) -> None:
+        if self._closing_requested or self._automatic_login_cancelled:
+            return
+        aid = self._automatic_login_current
+        record = self.accounts_page.account_record(aid) if aid else None
+        challenge = self._automatic_login_challenge
+        if record is None or challenge is None:
+            return
+        dialog = SeleniumCredentialsDialog(
+            player=str(record["player"]), world=str(record["world"]),
+            email=str(record.get("email") or ""), parent=self,
+        )
+        try:
+            if dialog.exec() != QDialog.Accepted:
+                self._cancel_selenium_handoff(challenge)
+                return
+            self._automatic_login_credentials = dialog.credentials()
+            self._automatic_login_save_credentials = dialog.remember.isChecked()
+        finally:
+            dialog.discard()
+            dialog.deleteLater()
+        self._launch_headless_selenium(challenge)
 
     def _selenium_progress(self, stage: str) -> None:
         descriptions = {
             "headless_login": "Logging in automatically in headless Chrome…",
+            "resolving_saved_login": "Looking for saved credentials in macOS Keychain…",
+            "launching_chrome": "Starting isolated headless Chrome browser…",
             "opening_visible_captcha": (
                 "A CAPTCHA was detected. Opening visible Chrome only for that challenge…"
             ),
@@ -1052,9 +1097,12 @@ class MainWindow(FluentWindow):
             ),
             "captcha_resolved": "CAPTCHA solved. Selenium is opening the selected game world…",
             "visible_captcha_login": "Continuing the headless attempt in temporary visible Chrome…",
+            "keychain_unavailable": "Saved login unavailable. Enter credentials manually if prompted.",
+            "keychain_save_failed": "Chrome signed in; encrypted login backup is unavailable until Keychain unlocks.",
         }
         message = descriptions.get(stage)
         if message:
+            logger.info("Gameforge sign-in stage: %s", stage)
             self.accounts_page.set_automatic_login_busy(True, message)
         if stage == "captcha_required":
             self._notice("Gameforge CAPTCHA", "Complete it in the visible Chrome window; no password entry needed.")
@@ -1063,7 +1111,10 @@ class MainWindow(FluentWindow):
         challenge = self._automatic_login_challenge
         aid = self._automatic_login_current
         record = self.accounts_page.account_record(aid) if aid else None
-        if not challenge or not record or not self._automatic_login_credentials:
+        if not challenge or not record:
+            return
+        if not self._automatic_login_email:
+            self._selenium_failure("No verified login identity returned by isolated Chrome")
             return
         if self._automatic_login_cancelled:
             self._cancel_selenium_handoff(challenge)
@@ -1075,7 +1126,7 @@ class MainWindow(FluentWindow):
             )
             envelope = encrypt_mac_world_session(
                 challenge, account, cookie,
-                email=self._automatic_login_credentials.email,
+                email=self._automatic_login_email,
             )
         except (NativeHandoffUnavailable, ValueError):
             self._notice("Gameforge session invalid", "World cookie was rejected before transmission.")
@@ -1087,30 +1138,33 @@ class MainWindow(FluentWindow):
         payload: dict[str, object] = {
             "ticket_id": challenge["ticket_id"], "envelope": envelope,
         }
-        if self._automatic_login_save_credentials:
-            try:
-                payload["vault"] = seal_login(
-                    str(self._active_backend_url), str(aid), str(record["world"]),
-                    self._automatic_login_credentials,
-                )
-            except LoginCredentialError:
-                # Do not block an authenticated session if backup fails.
-                self._notice(
-                    "Encrypted login backup unavailable",
-                    "Unlock macOS Keychain to preserve the password securely.",
-                )
+        if self._automatic_login_sealed_vault is not None:
+            # The isolated child already sealed this using Mac Keychain.
+            # Never invoke Keychain synchronously in a GUI callback.
+            payload["vault"] = self._automatic_login_sealed_vault
         self._request("native_login_complete", account_id=aid, task_payload=payload)
 
     def _selenium_failure(self, reason: str) -> None:
+        logger.warning("Isolated Gameforge sign-in failed: %s", reason)
         self._notice("Automatic sign-in unsuccessful", reason)
         if self._automatic_login_challenge is not None:
             self._cancel_selenium_handoff(self._automatic_login_challenge)
 
     def _selenium_finished(self) -> None:
+        self._selenium_watchdog.stop()
         worker = self._selenium_worker
         self._selenium_worker = None
         if worker is not None:
             worker.deleteLater()
+        if self._closing_requested:
+            return
+        if self._automatic_login_cancelled and self._automatic_login_challenge:
+            self._cancel_selenium_handoff(self._automatic_login_challenge)
+            return
+        if self._automatic_login_needs_credentials:
+            self._automatic_login_needs_credentials = False
+            QTimer.singleShot(0, self._prompt_automatic_login_credentials)
+            return
         # The Selenium finished signal and HTTP cancellation response can
         # arrive in either order. Advance exactly once after BOTH are idle.
         if self._worker is None and self._automatic_login_pending_advance:
@@ -1118,8 +1172,16 @@ class MainWindow(FluentWindow):
             QTimer.singleShot(0, self._advance_automatic_login)
 
     def _cancel_selenium_handoff(self, challenge: dict[str, object]) -> None:
+        if self._automatic_login_cancel_sent:
+            return
         aid, ticket = challenge.get("account_id"), challenge.get("ticket_id")
         if isinstance(aid, str) and isinstance(ticket, str):
+            if self._worker is not None:
+                # The API worker owns the sole request slot. Flush the pending
+                # cancel on its finished signal rather than dropping it.
+                self._pending_selenium_cancel = dict(challenge)
+                return
+            self._automatic_login_cancel_sent = True
             self._request("native_login_cancel", account_id=aid,
                           task_payload={"ticket_id": ticket})
         else:
@@ -1130,8 +1192,12 @@ class MainWindow(FluentWindow):
     def _reset_automatic_attempt(self) -> None:
         self._automatic_login_current = None
         self._automatic_login_credentials = None
+        self._automatic_login_email = None
         self._automatic_login_challenge = None
+        self._automatic_login_sealed_vault = None
         self._automatic_login_save_credentials = False
+        self._automatic_login_cancel_sent = False
+        self._pending_selenium_cancel = None
 
     def _begin_native_browser_login(self, account_id: str) -> None:
         if self.client is None or self._worker is not None:
@@ -1848,21 +1914,16 @@ class MainWindow(FluentWindow):
                 and payload.get("account_id") == self._automatic_login_current
             )
             if automatic_result:
-                if self._automatic_login_save_credentials:
-                    creds = self._automatic_login_credentials
-                    record = self.accounts_page.account_record(self._automatic_login_current)
-                    if creds is not None and record is not None:
-                        try:
-                            remember_login(
-                                str(self._active_backend_url), str(record["id"]),
-                                str(record["world"]), creds,
-                            )
-                        except LoginCredentialError:
-                            self._notice(
-                                "Gameforge login not remembered",
-                                "Unlock macOS Keychain. The server verified the session, "
-                                "but future automatic logins need saved credentials.",
-                            )
+                # The server stores a client-sealed login only after verifying
+                # the world cookie and player. Never write plaintext passwords
+                # from a MainWindow callback.
+                if (self._automatic_login_save_credentials
+                        and payload.get("vault_saved") is not True):
+                    self._notice(
+                        "Automatic login not backed up",
+                        "The session was verified, but saving the encrypted login "
+                        "did not complete. Unlock Mac Keychain before next sign-in.",
+                    )
                 self._automatic_login_successes += 1
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
@@ -2049,24 +2110,16 @@ class MainWindow(FluentWindow):
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)
-        visible = []
-        for raw in data:
-            account = dict(raw)
-            # Local Keychain can also identify an imported account even when
-            # a previous backend version omits its protected email binding.
-            if (not account.get("email")
-                    and isinstance(self._active_backend_url, str)
-                    and self._active_backend_url.startswith("https://")):
-                try:
-                    saved = get_saved_login(
-                        self._active_backend_url,
-                        str(account["id"]), str(account["world"]),
-                    )
-                except (LoginCredentialError, KeyError):
-                    saved = None
-                if saved is not None:
-                    account["email"] = saved.email
-            visible.append(account)
+        # Server metadata is displayed immediately; per-account Keychain reads
+        # happen only in the killable login subprocess, never in the Qt loop.
+        cached_emails = {
+            str(row["id"]): row["email"] for row in self.accounts_page._accounts
+            if isinstance(row.get("id"), str) and isinstance(row.get("email"), str)
+        }
+        visible = [dict(raw) for raw in data]
+        for account in visible:
+            if not account.get("email") and account.get("id") in cached_emails:
+                account["email"] = cached_emails[account["id"]]
         self.accounts_page.set_accounts(visible)
         self.warehouses_page.set_accounts(visible)
         self.military_page.set_accounts(visible)
@@ -2246,6 +2299,12 @@ class MainWindow(FluentWindow):
     def _on_worker_finished(self) -> None:
         self._worker = None
         self.connection_page.set_connecting(False)
+        if self._closing_requested:
+            return
+        pending_cancel, self._pending_selenium_cancel = self._pending_selenium_cancel, None
+        if pending_cancel is not None:
+            self._cancel_selenium_handoff(pending_cancel)
+            return
         challenge, self._pending_native_login_challenge = (
             self._pending_native_login_challenge, None
         )
@@ -2303,26 +2362,40 @@ class MainWindow(FluentWindow):
             title, message, parent=self, position=InfoBarPosition.TOP_RIGHT
         )
 
+    def abort_browser_login(self) -> None:
+        """Also invoked by macOS application Quit, not just window Close."""
+        self._closing_requested = True
+        self._selenium_watchdog.stop()
+        worker = self._selenium_worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait(2000)
+
     def closeEvent(self, event) -> None:
         self._assistance_poll.stop()
-        # Never destroy a live Selenium QThread/Chrome driver while Gameforge
-        # may still own an active challenge. Request cooperative cancellation.
+        self._closing_requested = True
+        self._selenium_watchdog.stop()
+        self._automatic_login_cancelled = True
+        self._automatic_login_queue.clear()
+        self._automatic_login_report = None
         if self._selenium_worker is not None and self._selenium_worker.isRunning():
+            # The child process group is forcibly killed (including Chrome).
+            # Its supervisory QThread only reads the local pipe and should
+            # finish promptly. Never wait on ChromeDriver itself.
             self._selenium_worker.cancel()
+            if not self._selenium_worker.wait(2000):
+                # Keep Qt responsive and automatically retry closing after
+                # the supervisor exits; do not require another Cmd+Q.
+                event.ignore()
+                self._selenium_worker.finished.connect(
+                    lambda: QTimer.singleShot(0, self.close)
+                )
+                return
+        if self._worker is not None and self._worker.isRunning():
+            # API requests may be in flight; never block Qt for 9 seconds.
+            # Once the bounded HTTP request finishes, close automatically.
             event.ignore()
-            self._notice(
-                "Selenium login stopping",
-                "Chrome is closing. Close Daedalus after automatic login stops.",
-            )
-            return
-        # Preserve the old GUI's rule: never destroy a live QThread.
-        if (
-            self._worker is not None
-            and self._worker.isRunning()
-            and not self._worker.wait(9000)
-        ):
-            event.ignore()
-            self._notice("Request still running", "Close the window after the request finishes.")
+            self._worker.finished.connect(lambda: QTimer.singleShot(0, self.close))
             return
         if self.client is not None:
             self.client.close()
