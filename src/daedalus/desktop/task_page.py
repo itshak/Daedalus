@@ -47,6 +47,7 @@ from qfluentwidgets import (
 
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.native_controls import (
+    AcademyResearchEditor,
     DonationPoliciesEditor,
     MapAreaEditor,
     MarketOffersEditor,
@@ -123,6 +124,7 @@ class TasksPage(QWidget):
     workshop_requested = Signal(str, int)
     trainable_units_requested = Signal(str, int, bool)
     market_quotes_requested = Signal(str, int, int, str)
+    academies_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -973,6 +975,21 @@ class TasksPage(QWidget):
         if isinstance(editor, MarketOffersEditor):
             editor.set_unavailable(city_id, resource_type, side)
 
+    def set_academies(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "research"):
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, AcademyResearchEditor):
+            editor.set_academies(result["academies"])
+
+    def set_academies_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, AcademyResearchEditor):
+            editor.set_unavailable()
+
     def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
         if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
             self._buildings_scope = None
@@ -1530,6 +1547,9 @@ class TasksPage(QWidget):
             elif kind == "map_center":
                 widget = MapAreaEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
+            elif kind == "academy_research":
+                widget = AcademyResearchEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind in {"market_buy", "market_sell"}:
                 widget = MarketOffersEditor(self, buying=kind == "market_buy")
                 widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
@@ -1654,6 +1674,8 @@ class TasksPage(QWidget):
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
         self.parameter_scroll.setVisible(bool(self._form_inputs))
+        if name == "research" and self.selected_account_id():
+            self.academies_requested.emit(self.selected_account_id())
         if name == "donationBot":
             method = self._form_inputs.get("donate_method")
             policy = self._form_inputs.get("cities_dict")
@@ -1682,6 +1704,7 @@ class TasksPage(QWidget):
                 "city_list", "choices_list", "island_list", "shipment_routes",
                 "donation_policies", "resource_limits", "resource_config",
                 "workshop_jobs", "train_units", "market_buy", "market_sell",
+                "academy_research",
             } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
@@ -1705,7 +1728,7 @@ class TasksPage(QWidget):
                      or any(field.get("type") in {
                          "city_list", "city_picker", "island_list", "shipment_routes",
                          "donation_policies", "workshop_jobs", "train_units",
-                         "market_buy", "market_sell",
+                         "market_buy", "market_sell", "academy_research",
                      } for field in fields))):
             self.cities_requested.emit(account_id)
 
@@ -1810,6 +1833,9 @@ class TasksPage(QWidget):
                 continue
             if isinstance(widget, ShipmentRoutesEditor):
                 config[key] = widget.to_config()
+                continue
+            if isinstance(widget, AcademyResearchEditor):
+                config.update(widget.to_config())
                 continue
             if isinstance(widget, MarketOffersEditor):
                 config.update(widget.to_config())
