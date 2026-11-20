@@ -165,6 +165,7 @@ def test_frozen_launcher_dispatches_login_child_before_desktop():
 def test_kill_group_cleans_descendants_even_if_helper_already_exited(monkeypatch):
     import signal
 
+    pytest.importorskip("PySide6")
     from daedalus.desktop.selenium_worker import SeleniumLoginWorker
 
     calls = []
