@@ -14,6 +14,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
 from daedalus.desktop.native_controls import (
+    AcademyResearchEditor,
     DonationPoliciesEditor,
     MapAreaEditor,
     MarketOffersEditor,
@@ -583,4 +584,68 @@ def test_task_market_config_uses_real_quotes_and_account_guard(
     assert name == "buyResources" or result["mode"] == "sell_to_offers"
     page.set_cities_unavailable("alpha")
     with pytest.raises(ValueError, match="load real market"):
+        page._form_config()
+
+
+ACADEMIES = [
+    {"city_id": 101, "city_name": "Athens", "position": 5,
+     "crystal": 600000, "cooldown": False, "can_experiment_now": True},
+    {"city_id": 102, "city_name": "Sparta", "position": 7,
+     "crystal": 100000, "cooldown": True, "can_experiment_now": False},
+]
+
+
+def test_native_academy_table_has_verified_crystal_and_cooldown(app):
+    editor = AcademyResearchEditor()
+    try:
+        with pytest.raises(ValueError, match="Load actual academies"):
+            editor.to_config()
+        editor.set_academies(ACADEMIES)
+        assert editor.table.rowCount() == 2
+        assert editor.table.item(0, 2).text() == "600,000"
+        assert editor.table.item(1, 3).text() == "Cooling down"
+        editor.table.item(0, 0).setCheckState(Qt.Checked)
+        assert editor.to_config() == {"cities_ids": ["101"], "qty": None}
+        editor.count.setValue(3)
+        assert editor.to_config()["qty"] == 3
+        editor.table.item(1, 0).setCheckState(Qt.Checked)
+        with pytest.raises(ValueError, match="exactly one"):
+            editor.to_config()
+        editor.table.item(0, 0).setCheckState(Qt.Unchecked)
+        with pytest.raises(ValueError, match="300,000 crystal"):
+            editor.to_config()
+        editor.count.setValue(0)
+        assert editor.to_config() == {"cities_ids": ["102"], "qty": None}
+        editor.set_unavailable()
+        assert editor.table.rowCount() == 0
+        with pytest.raises(ValueError, match="Load actual academies"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_research_task_uses_real_academy_rows_not_city_json(page):
+    requested = []
+    page.academies_requested.connect(requested.append)
+    set_native(page, "research", [
+        field("cities_ids"), field("qty"), field("mode"),
+        field("experiments"), field("automatic"),
+        field("cities"), field("info"),
+    ])
+    # Open task form and fetch current game inventory for the selected account.
+    editor = page._form_inputs["cities_ids"]
+    assert isinstance(editor, AcademyResearchEditor)
+    page.set_academies({"account_id": "other", "academies": ACADEMIES})
+    with pytest.raises(ValueError, match="Load actual academies"):
+        page._form_config()
+    page.set_academies({"account_id": "alpha", "academies": ACADEMIES})
+    editor.table.item(0, 0).setCheckState(Qt.Checked)
+    config = page._form_config()
+    assert config["cities_ids"] == ["101"]
+    assert config["qty"] is None
+    editor.count.setValue(2)
+    assert page._form_config()["qty"] == 2
+    page.set_academies_unavailable("alpha")
+    with pytest.raises(ValueError, match="Load actual academies"):
         page._form_config()
