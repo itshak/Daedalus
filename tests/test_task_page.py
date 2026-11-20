@@ -649,3 +649,29 @@ def test_editing_construction_queue_after_preview_revokes_approval(page):
     page.set_cities_unavailable("alpha")
     assert not page._construction_preview_ready
     assert page.building_table.rowCount() == 0
+
+
+def test_unknown_compound_engine_fields_do_not_create_raw_json_form_wall(page):
+    """Unreviewed complex configs must not impersonate a native game plan."""
+    page.set_capabilities([{
+        "name": "attackBarbarians", "kind": "background_task",
+        "config_fields": [
+            {"name": "island", "type": "json", "required": True},
+            {"name": "city", "type": "json", "required": True},
+            {"name": "plan", "type": "json", "required": True},
+            {"name": "ship_capacity", "type": "json", "required": True},
+        ],
+    }], enabled=True)
+    assert not page._form_inputs
+    assert page.expert_note.isVisible() is False or not page.expert_note.isHidden()
+    page.set_preflight({
+        "account_id": "alpha", "task": "attackBarbarians",
+        "ready": True, "reason": "none", "unresolved_request": False,
+    })
+    assert not page.start_button.isEnabled()
+    with pytest.raises(ValueError, match="reviewed engine plan"):
+        page._form_config()
+    page._toggle_advanced()
+    assert page.start_button.isEnabled()
+    page._toggle_advanced()
+    assert not page.start_button.isEnabled()
