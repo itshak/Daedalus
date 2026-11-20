@@ -176,8 +176,12 @@ def prepare_autoPirate(
         raise ValueError("none of your cities has a pirate fortress able to do mission {}".format(max(missions)))
     first_city = piracyCities[0] if piracyCities else piracy_cities[0]
     first_city_id = first_city["id"] if isinstance(first_city, dict) else first_city
-    # the task only reads the first city's id: keep the saved config small
-    config["piracyCities"] = [{"id": asId(first_city_id, "piracyCities")}]
+    selected_id = asId(first_city_id, "piracyCities")
+    eligible_ids = {asId(city["id"], "eligible fortress") for city in piracy_cities}
+    if selected_id not in eligible_ids:
+        raise ValueError("Selected pirate fortress is not eligible for these missions")
+    # The engine independently verifies that this fortress can run the highest mission.
+    config["piracyCities"] = [{"id": selected_id}]
     return config
 
 
