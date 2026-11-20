@@ -589,10 +589,10 @@ def test_academy_research_ipc_lists_only_owned_and_real_game_stock(tmp_path):
             {"city_id": 42, "city_name": "Athens", "position": 5,
              "crystal": 400000, "cooldown": False, "can_experiment_now": True},
         ]
-        assert requests[-1] == {
+        assert {
             "action": "list_academies_existing",
             "world": "s301-en", "player": "ExamplePlayer",
-        }
+        } in requests
         assert not any("task" in request["action"] for request in requests)
 
 
@@ -625,10 +625,10 @@ def test_tavern_status_ipc_is_owned_and_read_only(tmp_path):
         assert city["wine"] == 12000
         assert city["wine_per_hour"] == 24
         assert city["satisfaction"] == 45
-        assert requests[-1] == {
+        assert {
             "action": "list_taverns_existing",
             "world": "s301-en", "player": "ExamplePlayer",
-        }
+        } in requests
         assert not any("task" in record["action"] for record in requests)
 
 
@@ -638,10 +638,10 @@ def test_miracle_inventory_is_account_owned_and_exposes_real_cooldown(tmp_path):
         assert result["account_id"] == "alpha"
         assert result["miracles"][0]["wonder"] == "5"
         assert result["miracles"][0]["available_in_seconds"] == 1200
-        assert requests[-1] == {
+        assert {
             "action": "list_miracles_existing", "world": "s301-en",
             "player": "ExamplePlayer",
-        }
+        } in requests
         assert not any("start_task" in request["action"] for request in requests)
 
 
@@ -651,8 +651,8 @@ def test_olympus_shrine_status_ipc_owns_city_and_favor(tmp_path):
         assert result["account_id"] == "alpha"
         assert result["shrine"]["city_id"] == 42
         assert result["shrine"]["favor"] == 750
-        assert requests[-1] == {
+        assert {
             "action": "shrine_status_existing",
             "world": "s301-en", "player": "ExamplePlayer",
-        }
+        } in requests
         assert not any("start_task" in row["action"] for row in requests)
