@@ -52,6 +52,7 @@ from daedalus.desktop.native_controls import (
     MapAreaEditor,
     MarketOffersEditor,
     MiracleTempleEditor,
+    OlympusShrineEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -129,6 +130,7 @@ class TasksPage(QWidget):
     academies_requested = Signal(str)
     taverns_requested = Signal(str)
     miracles_requested = Signal(str)
+    shrine_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -1025,6 +1027,21 @@ class TasksPage(QWidget):
         if isinstance(editor, MiracleTempleEditor):
             editor.set_unavailable()
 
+    def set_shrine(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "activateShrine"):
+            return
+        editor = self._form_inputs.get("godids")
+        if isinstance(editor, OlympusShrineEditor):
+            editor.set_shrine(result["shrine"])
+
+    def set_shrine_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("godids")
+        if isinstance(editor, OlympusShrineEditor):
+            editor.set_unavailable()
+
     def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
         if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
             self._buildings_scope = None
@@ -1583,6 +1600,9 @@ class TasksPage(QWidget):
             elif kind == "map_center":
                 widget = MapAreaEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
+            elif kind == "olympus_shrine":
+                widget = OlympusShrineEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "miracle_temple":
                 widget = MiracleTempleEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
@@ -1722,6 +1742,8 @@ class TasksPage(QWidget):
             self.taverns_requested.emit(self.selected_account_id())
         if name == "activateMiracle" and self.selected_account_id():
             self.miracles_requested.emit(self.selected_account_id())
+        if name == "activateShrine" and self.selected_account_id():
+            self.shrine_requested.emit(self.selected_account_id())
         if name == "donationBot":
             method = self._form_inputs.get("donate_method")
             policy = self._form_inputs.get("cities_dict")
@@ -1751,6 +1773,7 @@ class TasksPage(QWidget):
                 "donation_policies", "resource_limits", "resource_config",
                 "workshop_jobs", "train_units", "market_buy", "market_sell",
                 "academy_research", "tavern_cities", "miracle_temple",
+                "olympus_shrine",
             } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
@@ -1775,7 +1798,7 @@ class TasksPage(QWidget):
                          "city_list", "city_picker", "island_list", "shipment_routes",
                          "donation_policies", "workshop_jobs", "train_units",
                          "market_buy", "market_sell", "academy_research",
-                         "tavern_cities", "miracle_temple",
+                         "tavern_cities", "miracle_temple", "olympus_shrine",
                      } for field in fields))):
             self.cities_requested.emit(account_id)
 
@@ -1880,6 +1903,9 @@ class TasksPage(QWidget):
                 continue
             if isinstance(widget, ShipmentRoutesEditor):
                 config[key] = widget.to_config()
+                continue
+            if isinstance(widget, OlympusShrineEditor):
+                config.update(widget.to_config())
                 continue
             if isinstance(widget, MiracleTempleEditor):
                 config.update(widget.to_config())
