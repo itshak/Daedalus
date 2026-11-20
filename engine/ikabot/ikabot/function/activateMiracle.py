@@ -169,7 +169,11 @@ def obtainMiraclesAvailable(session):
 
     for city_id in cities:
         city_info = cities[city_id]
-        temple_city = _CITY_TEMPLE_CACHE.get(city_id)
+        cache_key = (
+            str(session.mundo), str(session.servidor),
+            str(session.username).casefold(), str(city_id),
+        )
+        temple_city = _CITY_TEMPLE_CACHE.get(cache_key)
 
         if temple_city is None:
             html = session.get(city_url + str(city_info["id"]))
@@ -178,14 +182,15 @@ def obtainMiraclesAvailable(session):
             if pos is None:
                 continue
             temple_city = {"id": city["id"], "name": city["name"], "islandId": city["islandId"], "pos": pos}
-            _CITY_TEMPLE_CACHE[city_id] = temple_city
+            _CITY_TEMPLE_CACHE[cache_key] = temple_city
 
         island_id = temple_city["islandId"]
-        cached_island = _ISLAND_CACHE.get(island_id)
+        island_cache_key = (str(session.mundo), str(session.servidor), str(island_id))
+        cached_island = _ISLAND_CACHE.get(island_cache_key)
         if cached_island is None:
             html = session.get(island_url + island_id)
             cached_island = getIsland(html)
-            _ISLAND_CACHE[island_id] = cached_island
+            _ISLAND_CACHE[island_cache_key] = cached_island
 
         target_island = islands.get(island_id)
         if target_island is None:
