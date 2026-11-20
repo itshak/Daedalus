@@ -734,6 +734,7 @@ class TasksPage(QWidget):
                     ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
+                    # Account-scoped read data are never portable between cities/worlds.
                     input_widget.set_cities(self._cities_by_account.get(account_id, []))
                     self._invalidate_review()
 
@@ -1028,6 +1029,7 @@ class TasksPage(QWidget):
                     ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
+                    # Account-scoped read data are never portable between cities/worlds.
                     input_widget.set_cities(self._cities_by_account.get(account_id, []))
                     self._invalidate_review()
 
@@ -1930,7 +1932,8 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
-        if name == "research" and config.get("qty", 0) > 0 and len(config.get("cities_ids", [])) != 1:
+        if (name == "research" and type(config.get("qty")) is int and config["qty"] > 0
+                and len(config.get("cities_ids", [])) != 1):
             raise ValueError("Choose exactly one academy city for a fixed number of experiments")
         if name == "consolidateResources":
             destination = config.get("destinationCityId")
