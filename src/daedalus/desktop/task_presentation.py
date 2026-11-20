@@ -44,10 +44,6 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
-    ("research", "cities_ids"): {
-        "type": "academy_research", "label": "Academy experiments",
-        "help": "Select live academy cities and review crystal and cooldown before starting.",
-    },
     ("buyResources", "city"): {
         "type": "market_buy", "label": "Buy at this trading post",
         "help": "Choose live seller offers from this account's trading-post city.",
@@ -308,23 +304,14 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Leave all unchecked to use every city. Choose at least two for a custom subset.",
     },
     ("tavernManager", "cities_ids"): {
-        "type": "city_list",
-        "label": "Tavern cities",
-        "help": "Leave all unchecked to have IkaBot select its default tavern cities.",
+        "type": "tavern_cities", "label": "Tavern equilibrium",
+        "help": "Use actual wine, population and tavern statuses to choose managed cities.",
     },
+    ("tavernManager", "run_hours"): {"type": "hidden_derived"},
+    ("tavernManager", "notification_mode"): {"type": "hidden_derived"},
     ("research", "cities_ids"): {
-        "type": "city_list",
-        "label": "Academy cities",
-        "help": "Leave all unchecked to include the engine's default eligible academies.",
-    },
-    ("tavernManager", "run_hours"): {
-        "type": "integer",
-        "label": "Check tavern balance every",
-        "minimum": 0,
-        "maximum": 168,
-        "suffix": " hours",
-        "explicit_input": True,
-        "help": "Whole hours between checks. Choose 0 to run just once.",
+        "type": "academy_research", "label": "Academy experiments",
+        "help": "Choose actual academies; see current crystal and cooldown.",
     },
     ("alertLowWine", "hours"): {
         "type": "integer",
@@ -345,10 +332,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "maximum": 1_000_000,
         "help": "The amount of wine to send if automatic transfer is enabled; 0 disables transfers.",
     },
-    ("tavernManager", "check_now"): {
-        "label": "Check once immediately",
-        "help": "Run the initial check before the recurring schedule.",
-    },
+    ("tavernManager", "check_now"): {"type": "hidden_derived"},
 }
 
 
