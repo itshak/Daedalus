@@ -1,5 +1,9 @@
 # Web Control Center
 
+## Purpose
+
+Provide an accessible, Apple-inspired, browser-based control center that safely exposes the existing Daedalus backend's web-compatible multi-account management and automation workflows.
+
 ## ADDED Requirements
 
 ### Requirement: Optional Apple-inspired web experience

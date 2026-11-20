@@ -1,5 +1,9 @@
 # Web Access Security
 
+## Purpose
+
+Provide closed administrator authentication, a server-only gateway and privacy-preserving deployment boundaries for the optional Daedalus web control center.
+
 ## ADDED Requirements
 
 ### Requirement: Closed first-admin provisioning
