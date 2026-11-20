@@ -39,7 +39,7 @@ class TestNativeTrainArmy(unittest.TestCase):
         )
         stack.enter_context(patch.object(training, "getCity", return_value=self.city))
         stack.enter_context(patch.object(training, "getBuildingInfo", return_value=[
-            ["synthetic"], ["synthetic"], ["unit catalog"]]))
+            ["synthetic"], ["synthetic"], ["unit catalog", {}]]))
         stack.enter_context(patch.object(training, "generateArmyData", return_value=self.units))
         return stack
 
