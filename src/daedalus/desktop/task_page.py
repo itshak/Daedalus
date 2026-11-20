@@ -1441,7 +1441,18 @@ class TasksPage(QWidget):
             else "Show advanced JSON options"
         )
         if self._advanced_visible and self.selected_task_name() != "constructionList":
-            self._build_config_from_form()
+            fields = self._config_fields_by_task.get(self.selected_task_name() or "", [])
+            if not expert_configuration_needed(fields):
+                self._build_config_from_form()
+            else:
+                # Never attempt to compile an unsupported raw game plan while
+                # opening Advanced. That would display a modal error dialog,
+                # blocking a headless Mac session and obscuring the import path.
+                self.advanced_note.setText(
+                    "This IkaBot operation requires an existing validated engine plan. "
+                    "Import it explicitly or review an account-specific configuration; "
+                    "do not invent city, combat or ship identifiers."
+                )
         self._set_controls()
 
     def _import_advanced_config(self) -> None:
