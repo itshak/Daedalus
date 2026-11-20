@@ -550,3 +550,27 @@ def test_academy_research_api_requires_auth_and_does_not_spend_crystal(account_f
     assert result.json()["academies"][0]["can_experiment_now"]
     assert ipc.accounts == ["alpha"]
     assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_tavern_snapshot_api_is_authorized_and_nonmutating(account_file):
+    class TavernIPC:
+        def __init__(self):
+            self.calls = []
+
+        def taverns(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "taverns": [{
+                "city_id": 42, "city_name": "Athens", "wine": 1000,
+                "has_tavern": True, "serving_level": 3, "wine_per_hour": 20,
+                "satisfaction": 10, "population": 100, "capacity": 250,
+            }]}
+
+    ipc = TavernIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/taverns"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/taverns", headers=auth).status_code == 404
+    assert client.get(path, headers=auth).json()["taverns"][0]["wine_per_hour"] == 20
+    assert ipc.calls == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
