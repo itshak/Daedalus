@@ -1112,3 +1112,117 @@ class MiracleTempleEditor(QWidget):
             "wonder": self._wonders[row]["wonder"],
             "iterations": self.iterations.value(),
         }
+
+
+class OlympusShrineEditor(QWidget):
+    """Verified Shrine of Olympus + selected gods, favour budget and repeat policy."""
+
+    changed = Signal()
+
+    _GODS = (
+        (1, "Pan", "Wood"), (2, "Dionysus", "Wine"),
+        (3, "Tyche", "Marble"), (4, "Plutus", "Gold"),
+        (5, "Theia", "Crystal"), (6, "Hephaestus", "Sulfur"),
+    )
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.shrine_label = QLabel("Reading this account's Shrine of Olympus…")
+        self.shrine_label.setWordWrap(True)
+        layout.addWidget(self.shrine_label)
+        self.table = _table(("Activate", "God", "Bonus", "Favour cost"))
+        self.table.setMinimumHeight(160)
+        self.table.setAccessibleName("Select Shrine of Olympus blessings")
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(self._GODS))
+            for index, (god_id, god, resource) in enumerate(self._GODS):
+                toggle = QTableWidgetItem("")
+                toggle.setData(Qt.UserRole, god_id)
+                toggle.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                toggle.setCheckState(Qt.Unchecked)
+                self.table.setItem(index, 0, toggle)
+                for col, value in ((1, god), (2, resource), (3, "100")):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(index, col, item)
+        self.table.itemChanged.connect(self._selection_changed)
+        layout.addWidget(self.table)
+        schedule = QHBoxLayout()
+        schedule.addWidget(QLabel("Activation schedule"))
+        self.mode = ComboBox()
+        self.mode.addItems([
+            "Activate N times", "Repeat automatically (engine 72 h interval)",
+            "Activate N times, then repeat automatically",
+        ])
+        self.mode.setAccessibleName("Olympus blessing schedule")
+        self.mode.currentIndexChanged.connect(self._selection_changed)
+        schedule.addWidget(self.mode, 2)
+        self.count = _amount(minimum=1, value=1, label="Number of initial activations")
+        self.count.setMaximum(10)
+        self.count.valueChanged.connect(self.changed.emit)
+        schedule.addWidget(self.count, 1)
+        layout.addLayout(schedule)
+        self.summary = QLabel("No gods selected.")
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self._shrine: dict[str, object] | None = None
+        self._loaded = False
+
+    def _selection_changed(self, *_args: object) -> None:
+        chosen = [
+            self.table.item(i, 0).data(Qt.UserRole)
+            for i in range(self.table.rowCount())
+            if self.table.item(i, 0).checkState() == Qt.Checked
+        ]
+        cost = 100 * len(chosen)
+        favor = self._shrine.get("favor") if self._shrine else None
+        current = f"{favor:,}" if type(favor) is int else "Unknown"
+        self.summary.setText(
+            f"Favour required per cycle: {cost:,}. Current favour: {current}. "
+            + ("Waiting for enough favour is handled by IkaBot."
+               if cost else "Choose gods to activate.")
+        )
+        self.count.setEnabled(self.mode.currentIndex() != 1)
+        self.changed.emit()
+
+    def set_shrine(self, shrine: dict[str, object] | None) -> None:
+        self._loaded = True
+        self._shrine = shrine
+        if shrine is None:
+            self.shrine_label.setText(
+                "This account has no Shrine of Olympus. Activation is not possible."
+            )
+        else:
+            self.shrine_label.setText(
+                f"Shrine of Olympus: {shrine['city_name']} "
+                f"(building position {shrine['position']})."
+            )
+        self._selection_changed()
+
+    def set_unavailable(self) -> None:
+        self._loaded = False
+        self._shrine = None
+        self.shrine_label.setText(
+            "Could not verify an actual Shrine of Olympus for this account."
+        )
+        self._selection_changed()
+
+    def to_config(self) -> dict[str, object]:
+        if not self._loaded or self._shrine is None:
+            raise ValueError("An actual owned Shrine of Olympus is required")
+        gods = [
+            self.table.item(i, 0).data(Qt.UserRole)
+            for i in range(self.table.rowCount())
+            if self.table.item(i, 0).checkState() == Qt.Checked
+        ]
+        if not gods:
+            raise ValueError("Select at least one Shrine god")
+        mode = self.mode.currentIndex() + 1
+        if mode not in (1, 2, 3):
+            raise ValueError("Choose a valid Shrine schedule")
+        return {
+            "godids": gods, "mode": mode,
+            "times": 0 if mode == 2 else self.count.value(),
+        }
