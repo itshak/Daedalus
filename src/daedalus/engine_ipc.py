@@ -32,6 +32,7 @@ _ALLOWED = frozenset({
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
+    "list_academies_existing",
 })
 
 
@@ -135,6 +136,7 @@ class ExistingIPCClient:
             "task_preflight_existing", "list_buildings_existing",
             "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
+            "list_academies_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -611,6 +613,41 @@ class ExistingIPCClient:
             "sell_market_capacity": data.get("sell_market_capacity"),
             "currently_on_sale": data.get("currently_on_sale"),
         }
+
+    def academies(self, account: Account) -> dict[str, object]:
+        """Bounded academy inventory, with authoritative crystal/cooldown status."""
+        data = self.request("list_academies_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot academy list belongs to another account")
+        records = data.get("academies")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("IkaBot returned invalid academy list")
+        owned = {city["id"] for city in self.cities(account)}
+        seen = set()
+        result = []
+        for record in records:
+            if not isinstance(record, dict):
+                raise EngineIPCUnavailable("Invalid academy record")
+            ident = record.get("city_id")
+            name = record.get("city_name")
+            position = record.get("position")
+            crystal = record.get("crystal")
+            cooldown = record.get("cooldown")
+            ready = record.get("can_experiment_now")
+            if (type(ident) is not int or ident not in owned or ident in seen
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(position) is not int or not 0 <= position <= 80
+                    or type(crystal) is not int or not 0 <= crystal <= 10**15
+                    or type(cooldown) is not bool or type(ready) is not bool
+                    or (ready and (cooldown or crystal < 300000))):
+                raise EngineIPCUnavailable("Invalid or foreign academy entry")
+            seen.add(ident)
+            result.append({
+                "city_id": ident, "city_name": name, "position": position,
+                "crystal": crystal, "cooldown": cooldown, "can_experiment_now": ready,
+            })
+        return {"account_id": account.id, "academies": result}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
