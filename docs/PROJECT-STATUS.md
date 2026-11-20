@@ -17,6 +17,27 @@ the PySide6-Fluent runtime, physical Mac layout/VoiceOver and live Gameforge
 workflow have **not** been exercised in this branch. The redesign OpenSpec
 remains active until reviewed build and UX gates are satisfied.
 
+## Active native automation workspace — PR #68 (draft, unfinished)
+
+The `native-automation-workflows` OpenSpec change is **ACTIVE and UNFINISHED**.
+It implements category tabs, actual authenticated city pickers, a bounded read-only
+IkaBot IPC/API for real owned-city building levels, a construction building table
+with draft upgrade targets, and safe rejection of cross-account city/plan reuse.
+Raw construction planner JSON is hidden from the normal UI, with expert import
+retained for previously prepared engine plans. Resource distribution has native
+resource/mode choices and source-backed participating-city multi-selection;
+research and tavern management have account-bound city subsets. Daily reward collection has native wine/wood/luxury city destinations and verified favour-task choices.
+
+The remaining implementation is substantial: IkaBot's authoritative, read-only
+construction cost/shipment/ETA planner; native executable construction queue;
+dedicated domain UI and verified game DTOs for the full IkaBot catalog;
+per-account review previews and final Mac accessibility/visual acceptance.
+**The current draft is NOT production-ready and MUST NOT be archived or merged
+until the required engine planner, UI, contract tests and acceptance gates are
+completed.** See [full UX feature audit](AUTOMATION-UX-AUDIT.md),
+[design](../openspec/changes/native-automation-workflows/design.md) and
+[remaining checklist](../openspec/changes/native-automation-workflows/tasks.md).
+
 ## Complete and archived
 
 The following changes have implemented and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:

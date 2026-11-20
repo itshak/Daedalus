@@ -18,11 +18,14 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +46,21 @@ from qfluentwidgets import (
 )
 
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
+from daedalus.desktop.native_controls import (
+    AcademyResearchEditor,
+    DonationPoliciesEditor,
+    MapAreaEditor,
+    MarketOffersEditor,
+    MiracleTempleEditor,
+    OlympusShrineEditor,
+    PiracyMissionsEditor,
+    ResourceAmountsEditor,
+    ResourceLimitsEditor,
+    ShipmentRoutesEditor,
+    TavernCitiesEditor,
+    TrainableUnitsEditor,
+    WorkshopUpgradesEditor,
+)
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
     configuration_summary,
@@ -104,6 +122,17 @@ class TasksPage(QWidget):
     reconcile_requested = Signal(str, str)
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
+    cities_requested = Signal(str)
+    buildings_requested = Signal(str, int)
+    construction_preview_requested = Signal(str, int, object)
+    workshop_requested = Signal(str, int)
+    trainable_units_requested = Signal(str, int, bool)
+    market_quotes_requested = Signal(str, int, int, str)
+    academies_requested = Signal(str)
+    taverns_requested = Signal(str)
+    miracles_requested = Signal(str)
+    shrine_requested = Signal(str)
+    pirate_fortresses_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -122,7 +151,7 @@ class TasksPage(QWidget):
         self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
-        self._form_inputs: dict[str, LineEdit | CheckBox | ComboBox | QSpinBox | QDoubleSpinBox] = {}
+        self._form_inputs: dict[str, QWidget] = {}
         self._form_dirty = False
         self._reviewed = False
         self._pending_launch = False
@@ -130,6 +159,13 @@ class TasksPage(QWidget):
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
         self._status_account_ids: list[str] = []
+        # Authenticated, account-bound read-only city options; never invent IDs.
+        self._cities_by_account: dict[str, list[dict[str, object]]] = {}
+        self._buildings_scope: tuple[str, int] | None = None
+        self._construction_prepared: dict[str, object] | None = None
+        self._construction_preview_ready = False
+        self._pending_preview_key: tuple[object, ...] | None = None
+        self._building_rows: list[dict[str, object]] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
         outer = QVBoxLayout(self)
@@ -146,7 +182,7 @@ class TasksPage(QWidget):
         outer.addWidget(self.stack, 1)
         self.stack.addWidget(scroll)
         self.pivot.addItem(
-            routeKey="configure", text="Discover & configure",
+            routeKey="configure", text="Configure",
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
@@ -188,7 +224,8 @@ class TasksPage(QWidget):
         template_row.addWidget(self.catalog_button)
         template_row.addStretch(1)
         if workflow is None:
-            layout.addLayout(template_row)
+            # Category tabs below replace the duplicated template toolbar.
+            pass
         else:
             for button in (
                 self.wine_template_button, self.construction_template_button,
@@ -222,22 +259,29 @@ class TasksPage(QWidget):
         scope_row.addStretch(1)
         layout.addLayout(scope_row)
 
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(BodyLabel("Category"))
-        self.category_combo = ComboBox()
+        self.category_combo = ComboBox(self)
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
-        filter_row.addWidget(self.category_combo, 1)
+        self.group_tabs = Pivot(self)
+        self.group_tabs.setAccessibleName("Automation categories")
+        for index, category in enumerate(_CATEGORIES):
+            self.group_tabs.addItem(
+                routeKey=f"group-{index}", text=category,
+                onClick=lambda index=index: self.category_combo.setCurrentIndex(index),
+            )
+        self.group_tabs.setCurrentItem("group-0")
+        layout.addWidget(self.group_tabs)
+        filter_row = QHBoxLayout()
         self.search_input = SearchLineEdit()
         self.search_input.setPlaceholderText("Search automations")
         self.search_input.textChanged.connect(self._filter_tasks)
-        filter_row.addWidget(self.search_input, 2)
+        filter_row.addWidget(self.search_input, 1)
         layout.addLayout(filter_row)
 
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
         # These are read-only selection cards; only the separate, reviewed
         # Start action can contact the backend with a game mutation.
-        self.browse_button = PushButton("Browse automation gallery ▾")
+        self.browse_button = PushButton("Browse actions ▾")
         self.browse_button.setToolTip("Show or hide available automation choices")
         self._gallery_open = False
         self.browse_button.clicked.connect(self._toggle_gallery)
@@ -286,6 +330,33 @@ class TasksPage(QWidget):
         self.parameter_layout = QFormLayout(self.parameter_container)
         self.parameter_scroll.setWidget(self.parameter_container)
         layout.addWidget(self.parameter_scroll)
+        # Source-backed construction inventory: never a fabricated plan.
+        self.building_header = SubtitleLabel("Buildings in this city")
+        layout.addWidget(self.building_header)
+        self.building_table = _table([
+            "Choose", "Building", "Slot", "Current level", "Target level", "Status"
+        ])
+        self.building_table.setAccessibleName("Read-only verified city building levels and draft targets")
+        self.building_table.setMinimumHeight(180)
+        self.building_table.setMaximumHeight(320)
+        self.building_table.itemChanged.connect(self._mark_form_dirty)
+        layout.addWidget(self.building_table)
+        self.construction_preview_button = PushButton("Calculate actual upgrade costs & queue…")
+        self.construction_preview_button.clicked.connect(self._request_construction_preview)
+        self.construction_preview_button.setAccessibleDescription(
+            "Only reads IkaBot game information. Does not upgrade or ship anything."
+        )
+        layout.addWidget(self.construction_preview_button)
+        self.building_note = CaptionLabel(
+            "Choose a city to inspect its actual buildings. Upgrade targets are drafts; "
+            "starting requires an upstream-validated construction plan, not raw values."
+        )
+        self.building_note.setWordWrap(True)
+        layout.addWidget(self.building_note)
+        self.building_header.hide()
+        self.building_table.hide()
+        self.building_note.hide()
+        self.construction_preview_button.hide()
         self.advanced_toggle = PushButton("Show advanced JSON options")
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
         layout.addWidget(self.advanced_toggle)
@@ -505,6 +576,14 @@ class TasksPage(QWidget):
             if isinstance(a.get("id"), str) and a["id"]
         ]
         self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
+        # A metadata refresh may represent a changed session, so discard city caches.
+        self._cities_by_account.clear()
+        self._buildings_scope = None
+        self._building_rows = []
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
+        self.building_table.setRowCount(0)
         self._account_metadata = [
             a for a in self._all_account_metadata if a.get("enabled") is True
         ]
@@ -580,6 +659,448 @@ class TasksPage(QWidget):
         self._invalidate_review()
         self._selected_task_changed()
 
+    def _populate_city_picker(self, widget: ComboBox, *, optional: bool = False) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        with QSignalBlocker(widget):
+            widget.clear()
+            widget.addItem(
+                ("Skip optional reward" if optional else "Choose a city…")
+                if cities else "Cities unavailable — refresh to load"
+            )
+            for city in cities:
+                suffix = str(city.get("coords") or "")
+                widget.addItem(f"{city['name']} ({suffix})" if suffix else str(city["name"]))
+            # Never silently choose a city for a state-changing task.
+            widget.setCurrentIndex(0)
+
+    def _populate_city_list(self, widget: QListWidget) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        with QSignalBlocker(widget):
+            widget.clear()
+            for city in cities:
+                name = str(city["name"])
+                coords = str(city.get("coords") or "")
+                entry = QListWidgetItem(f"{name} ({coords})" if coords else name)
+                entry.setData(Qt.UserRole, city["id"])
+                entry.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                entry.setCheckState(Qt.Unchecked)
+                widget.addItem(entry)
+        widget.setToolTip(
+            "Leave every city unchecked to use engine defaults" if cities else
+            "City list unavailable — connect the account and refresh"
+        )
+
+    def _populate_island_list(self, widget: QListWidget) -> None:
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        seen: set[str] = set()
+        with QSignalBlocker(widget):
+            widget.clear()
+            for city in cities:
+                coords = str(city.get("coords") or "").strip()
+                if not re.fullmatch(r"\d{1,3}:\d{1,3}", coords) or coords in seen:
+                    continue
+                seen.add(coords)
+                entry = QListWidgetItem(f"{coords} · {city['name']}")
+                entry.setData(Qt.UserRole, coords)
+                entry.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                entry.setCheckState(Qt.Unchecked)
+                widget.addItem(entry)
+
+    def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
+        if account_id not in self._account_ids:
+            return
+        verified = []
+        for city in cities[:500]:
+            if (isinstance(city, dict) and type(city.get("id")) is int
+                    and city["id"] > 0 and isinstance(city.get("name"), str)
+                    and city["name"]):
+                verified.append({
+                    "id": city["id"], "name": city["name"][:120],
+                    "coords": str(city.get("coords") or "")[:40],
+                })
+        self._cities_by_account[account_id] = verified
+        if account_id == self.selected_account_id():
+            picker = self._form_inputs.get("city_id")
+            if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
+                self._populate_city_picker(picker)
+                self._construction_city_changed()
+            for key, input_widget in self._form_inputs.items():
+                if isinstance(input_widget, QListWidget):
+                    if input_widget.property("city_scope") is True:
+                        self._populate_city_list(input_widget)
+                    elif input_widget.property("island_scope") is True:
+                        self._populate_island_list(input_widget)
+                    else:
+                        continue
+                    self._invalidate_review()
+                elif (isinstance(input_widget, ComboBox)
+                      and input_widget.property("city_picker") is True):
+                    self._populate_city_picker(input_widget, optional=not
+                                               self._field_is_required(key))
+                    self._invalidate_review()
+                elif isinstance(input_widget, (
+                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    TrainableUnitsEditor, MarketOffersEditor,
+                )):
+                    # Account-scoped read data are never portable between cities/worlds.
+                    input_widget.set_cities(self._cities_by_account.get(account_id, []))
+                    self._invalidate_review()
+
+    def _field_is_required(self, key: str) -> bool:
+        return any(field["name"] == key and field["required"]
+                   for field in self._config_fields_by_task.get(self.selected_task_name() or "", []))
+
+    def _selected_construction_city(self) -> int | None:
+        if self.selected_task_name() != "constructionList":
+            return None
+        picker = self._form_inputs.get("city_id")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        return cities[index - 1]["id"] if 1 <= index <= len(cities) else None
+
+    def _construction_city_changed(self, *_args: object) -> None:
+        self._mark_form_dirty()
+        self._building_rows = []
+        self._buildings_scope = None
+        self._reset_construction_preview()
+        self.building_table.setRowCount(0)
+        self.construction_preview_button.setEnabled(False)
+        city_id = self._selected_construction_city()
+        account_id = self.selected_account_id()
+        if account_id and city_id:
+            self.building_note.setText("Loading real building levels for the chosen city…")
+            self.buildings_requested.emit(account_id, city_id)
+        else:
+            self.building_note.setText("Choose an actual city to inspect its buildings.")
+
+    def set_buildings(self, account_id: str, city_id: int,
+                      buildings: list[dict[str, object]]) -> None:
+        if account_id != self.selected_account_id() or city_id != self._selected_construction_city():
+            return  # late result from a different account/city
+        self._reset_construction_preview()
+        self._buildings_scope = (account_id, city_id)
+        self._building_rows = [dict(item) for item in buildings]
+        self.building_table.setRowCount(len(self._building_rows))
+        for row_index, item in enumerate(self._building_rows):
+            position, level = item["position"], item["level"]
+            choice = QTableWidgetItem("")
+            choice.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            choice.setCheckState(Qt.Unchecked)
+            choice.setData(Qt.UserRole, position)
+            self.building_table.setItem(row_index, 0, choice)
+            for col, value in ((1, item["name"]), (2, position), (3, level),
+                               (5, "Upgrading" if item["busy"] else
+                                "Maximum level" if not item["can_upgrade"] else
+                                "Ready now" if item.get("can_upgrade_now", True) else
+                                "Needs materials")):
+                cell = QTableWidgetItem(str(value))
+                cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.building_table.setItem(row_index, col, cell)
+            target = QSpinBox(self.building_table)
+            target.setAccessibleName(f"Draft target level for {item['name']}")
+            target.setRange(level, 150)
+            target.setValue(level)
+            target.setEnabled(item["can_upgrade"] and not item["busy"])
+            target.valueChanged.connect(self._mark_form_dirty)
+            self.building_table.setCellWidget(row_index, 4, target)
+            choice.setFlags(choice.flags() if item["can_upgrade"] and not item["busy"]
+                            else Qt.ItemIsEnabled)
+        self.building_note.setText(
+            f"{len(self._building_rows)} actual buildings loaded. Check the desired "
+            "buildings, set target levels and calculate costs using the actual IkaBot "
+            "planner. Missing resources must be supplied before launching."
+        )
+        self.construction_preview_button.setEnabled(bool(self._building_rows))
+        self._invalidate_review()
+
+    def _reset_construction_preview(self) -> None:
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
+        self.construction_preview_button.setEnabled(bool(self._building_rows))
+        self._invalidate_review()
+
+    def _selected_building_upgrades(self) -> list[dict[str, int]]:
+        upgrades: list[dict[str, int]] = []
+        for row, building in enumerate(self._building_rows):
+            checkbox = self.building_table.item(row, 0)
+            target = self.building_table.cellWidget(row, 4)
+            if checkbox is None or checkbox.checkState() != Qt.Checked:
+                continue
+            if not isinstance(target, QSpinBox) or not target.isEnabled():
+                raise ValueError("A selected building cannot be upgraded")
+            desired = target.value()
+            current = building["level"]
+            if desired <= current or desired > current + 10:
+                raise ValueError("Select a higher target (at most 10 levels per building)")
+            upgrades.append({"position": building["position"], "target_level": desired})
+        if not 0 < len(upgrades) <= 12:
+            raise ValueError("Select 1 to 12 real buildings before preview")
+        return upgrades
+
+    def _request_construction_preview(self) -> None:
+        account_id = self.selected_account_id()
+        city_id = self._selected_construction_city()
+        if not account_id or city_id is None or self._buildings_scope != (account_id, city_id):
+            QMessageBox.warning(self, "City data needed",
+                                "Load real buildings for the selected city first.")
+            return
+        try:
+            upgrades = self._selected_building_upgrades()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Choose upgrades", str(exc))
+            return
+        self._reset_construction_preview()
+        self._pending_preview_key = (
+            account_id, city_id,
+            tuple((row["position"], row["target_level"]) for row in upgrades),
+        )
+        self.construction_preview_button.setEnabled(False)
+        self.building_note.setText(
+            "Reading IkaBot's actual building costs and queue durations. "
+            "No upgrade or shipment has started."
+        )
+        self.construction_preview_requested.emit(account_id, city_id, upgrades)
+
+    def set_construction_preview(self, result: dict[str, object]) -> None:
+        account_id, city_id = result.get("account_id"), result.get("city_id")
+        try:
+            upgrades = self._selected_building_upgrades()
+        except ValueError:
+            return
+        scope = (account_id, city_id, tuple(
+            (row["position"], row["target_level"]) for row in upgrades
+        ))
+        if (self.selected_task_name() != "constructionList"
+                or self._pending_preview_key != scope
+                or self.selected_account_id() != account_id
+                or self._selected_construction_city() != city_id):
+            return
+        self._pending_preview_key = None
+        config = result.get("config")
+        ready = result.get("ready") is True
+        if not isinstance(config, dict):
+            self.set_construction_preview_unavailable(account_id, city_id)
+            return
+        self._construction_prepared = config if ready else None
+        self._construction_preview_ready = ready
+        names = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
+        costs, missing = result["costs"], result["missing"]
+        cost_text = " · ".join(f"{name} {qty:,}" for name, qty in zip(names, costs))
+        shortages = " · ".join(
+            f"{name} {qty:,}" for name, qty in zip(names, missing) if qty
+        )
+        seconds = result["estimated_seconds"]
+        description = (f"Actual IkaBot costs: {cost_text}. Estimated queue: "
+                       f"{seconds // 3600}h {(seconds % 3600) // 60}m. ")
+        if ready:
+            description += "Resources are sufficient. Review and approve the queue to start."
+        else:
+            description += (f"Missing: {shortages}. Supply the shortages, then preview again. "
+                            "This queue cannot start until it is affordable.")
+        self.building_note.setText(description)
+        self.construction_preview_button.setEnabled(True)
+        self._invalidate_review()
+
+    def set_construction_preview_unavailable(self, account_id: str, city_id: int) -> None:
+        if (account_id == self.selected_account_id()
+                and city_id == self._selected_construction_city()):
+            self._reset_construction_preview()
+            self.building_note.setText(
+                "IkaBot could not safely calculate this upgrade queue. "
+                "No upgrade has started; reconnect and recheck the building targets."
+            )
+
+    def _workshop_city_requested(self, city_id: int) -> None:
+        account_id = self.selected_account_id()
+        if (account_id and self.selected_task_name() == "UpgradeUnits"
+                and type(city_id) is int):
+            self.workshop_requested.emit(account_id, city_id)
+
+    def set_workshop_upgrades(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "UpgradeUnits"):
+            return
+        editor = self._form_inputs.get("jobs")
+        if isinstance(editor, WorkshopUpgradesEditor):
+            editor.set_workshop_data(
+                result["city_id"], result["upgrades"], result["workshop_level"]
+            )
+
+    def set_workshop_unavailable(self, account_id: str, city_id: int) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("jobs")
+        if isinstance(editor, WorkshopUpgradesEditor):
+            editor.set_unavailable(city_id)
+
+    def _trainable_city_requested(self, city_id: int, train_troops: bool) -> None:
+        account_id = self.selected_account_id()
+        if (account_id and self.selected_task_name() == "trainArmy"
+                and type(city_id) is int and type(train_troops) is bool):
+            self.trainable_units_requested.emit(account_id, city_id, train_troops)
+
+    def set_trainable_units(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "trainArmy"):
+            return
+        editor = self._form_inputs.get("city")
+        if isinstance(editor, TrainableUnitsEditor):
+            editor.set_trainables(result)
+
+    def set_trainable_units_unavailable(
+        self, account_id: str, city_id: int, train_troops: bool,
+    ) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("city")
+        if isinstance(editor, TrainableUnitsEditor):
+            editor.set_unavailable(city_id, train_troops)
+
+    def _market_quotes_requested(self, city_id: int, resource_type: int, side: str) -> None:
+        account_id = self.selected_account_id()
+        expected = "buy" if self.selected_task_name() == "buyResources" else (
+            "sell_to_offers", "create_offer"
+        ) if self.selected_task_name() == "sellResources" else ()
+        if (account_id and type(city_id) is int and type(resource_type) is int
+                and side in (expected if isinstance(expected, tuple) else (expected,))):
+            self.market_quotes_requested.emit(account_id, city_id, resource_type, side)
+
+    def set_market_quotes(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() not in {"buyResources", "sellResources"}):
+            return
+        key = "city" if self.selected_task_name() == "buyResources" else "mode"
+        editor = self._form_inputs.get(key)
+        if isinstance(editor, MarketOffersEditor):
+            editor.set_quotes(result)
+
+    def set_market_unavailable(self, account_id: str, city_id: int,
+                               resource_type: int, side: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        key = "city" if self.selected_task_name() == "buyResources" else "mode"
+        editor = self._form_inputs.get(key)
+        if isinstance(editor, MarketOffersEditor):
+            editor.set_unavailable(city_id, resource_type, side)
+
+    def set_academies(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "research"):
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, AcademyResearchEditor):
+            editor.set_academies(result["academies"])
+
+    def set_academies_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, AcademyResearchEditor):
+            editor.set_unavailable()
+
+    def set_taverns(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "tavernManager"):
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, TavernCitiesEditor):
+            editor.set_taverns(result["taverns"])
+
+    def set_taverns_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("cities_ids")
+        if isinstance(editor, TavernCitiesEditor):
+            editor.set_unavailable()
+
+    def set_miracles(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "activateMiracle"):
+            return
+        editor = self._form_inputs.get("wonder")
+        if isinstance(editor, MiracleTempleEditor):
+            editor.set_miracles(result["miracles"])
+
+    def set_miracles_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("wonder")
+        if isinstance(editor, MiracleTempleEditor):
+            editor.set_unavailable()
+
+    def set_shrine(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "activateShrine"):
+            return
+        editor = self._form_inputs.get("godids")
+        if isinstance(editor, OlympusShrineEditor):
+            editor.set_shrine(result["shrine"])
+
+    def set_pirate_fortresses(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "autoPirate"):
+            return
+        editor = self._form_inputs.get("pirateCount")
+        if isinstance(editor, PiracyMissionsEditor):
+            editor.set_fortresses(result["fortresses"])
+
+    def set_pirate_fortresses_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("pirateCount")
+        if isinstance(editor, PiracyMissionsEditor):
+            editor.set_unavailable()
+
+    def set_shrine_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("godids")
+        if isinstance(editor, OlympusShrineEditor):
+            editor.set_unavailable()
+
+    def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
+        if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
+            self._buildings_scope = None
+            self._building_rows.clear()
+            self._reset_construction_preview()
+            self.building_table.setRowCount(0)
+            self.construction_preview_button.setEnabled(False)
+            self.building_note.setText(
+                "Building information is unavailable for this city. "
+                "No upgrade assumptions were made; reconnect the account and refresh."
+            )
+            self._invalidate_review()
+
+    def set_cities_unavailable(self, account_id: str) -> None:
+        self._cities_by_account.pop(account_id, None)
+        if account_id == self.selected_account_id():
+            picker = self._form_inputs.get("city_id")
+            if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
+                self._populate_city_picker(picker)
+                self._construction_city_changed()
+            for key, input_widget in self._form_inputs.items():
+                if isinstance(input_widget, QListWidget):
+                    if input_widget.property("city_scope") is True:
+                        self._populate_city_list(input_widget)
+                    elif input_widget.property("island_scope") is True:
+                        self._populate_island_list(input_widget)
+                    else:
+                        continue
+                    self._invalidate_review()
+                elif (isinstance(input_widget, ComboBox)
+                      and input_widget.property("city_picker") is True):
+                    self._populate_city_picker(input_widget, optional=not
+                                               self._field_is_required(key))
+                    self._invalidate_review()
+                elif isinstance(input_widget, (
+                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    TrainableUnitsEditor, MarketOffersEditor,
+                )):
+                    # Account-scoped read data are never portable between cities/worlds.
+                    input_widget.set_cities(self._cities_by_account.get(account_id, []))
+                    self._invalidate_review()
+
     def _choose_bulk_accounts(self) -> None:
         from daedalus.desktop.account_scope import AccountSelectionDialog
 
@@ -607,11 +1128,21 @@ class TasksPage(QWidget):
         ineligible = [aid for aid in self._bulk_account_ids
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
+        # One city's construction plan cannot be dispatched against other account IDs.
+        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
+                                            "buyResources", "sellResources", "autoPirate"}:
+            can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
-        if count > 32:
+        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
+                                            "buyResources", "sellResources", "autoPirate"}:
+            self.bulk_note.setText(
+                "Construction, workshop, training and market plans are city-specific. Configure "
+                "each account separately; never reuse a quote or game plan across accounts."
+            )
+        elif count > 32:
             self.bulk_note.setText(
                 "View status for any number of accounts. To start tasks, "
                 "choose at most 32 accounts and review each one."
@@ -691,6 +1222,8 @@ class TasksPage(QWidget):
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
+                or self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
+                                                 "buyResources", "sellResources", "autoPirate"}
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.selected_task_name()):
@@ -828,6 +1361,7 @@ class TasksPage(QWidget):
     def _filter_tasks(self, *_args: object) -> None:
         old = self.selected_task_name()
         category = self.category_combo.currentText() or _CATEGORIES[0]
+        self.group_tabs.setCurrentItem(f"group-{self.category_combo.currentIndex()}")
         search = self.search_input.text().strip().casefold()
         self._task_names = [name for name in self._all_task_names
             if (category == "All automations" or _category(name) == category)
@@ -923,8 +1457,20 @@ class TasksPage(QWidget):
             "Hide advanced JSON options" if self._advanced_visible
             else "Show advanced JSON options"
         )
-        if self._advanced_visible:
-            self._build_config_from_form()
+        if self._advanced_visible and self.selected_task_name() != "constructionList":
+            fields = self._config_fields_by_task.get(self.selected_task_name() or "", [])
+            if not expert_configuration_needed(fields):
+                self._build_config_from_form()
+            else:
+                # Never attempt to compile an unsupported raw game plan while
+                # opening Advanced. That would display a modal error dialog,
+                # blocking a headless Mac session and obscuring the import path.
+                self.advanced_note.setText(
+                    "This IkaBot operation requires an existing validated engine plan. "
+                    "Import it explicitly or review an account-specific configuration; "
+                    "do not invent city, combat or ship identifiers."
+                )
+        self._set_controls()
 
     def _import_advanced_config(self) -> None:
         """User-directed bounded JSON import, never a system or account-file search."""
@@ -1001,6 +1547,11 @@ class TasksPage(QWidget):
 
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
+        if self.selected_task_name() == "constructionList":
+            self._construction_prepared = None
+            self._construction_preview_ready = False
+            self._pending_preview_key = None
+            self.construction_preview_button.setEnabled(bool(self._building_rows))
         self._invalidate_review()
 
     def _selected_task_changed(self, *_args: object) -> None:
@@ -1010,7 +1561,21 @@ class TasksPage(QWidget):
         while self.parameter_layout.rowCount():
             self.parameter_layout.removeRow(0)
         self._form_inputs.clear()
+        self._buildings_scope = None
+        self._building_rows = []
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._pending_preview_key = None
+        self.building_table.setRowCount(0)
         name = self.selected_task_name()
+        show_buildings = name == "constructionList"
+        self.building_header.setVisible(show_buildings)
+        self.building_table.setVisible(show_buildings)
+        self.building_note.setVisible(show_buildings)
+        self.construction_preview_button.setVisible(show_buildings)
+        self.construction_preview_button.setEnabled(False)
+        if show_buildings:
+            self.building_note.setText("Choose a city to load its actual buildings.")
         fields = self._config_fields_by_task.get(name or "", [])
         self.task_description.setText(
             f"{_friendly_task(name)}  ·  {_category(name)}. {task_explanation(name)}"
@@ -1031,17 +1596,118 @@ class TasksPage(QWidget):
             )
         for field in fields:
             key = str(field["name"])
+            if name == "constructionList" and key not in {"city_id", "city_name"}:
+                # Complex planner internals belong to an expert imported plan,
+                # never to the normal construction interface.
+                continue
+            if (field.get("type") in {"hidden_derived", "json"}
+                    and not (name == "constructionList" and key == "city_id")):
+                # Game-derived nested plans must never look like free-form text
+                # inputs in the normal workflow. Import a verified expert plan
+                # through Advanced until a source-backed native editor exists.
+                continue
+            if name == "constructionList" and key == "city_name":
+                # The paired, verified name comes from the selected city's read-only record.
+                continue
             kind = str(field["type"])
             default = field.get("default")
             label = (
                 str(field.get("label") or key.replace("_", " ").capitalize())
                 + (" *" if field["required"] else "")
             )
-            if field.get("choices"):
+            if kind == "resource_limits":
+                widget = ResourceLimitsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "resource_config":
+                widget = ResourceAmountsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "shipment_routes":
+                widget = ShipmentRoutesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "donation_policies":
+                widget = DonationPoliciesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "map_center":
+                widget = MapAreaEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "piracy_missions":
+                widget = PiracyMissionsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "olympus_shrine":
+                widget = OlympusShrineEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "miracle_temple":
+                widget = MiracleTempleEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "tavern_cities":
+                widget = TavernCitiesEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "academy_research":
+                widget = AcademyResearchEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind in {"market_buy", "market_sell"}:
+                widget = MarketOffersEditor(self, buying=kind == "market_buy")
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+                widget.market_requested.connect(self._market_quotes_requested)
+            elif kind == "train_units":
+                widget = TrainableUnitsEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+                widget.city_requested.connect(self._trainable_city_requested)
+            elif kind == "workshop_jobs":
+                widget = WorkshopUpgradesEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.changed.connect(self._mark_form_dirty)
+                widget.city_requested.connect(self._workshop_city_requested)
+            elif kind == "island_list":
+                widget = QListWidget(self)
+                widget.setProperty("island_scope", True)
+                widget.setMinimumHeight(110)
+                widget.setMaximumHeight(140)
+                self._populate_island_list(widget)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "city_list":
+                widget = QListWidget(self)
+                widget.setProperty("city_scope", True)
+                widget.setAccessibleName(f"Choose account cities for {label}")
+                widget.setMinimumHeight(105)
+                widget.setMaximumHeight(135)
+                self._populate_city_list(widget)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "choices_list":
+                widget = QListWidget(self)
+                widget.setAccessibleName(f"Choose options for {label}")
+                widget.setMinimumHeight(105)
+                widget.setMaximumHeight(135)
+                for idx, choice in enumerate(field["choices"]):
+                    labels = field.get("choice_labels", [])
+                    item = QListWidgetItem(str(labels[idx] if idx < len(labels) else choice))
+                    item.setData(Qt.UserRole, choice)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Unchecked)
+                    widget.addItem(item)
+                widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "city_picker":
+                widget = ComboBox()
+                widget.setProperty("city_picker", True)
+                widget.setAccessibleName(f"Choose actual city for {label}")
+                self._populate_city_picker(widget, optional=not field["required"])
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
+            elif name == "constructionList" and key == "city_id":
+                widget = ComboBox()
+                widget.setAccessibleName("Choose a real city for construction")
+                self._populate_city_picker(widget)
+                widget.currentIndexChanged.connect(self._construction_city_changed)
+            elif field.get("choices"):
                 widget = ComboBox()
                 choices = field["choices"]
-                for choice in choices:
-                    widget.addItem(str(choice))
+                choice_labels = field.get("choice_labels", [])
+                for idx, choice in enumerate(choices):
+                    text = choice_labels[idx] if idx < len(choice_labels) else choice
+                    widget.addItem(str(text))
                 if default in choices:
                     widget.setCurrentIndex(choices.index(default))
                 else:
@@ -1075,9 +1741,12 @@ class TasksPage(QWidget):
                 widget.valueChanged.connect(self._mark_form_dirty)
             elif kind == "number" and type(default) in (int, float) and -1_000_000 <= default <= 1_000_000:
                 widget = DoubleSpinBox()
-                widget.setRange(-1_000_000, 1_000_000)
+                widget.setRange(float(field.get("minimum", -1_000_000)),
+                                float(field.get("maximum", 1_000_000)))
                 widget.setDecimals(2)
                 widget.setValue(float(default))
+                if field.get("suffix"):
+                    widget.setSuffix(str(field["suffix"]))
                 widget.valueChanged.connect(self._mark_form_dirty)
             else:
                 widget = LineEdit()
@@ -1101,12 +1770,50 @@ class TasksPage(QWidget):
             style_form_input(widget, label, help_text)
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
-        self.parameter_scroll.setVisible(bool(fields))
+        self.parameter_scroll.setVisible(bool(self._form_inputs))
+        if name == "research" and self.selected_account_id():
+            self.academies_requested.emit(self.selected_account_id())
+        if name == "tavernManager" and self.selected_account_id():
+            self.taverns_requested.emit(self.selected_account_id())
+        if name == "activateMiracle" and self.selected_account_id():
+            self.miracles_requested.emit(self.selected_account_id())
+        if name == "activateShrine" and self.selected_account_id():
+            self.shrine_requested.emit(self.selected_account_id())
+        if name == "autoPirate" and self.selected_account_id():
+            self.pirate_fortresses_requested.emit(self.selected_account_id())
+        if name == "donationBot":
+            method = self._form_inputs.get("donate_method")
+            policy = self._form_inputs.get("cities_dict")
+            if isinstance(method, ComboBox) and isinstance(policy, DonationPoliciesEditor):
+                method.currentIndexChanged.connect(
+                    lambda _index: policy.update_method(
+                        [1, 2, 3][method.currentIndex()]
+                        if 0 <= method.currentIndex() < 3 else 1
+                    )
+                )
+                policy.update_method([1, 2, 3][method.currentIndex()]
+                                     if 0 <= method.currentIndex() < 3 else 1)
+        if name in {"autoPirate", "activateShrine", "resourceTransportManager"}:
+            driver = self._form_inputs.get("pirateSchedule" if name == "autoPirate" else "mode")
+            if isinstance(driver, ComboBox):
+                driver.currentIndexChanged.connect(self._update_native_visibility)
+            elif isinstance(driver, CheckBox):
+                driver.stateChanged.connect(self._update_native_visibility)
+            self._update_native_visibility()
         if fields:
             # Match the form to its contents instead of leaving a large empty
             # box under single-parameter workflows.
+            visible_fields = [f for f in fields if f.get("type") != "hidden_derived"
+                              and (name != "constructionList" or f.get("name") == "city_id")]
+            list_extra = 135 if any(field.get("type") in {
+                "city_list", "choices_list", "island_list", "shipment_routes",
+                "donation_policies", "resource_limits", "resource_config",
+                "workshop_jobs", "train_units", "market_buy", "market_sell",
+                "academy_research", "tavern_cities", "miracle_temple",
+                "olympus_shrine", "piracy_missions",
+            } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
-                min(315, max(72, len(fields) * 44 + 24))
+                min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
             )
         self.build_json_button.setEnabled(bool(fields))
         self._invalidate_review()
@@ -1122,6 +1829,48 @@ class TasksPage(QWidget):
         account_id = self.selected_account_id()
         if self._dispatch_enabled and account_id and name:
             self.preflight_requested.emit(account_id, name)
+        if (account_id and account_id not in self._cities_by_account
+                and (name == "constructionList"
+                     or any(field.get("type") in {
+                         "city_list", "city_picker", "island_list", "shipment_routes",
+                         "donation_policies", "workshop_jobs", "train_units",
+                         "market_buy", "market_sell", "academy_research",
+                         "tavern_cities", "miracle_temple", "olympus_shrine",
+                     } for field in fields))):
+            self.cities_requested.emit(account_id)
+
+    def _update_native_visibility(self, *_args: object) -> None:
+        """Hide irrelevant options in multi-mode upstream planners."""
+        name = self.selected_task_name()
+        visible: dict[str, bool] = {}
+        if name == "autoPirate":
+            schedule = self._form_inputs.get("pirateSchedule")
+            active = isinstance(schedule, CheckBox) and schedule.isChecked()
+            visible["pirateMissionChoice"] = not active
+            for key in ("pirateMissionDayChoice", "pirateMissionNightChoice",
+                        "dayStart", "dayEnd", "nightStart", "nightEnd"):
+                visible[key] = active
+        elif name == "activateShrine":
+            mode = self._form_inputs.get("mode")
+            visible["times"] = not (isinstance(mode, ComboBox)
+                                    and mode.currentIndex() == 1)
+        elif name == "resourceTransportManager":
+            mode = self._form_inputs.get("mode")
+            index = mode.currentIndex() if isinstance(mode, ComboBox) else -1
+            for key in ("origin_cities", "destination_city", "send_mode"):
+                visible[key] = index == 0
+            for key in ("origin_city", "destination_cities"):
+                visible[key] = index == 1
+            visible["island"] = False  # external routes require separate verified location
+        for key, show in visible.items():
+            widget = self._form_inputs.get(key)
+            if widget is None:
+                continue
+            widget.setVisible(show)
+            label = self.parameter_layout.labelForField(widget)
+            if label is not None:
+                label.setVisible(show)
+        self._mark_form_dirty()
 
     def set_preflight(self, result: dict[str, object]) -> None:
         if (result.get("account_id") != self.selected_account_id()
@@ -1160,8 +1909,107 @@ class TasksPage(QWidget):
         config: dict[str, object] = {}
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
+            if name == "constructionList":
+                # Full engine-prepared construction internals remain expert-only.
+                continue
             kind = str(field["type"])
+            if kind == "hidden_derived":
+                continue
+            if kind == "json":
+                if field["required"]:
+                    raise ValueError("This task requires an existing reviewed engine plan")
+                # An optional opaque game value is intentionally left unset.
+                continue
+            if name == "autoPirate":
+                schedule_widget = self._form_inputs.get("pirateSchedule")
+                scheduled = isinstance(schedule_widget, CheckBox) and schedule_widget.isChecked()
+                if (key in {"pirateMissionChoice"} and scheduled
+                        or key in {"pirateMissionDayChoice", "pirateMissionNightChoice",
+                                   "dayStart", "dayEnd", "nightStart", "nightEnd"}
+                        and not scheduled):
+                    continue
+            if name == "activateShrine" and key == "times":
+                mode_widget = self._form_inputs.get("mode")
+                if isinstance(mode_widget, ComboBox) and mode_widget.currentIndex() == 1:
+                    continue
+            if name == "resourceTransportManager":
+                mode_widget = self._form_inputs.get("mode")
+                index = mode_widget.currentIndex() if isinstance(mode_widget, ComboBox) else -1
+                if (key in {"origin_cities", "destination_city", "send_mode"} and index != 0
+                        or key in {"origin_city", "destination_cities"} and index != 1
+                        or key == "island"):
+                    continue
             widget = self._form_inputs[key]
+            if isinstance(widget, ResourceLimitsEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, ShipmentRoutesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, PiracyMissionsEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, OlympusShrineEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, MiracleTempleEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, TavernCitiesEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, AcademyResearchEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, MarketOffersEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, TrainableUnitsEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, WorkshopUpgradesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, DonationPoliciesEditor):
+                method_widget = self._form_inputs.get("donate_method")
+                idx = method_widget.currentIndex() if isinstance(method_widget, ComboBox) else -1
+                if idx < 0:
+                    raise ValueError("Choose a donation method")
+                config[key] = widget.to_config([1, 2, 3][idx])
+                continue
+            if isinstance(widget, ResourceAmountsEditor):
+                mode_widget = self._form_inputs.get("send_mode")
+                keep = (name == "resourceTransportManager"
+                        and isinstance(mode_widget, ComboBox)
+                        and mode_widget.currentIndex() == 0)
+                config[key] = widget.to_config(ignore_allowed=keep)
+                continue
+            if isinstance(widget, MapAreaEditor):
+                area = widget.to_config()
+                if area is not None:
+                    config[key], config["radius"] = area
+                continue
+            if isinstance(widget, QListWidget):
+                chosen = [widget.item(i).data(Qt.UserRole)
+                          for i in range(widget.count())
+                          if widget.item(i).checkState() == Qt.Checked]
+                if not chosen:
+                    if field["required"] and kind != "island_list":
+                        raise ValueError(f"Choose at least one option for {key}")
+                    continue
+                if name == "distributeResources" and kind == "city_list" and len(chosen) < 2:
+                    raise ValueError("Choose at least two cities to distribute resources")
+                config[key] = ([str(city) for city in chosen] if kind == "city_list"
+                               else chosen)
+                continue
+            if kind == "city_picker" and isinstance(widget, ComboBox):
+                cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+                index = widget.currentIndex()
+                if 1 <= index <= len(cities):
+                    config[key] = cities[index - 1]["id"]
+                elif field["required"]:
+                    raise ValueError(f"Select an actual city for {key}")
+                continue
             if isinstance(widget, ComboBox):
                 index = widget.currentIndex()
                 choices = field["choices"]
@@ -1179,6 +2027,8 @@ class TasksPage(QWidget):
                 if (field.get("explicit_input") is True
                         and value < int(field.get("minimum", 0))):
                     raise ValueError(f"Choose a value for {key} before starting")
+                if field.get("omit_zero") is True and value == 0:
+                    continue
                 config[key] = value
                 continue
             text = widget.text().strip()
@@ -1204,6 +2054,27 @@ class TasksPage(QWidget):
                 if kind == "number" and type(value) not in (float, int):
                     raise ValueError(f"Enter a number for {key}")
             config[key] = value
+        if (name == "research" and type(config.get("qty")) is int and config["qty"] > 0
+                and len(config.get("cities_ids", [])) != 1):
+            raise ValueError("Choose exactly one academy city for a fixed number of experiments")
+        if name == "consolidateResources":
+            destination = config.get("destinationCityId")
+            if destination is not None and str(destination) in config.get("sourceCityIds", []):
+                raise ValueError("Destination cannot also be a source city")
+        if name == "resourceTransportManager" and "mode" not in config:
+            raise ValueError("Choose a transport strategy")
+        if name == "dumpWorld" and config.get("shallow") is True and "coords" in config:
+            raise ValueError("Whole-world shallow scans cannot be limited to a map area")
+        if name == "distributeResources" and config.get("mode") == "producers" and config.get("resource") == "wood":
+            raise ValueError("Every city produces wood; choose the Even distribution policy")
+        if name == "constructionList":
+            picker = self._form_inputs.get("city_id")
+            cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if index < 1 or index > len(cities):
+                raise ValueError("Select a city loaded from this account before starting construction")
+            config["city_id"] = cities[index - 1]["id"]
+            config["city_name"] = cities[index - 1]["name"]
         if (name == "alertLowWine" and config.get("auto_transfer") is True
                 and (type(config.get("transfer_amount")) is not int
                      or config["transfer_amount"] < 1)):
@@ -1271,6 +2142,14 @@ class TasksPage(QWidget):
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
+            # Every unspecialized structured field requires an expert-verified
+            # plan. A guided form cannot silently omit required IkaBot settings.
+            and (self._advanced_visible or self.selected_task_name() == "constructionList"
+                 or not expert_configuration_needed(
+                     self._config_fields_by_task.get(self.selected_task_name() or "", [])))
+            # Live building selection alone is NOT a prepared engine plan.
+            and (self.selected_task_name() != "constructionList"
+                 or self._advanced_visible or self._construction_preview_ready)
         )
         # Status/history is read-only even on a backend that refuses dispatch.
         has_read_scope = bool(self._account_ids)
@@ -1311,7 +2190,7 @@ class TasksPage(QWidget):
         account_id = self.selected_account_id()
         task = self.selected_task_name()
         if (not self._dispatch_enabled or account_id is None or task is None
-                or self._pending_launch):
+                or self._pending_launch or not self.start_button.isEnabled()):
             return
         if self._unresolved:
             QMessageBox.warning(self, "Request needs review",
@@ -1327,15 +2206,35 @@ class TasksPage(QWidget):
             return
         try:
             if self._advanced_visible:
-                if self._form_dirty:
+                if self._form_dirty and task != "constructionList":
                     QMessageBox.warning(self, "Guided settings changed",
                         "Build JSON from guided settings or hide Advanced to use the form.")
                     return
                 config = json.loads(self.config_editor.toPlainText())
                 if not isinstance(config, dict):
                     raise ValueError("Advanced configuration must be a JSON object")
+                if task == "constructionList":
+                    city_id = self._selected_construction_city()
+                    cities = self._cities_by_account.get(account_id, [])
+                    matching = next((city for city in cities if city["id"] == city_id), None)
+                    if (matching is None or config.get("city_id") != city_id
+                            or config.get("city_name") != matching["name"]):
+                        raise ValueError(
+                            "Prepared construction plan must match the selected "
+                            "authenticated city and its exact name"
+                        )
+                    if any(key not in config for key in (
+                        "buildings", "shipments", "expand_overall", "wait_resources",
+                        "construction_queue", "total_time",
+                    )):
+                        raise ValueError("Import a complete upstream-prepared construction plan")
             else:
-                config = self._form_config()
+                if task == "constructionList":
+                    if not self._construction_preview_ready or self._construction_prepared is None:
+                        raise ValueError("Calculate and approve the actual IkaBot construction preview first")
+                    config = dict(self._construction_prepared)
+                else:
+                    config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return

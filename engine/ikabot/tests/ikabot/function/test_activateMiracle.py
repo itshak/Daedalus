@@ -98,3 +98,54 @@ class TestActivateMiracleTask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class TestMiracleCacheIsolation(unittest.TestCase):
+    """Temple/island cache keys must separate equal IDs across servers."""
+
+    def test_same_numeric_city_and_island_do_not_cross_worlds(self):
+        import ikabot.function.activateMiracle as miracles
+
+        miracles._CITY_TEMPLE_CACHE.clear()
+        miracles._ISLAND_CACHE.clear()
+        self.addCleanup(miracles._CITY_TEMPLE_CACHE.clear)
+        self.addCleanup(miracles._ISLAND_CACHE.clear)
+
+        def city_from_html(html):
+            world = html.split("|")[0]
+            return {
+                "id": "111", "name": "City " + world, "islandId": "55",
+                "position": [{"building": "temple"}],
+            }
+
+        def island_from_html(html):
+            world = html.split("|")[0]
+            return {
+                "id": "55", "name": "Island " + world,
+                "wonder": "5", "wonderName": "Hermes",
+            }
+
+        def session(world, player):
+            result = MagicMock()
+            result.mundo = world
+            result.servidor = "en"
+            result.username = player
+            result.get.side_effect = lambda url: world + "|" + str(url)
+            return result
+
+        city_list = (["111"], {"111": {"id": "111", "name": "City"}})
+        with (patch.object(miracles, "getIdsOfCities", return_value=city_list),
+              patch.object(miracles, "getCity", side_effect=city_from_html),
+              patch.object(miracles, "getIsland", side_effect=island_from_html),
+              patch.object(miracles, "get_temple_info",
+                           return_value={"level": 4, "available": True})):
+            alpha = miracles.obtainMiraclesAvailable(session("301", "Alpha"))
+            beta = miracles.obtainMiraclesAvailable(session("302", "Beta"))
+            gamma = miracles.obtainMiraclesAvailable(session("301", "Gamma"))
+
+        self.assertEqual(alpha[0]["ciudad"]["name"], "City 301")
+        self.assertEqual(beta[0]["ciudad"]["name"], "City 302")
+        self.assertEqual(len(miracles._CITY_TEMPLE_CACHE), 3)
+        self.assertEqual(len(miracles._ISLAND_CACHE), 2)
+        self.assertEqual(gamma[0]["ciudad"]["name"], "City 301")

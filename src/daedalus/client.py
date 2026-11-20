@@ -540,6 +540,161 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid city data")
         return data
 
+    def construction_preview(
+        self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+    ) -> dict[str, object]:
+        """Ask the existing IkaBot worker for a read-only, account-scoped plan."""
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or not 0 < city_id < 10**12 or not isinstance(upgrades, list)
+                or not 0 < len(upgrades) <= 12):
+            raise ValueError("Invalid construction preview scope")
+        for upgrade in upgrades:
+            if (not isinstance(upgrade, dict)
+                    or set(upgrade) != {"position", "target_level"}
+                    or type(upgrade["position"]) is not int
+                    or type(upgrade["target_level"]) is not int):
+                raise ValueError("Invalid construction preview target")
+        data = self._write(
+            f"accounts/{account_id}/cities/{city_id}/construction-preview",
+            {"upgrades": upgrades},
+        )
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or type(data.get("ready")) is not bool
+                or not isinstance(data.get("config"), dict)
+                or any(not isinstance(data.get(name), list)
+                       or len(data[name]) != 5 for name in ("costs", "missing", "available"))
+                or type(data.get("estimated_seconds")) is not int):
+            raise APIConnectionError("Backend returned an invalid construction preview")
+        return data
+
+    def workshop_upgrades(self, account_id: str, city_id: int) -> dict[str, object]:
+        """Fetch only real, account-bound workshop options for a city."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid workshop scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/workshop-upgrades")
+        choices = data.get("upgrades")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or not isinstance(choices, list) or len(choices) > 250
+                or type(data.get("workshop_level")) is not int
+                or any(not isinstance(choice, dict) for choice in choices)):
+            raise APIConnectionError("Backend returned invalid workshop options")
+        return data
+
+    def trainable_units(
+        self, account_id: str, city_id: int, *, train_troops: bool,
+    ) -> dict[str, object]:
+        """Read only actual trainable troop/ship types and source-provided costs."""
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or city_id <= 0 or type(train_troops) is not bool):
+            raise ValueError("Invalid training unit scope")
+        mode = "true" if train_troops else "false"
+        data = self._read(
+            f"accounts/{account_id}/cities/{city_id}/trainable-units?train_troops={mode}"
+        )
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("train_troops") is not train_troops
+                or not isinstance(data.get("city"), dict)
+                or not isinstance(data.get("units"), list)
+                or not isinstance(data.get("available"), list)
+                or len(data["available"]) != 5
+                or type(data.get("free_citizens")) is not int):
+            raise APIConnectionError("Backend returned invalid trainable unit options")
+        return data
+
+    def market_quotes(
+        self, account_id: str, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read live offer rows without placing a trade or exposing auth state."""
+        if (not _ACCOUNT_ID.fullmatch(account_id)
+                or type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market choice")
+        result = self._read(
+            f"accounts/{account_id}/cities/{city_id}/market-quotes"
+            f"?resource_type={resource_type}&side={side}"
+        )
+        if (result.get("account_id") != account_id
+                or result.get("city_id") != city_id
+                or result.get("resource_type") != resource_type
+                or result.get("side") != side
+                or not isinstance(result.get("city"), dict)
+                or not isinstance(result.get("offers"), list)):
+            raise APIConnectionError("Backend returned invalid market quotes")
+        return result
+
+    def academies(self, account_id: str) -> dict[str, object]:
+        """Fetch only verified academy and cooldown rows from the selected account."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for academy research")
+        result = self._read(f"accounts/{account_id}/academies")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("academies"), list)
+                or len(result["academies"]) > 100
+                or any(not isinstance(row, dict) for row in result["academies"])):
+            raise APIConnectionError("Backend returned invalid academy research inventory")
+        return result
+
+    def taverns(self, account_id: str) -> dict[str, object]:
+        """Fetch verified wine and tavern state from one selected game account."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for tavern management")
+        result = self._read(f"accounts/{account_id}/taverns")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("taverns"), list)
+                or len(result["taverns"]) > 100
+                or any(not isinstance(row, dict) for row in result["taverns"])):
+            raise APIConnectionError("Backend returned an invalid tavern inventory")
+        return result
+
+    def miracles(self, account_id: str) -> dict[str, object]:
+        """Fetch real temples and wonder cooldowns for one account only."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for wonder inventory")
+        result = self._read(f"accounts/{account_id}/miracles")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("miracles"), list)
+                or len(result["miracles"]) > 100
+                or any(not isinstance(item, dict) for item in result["miracles"])):
+            raise APIConnectionError("Backend returned invalid wonder inventory")
+        return result
+
+    def shrine_status(self, account_id: str) -> dict[str, object]:
+        """Read actual Olympus shrine, preserving unknown favour as unknown."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for shrine status")
+        result = self._read(f"accounts/{account_id}/shrine-status")
+        if (result.get("account_id") != account_id
+                or (result.get("shrine") is not None
+                    and not isinstance(result.get("shrine"), dict))):
+            raise APIConnectionError("Backend returned invalid shrine status")
+        return result
+
+    def pirate_fortresses(self, account_id: str) -> dict[str, object]:
+        """Fetch actual owned fortress mission levels, no game interaction."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for piracy inventory")
+        result = self._read(f"accounts/{account_id}/pirate-fortresses")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("fortresses"), list)
+                or len(result["fortresses"]) > 100
+                or any(not isinstance(row, dict) for row in result["fortresses"])):
+            raise APIConnectionError("Backend returned invalid pirate fortress inventory")
+        return result
+
+    def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
+        """Read sanitized, account-scoped real building rows; never a task launch."""
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid building inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/buildings")
+        rows = data.get("buildings")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or not isinstance(rows, list)
+                or data.get("available") is not True
+                or not all(isinstance(row, dict) for row in rows)):
+            raise APIConnectionError("Backend building inventory unavailable")
+        return rows
+
     def warehouses(self, account_id: str) -> list[dict[str, object]]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")

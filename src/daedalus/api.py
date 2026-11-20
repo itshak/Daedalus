@@ -569,6 +569,256 @@ def create_app(
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
 
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/buildings", dependencies=[Depends(authorized)])
+    def account_buildings(account_id: str, city_id: int) -> dict[str, object]:
+        """Safe, read-only actual building rows; not an executable construction plan."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode:
+            # Never invent game building levels, even in demo. Present empty as no data.
+            return {"account_id": account_id, "city_id": city_id,
+                    "buildings": [], "synthetic_demo": True, "available": False}
+        if ipc_client is None:
+            raise HTTPException(status_code=503, detail="Existing IPC attachment is disabled")
+        try:
+            buildings = ipc_client.buildings(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned city not found") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated building data unavailable") from exc
+        return {"account_id": account_id, "city_id": city_id,
+                "buildings": buildings, "available": True}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/construction-preview",
+        dependencies=[Depends(authorized)],
+    )
+    def preview_construction(
+        account_id: str, city_id: int,
+        payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        """Prepare a read-only IkaBot construction queue, never perform upgrades."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real construction planner unavailable")
+        upgrades = payload.get("upgrades")
+        if (set(payload) != {"upgrades"}
+                or not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12):
+            raise HTTPException(status_code=422, detail="Choose valid building targets")
+        for upgrade in upgrades:
+            if (not isinstance(upgrade, dict)
+                    or set(upgrade) != {"position", "target_level"}
+                    or type(upgrade["position"]) is not int
+                    or type(upgrade["target_level"]) is not int
+                    or not 0 <= upgrade["position"] <= 80
+                    or not 1 <= upgrade["target_level"] <= 150):
+                raise HTTPException(status_code=422, detail="Invalid building target")
+        try:
+            return ipc_client.construction_preview(account, city_id, upgrades)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="Construction preview rejected invalid city or targets"
+            ) from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated construction preview unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/workshop-upgrades",
+        dependencies=[Depends(authorized)],
+    )
+    def workshop_upgrades(account_id: str, city_id: int) -> dict[str, object]:
+        """Discover verified unit/ship workshop upgrades without game mutations."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated workshop inventory unavailable")
+        try:
+            return ipc_client.workshop_upgrades(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned workshop city unavailable") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated workshop inventory unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/trainable-units",
+        dependencies=[Depends(authorized)],
+    )
+    def trainable_units(
+        account_id: str, city_id: int, train_troops: bool = True,
+    ) -> dict[str, object]:
+        """Read-only, source-validated barracks/shipyard training choices."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated unit catalog unavailable")
+        try:
+            return ipc_client.trainable_units(account, city_id, train_troops=train_troops)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned barracks or shipyard unavailable") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated unit catalog unavailable") from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/market-quotes",
+        dependencies=[Depends(authorized)],
+    )
+    def market_quotes(
+        account_id: str, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read source-verified offers/price bounds, not a game transaction."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12 or not 0 <= resource_type <= 4:
+            raise HTTPException(status_code=422, detail="Invalid market city or resource")
+        if side not in {"buy", "sell_to_offers", "create_offer"}:
+            raise HTTPException(status_code=422, detail="Invalid market action")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated market unavailable")
+        try:
+            return ipc_client.market_quotes(account, city_id, resource_type, side)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned market unavailable") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated market unavailable") from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/academies",
+        dependencies=[Depends(authorized)],
+    )
+    def academy_research_inventory(account_id: str) -> dict[str, object]:
+        """Read current academy stock and cooldowns, without spending crystal."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated academy inventory unavailable")
+        try:
+            return ipc_client.academies(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Academy read rejected invalid account") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated academy inventory unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/taverns",
+        dependencies=[Depends(authorized)],
+    )
+    def tavern_inventory(account_id: str) -> dict[str, object]:
+        """Current city wine, tavern servings and population for safe review."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated tavern inventory unavailable")
+        try:
+            return ipc_client.taverns(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid tavern account context") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated tavern inventory unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/miracles",
+        dependencies=[Depends(authorized)],
+    )
+    def miracle_inventory(account_id: str) -> dict[str, object]:
+        """Read only real activated temples and available wonder cooldowns."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated wonder inventory unavailable")
+        try:
+            return ipc_client.miracles(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid wonder account context") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated wonder inventory unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/shrine-status",
+        dependencies=[Depends(authorized)],
+    )
+    def olympus_shrine_status(account_id: str) -> dict[str, object]:
+        """Read the selected account's Shrine of Olympus and current favour."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated shrine status unavailable")
+        try:
+            return ipc_client.shrine_status(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid shrine account context") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated shrine status unavailable"
+            ) from exc
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/pirate-fortresses",
+        dependencies=[Depends(authorized)],
+    )
+    def pirate_fortresses(account_id: str) -> dict[str, object]:
+        """Real fortress levels and capture mission timing, no piracy action."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated piracy inventory unavailable")
+        try:
+            return ipc_client.pirate_fortresses(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Piracy account data invalid") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated piracy inventory unavailable"
+            ) from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""

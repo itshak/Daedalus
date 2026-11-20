@@ -744,6 +744,26 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action == "list_buildings_existing":
+                    return self._list_buildings_existing(request)
+                if action == "preview_construction_existing":
+                    return self._preview_construction_existing(request)
+                if action == "list_workshop_upgrades_existing":
+                    return self._list_workshop_upgrades_existing(request)
+                if action == "list_trainables_existing":
+                    return self._list_trainables_existing(request)
+                if action == "market_quotes_existing":
+                    return self._market_quotes_existing(request)
+                if action == "list_academies_existing":
+                    return self._list_academies_existing(request)
+                if action == "list_taverns_existing":
+                    return self._list_taverns_existing(request)
+                if action == "list_miracles_existing":
+                    return self._list_miracles_existing(request)
+                if action == "shrine_status_existing":
+                    return self._shrine_status_existing(request)
+                if action == "list_pirate_fortresses_existing":
+                    return self._list_pirate_fortresses_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -796,6 +816,443 @@ class IPCServer:
             # Preserve upstream CLI semantics, including the email field.
             result["email"] = session.mail
         return result
+
+    def _list_buildings_existing(self, request):
+        """Read only one owned city's building slots from an existing session.
+
+        All upstream game HTML is parsed and discarded within IkaBot. This
+        action never prepares or starts an upgrade, alters worker production,
+        or restores a session. The request city must belong to this player.
+        """
+        from ikabot.config import city_url
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building inventory city")
+        ids, _cities = getIdsOfCities(session)
+        if city_id not in {_existing_city_id(value) for value in ids}:
+            raise ValueError("Building inventory city is not owned by this session")
+        html = session.get(city_url + str(city_id))
+        city = getCity(html)
+        if _existing_city_id(city.get("id")) != city_id:
+            raise ValueError("The game returned a different city")
+        buildings = []
+        for item in city.get("position", []):
+            if not isinstance(item, dict) or item.get("building") == "empty":
+                continue
+            slot, level = item.get("position"), item.get("level")
+            if (type(slot) is not int or not 0 <= slot <= 80
+                    or type(level) is not int or not 0 <= level <= 150):
+                raise ValueError("Invalid building position or level")
+            title = item.get("name")
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError("Invalid building name")
+            buildings.append({
+                "position": slot,
+                "building": str(item.get("building") or "")[:64],
+                "name": title[:100],
+                "level": level,
+                "busy": item.get("isBusy") is True,
+                "can_upgrade": item.get("isMaxLevel") is not True,
+                "can_upgrade_now": item.get("canUpgrade") is True,
+            })
+        if len(buildings) > 80 or len({item["position"] for item in buildings}) != len(buildings):
+            raise ValueError("Invalid building inventory")
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "buildings": buildings,
+        }
+
+    def _preview_construction_existing(self, request):
+        """Read-only construction cost/queue preparation for a verified owned city.
+
+        Only sanitized game-calculated quantities and a bounded exact task
+        config leave the existing session; never HTML or login/session state.
+        """
+        from ikabot.function.constructionList import preview_native_construction
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        upgrades = request.get("upgrades")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12):
+            raise ValueError("Invalid construction preview request")
+        reviewed = []
+        for item in upgrades:
+            if (not isinstance(item, dict)
+                    or type(item.get("position")) is not int
+                    or type(item.get("target_level")) is not int
+                    or not 0 <= item["position"] <= 80
+                    or not 1 <= item["target_level"] <= 150):
+                raise ValueError("Invalid building preview target")
+            reviewed.append({
+                "position": item["position"], "target_level": item["target_level"]
+            })
+        result = preview_native_construction(session, city_id, reviewed)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "plan": result,
+        }
+
+    def _list_workshop_upgrades_existing(self, request):
+        """Enumerate real workshop unit levels without starting upgrades."""
+        from ikabot.function.UpgradeUnits import find_workshop, workshop_upgrades
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid workshop city")
+        ids, _cities = getIdsOfCities(session)
+        if city_id not in {_existing_city_id(value) for value in ids}:
+            raise ValueError("Workshop city is not owned by the selected account")
+        city, workshop = find_workshop(session, str(city_id))
+        if _existing_city_id(city.get("id")) != city_id:
+            raise ValueError("Game returned a different workshop city")
+        if workshop is None:
+            return {
+                "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "city_id": city_id,
+                "workshop_level": 0, "upgrades": [],
+            }
+        maximum = min(25, int(workshop.get("level") or 0))
+        if not 0 <= maximum <= 25:
+            raise ValueError("Invalid workshop level")
+        available = workshop_upgrades(session, str(city_id), workshop["position"])
+        if not isinstance(available, dict) or len(available) > 100:
+            raise ValueError("Unbounded workshop upgrade inventory")
+        upgrades = []
+        for unit_id, unit in available.items():
+            if (not isinstance(unit_id, str) or not unit_id.isdigit()
+                    or not isinstance(unit, dict)):
+                raise ValueError("Invalid workshop unit")
+            name = str(unit.get("name") or "")[:100]
+            if not name:
+                raise ValueError("Missing workshop unit name")
+            types = unit.get("types")
+            if not isinstance(types, dict) or len(types) > 5:
+                raise ValueError("Invalid workshop upgrade types")
+            for upgrade_type, state in types.items():
+                if (not isinstance(upgrade_type, str)
+                        or not re.fullmatch(r"[a-zA-Z_]{1,40}", upgrade_type)
+                        or not isinstance(state, dict)):
+                    raise ValueError("Invalid unit upgrade")
+                level = state.get("level")
+                if type(level) is not int or not 0 <= level <= 25:
+                    raise ValueError("Invalid current unit upgrade level")
+                upgrades.append({
+                    "unit_id": unit_id, "name": name,
+                    "upgrade_type": upgrade_type,
+                    "description": str(state.get("desc") or upgrade_type)[:100],
+                    "current_level": level,
+                    "max_level": maximum,
+                })
+        if len(upgrades) > 250:
+            raise ValueError("Unbounded workshop upgrade choices")
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            "workshop_level": maximum, "upgrades": upgrades,
+        }
+
+    def _list_trainables_existing(self, request):
+        """Inspect actual barracks/shipyard unit costs without recruiting."""
+        from ikabot.function.trainArmy import available_trainable_units
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        train_troops = request.get("train_troops")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(train_troops) is not bool):
+            raise ValueError("Choose a valid training city and troop/ship mode")
+        snapshot = available_trainable_units(session, city_id, train_troops)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id,
+            **snapshot,
+        }
+
+    def _market_quotes_existing(self, request):
+        """Read-only buy/sell offer and price discovery from a verified game market."""
+        from ikabot.function.nativeMarket import market_snapshot
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        resource_type = request.get("resource_type")
+        side = request.get("market_side")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market quote scope")
+        snapshot = market_snapshot(session, city_id, resource_type, side)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id, **snapshot,
+        }
+
+    def _list_academies_existing(self, request):
+        """Return owned academy buildings, real crystal stock and cooldown state."""
+        from ikabot.config import actionRequest, city_url
+        from ikabot.function.research import find_academy_cities
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        ids, _cities = getIdsOfCities(session)
+        owned_ids = {_existing_city_id(value) for value in ids}
+        found = find_academy_cities(session)
+        if not isinstance(found, list) or len(found) > 100:
+            raise ValueError("Invalid academy list returned by the game")
+        academies = []
+        seen = set()
+        for academy in found:
+            if not isinstance(academy, dict):
+                raise ValueError("Invalid academy record")
+            raw_id = _existing_city_id(academy.get("cityID"))
+            position = academy.get("pos")
+            if (raw_id not in owned_ids or raw_id in seen
+                    or type(position) is not int or not 0 <= position <= 80):
+                raise ValueError("Academy does not belong to the selected account")
+            seen.add(raw_id)
+            city = getCity(session.get(city_url + str(raw_id)))
+            if _existing_city_id(city.get("id")) != raw_id:
+                raise ValueError("Game returned an unexpected academy city")
+            if not any(
+                building.get("position") == position
+                and building.get("building") == "academy"
+                for building in city.get("position", [])
+            ):
+                raise ValueError("Academy position has changed")
+            stock = city.get("availableResources")
+            if (not isinstance(stock, list) or len(stock) != 5
+                    or any(type(q) is not int or q < 0 for q in stock)):
+                raise ValueError("Academy resource amounts unavailable")
+            url = (
+                f"view=academy&cityId={raw_id}&position={position}"
+                f"&backgroundView=city&currentCityId={raw_id}&templateView=academy"
+                f"&actionRequest={actionRequest}&ajax=1"
+            )
+            cooldown_html = session.get(url)
+            if not isinstance(cooldown_html, str):
+                raise ValueError("Academy cooldown cannot be confirmed")
+            academies.append({
+                "city_id": raw_id, "city_name": str(city.get("name") or "")[:100],
+                "position": position, "crystal": stock[3],
+                "cooldown": "experimentCooldown" in cooldown_html,
+                "can_experiment_now": (
+                    stock[3] >= 300000 and "experimentCooldown" not in cooldown_html
+                ),
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "academies": academies,
+        }
+
+    def _list_taverns_existing(self, request):
+        """Read-only city wine, tavern servings and population state."""
+        from ikabot.config import city_url
+        from ikabot.function.tavernManager import TavernManager
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        ids, _cities = getIdsOfCities(session)
+        if len(ids) > 100:
+            raise ValueError("Too many cities to inspect")
+        manager = TavernManager(session)
+        taverns = []
+        for raw in ids:
+            city_id = _existing_city_id(raw)
+            city = getCity(session.get(city_url + str(city_id)))
+            if _existing_city_id(city.get("id")) != city_id:
+                raise ValueError("Unexpected city in tavern inspection")
+            stock = city.get("availableResources")
+            if (not isinstance(stock, list) or len(stock) != 5
+                    or any(type(x) is not int or x < 0 for x in stock)):
+                raise ValueError("Current wine stock is unavailable")
+            tavern = next(
+                (row for row in city.get("position", [])
+                 if row.get("building") == "tavern"), None
+            )
+            info = None
+            if tavern:
+                info = manager._get_tavern_data(city, tavern, force_refresh=True)
+            hall = manager._get_town_hall_data(city_id, city)
+            current = info.get("current_level") if isinstance(info, dict) else None
+            servings = info.get("consumption_values") if isinstance(info, dict) else None
+            wine_hour = (
+                manager._wine_at_level(servings, current)
+                if isinstance(servings, list) and type(current) is int else None
+            )
+            if wine_hour is not None and (
+                type(wine_hour) is not int or wine_hour < 0
+            ):
+                raise ValueError("Invalid tavern wine consumption")
+            taverns.append({
+                "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
+                "wine": stock[1], "has_tavern": tavern is not None,
+                "serving_level": current, "wine_per_hour": wine_hour,
+                "satisfaction": (
+                    hall.get("total_satisfaction") if isinstance(hall, dict) else None
+                ),
+                "population": (
+                    hall.get("current_pop") if isinstance(hall, dict) else None
+                ),
+                "capacity": (
+                    hall.get("max_pop") if isinstance(hall, dict) else None
+                ),
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "taverns": taverns,
+        }
+
+    def _list_miracles_existing(self, request):
+        """Inspect real owned temples, wonder level, cooldown and activation state."""
+        from ikabot.function.activateMiracle import obtainMiraclesAvailable
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        owned, _cities = getIdsOfCities(session)
+        own = {_existing_city_id(raw) for raw in owned}
+        available = obtainMiraclesAvailable(session)
+        if not isinstance(available, list) or len(available) > 100:
+            raise ValueError("Invalid wonder inventory")
+        reviewed = []
+        seen = set()
+        for miracle in available:
+            if not isinstance(miracle, dict):
+                raise ValueError("Invalid miracle")
+            temple = miracle.get("ciudad")
+            if not isinstance(temple, dict):
+                raise ValueError("Miracle is not associated with a temple")
+            city_id = _existing_city_id(temple.get("id"))
+            wonder = str(miracle.get("wonder") or "")
+            level = miracle.get("wonderActivationLevel")
+            enabled = miracle.get("available")
+            pending = miracle.get("available_in") if enabled is False else 0
+            if (city_id not in own or wonder not in set("12345678")
+                    or wonder in seen or type(level) is not int
+                    or not 0 <= level <= 5 or type(enabled) is not bool
+                    or type(pending) is not int or pending < 0 or pending > 7 * 86400):
+                raise ValueError("Invalid or foreign wonder temple")
+            seen.add(wonder)
+            reviewed.append({
+                "city_id": city_id,
+                "temple_city": str(temple.get("name") or "")[:100],
+                "island_id": str(miracle.get("id") or "")[:30],
+                "wonder": wonder,
+                "wonder_name": str(miracle.get("wonderName") or "")[:100],
+                "level": level, "available": enabled,
+                "available_in_seconds": pending,
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "miracles": reviewed,
+        }
+
+    def _shrine_status_existing(self, request):
+        """Read only real Olympus shrine location and current favour (if parseable).
+
+        A failed game response is unknown, not zero favour; never claim a
+        shrine is ready from an unparsable or unauthorized game payload.
+        """
+        from ikabot.config import actionRequest
+        from ikabot.function.activateShrine import findShrine
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id, position = findShrine(session)
+        if city_id is None or position is None:
+            shrine = None
+        else:
+            owned, _cities = getIdsOfCities(session)
+            integer_id = _existing_city_id(city_id)
+            if integer_id not in {_existing_city_id(item) for item in owned}:
+                raise ValueError("Shrine city is not owned")
+            if type(position) is not int or not 0 <= position <= 80:
+                raise ValueError("Invalid shrine position")
+            city = getCity(session.get(f"view=city&cityId={integer_id}"))
+            if _existing_city_id(city.get("id")) != integer_id:
+                raise ValueError("Shrine city changed")
+            raw = session.get(
+                f"view=shrineOfOlympus&cityId={integer_id}&position={position}"
+                f"&activeTab=tabOverview&backgroundView=city"
+                f"&currentCityId={integer_id}&templateView=shrineOfOlympus"
+                f"&actionRequest={actionRequest}&ajax=1",
+                noIndex=True,
+            )
+            favor = None
+            try:
+                data = json.loads(raw, strict=False)
+                parsed = data[2][1]["currentFavor"]
+                if type(parsed) is int and 0 <= parsed <= 10**12:
+                    favor = parsed
+                elif isinstance(parsed, str) and parsed.isdigit():
+                    favor = int(parsed)
+            except (IndexError, KeyError, TypeError, ValueError):
+                pass
+            shrine = {
+                "city_id": integer_id, "city_name": str(city.get("name") or "")[:100],
+                "position": position, "favor": favor,
+            }
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "shrine": shrine,
+        }
+
+    def _list_pirate_fortresses_existing(self, request):
+        """Identify actual account-owned fortresses and supported mission durations."""
+        from ikabot.config import piracyMissionToBuildingLevel, piracyMissionWaitingTime
+        from ikabot.function.autoPirate import getPiracyCities
+
+        session = self._existing_session(request)
+        candidates = getPiracyCities(session, 1)
+        if not isinstance(candidates, list) or len(candidates) > 100:
+            raise ValueError("Game returned invalid pirate fortress inventory")
+        verified = []
+        seen = set()
+        for city in candidates:
+            if not isinstance(city, dict):
+                raise ValueError("Invalid pirate city")
+            city_id = _existing_city_id(city.get("id"))
+            if city_id in seen:
+                raise ValueError("Duplicate pirate fortress city")
+            seen.add(city_id)
+            fortress = next(
+                (item for item in city.get("position", [])
+                 if item.get("building") == "pirateFortress"), None
+            )
+            if fortress is None or type(fortress.get("level")) is not int:
+                raise ValueError("Pirate fortress level unavailable")
+            level = fortress["level"]
+            if not 1 <= level <= 100:
+                raise ValueError("Invalid pirate fortress level")
+            missions = []
+            for mission, required_level in piracyMissionToBuildingLevel.items():
+                if (type(mission) is not int or not 1 <= mission <= 9
+                        or type(required_level) is not int
+                        or mission not in piracyMissionWaitingTime):
+                    raise ValueError("Unknown IkaBot pirate mission schedule")
+                if level >= required_level:
+                    duration = piracyMissionWaitingTime[mission]
+                    if type(duration) is not int or not 0 < duration <= 86400:
+                        raise ValueError("Invalid pirate mission duration")
+                    missions.append({"number": mission, "duration_seconds": duration})
+            verified.append({
+                "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
+                "fortress_level": level, "missions": missions,
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "fortresses": verified,
+        }
 
     def _warehouse_snapshots_existing(self, request):
         """Read numeric-only plunderable values from a real owned warehouse.

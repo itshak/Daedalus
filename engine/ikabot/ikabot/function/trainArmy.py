@@ -184,7 +184,129 @@ def generateArmyData(units_info):
 
 from ikabot.helpers.decorators import configurator, task
 
-@task("trainArmy")
+def available_trainable_units(session, city_id, train_troops):
+    """Read only actual recruitable troop/ship definitions from the game view."""
+    import math
+    from ikabot.helpers.taskConfig import requireOwnCity
+
+    if type(train_troops) is not bool:
+        raise ValueError("Choose troops or ships")
+    owned = requireOwnCity(session, city_id, "city_id")
+    city = getCity(session.get(city_url + str(owned)))
+    if str(city.get("id")) != str(owned):
+        raise ValueError("Game returned a different city")
+    name = "barracks" if train_troops else "shipyard"
+    building = next((row for row in city.get("position", [])
+                     if row.get("building") == name), None)
+    if building is None:
+        raise ValueError("The selected city lacks this training building")
+    position = building.get("position")
+    if type(position) is not int or not 0 <= position <= 80:
+        raise ValueError("Invalid training building position")
+    building_city = {"id": str(owned), "pos": str(position),
+                     "cityName": str(city["name"])[:100]}
+    response = getBuildingInfo(session, building_city, train_troops)
+    try:
+        catalog = generateArmyData(response[2][1])
+    except (IndexError, KeyError, ValueError, TypeError) as exc:
+        raise ValueError("Recruitable units are not available from this city") from exc
+    if not isinstance(catalog, list) or not 0 < len(catalog) <= 100:
+        raise ValueError("No supported trainable units in this city")
+    verified = []
+    ids = set()
+    allowed = {"wood", "wine", "marble", "crystal", "sulfur",
+               "citizens", "upkeep", "completiontime"}
+    for unit in catalog:
+        if not isinstance(unit, dict):
+            raise ValueError("Invalid game unit details")
+        unit_id = unit.get("unit_type_id")
+        label = unit.get("local_name")
+        costs = unit.get("costs")
+        if (type(unit_id) is not int or not 0 < unit_id < 10**7
+                or unit_id in ids or not isinstance(label, str)
+                or not 0 < len(label) <= 100 or not isinstance(costs, dict)
+                or not set(costs).issubset(allowed)):
+            raise ValueError("Malformed game unit data")
+        safe_costs = {}
+        for key, value in costs.items():
+            if (type(value) not in (int, float)
+                    or not math.isfinite(value) or not 0 <= value <= 10**9):
+                raise ValueError("Invalid game unit cost")
+            safe_costs[key] = value
+        ids.add(unit_id)
+        verified.append({
+            "unit_type_id": unit_id, "local_name": label,
+            "identifier": str(unit.get("identifier") or "")[:60],
+            "costs": safe_costs,
+        })
+    stock = city.get("availableResources")
+    citizens = city.get("freeCitizens")
+    if (not isinstance(stock, list) or len(stock) != 5
+            or any(type(x) is not int or x < 0 for x in stock)
+            or type(citizens) is not int or citizens < 0):
+        raise ValueError("City resources are unavailable")
+    return {
+        "city": building_city, "train_troops": train_troops,
+        "units": verified, "available": list(stock), "free_citizens": citizens,
+    }
+
+
+def prepare_trainArmy(session, city, tranings, trainTroops, replicate,
+                      countRepeat, cityTrainings, units):
+    """Rebuild non-replicated native training from real game costs before launch."""
+    if (not isinstance(city, dict) or not isinstance(tranings, list)
+            or len(tranings) != 1 or not isinstance(tranings[0], list)
+            or not 0 < len(tranings[0]) <= 50
+            or type(trainTroops) is not bool
+            or replicate != "n" or countRepeat != 0
+            or cityTrainings != [] or units != []):
+        raise ValueError("A native troop or ship plan must be explicit and city-specific")
+    catalog = available_trainable_units(session, city.get("id"), trainTroops)
+    current = catalog["city"]
+    if city.get("pos") != current["pos"] or city.get("cityName") != current["cityName"]:
+        raise ValueError("Training building or city changed; prepare again")
+    available = {unit["unit_type_id"]: unit for unit in catalog["units"]}
+    budget = {
+        "wood": catalog["available"][0],
+        "wine": catalog["available"][1],
+        "marble": catalog["available"][2],
+        "crystal": catalog["available"][3],
+        "sulfur": catalog["available"][4],
+        "citizens": catalog["free_citizens"],
+    }
+    verified = []
+    seen = set()
+    for entry in tranings[0]:
+        raw_keys = {"unit_type_id", "cantidad"}
+        prepared_keys = raw_keys | {"costs", "identifier", "local_name"}
+        if (not isinstance(entry, dict)
+                or set(entry) not in (raw_keys, prepared_keys)):
+            raise ValueError("Training selections require actual unit and quantity")
+        unit_id, count = entry["unit_type_id"], entry["cantidad"]
+        if (type(unit_id) is not int or unit_id not in available
+                or unit_id in seen or type(count) is not int
+                or not 0 < count <= 100000):
+            raise ValueError("Invalid or repeated training unit")
+        unit = available[unit_id]
+        if set(entry) == prepared_keys and any(
+            entry[key] != unit[key] for key in ("costs", "identifier", "local_name")
+        ):
+            raise ValueError("Saved training unit data has changed; prepare a fresh plan")
+        seen.add(unit_id)
+        for key in budget:
+            needed = unit["costs"].get(key, 0) * count
+            if needed > budget[key]:
+                raise ValueError("Not enough city resources or citizens for this training")
+            budget[key] -= needed
+        verified.append({**unit, "cantidad": count})
+    return {
+        "city": current, "tranings": [verified],
+        "trainTroops": trainTroops, "replicate": "n",
+        "countRepeat": 0, "cityTrainings": [], "units": [],
+    }
+
+
+@task("trainArmy", prepare=prepare_trainArmy)
 def do_trainArmy(session, city, tranings, trainTroops, replicate, countRepeat, cityTrainings, units):
     if replicate == "y":
         countRepeat = countRepeat + 1

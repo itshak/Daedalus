@@ -7,6 +7,7 @@ Daedalus only asks the engine for identities and already-authenticated cities.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import socket
@@ -28,7 +29,12 @@ _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
-    "validate_session_existing", "task_preflight_existing",
+    "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
+    "preview_construction_existing", "list_workshop_upgrades_existing",
+    "list_trainables_existing", "market_quotes_existing",
+    "list_academies_existing", "list_taverns_existing",
+    "list_miracles_existing", "shrine_status_existing",
+    "list_pirate_fortresses_existing",
 })
 
 
@@ -118,13 +124,23 @@ class ExistingIPCClient:
                 raise EngineIPCUnavailable("Cannot verify IkaBot IPC owner") from exc
         return port, authkey
 
-    def request(self, action: str, *, account: Account | None = None) -> dict[str, Any]:
+    def request(self, action: str, *, account: Account | None = None,
+                city_id: int | None = None,
+                upgrades: list[dict[str, int]] | None = None,
+                train_troops: bool | None = None,
+                resource_type: int | None = None,
+                market_side: str | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
-            "task_preflight_existing",
+            "task_preflight_existing", "list_buildings_existing",
+            "preview_construction_existing", "list_workshop_upgrades_existing",
+            "list_trainables_existing", "market_quotes_existing",
+            "list_academies_existing", "list_taverns_existing",
+            "list_miracles_existing", "shrine_status_existing",
+            "list_pirate_fortresses_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -132,7 +148,43 @@ class ExistingIPCClient:
         payload: dict[str, object] = {"action": action}
         if account is not None:
             payload.update(world=account.world, player=account.player)
-        return self._exchange(payload)
+        if action in {"list_buildings_existing", "preview_construction_existing",
+                      "list_workshop_upgrades_existing", "list_trainables_existing",
+                      "market_quotes_existing"}:
+            if type(city_id) is not int or not 0 < city_id < 10**12:
+                raise ValueError("Choose a valid city")
+            payload["city_id"] = city_id
+            if action == "preview_construction_existing":
+                if not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12:
+                    raise ValueError("Choose valid construction upgrades")
+                for upgrade in upgrades:
+                    if (not isinstance(upgrade, dict)
+                            or set(upgrade) != {"position", "target_level"}
+                            or type(upgrade["position"]) is not int
+                            or type(upgrade["target_level"]) is not int):
+                        raise ValueError("Invalid construction upgrade")
+                payload["upgrades"] = upgrades
+            elif upgrades is not None:
+                raise ValueError("Upgrades are allowed only in a construction preview")
+            if action == "list_trainables_existing":
+                if type(train_troops) is not bool:
+                    raise ValueError("Choose troops or ships")
+                payload["train_troops"] = train_troops
+            elif train_troops is not None:
+                raise ValueError("Training mode is only supported for real unit discovery")
+            if action == "market_quotes_existing":
+                if (type(resource_type) is not int or not 0 <= resource_type <= 4
+                        or market_side not in {"buy", "sell_to_offers", "create_offer"}):
+                    raise ValueError("Choose a valid market product and action")
+                payload["resource_type"] = resource_type
+                payload["market_side"] = market_side
+            elif resource_type is not None or market_side is not None:
+                raise ValueError("Market filters may only be used for read-only quotes")
+        elif (city_id is not None or upgrades is not None or train_troops is not None
+              or resource_type is not None or market_side is not None):
+            raise ValueError("City argument is not supported for this IPC action")
+        return self._exchange(payload, read_timeout=60.0 if action ==
+                              "preview_construction_existing" else 8.0)
 
     def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0,
                   allow_task_rejection: bool = False) -> dict[str, Any]:
@@ -248,6 +300,523 @@ class ExistingIPCClient:
                 }
             )
         return result
+
+    def buildings(self, account: Account, city_id: int) -> list[dict[str, object]]:
+        """Return sanitized existing-session building slots from an owned city."""
+        if type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid city ID")
+        # Independent membership check at both the controller and IkaBot IPC.
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("City does not belong to this account")
+        response = self.request("list_buildings_existing", account=account, city_id=city_id)
+        if (str(response.get("world", "")).casefold() != account.world.casefold()
+                or str(response.get("username", "")).casefold() != account.player.casefold()
+                or response.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot IPC returned another account's building data")
+        rows = response.get("buildings")
+        if not isinstance(rows, list) or len(rows) > 80:
+            raise EngineIPCUnavailable("IkaBot IPC returned invalid buildings")
+        validated = []
+        positions: set[int] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Malformed building row")
+            slot, level = row.get("position"), row.get("level")
+            name, building = row.get("name"), row.get("building")
+            if (type(slot) is not int or not 0 <= slot <= 80 or slot in positions
+                    or type(level) is not int or not 0 <= level <= 150
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(building, str) or not 0 < len(building) <= 64
+                    or type(row.get("busy")) is not bool
+                    or type(row.get("can_upgrade")) is not bool
+                    or (row.get("can_upgrade_now") is not None
+                        and type(row["can_upgrade_now"]) is not bool)):
+                raise EngineIPCUnavailable("IkaBot IPC returned invalid building data")
+            positions.add(slot)
+            validated.append({
+                "position": slot, "level": level, "name": name,
+                "building": building, "busy": row["busy"],
+                "can_upgrade": row["can_upgrade"],
+                "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
+            })
+        return validated
+
+    def construction_preview(
+        self, account: Account, city_id: int, upgrades: list[dict[str, int]],
+    ) -> dict[str, object]:
+        """One strictly read-only engine calculation, bound to an owned city."""
+        if type(city_id) is not int or city_id <= 0:
+            raise ValueError("Invalid preview city")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Construction city is not owned by this account")
+        data = self.request(
+            "preview_construction_existing", account=account, city_id=city_id,
+            upgrades=upgrades,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot preview belongs to a different game account")
+        plan = data.get("plan")
+        if not isinstance(plan, dict) or type(plan.get("ready")) is not bool:
+            raise EngineIPCUnavailable("Invalid IkaBot construction preview")
+        numbers = {}
+        for name in ("costs", "available", "missing"):
+            values = plan.get(name)
+            if (not isinstance(values, list) or len(values) != 5
+                    or any(type(v) is not int or v < 0 or v > 10**15
+                           for v in values)):
+                raise EngineIPCUnavailable("IkaBot returned invalid resource amounts")
+            numbers[name] = values
+        config = plan.get("config")
+        expected_keys = {
+            "city_id", "city_name", "buildings", "shipments", "expand_overall",
+            "wait_resources", "construction_queue", "total_time",
+        }
+        if (not isinstance(config, dict) or set(config) != expected_keys
+                or config.get("city_id") != city_id
+                or not isinstance(config.get("city_name"), str)
+                or not 0 < len(config["city_name"]) <= 100
+                or config.get("shipments") != []
+                or config.get("expand_overall") is not True
+                or config.get("wait_resources") is not False
+                or not isinstance(config.get("buildings"), list)
+                or not 0 < len(config["buildings"]) <= 12
+                or not isinstance(config.get("construction_queue"), list)
+                or any(type(v) is not int or v <= 0
+                       for v in config["construction_queue"])
+                or type(config.get("total_time")) is not int
+                or config["total_time"] < 0):
+            raise EngineIPCUnavailable("IkaBot returned an invalid prepared plan")
+        allowed_building_keys = {
+            "position", "name", "building", "level", "isBusy", "upgradeTo",
+            "constructionTime", "constructionTimes",
+        }
+        for row in config["buildings"]:
+            if (not isinstance(row, dict) or set(row) != allowed_building_keys
+                    or type(row.get("position")) is not int or not 0 <= row["position"] <= 80
+                    or type(row.get("level")) is not int or not 0 <= row["level"] <= 150
+                    or type(row.get("upgradeTo")) is not int
+                    or not row["level"] < row["upgradeTo"] <= 150
+                    or row.get("isBusy") is not False
+                    or not isinstance(row.get("name"), str)
+                    or not 0 < len(row["name"]) <= 100
+                    or not isinstance(row.get("building"), str)
+                    or not 0 < len(row["building"]) <= 64
+                    or type(row.get("constructionTime")) is not int
+                    or not isinstance(row.get("constructionTimes"), list)):
+                raise EngineIPCUnavailable("IkaBot returned an invalid building plan")
+        try:
+            size = len(json.dumps(config, allow_nan=False).encode("utf-8"))
+        except (ValueError, TypeError) as exc:
+            raise EngineIPCUnavailable("IkaBot returned an invalid preview payload") from exc
+        if size > 16000:
+            raise EngineIPCUnavailable("IkaBot construction plan exceeds safe size")
+        seconds = plan.get("estimated_seconds")
+        if type(seconds) is not int or seconds < 0:
+            raise EngineIPCUnavailable("IkaBot returned an invalid construction time")
+        return {
+            "account_id": account.id, "city_id": city_id, "ready": plan["ready"],
+            "config": config, "estimated_seconds": seconds, **numbers,
+        }
+
+    def workshop_upgrades(self, account: Account, city_id: int) -> dict[str, object]:
+        """Return verified current account workshop levels and upgrade choices."""
+        if type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid workshop city")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Workshop city not owned by account")
+        data = self.request(
+            "list_workshop_upgrades_existing", account=account, city_id=city_id,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id):
+            raise EngineIPCUnavailable("IkaBot returned another account's workshop")
+        level = data.get("workshop_level")
+        choices = data.get("upgrades")
+        if (type(level) is not int or not 0 <= level <= 25
+                or not isinstance(choices, list) or len(choices) > 250):
+            raise EngineIPCUnavailable("Invalid IkaBot workshop inventory")
+        result = []
+        seen = set()
+        for item in choices:
+            if not isinstance(item, dict):
+                raise EngineIPCUnavailable("Invalid workshop upgrade")
+            uid, name, upgrade_type = (
+                item.get("unit_id"), item.get("name"), item.get("upgrade_type")
+            )
+            current, maximum = item.get("current_level"), item.get("max_level")
+            description = item.get("description")
+            if (not isinstance(uid, str) or not uid.isdecimal()
+                    or not 0 < len(uid) <= 16
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(upgrade_type, str)
+                    or not re.fullmatch(r"[a-zA-Z_]{1,40}", upgrade_type)
+                    or not isinstance(description, str) or len(description) > 100
+                    or type(current) is not int or not 0 <= current <= 25
+                    or type(maximum) is not int or maximum != level
+                    or (uid, upgrade_type) in seen):
+                raise EngineIPCUnavailable("Malformed workshop upgrade data")
+            seen.add((uid, upgrade_type))
+            result.append({
+                "unit_id": uid, "name": name, "upgrade_type": upgrade_type,
+                "description": description, "current_level": current,
+                "max_level": maximum,
+            })
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "workshop_level": level, "upgrades": result,
+        }
+
+    def trainable_units(
+        self, account: Account, city_id: int, *, train_troops: bool,
+    ) -> dict[str, object]:
+        """Bounded, account-owned barracks/shipyard unit options and current costs."""
+        if type(city_id) is not int or not 0 < city_id < 10**12 or type(train_troops) is not bool:
+            raise ValueError("Invalid training selection")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Training city not owned by account")
+        data = self.request(
+            "list_trainables_existing", account=account, city_id=city_id,
+            train_troops=train_troops,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id or data.get("train_troops") is not train_troops):
+            raise EngineIPCUnavailable("IkaBot training options belong to another account")
+        city = data.get("city")
+        units = data.get("units")
+        resources = data.get("available")
+        citizens = data.get("free_citizens")
+        if (not isinstance(city, dict) or not isinstance(units, list)
+                or not 0 < len(units) <= 100
+                or not isinstance(resources, list) or len(resources) != 5
+                or any(type(value) is not int or not 0 <= value <= 10**15 for value in resources)
+                or type(citizens) is not int or not 0 <= citizens <= 10**15):
+            raise EngineIPCUnavailable("Invalid IkaBot training inventory")
+        if (city.get("id") != str(city_id)
+                or not isinstance(city.get("cityName"), str)
+                or not 0 < len(city["cityName"]) <= 100
+                or not isinstance(city.get("pos"), str)
+                or not city["pos"].isdigit()):
+            raise EngineIPCUnavailable("IkaBot training city did not match")
+        allowed_costs = {
+            "wood", "wine", "marble", "crystal", "sulfur",
+            "citizens", "upkeep", "completiontime",
+        }
+        verified = []
+        ids = set()
+        for unit in units:
+            if not isinstance(unit, dict):
+                raise EngineIPCUnavailable("Invalid trainable unit")
+            uid, name, costs = (
+                unit.get("unit_type_id"), unit.get("local_name"), unit.get("costs")
+            )
+            if (type(uid) is not int or not 0 < uid < 10**7 or uid in ids
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(costs, dict) or not set(costs).issubset(allowed_costs)):
+                raise EngineIPCUnavailable("Malformed trainable unit data")
+            for value in costs.values():
+                if (type(value) not in (int, float)
+                        or not math.isfinite(value) or not 0 <= value <= 10**9):
+                    raise EngineIPCUnavailable("Invalid recruitable unit costs")
+            ids.add(uid)
+            verified.append({
+                "unit_type_id": uid, "local_name": name, "costs": dict(costs),
+            })
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "train_troops": train_troops,
+            "city": city, "units": verified,
+            "available": list(resources), "free_citizens": citizens,
+        }
+
+    def market_quotes(
+        self, account: Account, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read strict, owned-city actual market quotes without game mutation."""
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market selection")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Market city is not owned by account")
+        data = self.request(
+            "market_quotes_existing", account=account, city_id=city_id,
+            resource_type=resource_type, market_side=side,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id
+                or data.get("resource_type") != resource_type
+                or data.get("side") != side):
+            raise EngineIPCUnavailable("IkaBot market quotes belong to another account")
+        city = data.get("city")
+        offers = data.get("offers")
+        if (not isinstance(city, dict) or not isinstance(offers, list)
+                or len(offers) > 200 or city.get("id") != str(city_id)
+                or not isinstance(city.get("name"), str)
+                or not 0 < len(city["name"]) <= 100
+                or not isinstance(city.get("cityName"), str)
+                or not 0 < len(city["cityName"]) <= 100
+                or type(city.get("pos")) is not int
+                or not 0 <= city["pos"] <= 80
+                or type(city.get("rango")) is not int
+                or not 0 < city["rango"] <= 100
+                or not isinstance(city.get("availableResources"), list)
+                or len(city["availableResources"]) != 5
+                or any(type(v) is not int or v < 0
+                       for v in city["availableResources"])):
+            raise EngineIPCUnavailable("Invalid IkaBot market snapshot")
+        if side == "buy":
+            keys = {
+                "ciudadDestino", "jugadorAComprar", "amountAvailable",
+                "tipo", "precio", "destinationCityId", "cityId", "position",
+                "type", "resource",
+            }
+            for offer in offers:
+                if (not isinstance(offer, dict) or set(offer) != keys
+                        or any(not isinstance(offer.get(key), str)
+                               or not 0 < len(offer[key]) <= 100
+                               for key in ("ciudadDestino", "jugadorAComprar", "tipo"))
+                        or any(not isinstance(offer.get(key), str)
+                               or not offer[key].isdigit()
+                               for key in ("destinationCityId", "cityId", "position", "type"))
+                        or type(offer.get("amountAvailable")) is not int
+                        or not 0 < offer["amountAvailable"] <= 10**12
+                        or type(offer.get("precio")) is not int
+                        or not 0 < offer["precio"] <= 10**9
+                        or not isinstance(offer.get("resource"), str)
+                        or offer["resource"] != ("resource" if resource_type == 0
+                                                else str(resource_type))):
+                    raise EngineIPCUnavailable("IkaBot returned invalid buying quote")
+        elif side == "sell_to_offers":
+            for offer in offers:
+                if (not isinstance(offer, list) or len(offer) != 6
+                        or any(not isinstance(value, str) or not 0 < len(value) <= 100
+                               for value in offer[:2])
+                        or any(type(value) is not int or value < 0 or value > 10**12
+                               for value in offer[2:])
+                        or offer[2] == 0 or offer[3] == 0 or offer[5] == 0):
+                    raise EngineIPCUnavailable("IkaBot returned invalid selling quote")
+        else:
+            for key in ("price_min", "price_max", "sell_market_capacity", "currently_on_sale"):
+                if type(data.get(key)) is not int or data[key] < 0:
+                    raise EngineIPCUnavailable("IkaBot returned invalid market listing limits")
+            if data["price_min"] > data["price_max"]:
+                raise EngineIPCUnavailable("Inconsistent market pricing limits")
+            if offers:
+                raise EngineIPCUnavailable("Listing mode cannot return external quotes")
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "resource_type": resource_type, "side": side,
+            "city": city, "offers": offers,
+            "price_min": data.get("price_min"),
+            "price_max": data.get("price_max"),
+            "sell_market_capacity": data.get("sell_market_capacity"),
+            "currently_on_sale": data.get("currently_on_sale"),
+        }
+
+    def academies(self, account: Account) -> dict[str, object]:
+        """Bounded academy inventory, with authoritative crystal/cooldown status."""
+        data = self.request("list_academies_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot academy list belongs to another account")
+        records = data.get("academies")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("IkaBot returned invalid academy list")
+        owned = {city["id"] for city in self.cities(account)}
+        seen = set()
+        result = []
+        for record in records:
+            if not isinstance(record, dict):
+                raise EngineIPCUnavailable("Invalid academy record")
+            ident = record.get("city_id")
+            name = record.get("city_name")
+            position = record.get("position")
+            crystal = record.get("crystal")
+            cooldown = record.get("cooldown")
+            ready = record.get("can_experiment_now")
+            if (type(ident) is not int or ident not in owned or ident in seen
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(position) is not int or not 0 <= position <= 80
+                    or type(crystal) is not int or not 0 <= crystal <= 10**15
+                    or type(cooldown) is not bool or type(ready) is not bool
+                    or (ready and (cooldown or crystal < 300000))):
+                raise EngineIPCUnavailable("Invalid or foreign academy entry")
+            seen.add(ident)
+            result.append({
+                "city_id": ident, "city_name": name, "position": position,
+                "crystal": crystal, "cooldown": cooldown, "can_experiment_now": ready,
+            })
+        return {"account_id": account.id, "academies": result}
+
+    def taverns(self, account: Account) -> dict[str, object]:
+        """Account-local wine, servings and satisfaction observations."""
+        data = self.request("list_taverns_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot tavern inventory belongs to another account")
+        records = data.get("taverns")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("Invalid IkaBot tavern inventory")
+        owned = {row["id"] for row in self.cities(account)}
+        seen = set()
+        result = []
+        for record in records:
+            if not isinstance(record, dict):
+                raise EngineIPCUnavailable("Malformed tavern record")
+            city_id = record.get("city_id")
+            name = record.get("city_name")
+            wine = record.get("wine")
+            has_tavern = record.get("has_tavern")
+            servings = record.get("serving_level")
+            consumption = record.get("wine_per_hour")
+            satisfaction = record.get("satisfaction")
+            population = record.get("population")
+            capacity = record.get("capacity")
+            if (type(city_id) is not int or city_id not in owned or city_id in seen
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(wine) is not int or not 0 <= wine <= 10**15
+                    or type(has_tavern) is not bool
+                    or (servings is not None and (type(servings) is not int
+                                                  or not 0 <= servings <= 100))
+                    or (consumption is not None and (type(consumption) is not int
+                                                    or not 0 <= consumption <= 10**9))
+                    or (satisfaction is not None and (type(satisfaction) is not int
+                                                     or not -10**9 <= satisfaction <= 10**9))
+                    or (population is not None and (type(population) is not int
+                                                   or not 0 <= population <= 10**9))
+                    or (capacity is not None and (type(capacity) is not int
+                                                 or not 0 <= capacity <= 10**9))):
+                raise EngineIPCUnavailable("Invalid tavern state from game")
+            seen.add(city_id)
+            result.append({
+                "city_id": city_id, "city_name": name,
+                "wine": wine, "has_tavern": has_tavern,
+                "serving_level": servings, "wine_per_hour": consumption,
+                "satisfaction": satisfaction,
+                "population": population, "capacity": capacity,
+            })
+        return {"account_id": account.id, "taverns": result}
+
+    def miracles(self, account: Account) -> dict[str, object]:
+        """Verified own temples and current wonder cooldown/readiness."""
+        data = self.request("list_miracles_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot wonders belong to another account")
+        raw = data.get("miracles")
+        if not isinstance(raw, list) or len(raw) > 100:
+            raise EngineIPCUnavailable("Invalid IkaBot wonders list")
+        owned = {row["id"] for row in self.cities(account)}
+        seen = set()
+        result = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise EngineIPCUnavailable("Invalid wonder record")
+            city_id = item.get("city_id")
+            temple_city = item.get("temple_city")
+            island_id = item.get("island_id")
+            wonder = item.get("wonder")
+            wonder_name = item.get("wonder_name")
+            level = item.get("level")
+            enabled = item.get("available")
+            seconds = item.get("available_in_seconds")
+            if (type(city_id) is not int or city_id not in owned
+                    or not isinstance(temple_city, str)
+                    or not 0 < len(temple_city) <= 100
+                    or not isinstance(island_id, str)
+                    or not island_id.isdecimal() or not 0 < len(island_id) <= 30
+                    or not isinstance(wonder, str)
+                    or wonder not in set("12345678") or wonder in seen
+                    or not isinstance(wonder_name, str)
+                    or not 0 < len(wonder_name) <= 100
+                    or type(level) is not int or not 0 <= level <= 5
+                    or type(enabled) is not bool
+                    or type(seconds) is not int or not 0 <= seconds <= 7 * 86400):
+                raise EngineIPCUnavailable("Malformed owned wonder information")
+            seen.add(wonder)
+            result.append({
+                "city_id": city_id, "temple_city": temple_city,
+                "island_id": island_id, "wonder": wonder,
+                "wonder_name": wonder_name, "level": level,
+                "available": enabled, "available_in_seconds": seconds,
+            })
+        return {"account_id": account.id, "miracles": result}
+
+    def shrine_status(self, account: Account) -> dict[str, object]:
+        """Verified account-local Shrine of Olympus, never a guessed favour balance."""
+        data = self.request("shrine_status_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Shrine status belongs to another game account")
+        shrine = data.get("shrine")
+        if shrine is not None:
+            if not isinstance(shrine, dict):
+                raise EngineIPCUnavailable("Malformed IkaBot shrine status")
+            city_id = shrine.get("city_id")
+            name = shrine.get("city_name")
+            position = shrine.get("position")
+            favor = shrine.get("favor")
+            if (type(city_id) is not int
+                    or city_id not in {city["id"] for city in self.cities(account)}
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(position) is not int or not 0 <= position <= 80
+                    or (favor is not None and (
+                        type(favor) is not int or not 0 <= favor <= 10**12
+                    ))):
+                raise EngineIPCUnavailable("Invalid or foreign Shrine of Olympus")
+            shrine = {"city_id": city_id, "city_name": name,
+                      "position": position, "favor": favor}
+        return {"account_id": account.id, "shrine": shrine}
+
+    def pirate_fortresses(self, account: Account) -> dict[str, object]:
+        """Bounded, account-owned fortress inventory and actual mission eligibility."""
+        data = self.request("list_pirate_fortresses_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Pirate fortresses belong to another account")
+        records = data.get("fortresses")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("Invalid pirate fortress inventory")
+        owned = {city["id"] for city in self.cities(account)}
+        seen = set()
+        result = []
+        for row in records:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Malformed pirate fortress")
+            city_id = row.get("city_id")
+            level = row.get("fortress_level")
+            missions = row.get("missions")
+            name = row.get("city_name")
+            if (type(city_id) is not int or city_id not in owned or city_id in seen
+                    or type(level) is not int or not 1 <= level <= 100
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(missions, list) or not 0 < len(missions) <= 9):
+                raise EngineIPCUnavailable("Invalid pirate fortress city")
+            seen.add(city_id)
+            verified_missions = []
+            mission_ids = set()
+            for mission in missions:
+                if not isinstance(mission, dict):
+                    raise EngineIPCUnavailable("Malformed pirate mission")
+                number = mission.get("number")
+                duration = mission.get("duration_seconds")
+                if (type(number) is not int or not 1 <= number <= 9
+                        or number in mission_ids
+                        or type(duration) is not int or not 0 < duration <= 86400
+                        or level < 2 * number - 1):
+                    raise EngineIPCUnavailable("Pirate mission not supported by fortress level")
+                mission_ids.add(number)
+                verified_missions.append({"number": number, "duration_seconds": duration})
+            result.append({
+                "city_id": city_id, "city_name": name, "fortress_level": level,
+                "missions": verified_missions,
+            })
+        return {"account_id": account.id, "fortresses": result}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""

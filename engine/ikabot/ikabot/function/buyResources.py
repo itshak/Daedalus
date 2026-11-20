@@ -261,7 +261,10 @@ def buy(session, city, offer, amount_to_buy, ships_available, ship_capacity):
     )
 
 
-@task("buyResources")
+from ikabot.function.nativeMarket import prepare_buyResources
+
+
+@task("buyResources", prepare=prepare_buyResources)
 def do_it(session, city, offers, amount_to_buy):
     """
     Parameters

@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from daedalus.api import create_app
+from daedalus.engine_ipc import EngineIPCUnavailable
 from daedalus.warehouse import CityWarehouseSnapshot, WarehouseResources
 
 TOKEN = "x" * 48
@@ -347,3 +348,279 @@ def test_api_responses_for_remote_https_never_cache_private_account_data(account
         assert response.headers["Pragma"] == "no-cache"
         assert response.headers["X-Content-Type-Options"] == "nosniff"
         assert response.headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_building_inventory_api_authorizes_account_city_and_never_dispatches(account_file):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    class BuildingIPC:
+        def __init__(self):
+            self.calls = []
+
+        def buildings(self, account, city_id):
+            self.calls.append((account.id, account.world, account.player, city_id))
+            if city_id != 42:
+                raise ValueError("Different city")
+            return [{"position": 1, "level": 8, "name": "Town Hall",
+                     "building": "townHall", "busy": False, "can_upgrade": True}]
+
+    ipc = BuildingIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    url = "/api/v1/accounts/alpha/cities/42/buildings"
+    assert client.get(url).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/cities/42/buildings", headers=auth).status_code == 404
+    assert client.get("/api/v1/accounts/alpha/cities/0/buildings", headers=auth).status_code == 422
+    assert ipc.calls == []
+    response = client.get(url, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["buildings"][0]["name"] == "Town Hall"
+    assert ipc.calls == [("alpha", "s301-en", "ExamplePlayer", 42)]
+    assert client.get("/api/v1/accounts/alpha/cities/99/buildings", headers=auth).status_code == 404
+    assert client.post(url, headers=auth).status_code == 405
+    assert len(ipc.calls) == 2
+
+    class BrokenIPC:
+        def buildings(self, _account, _city_id):
+            raise EngineIPCUnavailable("private-credential-value")
+
+    broken = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   ipc_client=BrokenIPC()))
+    failed = broken.get(url, headers=auth)
+    assert failed.status_code == 503
+    assert "private-credential" not in failed.text
+
+
+def test_readonly_construction_preview_requires_auth_and_does_not_start_tasks(account_file):
+    class PlanningIPC:
+        def __init__(self):
+            self.calls = []
+
+        def construction_preview(self, account, city_id, upgrades):
+            self.calls.append((account.id, city_id, upgrades))
+            return {"account_id": account.id, "city_id": city_id,
+                    "ready": True, "costs": [1000, 0, 0, 0, 0],
+                    "available": [2000, 0, 0, 0, 0],
+                    "missing": [0] * 5, "estimated_seconds": 120,
+                    "config": {"city_id": city_id, "city_name": "Athens",
+                               "buildings": [], "shipments": [], "expand_overall": True,
+                               "wait_resources": False, "construction_queue": [],
+                               "total_time": 120}}
+
+    ipc = PlanningIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/cities/42/construction-preview"
+    upgrades = [{"position": 3, "target_level": 10}]
+    assert client.post(path, json={"upgrades": upgrades}).status_code == 401
+    assert client.post("/api/v1/accounts/unknown/cities/42/construction-preview",
+                       json={"upgrades": upgrades}, headers=auth).status_code == 404
+    assert client.post(path, json={"upgrades": [{"position": 2, "target_level": -1}]},
+                       headers=auth).status_code == 422
+    assert ipc.calls == []
+    response = client.post(path, json={"upgrades": upgrades}, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert ipc.calls == [("alpha", 42, upgrades)]
+    assert client.get(path, headers=auth).status_code == 405
+
+
+def test_construction_preview_sanitizes_engine_exceptions(account_file):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    class BrokenIPC:
+        def construction_preview(self, _account, _city_id, _upgrades):
+            raise EngineIPCUnavailable("private-game-cookie-string")
+
+    client = TestClient(create_app(
+        accounts_path=account_file, api_token=TOKEN, ipc_client=BrokenIPC(),
+    ))
+    result = client.post(
+        "/api/v1/accounts/alpha/cities/42/construction-preview",
+        json={"upgrades": [{"position": 3, "target_level": 6}]},
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert result.status_code == 503
+    assert "private-game-cookie" not in result.text
+
+
+def test_readonly_trainable_catalog_requires_authorized_owned_city(account_file):
+    class TrainableIPC:
+        def __init__(self):
+            self.calls = []
+
+        def trainable_units(self, account, city_id, *, train_troops):
+            self.calls.append((account.id, city_id, train_troops))
+            return {
+                "account_id": account.id, "city_id": city_id,
+                "train_troops": train_troops,
+                "city": {"id": str(city_id), "pos": "3", "cityName": "Athens"},
+                "units": [{"unit_type_id": 301, "local_name": "Swordsman",
+                           "costs": {"wood": 100, "citizens": 1}}],
+                "available": [1000, 0, 0, 0, 0], "free_citizens": 12,
+            }
+
+    ipc = TrainableIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/cities/42/trainable-units?train_troops=false"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/cities/42/trainable-units",
+                      headers=auth).status_code == 404
+    assert client.get("/api/v1/accounts/alpha/cities/0/trainable-units",
+                      headers=auth).status_code == 422
+    assert not ipc.calls
+    response = client.get(path, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["train_troops"] is False
+    assert ipc.calls == [("alpha", 42, False)]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_market_quotes_need_auth_and_are_read_only(account_file):
+    class MarketIPC:
+        def __init__(self):
+            self.calls = []
+
+        def market_quotes(self, account, city_id, resource_type, side):
+            self.calls.append((account.id, city_id, resource_type, side))
+            return {
+                "account_id": account.id, "city_id": city_id,
+                "resource_type": resource_type, "side": side,
+                "city": {"id": str(city_id), "pos": 3, "rango": 4,
+                         "name": "Athens", "cityName": "Athens",
+                         "availableResources": [1000, 0, 0, 0, 0]},
+                "offers": [], "price_min": None, "price_max": None,
+                "sell_market_capacity": None, "currently_on_sale": None,
+            }
+
+    ipc = MarketIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = ("/api/v1/accounts/alpha/cities/42/market-quotes"
+            "?resource_type=0&side=buy")
+    assert client.get(path).status_code == 401
+    assert client.get(path.replace("/alpha/", "/unknown/"), headers=auth).status_code == 404
+    assert client.get(path.replace("side=buy", "side=send"), headers=auth).status_code == 422
+    assert client.get(path.replace("resource_type=0", "resource_type=9"), headers=auth).status_code == 422
+    assert not ipc.calls
+    resp = client.get(path, headers=auth)
+    assert resp.status_code == 200
+    assert resp.json()["side"] == "buy"
+    assert ipc.calls == [("alpha", 42, 0, "buy")]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_market_quote_service_errors_hide_game_session_data(account_file):
+    class BadMarket:
+        def market_quotes(self, _account, _city_id, _resource_type, _side):
+            raise EngineIPCUnavailable("user-cookie-SECRET-do-not-leak")
+
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   ipc_client=BadMarket()))
+    response = client.get(
+        "/api/v1/accounts/alpha/cities/42/market-quotes?resource_type=0&side=buy",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert response.status_code == 503
+    assert "user-cookie" not in response.text
+
+
+def test_academy_research_api_requires_auth_and_does_not_spend_crystal(account_file):
+    class AcademyIPC:
+        def __init__(self):
+            self.accounts = []
+
+        def academies(self, account):
+            self.accounts.append(account.id)
+            return {"account_id": account.id, "academies": [{
+                "city_id": 42, "city_name": "Athens", "position": 6,
+                "crystal": 300000, "cooldown": False,
+                "can_experiment_now": True,
+            }]}
+
+    ipc = AcademyIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/academies"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/academies", headers=auth).status_code == 404
+    result = client.get(path, headers=auth)
+    assert result.status_code == 200
+    assert result.json()["academies"][0]["can_experiment_now"]
+    assert ipc.accounts == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_tavern_snapshot_api_is_authorized_and_nonmutating(account_file):
+    class TavernIPC:
+        def __init__(self):
+            self.calls = []
+
+        def taverns(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "taverns": [{
+                "city_id": 42, "city_name": "Athens", "wine": 1000,
+                "has_tavern": True, "serving_level": 3, "wine_per_hour": 20,
+                "satisfaction": 10, "population": 100, "capacity": 250,
+            }]}
+
+    ipc = TavernIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/taverns"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/taverns", headers=auth).status_code == 404
+    assert client.get(path, headers=auth).json()["taverns"][0]["wine_per_hour"] == 20
+    assert ipc.calls == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_miracle_inventory_requires_authorization_and_remains_read_only(account_file):
+    class MiracleIPC:
+        def __init__(self):
+            self.calls = []
+
+        def miracles(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "miracles": [{
+                "city_id": 42, "temple_city": "Athens",
+                "island_id": "12", "wonder": "5",
+                "wonder_name": "Hermes", "level": 4,
+                "available": True, "available_in_seconds": 0,
+            }]}
+
+    ipc = MiracleIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/miracles"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/miracles", headers=auth).status_code == 404
+    assert client.get(path, headers=auth).json()["miracles"][0]["wonder"] == "5"
+    assert ipc.calls == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_shrine_favor_api_requires_auth_and_is_read_only(account_file):
+    class ShrineIPC:
+        def __init__(self):
+            self.calls = []
+
+        def shrine_status(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "shrine": {
+                "city_id": 42, "city_name": "Athens", "position": 5,
+                "favor": None,
+            }}
+
+    ipc = ShrineIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    url = "/api/v1/accounts/alpha/shrine-status"
+    assert client.get(url).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/shrine-status", headers=auth).status_code == 404
+    resp = client.get(url, headers=auth)
+    assert resp.status_code == 200
+    assert resp.json()["shrine"]["favor"] is None
+    assert ipc.calls == ["alpha"]
+    assert client.post(url, json={}, headers=auth).status_code == 405

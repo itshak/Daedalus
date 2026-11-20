@@ -35,6 +35,94 @@ def fake_worker(tmp_path, responder=None):
         if msg["action"] == "list_cities_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "cities": [{"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}]}
+        if msg["action"] == "preview_construction_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"],
+                    "plan": {"ready": True, "costs": [1000, 0, 100, 0, 0],
+                             "missing": [0, 0, 0, 0, 0],
+                             "available": [3000, 0, 500, 0, 0],
+                             "estimated_seconds": 120,
+                             "config": {
+                                 "city_id": msg["city_id"], "city_name": "Athens",
+                                 "buildings": [{
+                                     "position": 1, "name": "Town Hall", "building": "townHall",
+                                     "level": 11, "isBusy": False, "upgradeTo": 12,
+                                     "constructionTime": 120, "constructionTimes": [120],
+                                 }],
+                                 "shipments": [], "expand_overall": True, "wait_resources": False,
+                                 "construction_queue": [120], "total_time": 120,
+                             }}}
+        if msg["action"] == "list_buildings_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "buildings": [
+                        {"position": 1, "name": "Town Hall", "building": "townHall",
+                         "level": 12, "busy": False, "can_upgrade": True},
+                        {"position": 3, "name": "Academy", "building": "academy",
+                         "level": 6, "busy": True, "can_upgrade": False},
+                    ]}
+        if msg["action"] == "list_workshop_upgrades_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "workshop_level": 12,
+                    "upgrades": [
+                        {"unit_id": "101", "name": "Swordsman",
+                         "upgrade_type": "offensive", "description": "Attack",
+                         "current_level": 4, "max_level": 12},
+                        {"unit_id": "101", "name": "Swordsman",
+                         "upgrade_type": "defensive", "description": "Defense",
+                         "current_level": 5, "max_level": 12},
+                    ]}
+        if msg["action"] == "list_trainables_existing":
+            return {
+                "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": msg["city_id"], "train_troops": msg["train_troops"],
+                "city": {"id": str(msg["city_id"]), "cityName": "Athens", "pos": "3"},
+                "units": [
+                    {"unit_type_id": 301, "local_name": "Swordsman",
+                     "identifier": "swordsman", "costs": {
+                         "wood": 100, "sulfur": 50, "citizens": 1,
+                     }},
+                ],
+                "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
+            }
+        if msg["action"] == "shrine_status_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "shrine": {"city_id": 42, "city_name": "Athens",
+                               "position": 4, "favor": 750}}
+        if msg["action"] == "list_miracles_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "miracles": [{"city_id": 42, "temple_city": "Athens",
+                                  "island_id": "324", "wonder": "5",
+                                  "wonder_name": "Temple of Hermes", "level": 3,
+                                  "available": False, "available_in_seconds": 1200}]}
+        if msg["action"] == "list_taverns_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "taverns": [{"city_id": 42, "city_name": "Athens", "wine": 12000,
+                                 "has_tavern": True, "serving_level": 5,
+                                 "wine_per_hour": 24, "satisfaction": 45,
+                                 "population": 800, "capacity": 1000}]}
+        if msg["action"] == "list_academies_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "academies": [{"city_id": 42, "city_name": "Athens", "position": 5,
+                                   "crystal": 400000, "cooldown": False,
+                                   "can_experiment_now": True}]}
+        if msg["action"] == "market_quotes_existing":
+            side = msg["market_side"]
+            city = {"id": str(msg["city_id"]), "name": "Athens", "cityName": "Athens",
+                    "pos": 4, "rango": 3, "availableResources": [5000, 500, 0, 0, 0]}
+            offer = {"ciudadDestino": "Seller", "jugadorAComprar": "Trader",
+                     "amountAvailable": 500, "tipo": "wood", "precio": 7,
+                     "destinationCityId": "200", "cityId": str(msg["city_id"]),
+                     "position": "4", "type": "444", "resource": "resource"}
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "side": side,
+                    "resource_type": msg["resource_type"], "city": city,
+                    "offers": [offer] if side == "buy" else
+                              [["Buyer", "Player", 500, 8, 3, 200]]
+                              if side == "sell_to_offers" else [],
+                    "price_min": 1 if side == "create_offer" else None,
+                    "price_max": 30 if side == "create_offer" else None,
+                    "sell_market_capacity": 2000 if side == "create_offer" else None,
+                    "currently_on_sale": 0 if side == "create_offer" else None}
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
@@ -310,3 +398,261 @@ def test_active_validation_refuses_missing_existing_session_without_get(tmp_path
     with fake_worker(tmp_path, responder) as (client, requested, _):
         assert client.validate_account(ALPHA) is False
         assert [item["action"] for item in requested] == ["list_sessions"]
+
+
+def test_building_inventory_uses_existing_session_and_owned_city(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        buildings = client.buildings(ALPHA, 42)
+        assert [(row["position"], row["level"]) for row in buildings] == [(1, 12), (3, 6)]
+        assert requests[-1] == {"action": "list_buildings_existing",
+                                "world": "s301-en", "player": "ExamplePlayer", "city_id": 42}
+        with pytest.raises(ValueError, match="belong"):
+            client.buildings(ALPHA, 43)
+        assert all(row["action"] != "start_task_existing" for row in requests)
+
+
+def test_building_inventory_rejects_cross_account_ipc_data(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}
+            ]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        if msg["action"] == "list_buildings_existing":
+            return {"status": "ok", "world": "s302-en", "username": "OtherPlayer",
+                    "city_id": 42, "buildings": []}
+        raise AssertionError("No other IPC action expected")
+
+    with fake_worker(tmp_path, responder) as (client, requests, _):
+        with pytest.raises(EngineIPCUnavailable, match="another account"):
+            client.buildings(ALPHA, 42)
+        assert not any(row["action"].startswith("start_task") for row in requests)
+
+
+def test_building_inventory_rejects_malformed_and_duplicate_positions(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": 42, "buildings": [
+                    {"position": 1, "level": 10, "name": "Town Hall",
+                     "building": "townHall", "busy": False, "can_upgrade": True},
+                    {"position": 1, "level": 20, "name": "Academy",
+                     "building": "academy", "busy": False, "can_upgrade": True},
+                ]}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="invalid building"
+    ):
+        client.buildings(ALPHA, 42)
+
+
+def test_construction_preview_readonly_and_city_scoped(tmp_path):
+    upgrades = [{"position": 1, "target_level": 12}]
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.construction_preview(ALPHA, 42, upgrades)
+        assert result["ready"] is True
+        assert result["config"]["buildings"][0]["upgradeTo"] == 12
+        assert result["costs"] == [1000, 0, 100, 0, 0]
+        assert requests[-1] == {
+            "action": "preview_construction_existing",
+            "world": "s301-en", "player": "ExamplePlayer", "city_id": 42,
+            "upgrades": upgrades,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.construction_preview(ALPHA, 99, upgrades)
+        with pytest.raises(ValueError, match="Invalid construction upgrade"):
+            client.construction_preview(ALPHA, 42, [{"position": "x", "target_level": 10}])
+        assert all("start_task" not in request["action"] for request in requests)
+
+
+def test_construction_preview_rejects_wrong_account_identity(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s302-en", "username": "WrongPlayer", "city_id": 42,
+                "plan": {"ready": True}}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="different game account"
+    ):
+        client.construction_preview(ALPHA, 42, [{"position": 1, "target_level": 7}])
+
+
+def test_workshop_upgrades_are_account_bound_and_never_start_game_tasks(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        data = client.workshop_upgrades(ALPHA, 42)
+        assert data["workshop_level"] == 12
+        assert [(row["unit_id"], row["upgrade_type"]) for row in data["upgrades"]] == [
+            ("101", "offensive"), ("101", "defensive")
+        ]
+        assert requests[-1] == {
+            "action": "list_workshop_upgrades_existing",
+            "world": "s301-en", "player": "ExamplePlayer", "city_id": 42,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.workshop_upgrades(ALPHA, 99)
+        assert not any("start_task" in row["action"] for row in requests)
+
+
+def test_workshop_malformed_engine_response_rejected_before_ui(tmp_path):
+    def responder(msg):
+        if msg["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [
+                {"world": "s301-en", "player": "ExamplePlayer"}]}
+        if msg["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": 42, "workshop_level": 10, "upgrades": [{
+                    "unit_id": "101", "name": "Sword", "upgrade_type": "offensive",
+                    "description": "Attack", "current_level": 4, "max_level": 99,
+                }]}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="Malformed workshop"
+    ):
+        client.workshop_upgrades(ALPHA, 42)
+
+
+def test_readonly_training_catalog_is_source_scoped_and_contains_actual_costs(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        catalog = client.trainable_units(ALPHA, 42, train_troops=True)
+        assert catalog["train_troops"] is True
+        assert catalog["units"][0]["unit_type_id"] == 301
+        assert catalog["units"][0]["costs"]["wood"] == 100
+        assert requests[-1] == {
+            "action": "list_trainables_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+            "city_id": 42, "train_troops": True,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.trainable_units(ALPHA, 99, train_troops=True)
+        with pytest.raises(ValueError, match="Invalid training selection"):
+            client.trainable_units(ALPHA, 42, train_troops="yes")
+        assert not any("start_task" in request["action"] for request in requests)
+
+
+@pytest.mark.parametrize("side", ["buy", "sell_to_offers", "create_offer"])
+def test_market_quotes_ipc_uses_authorized_city_and_never_starts_trade(tmp_path, side):
+    with fake_worker(tmp_path) as (client, requests, _):
+        data = client.market_quotes(ALPHA, 42, 0, side)
+        assert data["city"]["id"] == "42"
+        assert data["side"] == side
+        assert requests[-1] == {
+            "action": "market_quotes_existing", "world": "s301-en",
+            "player": "ExamplePlayer", "city_id": 42,
+            "resource_type": 0, "market_side": side,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.market_quotes(ALPHA, 99, 0, side)
+        with pytest.raises(ValueError, match="Invalid market selection"):
+            client.market_quotes(ALPHA, 42, 5, side)
+        assert not any("task" in item["action"] for item in requests)
+
+
+def test_market_quote_response_from_wrong_world_rejected(tmp_path):
+    def responder(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{
+                "world": "s301-en", "player": "ExamplePlayer",
+            }]}
+        if request["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wood"}]}
+        return {"status": "ok", "world": "s301-en", "username": "WrongPlayer",
+                "city_id": 42, "resource_type": 0, "side": "buy",
+                "city": {}, "offers": []}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable
+    ):
+        client.market_quotes(ALPHA, 42, 0, "buy")
+
+
+def test_academy_research_ipc_lists_only_owned_and_real_game_stock(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.academies(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["academies"] == [
+            {"city_id": 42, "city_name": "Athens", "position": 5,
+             "crystal": 400000, "cooldown": False, "can_experiment_now": True},
+        ]
+        assert {
+            "action": "list_academies_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        } in requests
+        assert not any("task" in request["action"] for request in requests)
+
+
+def test_academy_research_ipc_rejects_wrong_city_and_false_readiness(tmp_path):
+    def responder(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{
+                "world": "s301-en", "player": "ExamplePlayer",
+            }]}
+        if request["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "academies": [{"city_id": 99, "city_name": "Other", "position": 2,
+                               "crystal": 50, "cooldown": True,
+                               "can_experiment_now": True}]}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="foreign academy"
+    ):
+        client.academies(ALPHA)
+
+
+def test_tavern_status_ipc_is_owned_and_read_only(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        payload = client.taverns(ALPHA)
+        assert payload["account_id"] == "alpha"
+        city = payload["taverns"][0]
+        assert city["city_id"] == 42
+        assert city["wine"] == 12000
+        assert city["wine_per_hour"] == 24
+        assert city["satisfaction"] == 45
+        assert {
+            "action": "list_taverns_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        } in requests
+        assert not any("task" in record["action"] for record in requests)
+
+
+def test_miracle_inventory_is_account_owned_and_exposes_real_cooldown(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.miracles(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["miracles"][0]["wonder"] == "5"
+        assert result["miracles"][0]["available_in_seconds"] == 1200
+        assert {
+            "action": "list_miracles_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        } in requests
+        assert not any("start_task" in request["action"] for request in requests)
+
+
+def test_olympus_shrine_status_ipc_owns_city_and_favor(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.shrine_status(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["shrine"]["city_id"] == 42
+        assert result["shrine"]["favor"] == 750
+        assert {
+            "action": "shrine_status_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        } in requests
+        assert not any("start_task" in row["action"] for row in requests)

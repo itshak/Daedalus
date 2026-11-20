@@ -252,6 +252,58 @@ class APIWorker(QThread):
                 result = self.client.connected_accounts()
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "task_cities" and self.account_id:
+                result = {
+                    "account_id": self.account_id,
+                    "cities": self.client.cities(self.account_id),
+                }
+            elif self.action == "task_construction_preview" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                upgrades = self.task_payload.get("upgrades")
+                if type(city_id) is not int or not isinstance(upgrades, list):
+                    raise ValueError("Invalid construction preview")
+                result = self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "task_piracy" and self.account_id:
+                result = self.client.pirate_fortresses(self.account_id)
+            elif self.action == "task_shrine" and self.account_id:
+                result = self.client.shrine_status(self.account_id)
+            elif self.action == "task_miracles" and self.account_id:
+                result = self.client.miracles(self.account_id)
+            elif self.action == "task_taverns" and self.account_id:
+                result = self.client.taverns(self.account_id)
+            elif self.action == "task_academies" and self.account_id:
+                result = self.client.academies(self.account_id)
+            elif self.action == "task_market" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                resource_type = self.task_payload.get("resource_type")
+                side = self.task_payload.get("side")
+                if (type(city_id) is not int or type(resource_type) is not int
+                        or not isinstance(side, str)):
+                    raise ValueError("Invalid market quote scope")
+                result = self.client.market_quotes(
+                    self.account_id, city_id, resource_type, side,
+                )
+            elif self.action == "task_trainables" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                train_troops = self.task_payload.get("train_troops")
+                if type(city_id) is not int or type(train_troops) is not bool:
+                    raise ValueError("Invalid army training city or mode")
+                result = self.client.trainable_units(
+                    self.account_id, city_id, train_troops=train_troops,
+                )
+            elif self.action == "task_workshop" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                if type(city_id) is not int:
+                    raise ValueError("Invalid workshop city")
+                result = self.client.workshop_upgrades(self.account_id, city_id)
+            elif self.action == "task_buildings" and self.account_id and self.task_payload:
+                city_id = self.task_payload.get("city_id")
+                if type(city_id) is not int:
+                    raise ValueError("Invalid selected construction city")
+                result = {
+                    "account_id": self.account_id, "city_id": city_id,
+                    "buildings": self.client.buildings(self.account_id, city_id),
+                }
             elif self.action == "warehouses" and self.account_id:
                 result = {
                     "account_id": self.account_id,
@@ -465,6 +517,17 @@ class MainWindow(FluentWindow):
         # timer fired from completed may race with finished and be discarded.
         self._preflight_queue: list[tuple[str, str, int]] = []
         self._pending_task_refresh: str | None = None
+        self._pending_task_cities: str | None = None
+        self._pending_task_buildings: tuple[str, int] | None = None
+        self._pending_workshop: tuple[str, int] | None = None
+        self._pending_trainables: tuple[str, int, bool] | None = None
+        self._pending_market: tuple[str, int, int, str] | None = None
+        self._pending_academies: str | None = None
+        self._pending_taverns: str | None = None
+        self._pending_miracles: str | None = None
+        self._pending_shrine: str | None = None
+        self._pending_piracy: str | None = None
+        self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._selenium_worker: SeleniumLoginWorker | None = None
@@ -623,6 +686,17 @@ class MainWindow(FluentWindow):
             )
         )
         for view in self._task_views:
+            view.cities_requested.connect(self._queue_task_cities)
+            view.buildings_requested.connect(self._queue_task_buildings)
+            view.workshop_requested.connect(self._queue_workshop)
+            view.trainable_units_requested.connect(self._queue_trainables)
+            view.market_quotes_requested.connect(self._queue_market)
+            view.academies_requested.connect(self._queue_academies)
+            view.taverns_requested.connect(self._queue_taverns)
+            view.miracles_requested.connect(self._queue_miracles)
+            view.shrine_requested.connect(self._queue_shrine)
+            view.pirate_fortresses_requested.connect(self._queue_piracy)
+            view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
             )
@@ -1327,6 +1401,204 @@ class MainWindow(FluentWindow):
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
+    def _queue_task_cities(self, account_id: str) -> None:
+        """Fetch account-bound city choices off-thread, after an active request ends."""
+        if self.client is None or self.tasks_page.selected_account_id() != account_id:
+            return
+        self._pending_task_cities = account_id
+        self._run_next_task_cities()
+
+    def _run_next_task_cities(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_task_cities
+        self._pending_task_cities = None
+        if account_id and self.tasks_page.selected_account_id() == account_id:
+            self._launch(self.client, "task_cities", account_id=account_id)
+
+    def _queue_task_buildings(self, account_id: str, city_id: int) -> None:
+        """Only load current selected city's read-only inventory."""
+        if self.client is None or self.tasks_page.selected_account_id() != account_id:
+            return
+        self._pending_task_buildings = (account_id, city_id)
+        self._run_next_task_buildings()
+
+    def _run_next_task_buildings(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_task_buildings
+        self._pending_task_buildings = None
+        if scope and self.tasks_page.selected_account_id() == scope[0]:
+            self._launch(self.client, "task_buildings", account_id=scope[0],
+                         task_payload={"city_id": scope[1]})
+
+    def _queue_construction_preview(
+        self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+    ) -> None:
+        """Prepare a read-only queue for the currently selected account and city."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "constructionList"):
+            return
+        self._pending_construction_preview = (account_id, city_id, upgrades)
+        self._run_next_construction_preview()
+
+    def _run_next_construction_preview(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_construction_preview
+        self._pending_construction_preview = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() == "constructionList"):
+            self._launch(
+                self.client, "task_construction_preview", account_id=scope[0],
+                task_payload={"city_id": scope[1], "upgrades": scope[2]},
+            )
+
+    def _queue_workshop(self, account_id: str, city_id: int) -> None:
+        """Read eligible upgrade rows for the current account-owned city."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "UpgradeUnits"):
+            return
+        self._pending_workshop = (account_id, city_id)
+        self._run_next_workshop()
+
+    def _run_next_workshop(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_workshop
+        self._pending_workshop = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() == "UpgradeUnits"):
+            self._launch(
+                self.client, "task_workshop", account_id=scope[0],
+                task_payload={"city_id": scope[1]},
+            )
+
+    def _queue_trainables(
+        self, account_id: str, city_id: int, train_troops: bool,
+    ) -> None:
+        """Read real, scoped barracks/shipyard catalog for the selected city."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "trainArmy"):
+            return
+        self._pending_trainables = (account_id, city_id, train_troops)
+        self._run_next_trainables()
+
+    def _run_next_trainables(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_trainables
+        self._pending_trainables = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() == "trainArmy"):
+            self._launch(
+                self.client, "task_trainables", account_id=scope[0],
+                task_payload={"city_id": scope[1], "train_troops": scope[2]},
+            )
+
+    def _queue_market(self, account_id: str, city_id: int,
+                      resource_type: int, side: str) -> None:
+        """Get account-scoped live quotes without starting a transaction."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() not in {"buyResources", "sellResources"}):
+            return
+        self._pending_market = (account_id, city_id, resource_type, side)
+        self._run_next_market()
+
+    def _run_next_market(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        scope = self._pending_market
+        self._pending_market = None
+        if (scope is not None and self.tasks_page.selected_account_id() == scope[0]
+                and self.tasks_page.selected_task_name() in {"buyResources", "sellResources"}):
+            self._launch(
+                self.client, "task_market", account_id=scope[0],
+                task_payload={"city_id": scope[1], "resource_type": scope[2],
+                              "side": scope[3]},
+            )
+
+    def _queue_academies(self, account_id: str) -> None:
+        """Fetch academy research readiness for the selected account."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "research"):
+            return
+        self._pending_academies = account_id
+        self._run_next_academies()
+
+    def _run_next_academies(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_academies
+        self._pending_academies = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "research"):
+            self._launch(self.client, "task_academies", account_id=account_id)
+
+    def _queue_taverns(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "tavernManager"):
+            return
+        self._pending_taverns = account_id
+        self._run_next_taverns()
+
+    def _run_next_taverns(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_taverns
+        self._pending_taverns = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "tavernManager"):
+            self._launch(self.client, "task_taverns", account_id=account_id)
+
+    def _queue_miracles(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "activateMiracle"):
+            return
+        self._pending_miracles = account_id
+        self._run_next_miracles()
+
+    def _run_next_miracles(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_miracles
+        self._pending_miracles = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "activateMiracle"):
+            self._launch(self.client, "task_miracles", account_id=account_id)
+
+    def _queue_shrine(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "activateShrine"):
+            return
+        self._pending_shrine = account_id
+        self._run_next_shrine()
+
+    def _run_next_shrine(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_shrine
+        self._pending_shrine = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "activateShrine"):
+            self._launch(self.client, "task_shrine", account_id=account_id)
+
+    def _queue_piracy(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "autoPirate"):
+            return
+        self._pending_piracy = account_id
+        self._run_next_piracy()
+
+    def _run_next_piracy(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_piracy
+        self._pending_piracy = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "autoPirate"):
+            self._launch(self.client, "task_piracy", account_id=account_id)
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1438,6 +1710,17 @@ class MainWindow(FluentWindow):
                     self._preflight_queue.clear()
                     self._pending_task_refresh = None
                     self._pending_batch_status = None
+                    self._pending_task_cities = None
+                    self._pending_task_buildings = None
+                    self._pending_workshop = None
+                    self._pending_trainables = None
+                    self._pending_market = None
+                    self._pending_academies = None
+                    self._pending_taverns = None
+                    self._pending_miracles = None
+                    self._pending_shrine = None
+                    self._pending_piracy = None
+                    self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
@@ -1624,6 +1907,40 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
+        elif action == "task_cities":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_cities(payload["account_id"], payload["cities"])
+        elif action == "task_piracy":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_pirate_fortresses(payload)
+        elif action == "task_shrine":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_shrine(payload)
+        elif action == "task_miracles":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_miracles(payload)
+        elif action == "task_taverns":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_taverns(payload)
+        elif action == "task_academies":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_academies(payload)
+        elif action == "task_market":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_market_quotes(payload)
+        elif action == "task_trainables":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_trainable_units(payload)
+        elif action == "task_workshop":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_workshop_upgrades(payload)
+        elif action == "task_buildings":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
+                                          payload["buildings"])
+        elif action == "task_construction_preview":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_construction_preview(payload)
         elif action == "task_preflight":
             assert isinstance(payload, dict)
             worker = self._worker
@@ -1740,6 +2057,71 @@ class MainWindow(FluentWindow):
             self._automatic_login_failures += 1
             self._reset_automatic_attempt()
             self._automatic_login_pending_advance = True
+        if action == "task_cities":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_cities_unavailable(account_id)
+        if action == "task_piracy":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_pirate_fortresses_unavailable(account_id)
+        if action == "task_shrine":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_shrine_unavailable(account_id)
+        if action == "task_miracles":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_miracles_unavailable(account_id)
+        if action == "task_taverns":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_taverns_unavailable(account_id)
+        if action == "task_academies":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_academies_unavailable(account_id)
+        if action == "task_market":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            resource_type = request.get("resource_type") if isinstance(request, dict) else None
+            side = request.get("side") if isinstance(request, dict) else None
+            if (isinstance(account_id, str) and type(city_id) is int
+                    and type(resource_type) is int and isinstance(side, str)):
+                self.tasks_page.set_market_unavailable(account_id, city_id, resource_type, side)
+        if action == "task_trainables":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            train_troops = request.get("train_troops") if isinstance(request, dict) else None
+            if (isinstance(account_id, str) and type(city_id) is int
+                    and type(train_troops) is bool):
+                self.tasks_page.set_trainable_units_unavailable(account_id, city_id, train_troops)
+        if action == "task_workshop":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            if isinstance(account_id, str) and type(city_id) is int:
+                self.tasks_page.set_workshop_unavailable(account_id, city_id)
+        if action == "task_buildings":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            if isinstance(account_id, str) and type(city_id) is int:
+                self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action == "task_construction_preview":
+            worker = self._worker
+            account_id = getattr(worker, "account_id", None)
+            request = getattr(worker, "task_payload", None)
+            city_id = request.get("city_id") if isinstance(request, dict) else None
+            if isinstance(account_id, str) and type(city_id) is int:
+                self.tasks_page.set_construction_preview_unavailable(account_id, city_id)
         if action == "task_preflight":
             worker = self._worker
             request = getattr(worker, "task_payload", None)
@@ -1783,7 +2165,10 @@ class MainWindow(FluentWindow):
                 # A failed reconnect must not hide an existing authorized session.
                 self.connection_page.set_connected(True)
         logger.warning("Backend %s request failed", action)
-        if action not in {"assistance_pending", "task_preflight"}:
+        if action not in {"assistance_pending", "task_preflight", "task_cities",
+                          "task_buildings", "task_construction_preview", "task_workshop",
+                          "task_trainables", "task_market", "task_academies",
+                          "task_taverns", "task_miracles", "task_shrine", "task_piracy"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -1836,6 +2221,28 @@ class MainWindow(FluentWindow):
                 and self._automatic_login_pending_advance):
             self._automatic_login_pending_advance = False
             QTimer.singleShot(0, self._advance_automatic_login)
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_task_cities()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_task_buildings()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_construction_preview()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_workshop()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_trainables()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_market()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_academies()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_taverns()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_miracles()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_shrine()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_piracy()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 

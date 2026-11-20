@@ -220,15 +220,19 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             assert not page.start_button.isEnabled()
             page.set_preflight({"account_id": "alpha", "task": expected,
                                 "ready": True, "reason": "none"})
-            assert page.start_button.isEnabled()
+            assert page.start_button.isEnabled() is (kind == "wine")
             if kind == "wine":
                 page._form_inputs["threshold"].setText("1000")
                 page._build_config_from_form()
                 assert '"threshold": 1000' in page.config_editor.toPlainText()
             page.confirm_box.setChecked(True)
             page._start()
-            assert seen[-1][0:2] == ("alpha", expected)
-            assert seen[-1][2] == ({"threshold": 1000} if kind == "wine" else {})
+            if kind == "wine":
+                assert seen[-1][0:2] == ("alpha", expected)
+                assert seen[-1][2] == {"threshold": 1000}
+            else:
+                # No prepared plan was supplied; merely having an @task is not enough.
+                assert seen == []
             assert "constructBuilding" not in page._task_names
         finally:
             _dispose(page, qt_app)
@@ -275,7 +279,7 @@ def test_native_navigation_uses_one_contextual_automation_workspace(qt_app, monk
             "account_id": "alpha", "task": "constructionList",
             "ready": True, "reason": "none"
         })
-        assert page.start_button.isEnabled()
+        assert not page.start_button.isEnabled()  # no reviewed construction plan
         window._on_completed("task_list", {
             "account_id": "alpha", "engine_tasks": [
                 {"task": "alertLowWine", "status": "running", "pid": 1001,

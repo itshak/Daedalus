@@ -44,14 +44,243 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
-    ("tavernManager", "run_hours"): {
-        "type": "integer",
-        "label": "Check tavern balance every",
-        "minimum": 0,
-        "maximum": 168,
-        "suffix": " hours",
-        "explicit_input": True,
-        "help": "Whole hours between checks. Choose 0 to run just once.",
+    ("buyResources", "city"): {
+        "type": "market_buy", "label": "Buy at this trading post",
+        "help": "Choose live seller offers from this account's trading-post city.",
+    },
+    ("buyResources", "offers"): {"type": "hidden_derived"},
+    ("buyResources", "amount_to_buy"): {"type": "hidden_derived"},
+    ("sellResources", "mode"): {
+        "type": "market_sell", "label": "Sell resources",
+        "help": "Select real buyers or create an offer within current trading-post price bounds.",
+    },
+    ("sellResources", "amount_to_sell"): {"type": "hidden_derived"},
+    ("sellResources", "offers"): {"type": "hidden_derived"},
+    ("sellResources", "resource_type"): {"type": "hidden_derived"},
+    ("sellResources", "city_to_buy_from"): {"type": "hidden_derived"},
+    ("sellResources", "price"): {"type": "hidden_derived"},
+    ("sellResources", "sell_market_capacity"): {"type": "hidden_derived"},
+    ("sellResources", "city"): {"type": "hidden_derived"},
+    ("trainArmy", "city"): {
+        "type": "train_units", "label": "Recruit from barracks or shipyard",
+        "help": "Choose a real city and actual unit types. Available resources and unit costs come from IkaBot.",
+    },
+    ("trainArmy", "tranings"): {"type": "hidden_derived"},
+    ("trainArmy", "trainTroops"): {"type": "hidden_derived"},
+    ("trainArmy", "replicate"): {"type": "hidden_derived"},
+    ("trainArmy", "countRepeat"): {"type": "hidden_derived"},
+    ("trainArmy", "cityTrainings"): {"type": "hidden_derived"},
+    ("trainArmy", "units"): {"type": "hidden_derived"},
+    ("UpgradeUnits", "jobs"): {
+        "type": "workshop_jobs", "label": "Workshop upgrade plan",
+        "help": "Choose a real city, then available unit and ship upgrades from its IkaBot workshop.",
+    },
+    # Source-verified compound editors. These field maps follow the actual
+    # upstream prepare_* contract; options and amounts remain subject to
+    # independent engine-side validation.
+    ("sendResources", "routes"): {
+        "type": "shipment_routes", "label": "Shipments",
+        "help": "Add origin, destination and resource quantities for each route. Own cities only.",
+    },
+    ("consolidateResources", "limits"): {
+        "type": "resource_limits", "label": "Retain in source cities",
+        "help": "Choose how many resources to keep in each source city; keep all means do not ship.",
+    },
+    ("consolidateResources", "sourceCityIds"): {
+        "type": "city_list", "label": "Source cities",
+        "help": "Choose the owned cities whose excess resources should be consolidated.",
+    },
+    ("consolidateResources", "destinationCityId"): {
+        "type": "city_picker", "label": "Destination city",
+        "help": "Receive excess resources in this account's city.",
+    },
+    ("consolidateResources", "intervalInHours"): {
+        "type": "integer", "label": "Repeat every",
+        "minimum": 1, "maximum": 336, "suffix": " h",
+        "explicit_input": True, "help": "Full hours between consolidation checks.",
+    },
+    ("consolidateResources", "shipType"): {
+        "type": "integer", "choices": [1, 2, 3],
+        "choice_labels": ["Trade ships", "Freighters", "Both fleets"],
+        "label": "Fleet type",
+    },
+    ("donationBot", "cities_dict"): {
+        "type": "donation_policies", "label": "Donation by city",
+        "help": "Choose each city's island project and share or amount.",
+    },
+    ("donationBot", "donate_method"): {
+        "type": "integer", "choices": [1, 2, 3],
+        "choice_labels": ["Keep storage below a percentage",
+                          "Donate a percentage of production",
+                          "Donate a fixed resource amount"],
+        "label": "Donation policy",
+    },
+    ("donationBot", "waiting_time"): {
+        "type": "integer", "label": "Repeat donations every",
+        "minimum": 1, "maximum": 10080, "suffix": " min",
+        "help": "Actual IkaBot donation polling interval.",
+    },
+    ("donationBot", "cities_ids"): {
+        "type": "hidden_derived",
+        "help": "City IDs are derived from the reviewed donation table.",
+    },
+    ("resourceTransportManager", "mode"): {
+        "type": "text", "choices": ["consolidate", "distribute"],
+        "choice_labels": ["Many source cities → One destination",
+                          "One source city → Many destinations"],
+        "label": "Transport strategy",
+    },
+    ("resourceTransportManager", "origin_cities"): {
+        "type": "city_list", "label": "Sending cities",
+        "help": "Select one or more of your own source cities.",
+    },
+    ("resourceTransportManager", "destination_city"): {
+        "type": "city_picker", "label": "Receiving city",
+    },
+    ("resourceTransportManager", "origin_city"): {
+        "type": "city_picker", "label": "Sending city",
+    },
+    ("resourceTransportManager", "destination_cities"): {
+        "type": "city_list", "label": "Receiving cities",
+        "help": "Choose the receiving cities in this account.",
+    },
+    ("resourceTransportManager", "resource_config"): {
+        "type": "resource_config", "label": "Five resource policies",
+        "help": "Use Ignore to exclude a resource, 0 for send-all in Keep mode, or a positive amount.",
+    },
+    ("resourceTransportManager", "send_mode"): {
+        "type": "text", "choices": ["keep", "send"],
+        "choice_labels": ["Keep a reserve; send any surplus", "Send these amounts"],
+        "label": "Resource amount interpretation",
+    },
+    ("resourceTransportManager", "island"): {
+        "type": "hidden_derived",
+        "help": "External destination islands need a separately verified lookup and are expert-only.",
+    },
+    ("resourceTransportManager", "interval_hours"): {
+        "type": "integer", "minimum": 0, "maximum": 720,
+        "label": "Repeat every", "suffix": " hours",
+        "help": "0 sends only once; a positive value runs periodically.",
+    },
+    ("resourceTransportManager", "notify"): {
+        "type": "text", "choices": ["none", "start", "all"],
+        "choice_labels": ["No extra notifications", "At the start of each cycle",
+                          "For every shipment"],
+        "label": "Notifications",
+    },
+    ("resourceTransportManager", "info"): {"type": "hidden_derived"},
+    ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
+    ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},
+    ("research", "qty"): {"type": "hidden_derived"},
+    ("research", "mode"): {"type": "hidden_derived"},
+    ("research", "experiments"): {"type": "hidden_derived"},
+    ("research", "automatic"): {"type": "hidden_derived"},
+    ("research", "cities"): {"type": "hidden_derived"},
+    ("research", "info"): {"type": "hidden_derived"},
+    ("tavernManager", "cities"): {"type": "hidden_derived"},
+    ("activateMiracle", "wonder"): {
+        "type": "miracle_temple", "label": "Actual owned wonder temple",
+        "help": "Choose an actual wonder and inspect cooldowns from authenticated game data.",
+    },
+    ("activateMiracle", "iterations"): {"type": "hidden_derived"},
+    ("activateMiracle", "island"): {
+        "type": "hidden_derived",
+        "help": "IkaBot finds an eligible owned temple for the chosen wonder.",
+    },
+    ("activateShrine", "godids"): {
+        "type": "olympus_shrine", "label": "Olympus blessings",
+        "help": "Real shrine, current favour balance, gods and schedule.",
+    },
+    ("activateShrine", "mode"): {"type": "hidden_derived"},
+    ("activateShrine", "times"): {"type": "hidden_derived"},
+    ("activateShrine", "selected_gods"): {"type": "hidden_derived"},
+    ("activateShrine", "wait_time"): {"type": "hidden_derived"},
+    ("searchForIslandSpaces", "islandList"): {
+        "type": "island_list", "label": "Islands to monitor",
+        "help": "Optionally select islands already hosting your cities; otherwise IkaBot searches all owned islands.",
+    },
+    ("searchForIslandSpaces", "time"): {
+        "type": "integer", "minimum": 3, "maximum": 1440,
+        "label": "Check every", "suffix": " min", "explicit_input": True,
+    },
+    ("searchForIslandSpaces", "fights"): {
+        "type": "boolean", "label": "Also monitor fighting on these islands",
+    },
+    ("dumpWorld", "coords"): {
+        "type": "map_center", "label": "Map area",
+        "help": "Optionally select an area; leave disabled to scan the whole world.",
+    },
+    ("dumpWorld", "radius"): {
+        "type": "hidden_derived", "help": "Radius is entered beside the optional map center.",
+    },
+    ("dumpWorld", "waiting_time"): {
+        "type": "number", "label": "Delay between island requests",
+        "minimum": 0.1, "maximum": 60.0, "suffix": " s",
+        "help": "Avoid aggressive world requests. Default is 1.5 seconds.",
+    },
+    ("dumpWorld", "show_progress"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateCount"): {
+        "type": "piracy_missions", "label": "Piracy mission planner",
+        "help": "Choose a real owned fortress, missions and schedule using verified game levels.",
+    },
+    ("autoPirate", "pirateSchedule"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionDayChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionNightChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "dayStart"): {"type": "hidden_derived"},
+    ("autoPirate", "dayEnd"): {"type": "hidden_derived"},
+    ("autoPirate", "nightStart"): {"type": "hidden_derived"},
+    ("autoPirate", "nightEnd"): {"type": "hidden_derived"},
+    ("autoPirate", "autoConvert"): {"type": "hidden_derived"},
+    ("autoPirate", "convertPerMission"): {"type": "hidden_derived"},
+    ("autoPirate", "maxRandomWaitingTime"): {"type": "hidden_derived"},
+    ("autoPirate", "piracyCities"): {"type": "hidden_derived"},
+    # Daily collection city destinations and favour keys are taken verbatim
+    # from loginDaily.prepare_loginDaily and TASK_FUNCTIONS.
+    ("loginDaily", "wine_city"): {
+        "type": "city_picker", "label": "Daily wine reward city",
+        "help": "Choose which of your actual cities receives the daily wine reward.",
+    },
+    ("loginDaily", "wood_city"): {
+        "type": "city_picker", "label": "Cinetheatre wood reward city",
+        "help": "Optional: leave skipped if you do not want the wood cinetheatre reward.",
+    },
+    ("loginDaily", "luxury_city"): {
+        "type": "city_picker", "label": "Cinetheatre luxury reward city",
+        "help": "Optional: leave skipped if you do not want the luxury cinetheatre reward.",
+    },
+    ("loginDaily", "favour_tasks"): {
+        "type": "choices_list", "choices": ["resource", "look", "online", "complete"],
+        "label": "Daily favour tasks",
+        "help": "Optional tasks: collect resource favour, visit information pages, stay online or collect completed tasks.",
+    },
+    # These are literal upstream enums in distributeResources.py, not guesses.
+    ("distributeResources", "resource"): {
+        "type": "text",
+        "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
+        "label": "Resource to distribute",
+        "help": "The IkaBot engine calculates actual shipment amounts at the time of dispatch.",
+    },
+    ("distributeResources", "mode"): {
+        "type": "text",
+        "choices": ["even", "producers"],
+        "label": "Distribution policy",
+        "help": "Even: balance amounts; Producers: ship from producers to non-producers.",
+    },
+    ("distributeResources", "cities_ids"): {
+        "type": "city_list",
+        "label": "Participating cities",
+        "help": "Leave all unchecked to use every city. Choose at least two for a custom subset.",
+    },
+    ("tavernManager", "cities_ids"): {
+        "type": "tavern_cities", "label": "Tavern equilibrium",
+        "help": "Use actual wine, population and tavern statuses to choose managed cities.",
+    },
+    ("tavernManager", "run_hours"): {"type": "hidden_derived"},
+    ("tavernManager", "notification_mode"): {"type": "hidden_derived"},
+    ("research", "cities_ids"): {
+        "type": "academy_research", "label": "Academy experiments",
+        "help": "Choose actual academies; see current crystal and cooldown.",
     },
     ("alertLowWine", "hours"): {
         "type": "integer",
@@ -72,10 +301,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "maximum": 1_000_000,
         "help": "The amount of wine to send if automatic transfer is enabled; 0 disables transfers.",
     },
-    ("tavernManager", "check_now"): {
-        "label": "Check once immediately",
-        "help": "Run the initial check before the recurring schedule.",
-    },
+    ("tavernManager", "check_now"): {"type": "hidden_derived"},
 }
 
 

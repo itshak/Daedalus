@@ -241,3 +241,89 @@ class TestConstructionSpeedupOptIn(unittest.TestCase):
                         "speedup" in call.args[0]
                         for call in session.setStatus.call_args_list
                     ))
+
+
+class TestNativeConstructionPreview(unittest.TestCase):
+    """No Gameforge traffic; upstream cost calculator is a deterministic stub."""
+
+    def setUp(self):
+        self.session = Mock()
+        self.session.get.return_value = "<synthetic city>"
+        self.city = {
+            "id": "42", "name": "Athens", "endUpgradeTime": 0,
+            "availableResources": [3000, 1000, 500, 0, 0],
+            "position": [
+                {"position": 1, "name": "Town Hall", "building": "townHall",
+                 "level": 5, "isBusy": False, "isMaxLevel": False},
+                {"position": 2, "name": "Academy", "building": "academy",
+                 "level": 3, "isBusy": False, "isMaxLevel": False},
+            ],
+        }
+
+    @staticmethod
+    def fake_costs(_session, _city, building, current, target, _reducers,
+                   *, noninteractive=False):
+        assert noninteractive
+        assert target > current
+        building["constructionTimes"] = [120] * (target - current)
+        building["constructionTime"] = 120 * (target - current)
+        return [1000 * (target - current), 0, 200, 0, 0]
+
+    def _preview(self, selected=None):
+        from ikabot.helpers import taskConfig
+
+        selected = selected or [{"position": 1, "target_level": 6}]
+        with (patch.object(taskConfig, "requireOwnCity", return_value="42"),
+              patch.object(construction, "getCity", return_value=self.city),
+              patch.object(construction, "getCostsReducers", return_value=[0] * 5),
+              patch.object(construction, "getResourcesNeeded",
+                           side_effect=self.fake_costs)):
+            return construction.preview_native_construction(self.session, 42, selected)
+
+    def test_preview_builds_real_calculated_queue_without_game_writes(self):
+        preview = self._preview()
+        self.assertTrue(preview["ready"])
+        self.assertEqual(preview["costs"], [1000, 0, 200, 0, 0])
+        self.assertEqual(preview["missing"], [0, 0, 0, 0, 0])
+        self.assertEqual(preview["config"]["construction_queue"], [120])
+        self.assertEqual(preview["config"]["buildings"][0]["upgradeTo"], 6)
+        self.assertEqual(preview["config"]["shipments"], [])
+        self.session.post.assert_not_called()
+
+    def test_preview_reports_exact_shortages_without_authorizing_start(self):
+        self.city["availableResources"] = [200, 0, 30, 0, 0]
+        preview = self._preview()
+        self.assertFalse(preview["ready"])
+        self.assertEqual(preview["missing"], [800, 0, 170, 0, 0])
+        self.session.post.assert_not_called()
+
+    def test_fails_closed_on_duplicate_slots_and_stale_targets(self):
+        for selected in (
+            [{"position": 1, "target_level": 6},
+             {"position": 1, "target_level": 7}],
+            [{"position": 1, "target_level": 5}],
+            [{"position": 79, "target_level": 7}],
+            [{"position": 2, "target_level": 99}],
+        ):
+            with self.subTest(selected=selected):
+                with self.assertRaises(ValueError):
+                    self._preview(selected)
+
+    def test_dispatch_revalidates_costs_and_rejects_tampered_queue(self):
+        from ikabot.helpers import taskConfig
+
+        with (patch.object(taskConfig, "requireOwnCity", return_value="42"),
+              patch.object(construction, "getCity", return_value=self.city),
+              patch.object(construction, "getCostsReducers", return_value=[0] * 5),
+              patch.object(construction, "getResourcesNeeded",
+                           side_effect=self.fake_costs)):
+            preview = construction.preview_native_construction(
+                self.session, 42, [{"position": 1, "target_level": 6}]
+            )
+            valid = construction.prepare_constructionList(self.session, **preview["config"])
+            self.assertEqual(valid["buildings"], preview["config"]["buildings"])
+            invalid = dict(preview["config"])
+            invalid["construction_queue"] = [1]
+            with self.assertRaisesRegex(ValueError, "stale"):
+                construction.prepare_constructionList(self.session, **invalid)
+        self.session.post.assert_not_called()

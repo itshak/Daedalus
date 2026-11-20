@@ -58,12 +58,17 @@ class TestPrepareAutoPirate(unittest.TestCase):
         )
         self.assertEqual([config[k] for k in ("dayStart", "dayEnd", "nightStart", "nightEnd")], [None] * 4)
 
-    def test_a_saved_config_keeps_only_the_first_city_id(self, _mock_cities):
+    def test_saved_config_accepts_only_eligible_owned_fortress(self, _mock_cities):
+        with self.assertRaisesRegex(ValueError, "not eligible"):
+            prepare_autoPirate(
+                MagicMock(), pirateCount=5, pirateMissionChoice=2,
+                piracyCities=[{"id": "8000", "name": "Foreign fortress"}],
+            )
         config = prepare_autoPirate(
             MagicMock(), pirateCount=5, pirateMissionChoice=2,
-            piracyCities=[{"id": "8000", "name": "Beta", "position": ["lots", "of", "data"]}],
+            piracyCities=[{"id": "7665", "name": "Alpha", "position": ["game-only"]}],
         )
-        self.assertEqual(config["piracyCities"], [{"id": "8000"}])
+        self.assertEqual(config["piracyCities"], [{"id": "7665"}])
 
     def test_rejects_bad_values(self, _mock_cities):
         with self.assertRaisesRegex(ValueError, "pirateMissionChoice must be at most 9, got 10"):

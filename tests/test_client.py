@@ -365,3 +365,109 @@ def test_only_fixed_task_prerequisite_errors_are_shown_to_user():
             c.start_task("alpha", "alertAttacks", {},
                 "12345678-1234-4123-8123-123456789abc", confirmed=True)
         assert "private-secret" not in str(err.value)
+
+
+def test_readonly_building_api_client_refuses_wrong_account_and_synthetic_data():
+    seen = []
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path.endswith("/cities/42/buildings"):
+            return httpx.Response(200, json={
+                "account_id": "alpha", "city_id": 42, "available": True,
+                "buildings": [{"position": 1, "name": "Town Hall", "level": 12,
+                              "building": "townHall", "busy": False, "can_upgrade": True}]
+            })
+        return httpx.Response(404)
+    with mock_client(handler) as client:
+        assert client.buildings("alpha", 42)[0]["level"] == 12
+        with pytest.raises(ValueError, match="Invalid building inventory"):
+            client.buildings("../other", 42)
+        with pytest.raises(ValueError, match="Invalid building inventory"):
+            client.buildings("alpha", -1)
+        assert seen == ["/api/v1/accounts/alpha/cities/42/buildings"]
+
+    def fake(_request):
+        return httpx.Response(200, json={"account_id": "alpha", "city_id": 42,
+                                         "available": False, "buildings": []})
+    with mock_client(fake) as client, pytest.raises(APIConnectionError, match="unavailable"):
+        client.buildings("alpha", 42)
+
+
+def test_construction_preview_client_is_account_scoped_and_post_only():
+    sent = []
+    def handler(request):
+        sent.append((request.method, request.url.path, request.headers.get("Authorization")))
+        if request.method != "POST":
+            return httpx.Response(405)
+        assert json.loads(request.content) == {
+            "upgrades": [{"position": 4, "target_level": 12}]
+        }
+        return httpx.Response(200, json={
+            "account_id": "alpha", "city_id": 42, "ready": True,
+            "costs": [1000, 0, 0, 0, 0], "missing": [0, 0, 0, 0, 0],
+            "available": [5000, 0, 0, 0, 0], "estimated_seconds": 120,
+            "config": {"city_id": 42, "city_name": "Athens"},
+        })
+    with mock_client(handler) as client:
+        result = client.construction_preview(
+            "alpha", 42, [{"position": 4, "target_level": 12}],
+        )
+        assert result["ready"]
+        for account, city, upgrades in (
+            ("../other", 42, [{"position": 4, "target_level": 12}]),
+            ("alpha", -1, [{"position": 4, "target_level": 12}]),
+            ("alpha", 42, [{"position": "invalid", "target_level": 12}]),
+        ):
+            with pytest.raises(ValueError, match="Invalid construction preview"):
+                client.construction_preview(account, city, upgrades)
+    assert sent == [
+        ("POST", "/api/v1/accounts/alpha/cities/42/construction-preview", f"Bearer {TOKEN}")
+    ]
+
+
+def test_construction_preview_rejects_wrong_account_or_fabricated_shape():
+    for response in (
+        {"account_id": "beta", "city_id": 42, "ready": True, "costs": [0] * 5,
+         "missing": [0] * 5, "available": [0] * 5, "estimated_seconds": 0, "config": {}},
+        {"account_id": "alpha", "city_id": 42, "ready": "yes", "costs": [0] * 5,
+         "missing": [0] * 5, "available": [0] * 5, "estimated_seconds": 0, "config": {}},
+        {"account_id": "alpha", "city_id": 42, "ready": True, "costs": [],
+         "missing": [0] * 5, "available": [0] * 5, "estimated_seconds": 0, "config": {}},
+    ):
+        with mock_client(lambda _request, data=response: httpx.Response(
+            200, json=data,
+        )) as client, pytest.raises(APIConnectionError, match="invalid construction preview"):
+            client.construction_preview(
+                "alpha", 42, [{"position": 4, "target_level": 12}],
+            )
+
+
+def test_client_trainable_units_use_only_verified_account_and_mode():
+    seen = []
+    def handler(request):
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(200, json={
+            "account_id": "alpha", "city_id": 42, "train_troops": True,
+            "city": {"id": "42", "cityName": "Athens", "pos": "3"},
+            "units": [], "available": [0] * 5, "free_citizens": 0,
+        })
+    with mock_client(handler) as client:
+        result = client.trainable_units("alpha", 42, train_troops=True)
+        assert result["city"]["cityName"] == "Athens"
+        with pytest.raises(ValueError, match="Invalid training unit scope"):
+            client.trainable_units("alpha", 42, train_troops="troops")
+        with pytest.raises(ValueError, match="Invalid training unit scope"):
+            client.trainable_units("other/evil", 42, train_troops=False)
+    assert len(seen) == 1
+    assert seen[0][0] == "GET"
+    assert seen[0][1].endswith(
+        "/api/v1/accounts/alpha/cities/42/trainable-units?train_troops=true"
+    )
+
+
+def test_client_trainable_catalog_wrong_account_rejected():
+    with mock_client(lambda _r: httpx.Response(200, json={
+        "account_id": "beta", "city_id": 42, "train_troops": True,
+        "city": {}, "units": [], "available": [0] * 5, "free_citizens": 0,
+    })) as client, pytest.raises(APIConnectionError, match="invalid trainable"):
+        client.trainable_units("alpha", 42, train_troops=True)
