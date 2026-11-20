@@ -51,6 +51,7 @@ from daedalus.desktop.native_controls import (
     DonationPoliciesEditor,
     MapAreaEditor,
     MarketOffersEditor,
+    MiracleTempleEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -127,6 +128,7 @@ class TasksPage(QWidget):
     market_quotes_requested = Signal(str, int, int, str)
     academies_requested = Signal(str)
     taverns_requested = Signal(str)
+    miracles_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -1008,6 +1010,21 @@ class TasksPage(QWidget):
         if isinstance(editor, TavernCitiesEditor):
             editor.set_unavailable()
 
+    def set_miracles(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "activateMiracle"):
+            return
+        editor = self._form_inputs.get("wonder")
+        if isinstance(editor, MiracleTempleEditor):
+            editor.set_miracles(result["miracles"])
+
+    def set_miracles_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("wonder")
+        if isinstance(editor, MiracleTempleEditor):
+            editor.set_unavailable()
+
     def set_buildings_unavailable(self, account_id: str, city_id: int) -> None:
         if account_id == self.selected_account_id() and city_id == self._selected_construction_city():
             self._buildings_scope = None
@@ -1566,6 +1583,9 @@ class TasksPage(QWidget):
             elif kind == "map_center":
                 widget = MapAreaEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
+            elif kind == "miracle_temple":
+                widget = MiracleTempleEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "tavern_cities":
                 widget = TavernCitiesEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
@@ -1700,6 +1720,8 @@ class TasksPage(QWidget):
             self.academies_requested.emit(self.selected_account_id())
         if name == "tavernManager" and self.selected_account_id():
             self.taverns_requested.emit(self.selected_account_id())
+        if name == "activateMiracle" and self.selected_account_id():
+            self.miracles_requested.emit(self.selected_account_id())
         if name == "donationBot":
             method = self._form_inputs.get("donate_method")
             policy = self._form_inputs.get("cities_dict")
@@ -1728,7 +1750,7 @@ class TasksPage(QWidget):
                 "city_list", "choices_list", "island_list", "shipment_routes",
                 "donation_policies", "resource_limits", "resource_config",
                 "workshop_jobs", "train_units", "market_buy", "market_sell",
-                "academy_research", "tavern_cities",
+                "academy_research", "tavern_cities", "miracle_temple",
             } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
@@ -1753,7 +1775,7 @@ class TasksPage(QWidget):
                          "city_list", "city_picker", "island_list", "shipment_routes",
                          "donation_policies", "workshop_jobs", "train_units",
                          "market_buy", "market_sell", "academy_research",
-                         "tavern_cities",
+                         "tavern_cities", "miracle_temple",
                      } for field in fields))):
             self.cities_requested.emit(account_id)
 
@@ -1858,6 +1880,9 @@ class TasksPage(QWidget):
                 continue
             if isinstance(widget, ShipmentRoutesEditor):
                 config[key] = widget.to_config()
+                continue
+            if isinstance(widget, MiracleTempleEditor):
+                config.update(widget.to_config())
                 continue
             if isinstance(widget, TavernCitiesEditor):
                 config.update(widget.to_config())
