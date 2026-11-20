@@ -48,10 +48,22 @@ def test_every_active_change_is_explicitly_unfinished_and_reported():
 
 
 def test_canonical_capability_specs_exist_for_all_active_deltas():
+    """New ADDED capabilities become canonical only after implementation/archive."""
     for path in sorted(CHANGES.glob("*/specs/*/spec.md")):
         capability = path.parent.name
-        assert (SPECS / capability / "spec.md").is_file(), (
-            f"Active delta {path} has no canonical capability spec"
+        if (SPECS / capability / "spec.md").is_file():
+            continue
+        delta = path.read_text(encoding="utf-8")
+        operations = re.findall(
+            r"^## (ADDED|MODIFIED|REMOVED|RENAMED) Requirements\s*$",
+            delta,
+            flags=re.MULTILINE,
+        )
+        assert operations == ["ADDED"], (
+            f"Unrecognized capability {capability} may only have ADDED requirements: {path}"
+        )
+        assert "## Purpose" in delta, (
+            f"New capability {capability} needs a Purpose before archival"
         )
 
 
