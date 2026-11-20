@@ -624,6 +624,32 @@ def create_app(
         except EngineIPCUnavailable as exc:
             raise HTTPException(status_code=503, detail="Authenticated unit catalog unavailable") from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/market-quotes",
+        dependencies=[Depends(authorized)],
+    )
+    def market_quotes(
+        account_id: str, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read source-verified offers/price bounds, not a game transaction."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12 or not 0 <= resource_type <= 4:
+            raise HTTPException(status_code=422, detail="Invalid market city or resource")
+        if side not in {"buy", "sell_to_offers", "create_offer"}:
+            raise HTTPException(status_code=422, detail="Invalid market action")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated market unavailable")
+        try:
+            return ipc_client.market_quotes(account, city_id, resource_type, side)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned market unavailable") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated market unavailable") from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
