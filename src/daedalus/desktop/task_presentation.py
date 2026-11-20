@@ -188,19 +188,11 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "IkaBot finds an eligible owned temple for the chosen wonder.",
     },
     ("activateShrine", "godids"): {
-        "type": "choices_list", "choices": [1, 2, 3, 4, 5, 6],
-        "choice_labels": ["Pan", "Dionysus", "Tyche", "Plutus", "Theia", "Hephaestus"],
-        "label": "Gods to activate", "help": "Requires an actual Shrine of Olympus in this account.",
+        "type": "olympus_shrine", "label": "Olympus blessings",
+        "help": "Real shrine, current favour balance, gods and schedule.",
     },
-    ("activateShrine", "mode"): {
-        "type": "integer", "choices": [1, 2, 3],
-        "choice_labels": ["Activate a number of times", "Repeat every 70 hours", "Both"],
-        "label": "Activation schedule",
-    },
-    ("activateShrine", "times"): {
-        "type": "integer", "minimum": 1, "maximum": 10,
-        "label": "Number of activations", "help": "Used in First and Both schedules.",
-    },
+    ("activateShrine", "mode"): {"type": "hidden_derived"},
+    ("activateShrine", "times"): {"type": "hidden_derived"},
     ("activateShrine", "selected_gods"): {"type": "hidden_derived"},
     ("activateShrine", "wait_time"): {"type": "hidden_derived"},
     ("searchForIslandSpaces", "islandList"): {
