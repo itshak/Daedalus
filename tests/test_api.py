@@ -441,3 +441,36 @@ def test_construction_preview_sanitizes_engine_exceptions(account_file):
     )
     assert result.status_code == 503
     assert "private-game-cookie" not in result.text
+
+
+def test_readonly_trainable_catalog_requires_authorized_owned_city(account_file):
+    class TrainableIPC:
+        def __init__(self):
+            self.calls = []
+
+        def trainable_units(self, account, city_id, *, train_troops):
+            self.calls.append((account.id, city_id, train_troops))
+            return {
+                "account_id": account.id, "city_id": city_id,
+                "train_troops": train_troops,
+                "city": {"id": str(city_id), "pos": "3", "cityName": "Athens"},
+                "units": [{"unit_type_id": 301, "local_name": "Swordsman",
+                           "costs": {"wood": 100, "citizens": 1}}],
+                "available": [1000, 0, 0, 0, 0], "free_citizens": 12,
+            }
+
+    ipc = TrainableIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/cities/42/trainable-units?train_troops=false"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/cities/42/trainable-units",
+                      headers=auth).status_code == 404
+    assert client.get("/api/v1/accounts/alpha/cities/0/trainable-units",
+                      headers=auth).status_code == 422
+    assert not ipc.calls
+    response = client.get(path, headers=auth)
+    assert response.status_code == 200
+    assert response.json()["train_troops"] is False
+    assert ipc.calls == [("alpha", 42, False)]
+    assert client.post(path, json={}, headers=auth).status_code == 405
