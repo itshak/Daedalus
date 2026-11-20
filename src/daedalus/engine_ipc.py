@@ -34,6 +34,7 @@ _ALLOWED = frozenset({
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
+    "list_pirate_fortresses_existing",
 })
 
 
@@ -139,6 +140,7 @@ class ExistingIPCClient:
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
+            "list_pirate_fortresses_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -770,6 +772,51 @@ class ExistingIPCClient:
             shrine = {"city_id": city_id, "city_name": name,
                       "position": position, "favor": favor}
         return {"account_id": account.id, "shrine": shrine}
+
+    def pirate_fortresses(self, account: Account) -> dict[str, object]:
+        """Bounded, account-owned fortress inventory and actual mission eligibility."""
+        data = self.request("list_pirate_fortresses_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Pirate fortresses belong to another account")
+        records = data.get("fortresses")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("Invalid pirate fortress inventory")
+        owned = {city["id"] for city in self.cities(account)}
+        seen = set()
+        result = []
+        for row in records:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Malformed pirate fortress")
+            city_id = row.get("city_id")
+            level = row.get("fortress_level")
+            missions = row.get("missions")
+            name = row.get("city_name")
+            if (type(city_id) is not int or city_id not in owned or city_id in seen
+                    or type(level) is not int or not 1 <= level <= 100
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or not isinstance(missions, list) or not 0 < len(missions) <= 9):
+                raise EngineIPCUnavailable("Invalid pirate fortress city")
+            seen.add(city_id)
+            verified_missions = []
+            mission_ids = set()
+            for mission in missions:
+                if not isinstance(mission, dict):
+                    raise EngineIPCUnavailable("Malformed pirate mission")
+                number = mission.get("number")
+                duration = mission.get("duration_seconds")
+                if (type(number) is not int or not 1 <= number <= 9
+                        or number in mission_ids
+                        or type(duration) is not int or not 0 < duration <= 86400
+                        or level < 2 * number - 1):
+                    raise EngineIPCUnavailable("Pirate mission not supported by fortress level")
+                mission_ids.add(number)
+                verified_missions.append({"number": number, "duration_seconds": duration})
+            result.append({
+                "city_id": city_id, "city_name": name, "fortress_level": level,
+                "missions": verified_missions,
+            })
+        return {"account_id": account.id, "fortresses": result}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
