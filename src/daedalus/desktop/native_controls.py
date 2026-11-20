@@ -1034,3 +1034,81 @@ class TavernCitiesEditor(QWidget):
             "run_hours": self.interval.value(),
             "notification_mode": self.notifications.currentIndex() + 1,
         }
+
+
+class MiracleTempleEditor(QWidget):
+    """Select an actual owned temple/wonder instead of an invented god choice."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.table = _table((
+            "Wonder", "Temple city", "Wonder level", "Now", "Cooldown remaining",
+        ))
+        self.table.setMinimumHeight(195)
+        self.table.setAccessibleName("Real account-owned miracles and cooldowns")
+        self.table.itemSelectionChanged.connect(self.changed.emit)
+        layout.addWidget(self.table)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Activations to schedule"))
+        self.iterations = _amount(minimum=1, value=1,
+                                  label="Total wonder activations")
+        self.iterations.setMaximum(100)
+        self.iterations.valueChanged.connect(self.changed.emit)
+        row.addWidget(self.iterations)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.description = QLabel(
+            "Loading current temple miracles from this game account."
+        )
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._wonders: list[dict[str, object]] | None = None
+
+    def set_miracles(self, wonders: list[dict[str, object]]) -> None:
+        self._wonders = list(wonders)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(wonders))
+            for row, miracle in enumerate(wonders):
+                seconds = miracle["available_in_seconds"]
+                cooldown = (f"{seconds // 3600} h {(seconds % 3600) // 60} min"
+                            if seconds else "None")
+                for column, value in (
+                    (0, miracle["wonder_name"]),
+                    (1, miracle["temple_city"]),
+                    (2, miracle["level"]),
+                    (3, "Ready" if miracle["available"] else "Waiting"),
+                    (4, cooldown),
+                ):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(row, column, cell)
+            self.table.clearSelection()
+        self.description.setText(
+            f"{len(wonders)} real miracle types from your own temples. "
+            "Select one row. IkaBot will check wonder eligibility again at launch "
+            "and wait for cooldown before each later activation."
+        )
+        self.changed.emit()
+
+    def set_unavailable(self) -> None:
+        self._wonders = None
+        self.table.setRowCount(0)
+        self.description.setText(
+            "Temple and wonder information unavailable for this account."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> dict[str, object]:
+        if self._wonders is None:
+            raise ValueError("Load actual owned miracles before selecting")
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self._wonders):
+            raise ValueError("Select one real wonder temple from the table")
+        return {
+            "wonder": self._wonders[row]["wonder"],
+            "iterations": self.iterations.value(),
+        }
