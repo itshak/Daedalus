@@ -48,7 +48,8 @@ def test_navigation_has_unique_icons_and_only_one_regular_automation(app, monkey
     monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
     window = MainWindow()
     try:
-        assert len({icon.value for icon in NAV_ICONS.values()}) == 7
+        assert len({icon.value for icon in NAV_ICONS.values()}) == len(NAV_ICONS) == 8
+        assert window.military_page.objectName() == "military_page"
         assert NAV_ICONS["connection"] != NAV_ICONS["settings"]
         assert NAV_ICONS["automations"] != NAV_ICONS["activity"]
         assert window.tasks_page.objectName() == "tasks_page"
@@ -353,6 +354,8 @@ def test_wine_alert_has_native_required_hours_and_safe_transfer_toggle(app):
 def test_tavern_manager_native_hour_spinner_allows_explicit_one_time_run(app):
     from PySide6.QtWidgets import QSpinBox
 
+    from daedalus.desktop.native_controls import TavernCitiesEditor
+
     page = TasksPage()
     try:
         page.set_accounts(accounts())
@@ -363,12 +366,25 @@ def test_tavern_manager_native_hour_spinner_allows_explicit_one_time_run(app):
                 {"name": "cities_ids", "type": "json", "default": None},
             ],
         }], enabled=True)
-        spinner = page._form_inputs["run_hours"]
+        editor = page._form_inputs["cities_ids"]
+        assert isinstance(editor, TavernCitiesEditor)
+        assert "run_hours" not in page._form_inputs  # dedicated UI replaces raw JSON
+        spinner = editor.interval
         assert isinstance(spinner, QSpinBox)
-        with pytest.raises(ValueError, match="Choose a value"):
+        with pytest.raises(ValueError, match="Load real tavern"):
             page._form_config()
+        page.set_taverns({
+            "account_id": page.selected_account_id(),
+            "taverns": [{
+                "city_id": 42, "city_name": "Athens", "wine": 10000,
+                "has_tavern": True, "serving_level": 2, "wine_per_hour": 50,
+                "satisfaction": 40, "population": 800, "capacity": 1000,
+            }],
+        })
         spinner.setValue(0)
-        assert page._form_config() == {"run_hours": 0}
+        assert page._form_config() == {
+            "cities_ids": None, "run_hours": 0, "notification_mode": 2,
+        }
     finally:
         _dispose(page, app)
 

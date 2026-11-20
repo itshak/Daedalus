@@ -764,6 +764,10 @@ class IPCServer:
                     return self._shrine_status_existing(request)
                 if action == "list_pirate_fortresses_existing":
                     return self._list_pirate_fortresses_existing(request)
+                if action == "military_overview_existing":
+                    return self._military_overview_existing(request)
+                if action == "ship_movements_existing":
+                    return self._ship_movements_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -1252,6 +1256,116 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "fortresses": verified,
+        }
+
+    def _military_overview_existing(self, request):
+        """Read-only ground/fleet counts from the owner's existing cityMilitary view.
+
+        Original CLI viewArmy parser is reused, but raw HTML never leaves IPC.
+        Neither opening the view nor parsing its data changes the game state.
+        """
+        from ikabot.function.viewArmy import getCityMilitaryData, parseUnits
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+        from ikabot.helpers.varios import decodeUnicodeEscape
+
+        session = self._existing_session(request)
+        ids, cities = getIdsOfCities(session)
+        if not isinstance(ids, (list, tuple)) or len(ids) > 100:
+            raise ValueError("Invalid number of military cities")
+        results = []
+        known = set()
+        for raw_id in ids:
+            city_id = _existing_city_id(raw_id)
+            if city_id in known:
+                raise ValueError("Repeated military city")
+            known.add(city_id)
+            city = cities[raw_id]
+            if not isinstance(city, dict):
+                raise ValueError("Invalid military city")
+            city_name = decodeUnicodeEscape(city.get("name", ""))
+            if (not isinstance(city_name, str) or not city_name.strip()
+                    or len(city_name) > 120):
+                raise ValueError("Invalid military city name")
+            ground, fleet = parseUnits(getCityMilitaryData(session, city["id"]))
+            def reviewed_units(units):
+                if not isinstance(units, dict) or len(units) > 100:
+                    raise ValueError("Invalid military inventory")
+                rows = []
+                for unit_name, amount in units.items():
+                    if (not isinstance(unit_name, str) or not unit_name.strip()
+                            or len(unit_name) > 100 or type(amount) is not int
+                            or not 0 <= amount <= 10**10):
+                        raise ValueError("Invalid military unit count")
+                    if amount:
+                        rows.append({"unit": unit_name, "amount": amount})
+                return rows
+            results.append({
+                "city_id": city_id, "city_name": city_name,
+                "troops": reviewed_units(ground), "fleet": reviewed_units(fleet),
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "cities": results,
+            "observed_at": int(time.time()),
+        }
+
+    def _ship_movements_existing(self, request):
+        """Read-only military advisor's existing movement panel, not a send order."""
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        ids, _cities = getIdsOfCities(session)
+        if not ids or len(ids) > 100:
+            raise ValueError("No verified owned city available for movements")
+        city_id = _existing_city_id(ids[0])
+        url = (
+            "view=militaryAdvisor&oldView=city&oldBackgroundView=city"
+            f"&backgroundView=city&currentCityId={city_id}"
+            f"&actionRequest={config.actionRequest}&ajax=1"
+        )
+        raw = json.loads(session.post(url), strict=False)
+        movements = raw[1][1][2]["viewScriptParams"]["militaryAndFleetMovements"]
+        server_now = int(raw[0][1]["time"])
+        if not isinstance(movements, list) or len(movements) > 250:
+            raise ValueError("Invalid number of ship movements")
+        def title(value):
+            if not isinstance(value, str) or len(value) > 120:
+                raise ValueError("Invalid movement text")
+            return value
+        result = []
+        for item in movements:
+            if not isinstance(item, dict):
+                raise ValueError("Invalid ship movement")
+            origin = item["origin"]
+            destination = item["target"]
+            event = item["event"]
+            if not all(isinstance(value, dict) for value in (origin, destination, event)):
+                raise ValueError("Invalid movement description")
+            arrive = int(item["eventTime"])
+            if arrive < 0 or arrive > 2**40:
+                raise ValueError("Invalid movement arrival")
+            soldiers = int(item["army"]["amount"])
+            ships = int(item["fleet"]["amount"])
+            if any(not 0 <= n <= 10**10 for n in (soldiers, ships)):
+                raise ValueError("Invalid movement quantities")
+            hostile = item.get("isHostile")
+            returning = event.get("isFleetReturning")
+            if type(hostile) is not bool or type(returning) is not bool:
+                raise ValueError("Invalid movement flags")
+            result.append({
+                "origin": title(origin.get("name")),
+                "destination": title(destination.get("name")),
+                "origin_player": title(origin.get("avatarName") or ""),
+                "destination_player": title(destination.get("avatarName") or ""),
+                "mission": title(event.get("missionText") or ""),
+                "seconds_remaining": max(0, arrive - server_now),
+                "troops": soldiers, "ships": ships,
+                "hostile": hostile, "returning": returning,
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "movements": result,
+            "observed_at": int(time.time()),
         }
 
     def _warehouse_snapshots_existing(self, request):

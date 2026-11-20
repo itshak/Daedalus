@@ -180,7 +180,15 @@ class TasksPage(QWidget):
         self.stack = QStackedWidget(self)
         outer.addWidget(self.pivot)
         outer.addWidget(self.stack, 1)
-        self.stack.addWidget(scroll)
+        # A single vertical scroller owns the guided fields. Keep the exact
+        # approval/launch actions visible in a compact, keyboard-reachable
+        # footer instead of burying them beneath large live-data tables.
+        configure_root = QWidget(self.stack)
+        configure_layout = QVBoxLayout(configure_root)
+        configure_layout.setContentsMargins(0, 0, 0, 0)
+        configure_layout.setSpacing(0)
+        configure_layout.addWidget(scroll, 1)
+        self.stack.addWidget(configure_root)
         self.pivot.addItem(
             routeKey="configure", text="Configure",
             onClick=lambda: self._show_section(0),
@@ -324,8 +332,10 @@ class TasksPage(QWidget):
 
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
-        self.parameter_scroll.setMinimumHeight(110)
-        self.parameter_scroll.setMaximumHeight(290)
+        self.parameter_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.parameter_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.parameter_scroll.setMinimumHeight(72)
+        self.parameter_scroll.setMaximumHeight(3200)
         self.parameter_container = QWidget()
         self.parameter_layout = QFormLayout(self.parameter_container)
         self.parameter_scroll.setWidget(self.parameter_container)
@@ -399,7 +409,12 @@ class TasksPage(QWidget):
         )
         self.start_button.clicked.connect(self._start)
         launch_row.addWidget(self.start_button)
-        layout.addLayout(launch_row)
+        self.configure_footer = CardWidget(configure_root)
+        self.configure_footer.setAccessibleName("Review and launch automation")
+        footer_layout = QVBoxLayout(self.configure_footer)
+        footer_layout.setContentsMargins(16, 9, 16, 9)
+        footer_layout.setSpacing(5)
+        footer_layout.addLayout(launch_row)
 
         batch_row = QHBoxLayout()
         self.bulk_note = CaptionLabel(
@@ -415,7 +430,8 @@ class TasksPage(QWidget):
         )
         self.start_selected_button.clicked.connect(self._start_selected)
         batch_row.addWidget(self.start_selected_button)
-        layout.addLayout(batch_row)
+        footer_layout.addLayout(batch_row)
+        configure_layout.addWidget(self.configure_footer)
 
         running_panel = QWidget(self.stack)
         layout = QVBoxLayout(running_panel)
@@ -1812,9 +1828,14 @@ class TasksPage(QWidget):
                 "academy_research", "tavern_cities", "miracle_temple",
                 "olympus_shrine", "piracy_missions",
             } for field in visible_fields) else 0
-            self.parameter_scroll.setFixedHeight(
-                min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
+            # Use the outer page's one scrollbar: native tables and policy
+            # editors should never create a second tiny scrolling viewport.
+            self.parameter_container.adjustSize()
+            content_height = max(
+                self.parameter_container.sizeHint().height() + 16,
+                len(visible_fields) * 44 + 24 + list_extra,
             )
+            self.parameter_scroll.setFixedHeight(min(3000, max(72, content_height)))
         self.build_json_button.setEnabled(bool(fields))
         self._invalidate_review()
         self.config_editor.setPlainText("{}")

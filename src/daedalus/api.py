@@ -819,6 +819,48 @@ def create_app(
                 status_code=503, detail="Authenticated piracy inventory unavailable"
             ) from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/military",
+        dependencies=[Depends(authorized)],
+    )
+    def account_military(account_id: str) -> dict[str, object]:
+        """Current owned-city troops and fleets; never issue a military order."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated military data unavailable")
+        try:
+            data = ipc_client.military_overview(account)
+        except (EngineIPCUnavailable, ValueError) as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated military data unavailable"
+            ) from exc
+        return {"account_id": account_id, **data}
+
+    @app.get(
+        "/api/v1/accounts/{account_id}/ship-movements",
+        dependencies=[Depends(authorized)],
+    )
+    def account_ship_movements(account_id: str) -> dict[str, object]:
+        """Read-only current ship/military movements, never dispatch a ship."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated movement data unavailable")
+        try:
+            data = ipc_client.ship_movements(account)
+        except (EngineIPCUnavailable, ValueError) as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated movement data unavailable"
+            ) from exc
+        return {"account_id": account_id, **data}
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""

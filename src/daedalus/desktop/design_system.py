@@ -40,6 +40,7 @@ NAV_ICONS = {
     "overview": FIF.HOME,
     "accounts": FIF.PEOPLE,
     "warehouses": FIF.SAVE,
+    "military": FIF.FLAG,
     "automations": FIF.ROBOT,
     "activity": FIF.HISTORY,
     "connection": FIF.LINK,

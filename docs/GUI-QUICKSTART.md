@@ -83,6 +83,27 @@ The **Home** dashboard prioritizes a currently authenticated account and offers 
 
 **Notifications**: This preview detects missing Telegram/Discord destinations, but still uses IkaBot's existing notification setup for secret bot tokens/webhooks; it does not transmit them through the ordinary Daedalus REST API. Do not paste those secrets into an automation JSON field.
 
+## Read-only military dashboard (Troops / Fleet / Movements)
+
+Open **Military** from the main navigation. Select a particular account or
+**All accounts** (the default), then choose **Troops**, **Fleet**, or
+**Movements**. Click **Refresh military data**. Daedalus queries only the
+currently authenticated, account-bound IkaBot session. The troop/fleet views
+show per-city units and ships; Movements shows origin, destination, mission,
+time remaining, troop and ship counts and hostile/returning indicators.
+
+The screen performs **no recruitment, battle, dispatch or recall**. Data is
+cleared when changing backend context; a disconnected account reports
+*unavailable*, never an invented zero. All-account reads run sequentially,
+with independent per-account results. The original viewArmy and
+shipMovements CLI functions remain intact and are not misrepresented as
+background tasks.
+
+The Automations workspace keeps the explicit consent and launch actions
+visible beneath task-specific native tables; its outer scroll owns long
+configuration content. Unsupported combat and administrative operations
+remain clearly labeled as requiring a reviewed native planner.
+
 ## Current acceptance boundaries
 
 One owner-authorized field smoke verified Monjo saved-cookie restoration, the exact game-world player, seven city records and seven real warehouse snapshots on the Mac. No owner-approved game-task execution, **new native Mac Gameforge browser/CAPTCHA login**, dedicated-worker rebind, persistent server keyring after host reboot or completed production cutover has been demonstrated. Those live acceptance checks remain open in the owner acceptance checklist in [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md). GUI and backend synthetic tests cannot substitute for them.

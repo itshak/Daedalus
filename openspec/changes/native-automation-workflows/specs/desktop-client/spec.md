@@ -35,3 +35,11 @@ The client SHALL expose grouped navigation, appropriate native controls, keyboar
 #### Scenario: Narrow window
 - **WHEN** the user sizes a Mac window to 900x650
 - **THEN** category navigation, city selector, task controls and review action remain reachable without overlap or clipped inputs
+
+### Requirement: Native, nonmutating military inspection
+The desktop SHALL expose Troops, Fleet and Movements from verified IkaBot existing-session snapshots for one or all configured enabled accounts, with per-account data isolation and visible unavailable/unknown states. Editing or viewing these tables SHALL never initiate a military action.
+
+#### Scenario: All accounts military inspection
+- **GIVEN** two accounts, one authenticated and one disconnected
+- **WHEN** the operator refreshes Troops for All accounts
+- **THEN** only the authenticated account's actual units are listed; the disconnected account is counted as unavailable, not as an empty garrison
