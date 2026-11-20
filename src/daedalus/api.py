@@ -650,6 +650,28 @@ def create_app(
         except EngineIPCUnavailable as exc:
             raise HTTPException(status_code=503, detail="Authenticated market unavailable") from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/academies",
+        dependencies=[Depends(authorized)],
+    )
+    def academy_research_inventory(account_id: str) -> dict[str, object]:
+        """Read current academy stock and cooldowns, without spending crystal."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated academy inventory unavailable")
+        try:
+            return ipc_client.academies(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Academy read rejected invalid account") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated academy inventory unavailable"
+            ) from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
