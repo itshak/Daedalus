@@ -206,6 +206,8 @@ class APIWorker(QThread):
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "task_miracles" and self.account_id:
+                result = self.client.miracles(self.account_id)
             elif self.action == "task_taverns" and self.account_id:
                 result = self.client.taverns(self.account_id)
             elif self.action == "task_academies" and self.account_id:
@@ -456,6 +458,7 @@ class MainWindow(FluentWindow):
         self._pending_market: tuple[str, int, int, str] | None = None
         self._pending_academies: str | None = None
         self._pending_taverns: str | None = None
+        self._pending_miracles: str | None = None
         self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
@@ -615,6 +618,7 @@ class MainWindow(FluentWindow):
             view.market_quotes_requested.connect(self._queue_market)
             view.academies_requested.connect(self._queue_academies)
             view.taverns_requested.connect(self._queue_taverns)
+            view.miracles_requested.connect(self._queue_miracles)
             view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
@@ -1448,6 +1452,22 @@ class MainWindow(FluentWindow):
                 and self.tasks_page.selected_task_name() == "tavernManager"):
             self._launch(self.client, "task_taverns", account_id=account_id)
 
+    def _queue_miracles(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "activateMiracle"):
+            return
+        self._pending_miracles = account_id
+        self._run_next_miracles()
+
+    def _run_next_miracles(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_miracles
+        self._pending_miracles = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "activateMiracle"):
+            self._launch(self.client, "task_miracles", account_id=account_id)
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1566,6 +1586,7 @@ class MainWindow(FluentWindow):
                     self._pending_market = None
                     self._pending_academies = None
                     self._pending_taverns = None
+                    self._pending_miracles = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
@@ -1743,6 +1764,9 @@ class MainWindow(FluentWindow):
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
+        elif action == "task_miracles":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_miracles(payload)
         elif action == "task_taverns":
             assert isinstance(payload, dict)
             self.tasks_page.set_taverns(payload)
@@ -1868,6 +1892,10 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.tasks_page.set_cities_unavailable(account_id)
+        if action == "task_miracles":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_miracles_unavailable(account_id)
         if action == "task_taverns":
             account_id = getattr(self._worker, "account_id", None)
             if isinstance(account_id, str):
@@ -1962,7 +1990,7 @@ class MainWindow(FluentWindow):
         if action not in {"assistance_pending", "task_preflight", "task_cities",
                           "task_buildings", "task_construction_preview", "task_workshop",
                           "task_trainables", "task_market", "task_academies",
-                          "task_taverns"}:
+                          "task_taverns", "task_miracles"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -2031,6 +2059,8 @@ class MainWindow(FluentWindow):
             self._run_next_academies()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_taverns()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_miracles()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
