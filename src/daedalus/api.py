@@ -694,6 +694,28 @@ def create_app(
                 status_code=503, detail="Authenticated tavern inventory unavailable"
             ) from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/miracles",
+        dependencies=[Depends(authorized)],
+    )
+    def miracle_inventory(account_id: str) -> dict[str, object]:
+        """Read only real activated temples and available wonder cooldowns."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated wonder inventory unavailable")
+        try:
+            return ipc_client.miracles(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid wonder account context") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated wonder inventory unavailable"
+            ) from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
