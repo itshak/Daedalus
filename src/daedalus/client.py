@@ -608,6 +608,18 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned an invalid tavern inventory")
         return result
 
+    def miracles(self, account_id: str) -> dict[str, object]:
+        """Fetch real temples and wonder cooldowns for one account only."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for wonder inventory")
+        result = self._read(f"accounts/{account_id}/miracles")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("miracles"), list)
+                or len(result["miracles"]) > 100
+                or any(not isinstance(item, dict) for item in result["miracles"])):
+            raise APIConnectionError("Backend returned invalid wonder inventory")
+        return result
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
