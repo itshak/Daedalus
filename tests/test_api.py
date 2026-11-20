@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from daedalus.api import create_app
+from daedalus.engine_ipc import EngineIPCUnavailable
 from daedalus.warehouse import CityWarehouseSnapshot, WarehouseResources
 
 TOKEN = "x" * 48
