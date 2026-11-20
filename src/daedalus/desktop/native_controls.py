@@ -1226,3 +1226,187 @@ class OlympusShrineEditor(QWidget):
             "godids": gods, "mode": mode,
             "times": 0 if mode == 2 else self.count.value(),
         }
+
+
+class PiracyMissionsEditor(QWidget):
+    """Available pirate fortress missions, real durations and optional day/night policy."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        from qfluentwidgets import CheckBox
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Pirate fortress city"))
+        self.city = ComboBox()
+        self.city.setAccessibleName("Real own pirate fortress")
+        top.addWidget(self.city, 2)
+        top.addWidget(QLabel("Number of missions"))
+        self.count = _amount(minimum=1, value=1, label="Piracy mission count")
+        self.count.setMaximum(100000)
+        top.addWidget(self.count, 1)
+        layout.addLayout(top)
+        self.schedule = CheckBox("Use separate day/night missions")
+        layout.addWidget(self.schedule)
+        self.main_mission = ComboBox()
+        self.main_mission.setAccessibleName("Piracy mission with actual fortress eligibility")
+        self.day_mission = ComboBox()
+        self.day_mission.setAccessibleName("Day piracy mission")
+        self.night_mission = ComboBox()
+        self.night_mission.setAccessibleName("Night piracy mission")
+        layout.addWidget(QLabel("Default mission"))
+        layout.addWidget(self.main_mission)
+        day = QHBoxLayout()
+        day.addWidget(QLabel("Day mission"))
+        day.addWidget(self.day_mission)
+        self.day_start = _amount(value=10, label="Day schedule starts, game hour")
+        self.day_end = _amount(value=18, label="Day schedule ends, game hour")
+        for label, field in (("From", self.day_start), ("Until", self.day_end)):
+            field.setMaximum(23)
+            day.addWidget(QLabel(label))
+            day.addWidget(field)
+        layout.addLayout(day)
+        night = QHBoxLayout()
+        night.addWidget(QLabel("Night mission"))
+        night.addWidget(self.night_mission)
+        self.night_start = _amount(value=19, label="Night schedule starts, game hour")
+        self.night_end = _amount(value=9, label="Night schedule ends, game hour")
+        for label, field in (("From", self.night_start), ("Until", self.night_end)):
+            field.setMaximum(23)
+            night.addWidget(QLabel(label))
+            night.addWidget(field)
+        layout.addLayout(night)
+        extras = QHBoxLayout()
+        self.convert = CheckBox("Convert capture points automatically")
+        extras.addWidget(self.convert)
+        self.convert_all = CheckBox("Convert all available points")
+        extras.addWidget(self.convert_all)
+        self.convert_amount = _amount(
+            value=0, label="Number of capture points converted after each mission"
+        )
+        extras.addWidget(self.convert_amount)
+        layout.addLayout(extras)
+        waiting = QHBoxLayout()
+        waiting.addWidget(QLabel("Maximum random extra wait"))
+        self.waiting = _amount(value=0, label="Extra random waiting between missions")
+        self.waiting.setMaximum(3600)
+        self.waiting.setSuffix(" seconds")
+        waiting.addWidget(self.waiting)
+        waiting.addStretch(1)
+        layout.addLayout(waiting)
+        self.note = QLabel(
+            "Loading real pirate fortresses and mission eligibility from this account."
+        )
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self._fortresses: list[dict[str, object]] | None = None
+        self.city.currentIndexChanged.connect(self._city_changed)
+        self.schedule.stateChanged.connect(self._mode_changed)
+        self.convert.stateChanged.connect(self._mode_changed)
+        self.convert_all.stateChanged.connect(self._mode_changed)
+        for field in (self.count, self.waiting, self.day_start, self.day_end,
+                      self.night_start, self.night_end, self.convert_amount):
+            field.valueChanged.connect(self.changed.emit)
+        for mission in (self.main_mission, self.day_mission, self.night_mission):
+            mission.currentIndexChanged.connect(self.changed.emit)
+        self._mode_changed()
+
+    def _mode_changed(self, *_args: object) -> None:
+        scheduled = self.schedule.isChecked()
+        self.main_mission.setEnabled(not scheduled)
+        for widget in (self.day_mission, self.night_mission,
+                       self.day_start, self.day_end, self.night_start, self.night_end):
+            widget.setEnabled(scheduled)
+        converting = self.convert.isChecked()
+        self.convert_all.setEnabled(converting)
+        self.convert_amount.setEnabled(converting and not self.convert_all.isChecked())
+        self.changed.emit()
+
+    def _city_changed(self, *_args: object) -> None:
+        idx = self.city.currentIndex()
+        chosen = (
+            self._fortresses[idx - 1]
+            if self._fortresses is not None and 1 <= idx <= len(self._fortresses)
+            else None
+        )
+        missions = chosen["missions"] if chosen is not None else []
+        for picker in (self.main_mission, self.day_mission, self.night_mission):
+            with QSignalBlocker(picker):
+                picker.clear()
+                picker.addItem("Choose mission")
+                for mission in missions:
+                    secs = mission["duration_seconds"]
+                    picker.addItem(
+                        f'Mission {mission["number"]}: {secs // 3600}h {(secs % 3600) // 60}m '
+                        f'{secs % 60}s', userData=mission["number"],
+                    )
+                picker.setCurrentIndex(0)
+        self.note.setText(
+            f'{chosen["city_name"]}: fortress level {chosen["fortress_level"]}, '
+            f'{len(missions)} actual eligible missions. Select one or two missions.'
+            if chosen is not None else
+            "Select a real fortress city to see its available capture missions."
+        )
+        self.changed.emit()
+
+    def set_fortresses(self, fortresses: list[dict[str, object]]) -> None:
+        self._fortresses = list(fortresses)
+        with QSignalBlocker(self.city):
+            self.city.clear()
+            self.city.addItem("Choose own fortress")
+            for fortress in self._fortresses:
+                self.city.addItem(
+                    f'{fortress["city_name"]} (level {fortress["fortress_level"]})',
+                    userData=fortress["city_id"],
+                )
+            self.city.setCurrentIndex(0)
+        self._city_changed()
+
+    def set_unavailable(self) -> None:
+        self._fortresses = None
+        with QSignalBlocker(self.city):
+            self.city.clear()
+            self.city.addItem("Fortress data unavailable")
+        self._city_changed()
+        self.note.setText(
+            "Real pirate fortress data could not be verified for this account."
+        )
+
+    def to_config(self) -> dict[str, object]:
+        idx = self.city.currentIndex()
+        if (self._fortresses is None or idx <= 0
+                or idx > len(self._fortresses)):
+            raise ValueError("Choose a real owned pirate fortress")
+        city = self._fortresses[idx - 1]
+        supported = {mission["number"] for mission in city["missions"]}
+        if not supported:
+            raise ValueError("Fortress cannot run any pirate missions")
+        scheduled = self.schedule.isChecked()
+        main = self.main_mission.currentData(Qt.UserRole)
+        day = self.day_mission.currentData(Qt.UserRole)
+        night = self.night_mission.currentData(Qt.UserRole)
+        missions = [day, night] if scheduled else [main]
+        if any(type(mission) is not int or mission not in supported for mission in missions):
+            raise ValueError("Choose mission levels supported by this fortress")
+        result: dict[str, object] = {
+            "pirateCount": self.count.value(),
+            "pirateSchedule": scheduled,
+            "pirateMissionChoice": None if scheduled else main,
+            "pirateMissionDayChoice": day if scheduled else None,
+            "pirateMissionNightChoice": night if scheduled else None,
+            "dayStart": self.day_start.value() if scheduled else None,
+            "dayEnd": self.day_end.value() if scheduled else None,
+            "nightStart": self.night_start.value() if scheduled else None,
+            "nightEnd": self.night_end.value() if scheduled else None,
+            "autoConvert": "y" if self.convert.isChecked() else "n",
+            "convertPerMission": (
+                "all" if self.convert.isChecked() and self.convert_all.isChecked()
+                else self.convert_amount.value() if self.convert.isChecked() else 0
+            ),
+            "maxRandomWaitingTime": self.waiting.value(),
+            "piracyCities": [{"id": city["city_id"]}],
+        }
+        return result
