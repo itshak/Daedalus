@@ -84,6 +84,24 @@ def fake_worker(tmp_path, responder=None):
                 ],
                 "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
             }
+        if msg["action"] == "market_quotes_existing":
+            side = msg["market_side"]
+            city = {"id": str(msg["city_id"]), "name": "Athens", "cityName": "Athens",
+                    "pos": 4, "rango": 3, "availableResources": [5000, 500, 0, 0, 0]}
+            offer = {"ciudadDestino": "Seller", "jugadorAComprar": "Trader",
+                     "amountAvailable": 500, "tipo": "wood", "precio": 7,
+                     "destinationCityId": "200", "cityId": str(msg["city_id"]),
+                     "position": "4", "type": "444", "resource": "resource"}
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "city_id": msg["city_id"], "side": side,
+                    "resource_type": msg["resource_type"], "city": city,
+                    "offers": [offer] if side == "buy" else
+                              [["Buyer", "Player", 500, 8, 3, 200]]
+                              if side == "sell_to_offers" else [],
+                    "price_min": 1 if side == "create_offer" else None,
+                    "price_max": 30 if side == "create_offer" else None,
+                    "sell_market_capacity": 2000 if side == "create_offer" else None,
+                    "currently_on_sale": 0 if side == "create_offer" else None}
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
@@ -503,3 +521,40 @@ def test_readonly_training_catalog_is_source_scoped_and_contains_actual_costs(tm
         with pytest.raises(ValueError, match="Invalid training selection"):
             client.trainable_units(ALPHA, 42, train_troops="yes")
         assert not any("start_task" in request["action"] for request in requests)
+
+
+@pytest.mark.parametrize("side", ["buy", "sell_to_offers", "create_offer"])
+def test_market_quotes_ipc_uses_authorized_city_and_never_starts_trade(tmp_path, side):
+    with fake_worker(tmp_path) as (client, requests, _):
+        data = client.market_quotes(ALPHA, 42, 0, side)
+        assert data["city"]["id"] == "42"
+        assert data["side"] == side
+        assert requests[-1] == {
+            "action": "market_quotes_existing", "world": "s301-en",
+            "player": "ExamplePlayer", "city_id": 42,
+            "resource_type": 0, "market_side": side,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.market_quotes(ALPHA, 99, 0, side)
+        with pytest.raises(ValueError, match="Invalid market selection"):
+            client.market_quotes(ALPHA, 42, 5, side)
+        assert not any("task" in item["action"] for item in requests)
+
+
+def test_market_quote_response_from_wrong_world_rejected(tmp_path):
+    def responder(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{
+                "world": "s301-en", "player": "ExamplePlayer",
+            }]}
+        if request["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wood"}]}
+        return {"status": "ok", "world": "s301-en", "username": "WrongPlayer",
+                "city_id": 42, "resource_type": 0, "side": "buy",
+                "city": {}, "offers": []}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable
+    ):
+        client.market_quotes(ALPHA, 42, 0, "buy")
