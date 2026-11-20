@@ -32,7 +32,7 @@ _ALLOWED = frozenset({
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
-    "list_academies_existing",
+    "list_academies_existing", "list_taverns_existing",
 })
 
 
@@ -136,7 +136,7 @@ class ExistingIPCClient:
             "task_preflight_existing", "list_buildings_existing",
             "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
-            "list_academies_existing",
+            "list_academies_existing", "list_taverns_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -648,6 +648,55 @@ class ExistingIPCClient:
                 "crystal": crystal, "cooldown": cooldown, "can_experiment_now": ready,
             })
         return {"account_id": account.id, "academies": result}
+
+    def taverns(self, account: Account) -> dict[str, object]:
+        """Account-local wine, servings and satisfaction observations."""
+        data = self.request("list_taverns_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot tavern inventory belongs to another account")
+        records = data.get("taverns")
+        if not isinstance(records, list) or len(records) > 100:
+            raise EngineIPCUnavailable("Invalid IkaBot tavern inventory")
+        owned = {row["id"] for row in self.cities(account)}
+        seen = set()
+        result = []
+        for record in records:
+            if not isinstance(record, dict):
+                raise EngineIPCUnavailable("Malformed tavern record")
+            city_id = record.get("city_id")
+            name = record.get("city_name")
+            wine = record.get("wine")
+            has_tavern = record.get("has_tavern")
+            servings = record.get("serving_level")
+            consumption = record.get("wine_per_hour")
+            satisfaction = record.get("satisfaction")
+            population = record.get("population")
+            capacity = record.get("capacity")
+            if (type(city_id) is not int or city_id not in owned or city_id in seen
+                    or not isinstance(name, str) or not 0 < len(name) <= 100
+                    or type(wine) is not int or not 0 <= wine <= 10**15
+                    or type(has_tavern) is not bool
+                    or (servings is not None and (type(servings) is not int
+                                                  or not 0 <= servings <= 100))
+                    or (consumption is not None and (type(consumption) is not int
+                                                    or not 0 <= consumption <= 10**9))
+                    or (satisfaction is not None and (type(satisfaction) is not int
+                                                     or not -10**9 <= satisfaction <= 10**9))
+                    or (population is not None and (type(population) is not int
+                                                   or not 0 <= population <= 10**9))
+                    or (capacity is not None and (type(capacity) is not int
+                                                 or not 0 <= capacity <= 10**9))):
+                raise EngineIPCUnavailable("Invalid tavern state from game")
+            seen.add(city_id)
+            result.append({
+                "city_id": city_id, "city_name": name,
+                "wine": wine, "has_tavern": has_tavern,
+                "serving_level": servings, "wine_per_hour": consumption,
+                "satisfaction": satisfaction,
+                "population": population, "capacity": capacity,
+            })
+        return {"account_id": account.id, "taverns": result}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
