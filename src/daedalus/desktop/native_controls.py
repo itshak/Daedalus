@@ -613,3 +613,216 @@ class TrainableUnitsEditor(QWidget):
             "replicate": "n", "countRepeat": 0,
             "cityTrainings": [], "units": [],
         }
+
+
+class MarketOffersEditor(QWidget):
+    """Live IkaBot market offer selection and safe listing-price form."""
+
+    changed = Signal()
+    market_requested = Signal(int, int, str)
+
+    def __init__(self, parent: QWidget | None = None, *, buying: bool) -> None:
+        super().__init__(parent)
+        self._buying = buying
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        selectors = QHBoxLayout()
+        selectors.addWidget(QLabel("Trading-post city"))
+        self.city_picker = ComboBox()
+        self.city_picker.setAccessibleName("Market city")
+        selectors.addWidget(self.city_picker, 2)
+        selectors.addWidget(QLabel("Resource"))
+        self.resource = ComboBox()
+        for name in _RESOURCES:
+            self.resource.addItem(name)
+        self.resource.setCurrentIndex(0)
+        self.resource.setAccessibleName("Market resource")
+        selectors.addWidget(self.resource, 1)
+        self.mode = ComboBox()
+        if buying:
+            self.mode.addItem("Buy from existing offers")
+        else:
+            self.mode.addItems(["Sell to existing buyers", "Create a market offer"])
+        self.mode.setAccessibleName("Market transaction type")
+        selectors.addWidget(self.mode, 1)
+        layout.addLayout(selectors)
+        self.table = _table(("Choose", "Market city", "Player", "Available", "Gold per unit"))
+        self.table.setMinimumHeight(210)
+        self.table.setAccessibleName("Source-verified live market quotes")
+        self.table.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.table)
+        bottom = QHBoxLayout()
+        bottom.addWidget(QLabel("Quantity"))
+        self.amount = _amount(minimum=1, value=1, label="Total resource quantity to trade")
+        self.amount.valueChanged.connect(self.changed.emit)
+        bottom.addWidget(self.amount)
+        bottom.addWidget(QLabel("Offer price"))
+        self.price = _amount(minimum=1, value=1, label="Gold per resource for new listing")
+        self.price.valueChanged.connect(self.changed.emit)
+        self.price.setEnabled(False)
+        bottom.addWidget(self.price)
+        bottom.addStretch(1)
+        layout.addLayout(bottom)
+        self.description = QLabel("Choose a city and resource; market quotes come from IkaBot.")
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._selected: tuple[int, int, str] | None = None
+        self._loaded: tuple[int, int, str] | None = None
+        self._snapshot: dict[str, object] | None = None
+        self._offers: list[object] = []
+        self.city_picker.currentIndexChanged.connect(self._refresh_selection)
+        self.resource.currentIndexChanged.connect(self._refresh_selection)
+        self.mode.currentIndexChanged.connect(self._refresh_selection)
+        self.set_cities([])
+
+    def set_cities(self, cities: list[dict[str, object]]) -> None:
+        self._selected = None
+        self._loaded = None
+        self._snapshot = None
+        self._offers = []
+        self.table.setRowCount(0)
+        with QSignalBlocker(self.city_picker):
+            self.city_picker.clear()
+            self.city_picker.addItem("Choose a city")
+            for city in cities:
+                coords = str(city.get("coords") or "")
+                name = str(city["name"])
+                self.city_picker.addItem(
+                    f"{name} ({coords})" if coords else name, userData=city["id"]
+                )
+            self.city_picker.setCurrentIndex(0)
+        self.description.setText(
+            "Choose an actual account city with a trading post to load offers."
+        )
+        self.price.setEnabled(False)
+        self.changed.emit()
+
+    def _refresh_selection(self, *_args: object) -> None:
+        self._loaded = None
+        self._snapshot = None
+        self._offers = []
+        self.table.setRowCount(0)
+        city_id = self.city_picker.currentData(Qt.UserRole)
+        resource_type = self.resource.currentIndex()
+        side = ("buy" if self._buying else
+                "sell_to_offers" if self.mode.currentIndex() == 0 else "create_offer")
+        self._selected = (
+            (city_id, resource_type, side)
+            if type(city_id) is int and 0 <= resource_type <= 4 else None
+        )
+        self.price.setEnabled(False)
+        self.description.setText(
+            "Loading actual IkaBot marketplace offers or price bounds…"
+            if self._selected else "Choose a real city with a trading post."
+        )
+        self.changed.emit()
+        if self._selected is not None:
+            self.market_requested.emit(*self._selected)
+
+    def set_quotes(self, snapshot: dict[str, object]) -> None:
+        scope = (
+            snapshot.get("city_id"), snapshot.get("resource_type"), snapshot.get("side")
+        )
+        if scope != self._selected:
+            return
+        offers = snapshot.get("offers")
+        if not isinstance(offers, list):
+            return
+        self._loaded = self._selected
+        self._snapshot = snapshot
+        self._offers = list(offers)
+        listing = scope[2] == "create_offer"
+        self.table.setVisible(not listing)
+        self.price.setVisible(listing)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(self._offers))
+            for row, offer in enumerate(self._offers):
+                if isinstance(offer, dict):
+                    city_name, player = offer["ciudadDestino"], offer["jugadorAComprar"]
+                    amount, price = offer["amountAvailable"], offer["precio"]
+                else:
+                    city_name, player, amount, price = offer[:4]
+                checkbox = QTableWidgetItem("")
+                checkbox.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                checkbox.setCheckState(Qt.Unchecked)
+                self.table.setItem(row, 0, checkbox)
+                for column, value in (
+                    (1, city_name), (2, player), (3, f"{amount:,}"), (4, f"{price:,}")
+                ):
+                    item = QTableWidgetItem(str(value))
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(row, column, item)
+        if listing:
+            lower, upper = snapshot["price_min"], snapshot["price_max"]
+            self.price.setRange(lower, upper)
+            self.price.setValue(lower)
+            self.price.setEnabled(True)
+            self.description.setText(
+                f"Current allowed price: {lower:,}–{upper:,} gold per unit. "
+                f"Own stock: {snapshot['city']['availableResources'][scope[1]]:,}. "
+                f"Already offered: {snapshot['currently_on_sale']:,}; "
+                f"market capacity: {snapshot['sell_market_capacity']:,}."
+            )
+        else:
+            self.description.setText(
+                f"{len(self._offers)} actual offers. Select sellers/buyers and a quantity. "
+                "Prices are rechecked by IkaBot before execution."
+            )
+        self.changed.emit()
+
+    def set_unavailable(self, city_id: int, resource_type: int, side: str) -> None:
+        if self._selected != (city_id, resource_type, side):
+            return
+        self._snapshot = None
+        self._loaded = None
+        self._offers.clear()
+        self.table.setRowCount(0)
+        self.price.setEnabled(False)
+        self.description.setText(
+            "Authenticated market data is unavailable for this city/resource. "
+            "No transaction has been prepared."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> dict[str, object]:
+        if self._snapshot is None or self._loaded != self._selected:
+            raise ValueError("Choose a trading-post city and load real market offers")
+        _city, resource_type, side = self._loaded
+        snapshot = self._snapshot
+        amount = self.amount.value()
+        if side == "create_offer":
+            stock = snapshot["city"]["availableResources"][resource_type]
+            if amount > stock:
+                raise ValueError("Selling quantity exceeds actual city stock")
+            price = self.price.value()
+            if not snapshot["price_min"] <= price <= snapshot["price_max"]:
+                raise ValueError("The new offer price is outside the market's allowed range")
+            return {
+                "mode": "create_offer", "amount_to_sell": amount,
+                "price": price, "resource_type": resource_type,
+                "sell_market_capacity": snapshot["sell_market_capacity"],
+                "city": snapshot["city"],
+            }
+        chosen = [
+            self._offers[row] for row in range(len(self._offers))
+            if self.table.item(row, 0) is not None
+            and self.table.item(row, 0).checkState() == Qt.Checked
+        ]
+        if not 0 < len(chosen) <= 50:
+            raise ValueError("Select 1 to 50 actual market quotes")
+        if side == "buy":
+            available = sum(offer["amountAvailable"] for offer in chosen)
+            if amount > available:
+                raise ValueError("Buying quantity exceeds selected live offers")
+            return {"city": snapshot["city"], "offers": chosen, "amount_to_buy": amount}
+        available = min(
+            snapshot["city"]["availableResources"][resource_type],
+            sum(offer[2] for offer in chosen),
+        )
+        if amount > available:
+            raise ValueError("Selling quantity exceeds actual stock or buyer offers")
+        return {
+            "mode": "sell_to_offers", "amount_to_sell": amount,
+            "offers": chosen, "resource_type": resource_type,
+            "city_to_buy_from": snapshot["city"],
+        }
