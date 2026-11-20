@@ -20,6 +20,7 @@ from daedalus.desktop.native_controls import (
     MarketOffersEditor,
     MiracleTempleEditor,
     OlympusShrineEditor,
+    PiracyMissionsEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -212,17 +213,20 @@ def test_shrine_gods_are_native_source_verified_multichoices(page):
         field("times", "integer", default=1), field("selected_gods"),
         field("wait_time", "integer", default=43200),
     ])
-    gods = page._form_inputs["godids"]
-    assert [gods.item(i).text() for i in range(gods.count())] == [
-        "Pan", "Dionysus", "Tyche", "Plutus", "Theia", "Hephaestus"
-    ]
-    gods.item(0).setCheckState(Qt.Checked)
-    gods.item(5).setCheckState(Qt.Checked)
-    page._form_inputs["mode"].setCurrentIndex(0)
+    editor = page._form_inputs["godids"]
+    assert isinstance(editor, OlympusShrineEditor)
+    with pytest.raises(ValueError, match="actual owned Shrine"):
+        page._form_config()
+    page.set_shrine({
+        "account_id": "alpha",
+        "shrine": {"city_id": 101, "city_name": "Athens", "position": 4, "favor": 310},
+    })
+    editor.table.item(0, 0).setCheckState(Qt.Checked)
+    editor.table.item(5, 0).setCheckState(Qt.Checked)
     assert page._form_config()["godids"] == [1, 6]
     assert "selected_gods" not in page._form_config()
-    page._form_inputs["mode"].setCurrentIndex(1)
-    assert "times" not in page._form_config()
+    editor.mode.setCurrentIndex(1)
+    assert page._form_config()["times"] == 0
 
 
 def test_island_search_uses_real_own_island_coordinates_and_not_raw_json(page):
@@ -240,12 +244,11 @@ def test_island_search_uses_real_own_island_coordinates_and_not_raw_json(page):
     assert config["time"] == 15
 
 
-def test_auto_pirate_mode_switch_only_submits_visible_schedule_controls(page):
+def test_auto_pirate_mode_switch_only_submits_verified_missions(page):
     set_native(page, "autoPirate", [
         field("pirateCount", required=True),
         field("pirateSchedule", "boolean", default=False),
-        field("pirateMissionChoice"),
-        field("pirateMissionDayChoice"),
+        field("pirateMissionChoice"), field("pirateMissionDayChoice"),
         field("pirateMissionNightChoice"),
         field("dayStart", "integer", default=10),
         field("dayEnd", "integer", default=18),
@@ -256,19 +259,40 @@ def test_auto_pirate_mode_switch_only_submits_visible_schedule_controls(page):
         field("maxRandomWaitingTime", "integer", default=0),
         field("piracyCities"),
     ])
-    page._form_inputs["pirateCount"].setValue(3)
-    page._form_inputs["pirateMissionChoice"].setCurrentIndex(1)
+    editor = page._form_inputs["pirateCount"]
+    assert isinstance(editor, PiracyMissionsEditor)
+    with pytest.raises(ValueError, match="real owned pirate fortress"):
+        page._form_config()
+    result = {
+        "account_id": "alpha",
+        "fortresses": [{
+            "city_id": 101, "city_name": "Athens", "fortress_level": 3,
+            "missions": [{"number": 1, "duration_seconds": 180},
+                         {"number": 2, "duration_seconds": 360}],
+        }],
+    }
+    page.set_pirate_fortresses({**result, "account_id": "beta"})
+    with pytest.raises(ValueError, match="real owned pirate fortress"):
+        page._form_config()
+    page.set_pirate_fortresses(result)
+    editor.city.setCurrentIndex(1)
+    editor.count.setValue(3)
+    editor.main_mission.setCurrentIndex(2)
     config = page._form_config()
     assert config["pirateCount"] == 3
     assert config["pirateMissionChoice"] == 2
-    assert "pirateMissionDayChoice" not in config
-    page._form_inputs["pirateSchedule"].setChecked(True)
-    page._form_inputs["pirateMissionDayChoice"].setCurrentIndex(0)
-    page._form_inputs["pirateMissionNightChoice"].setCurrentIndex(1)
+    assert config["pirateMissionDayChoice"] is None
+    editor.schedule.setChecked(True)
+    editor.day_mission.setCurrentIndex(1)
+    editor.night_mission.setCurrentIndex(2)
     scheduled = page._form_config()
-    assert "pirateMissionChoice" not in scheduled
+    assert scheduled["pirateMissionChoice"] is None
     assert scheduled["pirateMissionDayChoice"] == 1
     assert scheduled["pirateMissionNightChoice"] == 2
+    assert scheduled["piracyCities"] == [{"id": 101}]
+    page.set_pirate_fortresses_unavailable("alpha")
+    with pytest.raises(ValueError, match="real owned pirate fortress"):
+        page._form_config()
 
 
 def test_donation_policy_and_map_editor_use_no_json_fields(page):
