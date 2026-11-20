@@ -760,6 +760,8 @@ class IPCServer:
                     return self._list_taverns_existing(request)
                 if action == "list_miracles_existing":
                     return self._list_miracles_existing(request)
+                if action == "shrine_status_existing":
+                    return self._shrine_status_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -1150,6 +1152,57 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "miracles": reviewed,
+        }
+
+    def _shrine_status_existing(self, request):
+        """Read only real Olympus shrine location and current favour (if parseable).
+
+        A failed game response is unknown, not zero favour; never claim a
+        shrine is ready from an unparsable or unauthorized game payload.
+        """
+        from ikabot.config import actionRequest
+        from ikabot.function.activateShrine import findShrine
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        city_id, position = findShrine(session)
+        if city_id is None or position is None:
+            shrine = None
+        else:
+            owned, _cities = getIdsOfCities(session)
+            integer_id = _existing_city_id(city_id)
+            if integer_id not in {_existing_city_id(item) for item in owned}:
+                raise ValueError("Shrine city is not owned")
+            if type(position) is not int or not 0 <= position <= 80:
+                raise ValueError("Invalid shrine position")
+            city = getCity(session.get(f"view=city&cityId={integer_id}"))
+            if _existing_city_id(city.get("id")) != integer_id:
+                raise ValueError("Shrine city changed")
+            raw = session.get(
+                f"view=shrineOfOlympus&cityId={integer_id}&position={position}"
+                f"&activeTab=tabOverview&backgroundView=city"
+                f"&currentCityId={integer_id}&templateView=shrineOfOlympus"
+                f"&actionRequest={actionRequest}&ajax=1",
+                noIndex=True,
+            )
+            favor = None
+            try:
+                data = json.loads(raw, strict=False)
+                parsed = data[2][1]["currentFavor"]
+                if type(parsed) is int and 0 <= parsed <= 10**12:
+                    favor = parsed
+                elif isinstance(parsed, str) and parsed.isdigit():
+                    favor = int(parsed)
+            except (IndexError, KeyError, TypeError, ValueError):
+                pass
+            shrine = {
+                "city_id": integer_id, "city_name": str(city.get("name") or "")[:100],
+                "position": position, "favor": favor,
+            }
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "shrine": shrine,
         }
 
     def _warehouse_snapshots_existing(self, request):
