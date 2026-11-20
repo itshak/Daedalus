@@ -752,6 +752,8 @@ class IPCServer:
                     return self._list_workshop_upgrades_existing(request)
                 if action == "list_trainables_existing":
                     return self._list_trainables_existing(request)
+                if action == "market_quotes_existing":
+                    return self._market_quotes_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -963,6 +965,24 @@ class IPCServer:
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,
             **snapshot,
+        }
+
+    def _market_quotes_existing(self, request):
+        """Read-only buy/sell offer and price discovery from a verified game market."""
+        from ikabot.function.nativeMarket import market_snapshot
+
+        session = self._existing_session(request)
+        city_id = request.get("city_id")
+        resource_type = request.get("resource_type")
+        side = request.get("market_side")
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market quote scope")
+        snapshot = market_snapshot(session, city_id, resource_type, side)
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "city_id": city_id, **snapshot,
         }
 
     def _warehouse_snapshots_existing(self, request):
