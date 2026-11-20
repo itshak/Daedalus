@@ -15,8 +15,8 @@ from PySide6.QtWidgets import QApplication
 
 from daedalus.desktop.native_controls import (
     DonationPoliciesEditor,
-    MarketOffersEditor,
     MapAreaEditor,
+    MarketOffersEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
