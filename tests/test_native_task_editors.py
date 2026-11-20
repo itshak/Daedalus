@@ -195,6 +195,7 @@ def test_consolidation_has_source_city_checkboxes_destination_and_resource_matri
     ])
     assert isinstance(page._form_inputs["limits"], ResourceLimitsEditor)
     page._form_inputs["limits"].values[0].setValue(200)
+    page._form_inputs["intervalInHours"].setValue(1)
     page._form_inputs["sourceCityIds"].item(0).setCheckState(Qt.Checked)
     page._form_inputs["destinationCityId"].setCurrentIndex(2)
     config = page._form_config()
