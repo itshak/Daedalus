@@ -15,6 +15,7 @@ import ikabot.function.webServer, ikabot.function.loginDaily, ikabot.function.re
 import ikabot.function.sendResources, ikabot.function.activateMiracle, ikabot.function.UpgradeUnits  # noqa
 import ikabot.function.distributeResources, ikabot.function.resourceTransportManager  # noqa
 import ikabot.function.trainArmy  # noqa
+import ikabot.function.constructionList  # noqa
 from ikabot.helpers.decorators import _TASK_REGISTRY
 from ikabot.helpers.ipc import _validate_task_config
 
@@ -23,7 +24,18 @@ FORTRESS = [{"id": "111", "name": "Alpha", "position": [{"building": "pirateFort
 HERMES = {"id": "4415", "wonder": "5", "wonderName": "Temple of Hermes", "wonderActivationLevel": 3, "available": True,
           "ciudad": {"id": "111", "name": "Alpha", "islandId": "4415", "pos": "4"}, "cities": [{"type": "city", "id": 9000}]}
 
+CONSTRUCTION = {
+    "city_id": 111, "city_name": "Alpha", "buildings": [{
+        "position": 1, "name": "Town Hall", "building": "townHall",
+        "level": 5, "isBusy": False, "upgradeTo": 6,
+        "constructionTime": 120, "constructionTimes": [120],
+    }],
+    "shipments": [], "expand_overall": True, "wait_resources": False,
+    "construction_queue": [120], "total_time": 120,
+}
+
 MENU = {
+    "constructionList": CONSTRUCTION,
     "trainArmy": {"city": {"id": "111", "pos": "3", "cityName": "Alpha"},
                   "tranings": [[{"unit_type_id": 301, "cantidad": 2}]],
                   "trainTroops": True, "replicate": "n", "countRepeat": 0,
@@ -119,6 +131,8 @@ class TestRelaunchFromExportedConfig(unittest.TestCase):
         stack.enter_context(patch("ikabot.function.distributeResources.getIdsOfCities", return_value=OWN))
         stack.enter_context(patch("ikabot.function.resourceTransportManager.getIdsOfCities", return_value=OWN))
         stack.enter_context(patch("ikabot.function.distributeResources.plan_routes", return_value=[("a route",)]))
+        stack.enter_context(patch("ikabot.function.constructionList.preview_native_construction",
+                                  return_value={"config": CONSTRUCTION, "ready": True}))
         stack.enter_context(patch("ikabot.function.trainArmy.available_trainable_units", return_value={
             "city": {"id": "111", "pos": "3", "cityName": "Alpha"},
             "train_troops": True,
