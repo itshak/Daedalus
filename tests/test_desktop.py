@@ -64,12 +64,16 @@ def test_accounts_page_reports_real_nonsecret_states(qt_app):
           "session_status": "needs_assistance", "label": "Primary"}]
     )
     assert page.table.rowCount() == 1
-    assert page.table.item(0, 4).text() == "needs_assistance"
-    assert page.table.item(0, 5).text() == "Not checked"
+    assert page.table.item(0, 4).text() == "✕"
+    assert "needs sign-in assistance" in page.table.item(0, 4).toolTip()
+    assert page.table.item(0, 5).text() == "?"
+    assert "not been checked" in page.table.item(0, 5).toolTip()
     page.set_connected_ids(["alpha"])
-    assert page.table.item(0, 5).text() == "Attached"
+    assert page.table.item(0, 5).text() == "✓"
+    assert "worker is attached" in page.table.item(0, 5).toolTip()
     page.set_connected_ids([])
-    assert page.table.item(0, 5).text() == "Not attached"
+    assert page.table.item(0, 5).text() == "✕"
+    assert "No IkaBot worker" in page.table.item(0, 5).toolTip()
     page.close()
 
 
