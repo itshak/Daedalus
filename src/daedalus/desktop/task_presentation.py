@@ -179,17 +179,10 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("research", "info"): {"type": "hidden_derived"},
     ("tavernManager", "cities"): {"type": "hidden_derived"},
     ("activateMiracle", "wonder"): {
-        "type": "text", "choices": ["hephaistos", "hades", "demeter", "athene",
-                                   "hermes", "ares", "poseidon", "colossus"],
-        "choice_labels": ["Hephaistos", "Hades", "Demeter", "Athena",
-                          "Hermes", "Ares", "Poseidon", "Colossus"],
-        "label": "Miracle",
-        "help": "Engine verifies that this account owns an eligible temple of the chosen wonder.",
+        "type": "miracle_temple", "label": "Actual owned wonder temple",
+        "help": "Choose an actual wonder and inspect cooldowns from authenticated game data.",
     },
-    ("activateMiracle", "iterations"): {
-        "type": "integer", "minimum": 1, "maximum": 100,
-        "label": "Number of activations",
-    },
+    ("activateMiracle", "iterations"): {"type": "hidden_derived"},
     ("activateMiracle", "island"): {
         "type": "hidden_derived",
         "help": "IkaBot finds an eligible owned temple for the chosen wonder.",
