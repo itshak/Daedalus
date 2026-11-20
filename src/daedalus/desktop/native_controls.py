@@ -915,3 +915,122 @@ class AcademyResearchEditor(QWidget):
             "cities_ids": [str(row["city_id"]) for row in chosen],
             "qty": count if count > 0 else None,
         }
+
+
+class TavernCitiesEditor(QWidget):
+    """Per-city real wine, consumption and happiness; adjustable check frequency."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        from qfluentwidgets import CheckBox
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.all_cities = CheckBox("Manage all cities with taverns")
+        self.all_cities.setChecked(True)
+        self.all_cities.stateChanged.connect(self._scope_changed)
+        layout.addWidget(self.all_cities)
+        self.table = _table((
+            "Manage", "City", "Current wine", "Wine / hour",
+            "Population", "Satisfaction",
+        ))
+        self.table.setMinimumHeight(200)
+        self.table.setAccessibleName("Account cities with real tavern and wine state")
+        self.table.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.table)
+        policy = QHBoxLayout()
+        policy.addWidget(QLabel("Repeat"))
+        self.interval = _amount(label="Hours between tavern balance checks")
+        self.interval.setRange(0, 24)
+        self.interval.setValue(2)
+        self.interval.setSpecialValueText("Once now")
+        self.interval.valueChanged.connect(self.changed.emit)
+        policy.addWidget(self.interval)
+        policy.addWidget(QLabel("Notifications"))
+        self.notifications = ComboBox()
+        self.notifications.addItems(["Every change", "Only errors", "None"])
+        self.notifications.setCurrentIndex(1)
+        self.notifications.setAccessibleName("Tavern manager notifications")
+        self.notifications.currentIndexChanged.connect(self.changed.emit)
+        policy.addWidget(self.notifications)
+        policy.addStretch(1)
+        layout.addLayout(policy)
+        self.description = QLabel(
+            "Loading wine, population and tavern servings from the account."
+        )
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._taverns: list[dict[str, object]] | None = None
+
+    def _scope_changed(self, *_args: object) -> None:
+        self.table.setEnabled(not self.all_cities.isChecked())
+        self.changed.emit()
+
+    def set_taverns(self, rows: list[dict[str, object]]) -> None:
+        self._taverns = list(rows)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(rows))
+            for row, city in enumerate(rows):
+                checkbox = QTableWidgetItem("")
+                checkbox.setData(Qt.UserRole, city["city_id"])
+                checkbox.setFlags(
+                    Qt.ItemIsEnabled | Qt.ItemIsUserCheckable
+                    if city["has_tavern"] else Qt.ItemIsEnabled
+                )
+                checkbox.setCheckState(Qt.Unchecked)
+                self.table.setItem(row, 0, checkbox)
+                population = (
+                    f'{city["population"]:,} / {city["capacity"]:,}'
+                    if city["population"] is not None and city["capacity"] is not None
+                    else "Unavailable"
+                )
+                for col, value in (
+                    (1, city["city_name"]),
+                    (2, f'{city["wine"]:,}'),
+                    (3, city["wine_per_hour"] if city["wine_per_hour"] is not None
+                     else "Unavailable"),
+                    (4, population),
+                    (5, city["satisfaction"] if city["satisfaction"] is not None
+                     else "Unavailable"),
+                ):
+                    item = QTableWidgetItem(str(value))
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(row, col, item)
+        self.description.setText(
+            f"{len(rows)} owned cities inspected. "
+            "Tavern equilibrium changes wine servings according to current population "
+            "and satisfaction; check before approving recurring game changes."
+        )
+        self._scope_changed()
+
+    def set_unavailable(self) -> None:
+        self._taverns = None
+        self.table.setRowCount(0)
+        self.description.setText(
+            "Could not read the account's tavern and wine levels. No schedule is ready."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> dict[str, object]:
+        if self._taverns is None:
+            raise ValueError("Load real tavern and wine status for the account")
+        if self.all_cities.isChecked():
+            ids = None
+            if not any(city["has_tavern"] for city in self._taverns):
+                raise ValueError("No actual taverns are available in this account")
+        else:
+            ids = [
+                str(self._taverns[row]["city_id"])
+                for row in range(len(self._taverns))
+                if self._taverns[row]["has_tavern"]
+                and self.table.item(row, 0).checkState() == Qt.Checked
+            ]
+            if not ids:
+                raise ValueError("Choose at least one city with a real tavern")
+        return {
+            "cities_ids": ids,
+            "run_hours": self.interval.value(),
+            "notification_mode": self.notifications.currentIndex() + 1,
+        }
