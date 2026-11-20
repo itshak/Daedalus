@@ -631,6 +631,18 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid shrine status")
         return result
 
+    def pirate_fortresses(self, account_id: str) -> dict[str, object]:
+        """Fetch actual owned fortress mission levels, no game interaction."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for piracy inventory")
+        result = self._read(f"accounts/{account_id}/pirate-fortresses")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("fortresses"), list)
+                or len(result["fortresses"]) > 100
+                or any(not isinstance(row, dict) for row in result["fortresses"])):
+            raise APIConnectionError("Backend returned invalid pirate fortress inventory")
+        return result
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
