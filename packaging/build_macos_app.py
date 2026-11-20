@@ -77,6 +77,8 @@ def build_command(
         "--hidden-import",
         "daedalus.desktop.selenium_worker",
         "--hidden-import",
+        "daedalus.desktop.selenium_child",
+        "--hidden-import",
         "daedalus.desktop.selenium_credentials",
         "--hidden-import",
         "PySide6.QtWebEngineCore",
@@ -102,6 +104,9 @@ def launcher_source() -> str:
         "import sys\n"
         "if __name__ == '__main__':\n"
         "    multiprocessing.freeze_support()\n"
+        "    if sys.argv[1:] == ['--selenium-child']:\n"
+        "        from daedalus.desktop.selenium_child import main as selenium_main\n"
+        "        sys.exit(selenium_main())\n"
         "    from daedalus.desktop import main\n"
         "    sys.exit(main())\n"
     )
