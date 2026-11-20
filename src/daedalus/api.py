@@ -672,6 +672,28 @@ def create_app(
                 status_code=503, detail="Authenticated academy inventory unavailable"
             ) from exc
 
+    @app.get(
+        "/api/v1/accounts/{account_id}/taverns",
+        dependencies=[Depends(authorized)],
+    )
+    def tavern_inventory(account_id: str) -> dict[str, object]:
+        """Current city wine, tavern servings and population for safe review."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Authenticated tavern inventory unavailable")
+        try:
+            return ipc_client.taverns(account)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid tavern account context") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Authenticated tavern inventory unavailable"
+            ) from exc
+
     @app.get("/api/v1/task-control", dependencies=[Depends(authorized)])
     def task_control_status() -> dict[str, bool]:
         """Read-only opt-in status for clients; never exposes task management itself."""
