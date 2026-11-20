@@ -14,6 +14,7 @@ import ikabot.function.donationBot, ikabot.function.tavernManager, ikabot.functi
 import ikabot.function.webServer, ikabot.function.loginDaily, ikabot.function.research, ikabot.function.dumpWorld  # noqa
 import ikabot.function.sendResources, ikabot.function.activateMiracle, ikabot.function.UpgradeUnits  # noqa
 import ikabot.function.distributeResources, ikabot.function.resourceTransportManager  # noqa
+import ikabot.function.trainArmy  # noqa
 from ikabot.helpers.decorators import _TASK_REGISTRY
 from ikabot.helpers.ipc import _validate_task_config
 
@@ -23,6 +24,10 @@ HERMES = {"id": "4415", "wonder": "5", "wonderName": "Temple of Hermes", "wonder
           "ciudad": {"id": "111", "name": "Alpha", "islandId": "4415", "pos": "4"}, "cities": [{"type": "city", "id": 9000}]}
 
 MENU = {
+    "trainArmy": {"city": {"id": "111", "pos": "3", "cityName": "Alpha"},
+                  "tranings": [[{"unit_type_id": 301, "cantidad": 2}]],
+                  "trainTroops": True, "replicate": "n", "countRepeat": 0,
+                  "cityTrainings": [], "units": []},
     "alertAttacks": {"minutes": 20},
     "alertLowWine": {"hours": 6, "auto_transfer": True, "transfer_amount": 5000},
     "activateShrine": {"godids": (2, 4), "mode": 1, "times": 1, "selected_gods": "Dionysus, Plutus", "wait_time": 3},
@@ -114,6 +119,14 @@ class TestRelaunchFromExportedConfig(unittest.TestCase):
         stack.enter_context(patch("ikabot.function.distributeResources.getIdsOfCities", return_value=OWN))
         stack.enter_context(patch("ikabot.function.resourceTransportManager.getIdsOfCities", return_value=OWN))
         stack.enter_context(patch("ikabot.function.distributeResources.plan_routes", return_value=[("a route",)]))
+        stack.enter_context(patch("ikabot.function.trainArmy.available_trainable_units", return_value={
+            "city": {"id": "111", "pos": "3", "cityName": "Alpha"},
+            "train_troops": True,
+            "units": [{"unit_type_id": 301, "local_name": "Swordsman",
+                       "identifier": "swordsman",
+                       "costs": {"wood": 100, "citizens": 1}}],
+            "available": [10000, 0, 0, 0, 0], "free_citizens": 100,
+        }))
 
     def test_every_task_relaunches_from_its_exported_config(self):
         session = MagicMock()
