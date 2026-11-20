@@ -31,7 +31,7 @@ _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_construction_existing", "list_workshop_upgrades_existing",
-    "list_trainables_existing",
+    "list_trainables_existing", "market_quotes_existing",
 })
 
 
@@ -124,7 +124,9 @@ class ExistingIPCClient:
     def request(self, action: str, *, account: Account | None = None,
                 city_id: int | None = None,
                 upgrades: list[dict[str, int]] | None = None,
-                train_troops: bool | None = None) -> dict[str, Any]:
+                train_troops: bool | None = None,
+                resource_type: int | None = None,
+                market_side: str | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
@@ -132,7 +134,7 @@ class ExistingIPCClient:
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
             "preview_construction_existing", "list_workshop_upgrades_existing",
-            "list_trainables_existing",
+            "list_trainables_existing", "market_quotes_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -141,7 +143,8 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
-                      "list_workshop_upgrades_existing", "list_trainables_existing"}:
+                      "list_workshop_upgrades_existing", "list_trainables_existing",
+                      "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
                 raise ValueError("Choose a valid city")
             payload["city_id"] = city_id
@@ -163,7 +166,16 @@ class ExistingIPCClient:
                 payload["train_troops"] = train_troops
             elif train_troops is not None:
                 raise ValueError("Training mode is only supported for real unit discovery")
-        elif city_id is not None or upgrades is not None or train_troops is not None:
+            if action == "market_quotes_existing":
+                if (type(resource_type) is not int or not 0 <= resource_type <= 4
+                        or market_side not in {"buy", "sell_to_offers", "create_offer"}):
+                    raise ValueError("Choose a valid market product and action")
+                payload["resource_type"] = resource_type
+                payload["market_side"] = market_side
+            elif resource_type is not None or market_side is not None:
+                raise ValueError("Market filters may only be used for read-only quotes")
+        elif (city_id is not None or upgrades is not None or train_troops is not None
+              or resource_type is not None or market_side is not None):
             raise ValueError("City argument is not supported for this IPC action")
         return self._exchange(payload, read_timeout=60.0 if action ==
                               "preview_construction_existing" else 8.0)
