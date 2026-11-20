@@ -84,6 +84,12 @@ def fake_worker(tmp_path, responder=None):
                 ],
                 "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
             }
+        if msg["action"] == "list_miracles_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "miracles": [{"city_id": 42, "temple_city": "Athens",
+                                  "island_id": "324", "wonder": "5",
+                                  "wonder_name": "Temple of Hermes", "level": 3,
+                                  "available": False, "available_in_seconds": 1200}]}
         if msg["action"] == "list_taverns_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "taverns": [{"city_id": 42, "city_name": "Athens", "wine": 12000,
@@ -620,3 +626,16 @@ def test_tavern_status_ipc_is_owned_and_read_only(tmp_path):
             "world": "s301-en", "player": "ExamplePlayer",
         }
         assert not any("task" in record["action"] for record in requests)
+
+
+def test_miracle_inventory_is_account_owned_and_exposes_real_cooldown(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.miracles(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["miracles"][0]["wonder"] == "5"
+        assert result["miracles"][0]["available_in_seconds"] == 1200
+        assert requests[-1] == {
+            "action": "list_miracles_existing", "world": "s301-en",
+            "player": "ExamplePlayer",
+        }
+        assert not any("start_task" in request["action"] for request in requests)
