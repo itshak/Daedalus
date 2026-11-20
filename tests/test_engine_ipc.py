@@ -84,6 +84,12 @@ def fake_worker(tmp_path, responder=None):
                 ],
                 "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
             }
+        if msg["action"] == "list_taverns_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "taverns": [{"city_id": 42, "city_name": "Athens", "wine": 12000,
+                                 "has_tavern": True, "serving_level": 5,
+                                 "wine_per_hour": 24, "satisfaction": 45,
+                                 "population": 800, "capacity": 1000}]}
         if msg["action"] == "list_academies_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "academies": [{"city_id": 42, "city_name": "Athens", "position": 5,
@@ -598,3 +604,19 @@ def test_academy_research_ipc_rejects_wrong_city_and_false_readiness(tmp_path):
         EngineIPCUnavailable, match="foreign academy"
     ):
         client.academies(ALPHA)
+
+
+def test_tavern_status_ipc_is_owned_and_read_only(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        payload = client.taverns(ALPHA)
+        assert payload["account_id"] == "alpha"
+        city = payload["taverns"][0]
+        assert city["city_id"] == 42
+        assert city["wine"] == 12000
+        assert city["wine_per_hour"] == 24
+        assert city["satisfaction"] == 45
+        assert requests[-1] == {
+            "action": "list_taverns_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        }
+        assert not any("task" in record["action"] for record in requests)
