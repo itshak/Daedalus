@@ -440,3 +440,34 @@ def test_construction_preview_rejects_wrong_account_or_fabricated_shape():
             client.construction_preview(
                 "alpha", 42, [{"position": 4, "target_level": 12}],
             )
+
+
+def test_client_trainable_units_use_only_verified_account_and_mode():
+    seen = []
+    def handler(request):
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(200, json={
+            "account_id": "alpha", "city_id": 42, "train_troops": True,
+            "city": {"id": "42", "cityName": "Athens", "pos": "3"},
+            "units": [], "available": [0] * 5, "free_citizens": 0,
+        })
+    with mock_client(handler) as client:
+        result = client.trainable_units("alpha", 42, train_troops=True)
+        assert result["city"]["cityName"] == "Athens"
+        with pytest.raises(ValueError, match="Invalid training unit scope"):
+            client.trainable_units("alpha", 42, train_troops="troops")
+        with pytest.raises(ValueError, match="Invalid training unit scope"):
+            client.trainable_units("other/evil", 42, train_troops=False)
+    assert len(seen) == 1
+    assert seen[0][0] == "GET"
+    assert seen[0][1].endswith(
+        "/api/v1/accounts/alpha/cities/42/trainable-units?train_troops=true"
+    )
+
+
+def test_client_trainable_catalog_wrong_account_rejected():
+    with mock_client(lambda _r: httpx.Response(200, json={
+        "account_id": "beta", "city_id": 42, "train_troops": True,
+        "city": {}, "units": [], "available": [0] * 5, "free_citizens": 0,
+    })) as client, pytest.raises(APIConnectionError, match="invalid trainable"):
+        client.trainable_units("alpha", 42, train_troops=True)
