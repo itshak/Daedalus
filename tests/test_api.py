@@ -574,3 +574,28 @@ def test_tavern_snapshot_api_is_authorized_and_nonmutating(account_file):
     assert client.get(path, headers=auth).json()["taverns"][0]["wine_per_hour"] == 20
     assert ipc.calls == ["alpha"]
     assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_miracle_inventory_requires_authorization_and_remains_read_only(account_file):
+    class MiracleIPC:
+        def __init__(self):
+            self.calls = []
+
+        def miracles(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "miracles": [{
+                "city_id": 42, "temple_city": "Athens",
+                "island_id": "12", "wonder": "5",
+                "wonder_name": "Hermes", "level": 4,
+                "available": True, "available_in_seconds": 0,
+            }]}
+
+    ipc = MiracleIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/miracles"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/miracles", headers=auth).status_code == 404
+    assert client.get(path, headers=auth).json()["miracles"][0]["wonder"] == "5"
+    assert ipc.calls == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
