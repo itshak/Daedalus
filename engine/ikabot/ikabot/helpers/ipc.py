@@ -756,6 +756,8 @@ class IPCServer:
                     return self._market_quotes_existing(request)
                 if action == "list_academies_existing":
                     return self._list_academies_existing(request)
+                if action == "list_taverns_existing":
+                    return self._list_taverns_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -1043,6 +1045,65 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "academies": academies,
+        }
+
+    def _list_taverns_existing(self, request):
+        """Read-only city wine, tavern servings and population state."""
+        from ikabot.config import city_url
+        from ikabot.function.tavernManager import TavernManager
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        ids, _cities = getIdsOfCities(session)
+        if len(ids) > 100:
+            raise ValueError("Too many cities to inspect")
+        manager = TavernManager(session)
+        taverns = []
+        for raw in ids:
+            city_id = _existing_city_id(raw)
+            city = getCity(session.get(city_url + str(city_id)))
+            if _existing_city_id(city.get("id")) != city_id:
+                raise ValueError("Unexpected city in tavern inspection")
+            stock = city.get("availableResources")
+            if (not isinstance(stock, list) or len(stock) != 5
+                    or any(type(x) is not int or x < 0 for x in stock)):
+                raise ValueError("Current wine stock is unavailable")
+            tavern = next(
+                (row for row in city.get("position", [])
+                 if row.get("building") == "tavern"), None
+            )
+            info = None
+            if tavern:
+                info = manager._get_tavern_data(city, tavern, force_refresh=True)
+            hall = manager._get_town_hall_data(city_id, city)
+            current = info.get("current_level") if isinstance(info, dict) else None
+            servings = info.get("consumption_values") if isinstance(info, dict) else None
+            wine_hour = (
+                manager._wine_at_level(servings, current)
+                if isinstance(servings, list) and type(current) is int else None
+            )
+            if wine_hour is not None and (
+                type(wine_hour) is not int or wine_hour < 0
+            ):
+                raise ValueError("Invalid tavern wine consumption")
+            taverns.append({
+                "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
+                "wine": stock[1], "has_tavern": tavern is not None,
+                "serving_level": current, "wine_per_hour": wine_hour,
+                "satisfaction": (
+                    hall.get("total_satisfaction") if isinstance(hall, dict) else None
+                ),
+                "population": (
+                    hall.get("current_pop") if isinstance(hall, dict) else None
+                ),
+                "capacity": (
+                    hall.get("max_pop") if isinstance(hall, dict) else None
+                ),
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "taverns": taverns,
         }
 
     def _warehouse_snapshots_existing(self, request):
