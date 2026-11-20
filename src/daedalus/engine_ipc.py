@@ -33,6 +33,7 @@ _ALLOWED = frozenset({
     "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
+    "list_miracles_existing",
 })
 
 
@@ -137,6 +138,7 @@ class ExistingIPCClient:
             "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
+            "list_miracles_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -697,6 +699,51 @@ class ExistingIPCClient:
                 "population": population, "capacity": capacity,
             })
         return {"account_id": account.id, "taverns": result}
+
+    def miracles(self, account: Account) -> dict[str, object]:
+        """Verified own temples and current wonder cooldown/readiness."""
+        data = self.request("list_miracles_existing", account=account)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("IkaBot wonders belong to another account")
+        raw = data.get("miracles")
+        if not isinstance(raw, list) or len(raw) > 100:
+            raise EngineIPCUnavailable("Invalid IkaBot wonders list")
+        owned = {row["id"] for row in self.cities(account)}
+        seen = set()
+        result = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise EngineIPCUnavailable("Invalid wonder record")
+            city_id = item.get("city_id")
+            temple_city = item.get("temple_city")
+            island_id = item.get("island_id")
+            wonder = item.get("wonder")
+            wonder_name = item.get("wonder_name")
+            level = item.get("level")
+            enabled = item.get("available")
+            seconds = item.get("available_in_seconds")
+            if (type(city_id) is not int or city_id not in owned
+                    or not isinstance(temple_city, str)
+                    or not 0 < len(temple_city) <= 100
+                    or not isinstance(island_id, str)
+                    or not island_id.isdecimal() or not 0 < len(island_id) <= 30
+                    or not isinstance(wonder, str)
+                    or wonder not in set("12345678") or wonder in seen
+                    or not isinstance(wonder_name, str)
+                    or not 0 < len(wonder_name) <= 100
+                    or type(level) is not int or not 0 <= level <= 5
+                    or type(enabled) is not bool
+                    or type(seconds) is not int or not 0 <= seconds <= 7 * 86400):
+                raise EngineIPCUnavailable("Malformed owned wonder information")
+            seen.add(wonder)
+            result.append({
+                "city_id": city_id, "temple_city": temple_city,
+                "island_id": island_id, "wonder": wonder,
+                "wonder_name": wonder_name, "level": level,
+                "available": enabled, "available_in_seconds": seconds,
+            })
+        return {"account_id": account.id, "miracles": result}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
