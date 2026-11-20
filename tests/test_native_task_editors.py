@@ -18,6 +18,7 @@ from daedalus.desktop.native_controls import (
     DonationPoliciesEditor,
     MapAreaEditor,
     MarketOffersEditor,
+    MiracleTempleEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -722,4 +723,56 @@ def test_tavern_task_uses_real_city_status_not_optional_json(page):
     assert page._form_config()["cities_ids"] == ["103"]
     page.set_taverns_unavailable("alpha")
     with pytest.raises(ValueError, match="Load real tavern"):
+        page._form_config()
+
+
+MIRACLES = [
+    {"city_id": 101, "temple_city": "Athens",
+     "island_id": "123", "wonder": "5",
+     "wonder_name": "Temple of Hermes", "level": 5,
+     "available": True, "available_in_seconds": 0},
+    {"city_id": 102, "temple_city": "Sparta",
+     "island_id": "456", "wonder": "1",
+     "wonder_name": "Hephaestus' Forge", "level": 4,
+     "available": False, "available_in_seconds": 7200},
+]
+
+
+def test_miracle_native_table_shows_owned_temple_level_and_cooldown(app):
+    editor = MiracleTempleEditor()
+    try:
+        with pytest.raises(ValueError, match="Load actual owned miracles"):
+            editor.to_config()
+        editor.set_miracles(MIRACLES)
+        assert editor.table.rowCount() == 2
+        assert editor.table.item(1, 4).text() == "2 h 0 min"
+        with pytest.raises(ValueError, match="Select one real wonder"):
+            editor.to_config()
+        editor.table.setCurrentCell(1, 0)
+        editor.iterations.setValue(3)
+        assert editor.to_config() == {"wonder": "1", "iterations": 3}
+        editor.set_unavailable()
+        with pytest.raises(ValueError, match="Load actual owned miracles"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_activate_miracle_is_real_wonder_table_not_static_fake_names(page):
+    set_native(page, "activateMiracle", [
+        field("wonder", required=True),
+        field("iterations", "integer", required=True, default=1),
+        field("island"),
+    ])
+    editor = page._form_inputs["wonder"]
+    assert isinstance(editor, MiracleTempleEditor)
+    page.set_miracles({"account_id": "other", "miracles": MIRACLES})
+    with pytest.raises(ValueError, match="Load actual"):
+        page._form_config()
+    page.set_miracles({"account_id": "alpha", "miracles": MIRACLES})
+    editor.table.setCurrentCell(0, 0)
+    assert page._form_config() == {"wonder": "5", "iterations": 1}
+    page.set_miracles_unavailable("alpha")
+    with pytest.raises(ValueError, match="Load actual"):
         page._form_config()
