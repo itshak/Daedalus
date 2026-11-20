@@ -44,6 +44,23 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("buyResources", "city"): {
+        "type": "market_buy", "label": "Buy at this trading post",
+        "help": "Choose live seller offers from this account's trading-post city.",
+    },
+    ("buyResources", "offers"): {"type": "hidden_derived"},
+    ("buyResources", "amount_to_buy"): {"type": "hidden_derived"},
+    ("sellResources", "mode"): {
+        "type": "market_sell", "label": "Sell resources",
+        "help": "Select real buyers or create an offer within current trading-post price bounds.",
+    },
+    ("sellResources", "amount_to_sell"): {"type": "hidden_derived"},
+    ("sellResources", "offers"): {"type": "hidden_derived"},
+    ("sellResources", "resource_type"): {"type": "hidden_derived"},
+    ("sellResources", "city_to_buy_from"): {"type": "hidden_derived"},
+    ("sellResources", "price"): {"type": "hidden_derived"},
+    ("sellResources", "sell_market_capacity"): {"type": "hidden_derived"},
+    ("sellResources", "city"): {"type": "hidden_derived"},
     ("trainArmy", "city"): {
         "type": "train_units", "label": "Recruit from barracks or shipyard",
         "help": "Choose a real city and actual unit types. Available resources and unit costs come from IkaBot.",
