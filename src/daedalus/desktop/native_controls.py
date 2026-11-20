@@ -164,8 +164,8 @@ class ShipmentRoutesEditor(QWidget):
         ids = {city["id"] for city in self._cities}
         total: dict[int, list[int]] = {}
         for source, destination, fields in self._rows:
-            origin = source.currentData(Qt.UserRole)
-            target = destination.currentData(Qt.UserRole)
+            origin = source.currentData()
+            target = destination.currentData()
             if type(origin) is not int or origin not in ids:
                 raise ValueError("Choose a verified source city for every route")
             if type(target) is not int or target not in ids:
@@ -249,7 +249,7 @@ class DonationPoliciesEditor(QWidget):
             raise ValueError("Choose a supported donation policy")
         result: dict[str, dict[str, object]] = {}
         for city_id, kind, amount in self._rows:
-            value = kind.currentData(Qt.UserRole)
+            value = kind.currentData()
             if value is None:
                 continue
             if method in (1, 2) and amount.value() > 100:
@@ -380,7 +380,7 @@ class WorkshopUpgradesEditor(QWidget):
         self.table.setRowCount(0)
         self._units = []
         self._loaded_city_id = None
-        city_id = self.city_picker.currentData(Qt.UserRole)
+        city_id = self.city_picker.currentData()
         self._scope_city_id = city_id if type(city_id) is int else None
         self.description.setText(
             "Reading actual workshop unit levels…" if self._scope_city_id else
@@ -525,7 +525,7 @@ class TrainableUnitsEditor(QWidget):
         self._loaded = None
         self._snapshot = None
         self.table.setRowCount(0)
-        city_id = self.city_picker.currentData(Qt.UserRole)
+        city_id = self.city_picker.currentData()
         train_troops = self.mode.currentIndex() == 0
         self._selected = (city_id, train_troops) if type(city_id) is int else None
         self.description.setText(
@@ -702,7 +702,7 @@ class MarketOffersEditor(QWidget):
         self._snapshot = None
         self._offers = []
         self.table.setRowCount(0)
-        city_id = self.city_picker.currentData(Qt.UserRole)
+        city_id = self.city_picker.currentData()
         resource_type = self.resource.currentIndex()
         side = ("buy" if self._buying else
                 "sell_to_offers" if self.mode.currentIndex() == 0 else "create_offer")
@@ -1385,9 +1385,9 @@ class PiracyMissionsEditor(QWidget):
         if not supported:
             raise ValueError("Fortress cannot run any pirate missions")
         scheduled = self.schedule.isChecked()
-        main = self.main_mission.currentData(Qt.UserRole)
-        day = self.day_mission.currentData(Qt.UserRole)
-        night = self.night_mission.currentData(Qt.UserRole)
+        main = self.main_mission.currentData()
+        day = self.day_mission.currentData()
+        night = self.night_mission.currentData()
         missions = [day, night] if scheduled else [main]
         if any(type(mission) is not int or mission not in supported for mission in missions):
             raise ValueError("Choose mission levels supported by this fortress")
