@@ -19,6 +19,7 @@ from daedalus.desktop.native_controls import (
     MapAreaEditor,
     MarketOffersEditor,
     MiracleTempleEditor,
+    OlympusShrineEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -775,4 +776,63 @@ def test_activate_miracle_is_real_wonder_table_not_static_fake_names(page):
     assert page._form_config() == {"wonder": "5", "iterations": 1}
     page.set_miracles_unavailable("alpha")
     with pytest.raises(ValueError, match="Load actual"):
+        page._form_config()
+
+
+def test_olympus_shrine_editor_shows_favor_needed_and_repeat_policy(app):
+    editor = OlympusShrineEditor()
+    try:
+        with pytest.raises(ValueError, match="actual owned Shrine"):
+            editor.to_config()
+        editor.set_shrine({"city_id": 101, "city_name": "Athens",
+                           "position": 4, "favor": 320})
+        editor.table.item(0, 0).setCheckState(Qt.Checked)
+        editor.table.item(1, 0).setCheckState(Qt.Checked)
+        assert "Favour required per cycle: 200" in editor.summary.text()
+        assert "320" in editor.summary.text()
+        editor.mode.setCurrentIndex(2)
+        editor.count.setValue(3)
+        assert editor.to_config() == {
+            "godids": [1, 2], "mode": 3, "times": 3,
+        }
+        editor.mode.setCurrentIndex(1)
+        assert editor.to_config() == {"godids": [1, 2], "mode": 2, "times": 0}
+        assert not editor.count.isEnabled()
+        editor.set_shrine({"city_id": 101, "city_name": "Athens",
+                           "position": 4, "favor": None})
+        assert "Current favour: Unknown" in editor.summary.text()
+        editor.set_shrine(None)
+        with pytest.raises(ValueError, match="actual owned Shrine"):
+            editor.to_config()
+        editor.set_unavailable()
+        with pytest.raises(ValueError, match="actual owned Shrine"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_shrine_task_uses_verified_olympus_snapshot_not_fake_gods(page):
+    set_native(page, "activateShrine", [
+        field("godids", required=True),
+        field("mode", "integer", required=True),
+        field("times", "integer", default=1),
+        field("selected_gods"), field("wait_time"),
+    ])
+    editor = page._form_inputs["godids"]
+    assert isinstance(editor, OlympusShrineEditor)
+    page.set_shrine({"account_id": "beta", "shrine": {
+        "city_id": 101, "city_name": "Athens", "position": 4, "favor": 50
+    }})
+    with pytest.raises(ValueError, match="actual owned Shrine"):
+        page._form_config()
+    page.set_shrine({"account_id": "alpha", "shrine": {
+        "city_id": 101, "city_name": "Athens", "position": 4, "favor": 50
+    }})
+    editor.table.item(3, 0).setCheckState(Qt.Checked)
+    assert page._form_config() == {
+        "godids": [4], "mode": 1, "times": 1,
+    }
+    page.set_shrine_unavailable("alpha")
+    with pytest.raises(ValueError, match="actual owned Shrine"):
         page._form_config()
