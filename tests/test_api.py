@@ -474,3 +474,52 @@ def test_readonly_trainable_catalog_requires_authorized_owned_city(account_file)
     assert response.json()["train_troops"] is False
     assert ipc.calls == [("alpha", 42, False)]
     assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_market_quotes_need_auth_and_are_read_only(account_file):
+    class MarketIPC:
+        def __init__(self):
+            self.calls = []
+
+        def market_quotes(self, account, city_id, resource_type, side):
+            self.calls.append((account.id, city_id, resource_type, side))
+            return {
+                "account_id": account.id, "city_id": city_id,
+                "resource_type": resource_type, "side": side,
+                "city": {"id": str(city_id), "pos": 3, "rango": 4,
+                         "name": "Athens", "cityName": "Athens",
+                         "availableResources": [1000, 0, 0, 0, 0]},
+                "offers": [], "price_min": None, "price_max": None,
+                "sell_market_capacity": None, "currently_on_sale": None,
+            }
+
+    ipc = MarketIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = ("/api/v1/accounts/alpha/cities/42/market-quotes"
+            "?resource_type=0&side=buy")
+    assert client.get(path).status_code == 401
+    assert client.get(path.replace("/alpha/", "/unknown/"), headers=auth).status_code == 404
+    assert client.get(path.replace("side=buy", "side=send"), headers=auth).status_code == 422
+    assert client.get(path.replace("resource_type=0", "resource_type=9"), headers=auth).status_code == 422
+    assert not ipc.calls
+    resp = client.get(path, headers=auth)
+    assert resp.status_code == 200
+    assert resp.json()["side"] == "buy"
+    assert ipc.calls == [("alpha", 42, 0, "buy")]
+    assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_market_quote_service_errors_hide_game_session_data(account_file):
+    class BadMarket:
+        def market_quotes(self, _account, _city_id, _resource_type, _side):
+            raise EngineIPCUnavailable("user-cookie-SECRET-do-not-leak")
+
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN,
+                                   ipc_client=BadMarket()))
+    response = client.get(
+        "/api/v1/accounts/alpha/cities/42/market-quotes?resource_type=0&side=buy",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert response.status_code == 503
+    assert "user-cookie" not in response.text
