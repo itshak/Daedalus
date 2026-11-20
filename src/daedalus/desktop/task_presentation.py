@@ -220,37 +220,21 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("dumpWorld", "show_progress"): {"type": "hidden_derived"},
     ("autoPirate", "pirateCount"): {
-        "type": "integer", "minimum": 1, "maximum": 100000, "explicit_input": True,
-        "label": "Number of missions",
+        "type": "piracy_missions", "label": "Piracy mission planner",
+        "help": "Choose a real owned fortress, missions and schedule using verified game levels.",
     },
-    ("autoPirate", "pirateMissionChoice"): {
-        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "label": "Mission", "help": "Required without the day/night schedule.",
-    },
-    ("autoPirate", "pirateMissionDayChoice"): {
-        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "label": "Day mission", "help": "Required when scheduled.",
-    },
-    ("autoPirate", "pirateMissionNightChoice"): {
-        "type": "integer", "choices": [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "label": "Night mission", "help": "Required when scheduled.",
-    },
-    ("autoPirate", "dayStart"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
-    ("autoPirate", "dayEnd"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
-    ("autoPirate", "nightStart"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
-    ("autoPirate", "nightEnd"): {"type": "integer", "minimum": 0, "maximum": 23, "suffix": ":00"},
-    ("autoPirate", "autoConvert"): {"type": "boolean", "label": "Convert capture points automatically"},
-    ("autoPirate", "convertPerMission"): {
-        "type": "integer", "minimum": 0, "maximum": 1000000, "label": "Convert after each mission",
-    },
-    ("autoPirate", "maxRandomWaitingTime"): {
-        "type": "integer", "minimum": 0, "maximum": 3600,
-        "label": "Random additional waiting", "suffix": " s",
-    },
-    ("autoPirate", "piracyCities"): {
-        "type": "hidden_derived",
-        "help": "Engine selects the first eligible real pirate fortress for the chosen mission.",
-    },
+    ("autoPirate", "pirateSchedule"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionDayChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "pirateMissionNightChoice"): {"type": "hidden_derived"},
+    ("autoPirate", "dayStart"): {"type": "hidden_derived"},
+    ("autoPirate", "dayEnd"): {"type": "hidden_derived"},
+    ("autoPirate", "nightStart"): {"type": "hidden_derived"},
+    ("autoPirate", "nightEnd"): {"type": "hidden_derived"},
+    ("autoPirate", "autoConvert"): {"type": "hidden_derived"},
+    ("autoPirate", "convertPerMission"): {"type": "hidden_derived"},
+    ("autoPirate", "maxRandomWaitingTime"): {"type": "hidden_derived"},
+    ("autoPirate", "piracyCities"): {"type": "hidden_derived"},
     # Daily collection city destinations and favour keys are taken verbatim
     # from loginDaily.prepare_loginDaily and TASK_FUNCTIONS.
     ("loginDaily", "wine_city"): {
