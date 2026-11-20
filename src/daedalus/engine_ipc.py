@@ -35,6 +35,7 @@ _ALLOWED = frozenset({
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
     "list_pirate_fortresses_existing",
+    "military_overview_existing", "ship_movements_existing",
 })
 
 
@@ -141,6 +142,7 @@ class ExistingIPCClient:
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
             "list_pirate_fortresses_existing",
+    "military_overview_existing", "ship_movements_existing",
         } and account is None:
             raise ValueError("Explicit account identity is required")
         if account is not None and not account.enabled:
@@ -183,8 +185,10 @@ class ExistingIPCClient:
         elif (city_id is not None or upgrades is not None or train_troops is not None
               or resource_type is not None or market_side is not None):
             raise ValueError("City argument is not supported for this IPC action")
-        return self._exchange(payload, read_timeout=60.0 if action ==
-                              "preview_construction_existing" else 8.0)
+        return self._exchange(payload, read_timeout=60.0 if action in {
+            "preview_construction_existing", "military_overview_existing",
+            "ship_movements_existing",
+        } else 8.0)
 
     def _exchange(self, payload: dict[str, object], *, read_timeout: float = 8.0,
                   allow_task_rejection: bool = False) -> dict[str, Any]:
@@ -817,6 +821,87 @@ class ExistingIPCClient:
                 "missions": verified_missions,
             })
         return {"account_id": account.id, "fortresses": result}
+
+    def military_overview(self, account: Account) -> dict[str, object]:
+        """Bounded, source-backed troop and ship counts for this exact account."""
+        if not self.has_account(account):
+            raise EngineIPCUnavailable("No unique authenticated military session")
+        data = self.request("military_overview_existing", account=account)
+        if not _is_exact_identity({
+            "world": data.get("world"), "player": data.get("username")
+        }, account):
+            raise EngineIPCUnavailable("Military inventory belongs to another account")
+        rows = data.get("cities")
+        observed = data.get("observed_at")
+        if (not isinstance(rows, list) or len(rows) > 100
+                or type(observed) is not int or observed <= 0):
+            raise EngineIPCUnavailable("Invalid military inventory")
+        owned = {city["id"] for city in self.cities(account)}
+        output = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict) or type(row.get("city_id")) is not int:
+                raise EngineIPCUnavailable("Invalid military city")
+            cid = row["city_id"]
+            if (cid not in owned or cid in seen or
+                    not isinstance(row.get("city_name"), str) or
+                    len(row["city_name"]) > 120):
+                raise EngineIPCUnavailable("Military city is not verified")
+            seen.add(cid)
+            typed = {"city_id": cid, "city_name": row["city_name"]}
+            for group in ("troops", "fleet"):
+                units = row.get(group)
+                if not isinstance(units, list) or len(units) > 100:
+                    raise EngineIPCUnavailable("Invalid military unit list")
+                clean = []
+                for unit in units:
+                    if (not isinstance(unit, dict)
+                            or not isinstance(unit.get("unit"), str)
+                            or not 0 < len(unit["unit"]) <= 100
+                            or type(unit.get("amount")) is not int
+                            or not 0 <= unit["amount"] <= 10**10):
+                        raise EngineIPCUnavailable("Invalid military unit record")
+                    clean.append({"unit": unit["unit"], "amount": unit["amount"]})
+                typed[group] = clean
+            output.append(typed)
+        return {"cities": output, "observed_at": observed}
+
+    def ship_movements(self, account: Account) -> dict[str, object]:
+        """Read-only bounded movements, never a military dispatch."""
+        if not self.has_account(account):
+            raise EngineIPCUnavailable("No unique authenticated movement session")
+        data = self.request("ship_movements_existing", account=account)
+        if not _is_exact_identity({
+            "world": data.get("world"), "player": data.get("username")
+        }, account):
+            raise EngineIPCUnavailable("Movements belong to another account")
+        rows = data.get("movements")
+        observed = data.get("observed_at")
+        if (not isinstance(rows, list) or len(rows) > 250
+                or type(observed) is not int or observed <= 0):
+            raise EngineIPCUnavailable("Invalid movement inventory")
+        cleaned = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise EngineIPCUnavailable("Invalid movement record")
+            clean = {}
+            for field in ("origin", "destination", "origin_player",
+                          "destination_player", "mission"):
+                value = row.get(field)
+                if not isinstance(value, str) or len(value) > 120:
+                    raise EngineIPCUnavailable("Invalid movement text")
+                clean[field] = value
+            for field in ("seconds_remaining", "troops", "ships"):
+                value = row.get(field)
+                if type(value) is not int or not 0 <= value <= 10**10:
+                    raise EngineIPCUnavailable("Invalid movement count")
+                clean[field] = value
+            for field in ("hostile", "returning"):
+                if type(row.get(field)) is not bool:
+                    raise EngineIPCUnavailable("Invalid movement flag")
+                clean[field] = row[field]
+            cleaned.append(clean)
+        return {"movements": cleaned, "observed_at": observed}
 
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""

@@ -8,6 +8,8 @@
 - [x] Verified read-only workshop upgrade, troop/ship recruitment, academy, tavern, miracle, shrine, piracy fortress and market inventories with dedicated Qt editors.
 - [x] Strict source-scoped API/client/IPC checks, no fabricated game IDs, and synthetic UI/engine tests for these native background workflows.
 - [x] Run-time validation of current game unit resources, training costs, construction targets and exact current market quotes before relevant task dispatch.
+- [x] Read-only viewArmy and shipMovements via account-bound existing-session IPC, validated HTTP DTOs and compact Troops/Fleet/Movements tables with All accounts scope; no game order path.
+- [x] Keep automation review/launch controls in a visible native footer and remove nested guided-form vertical scrolling.
 - [x] Hide unsupported free-form JSON parameters in guided mode; require explicitly reviewed expert configuration for unsafe/unimplemented tasks.
 - [ ] Provide safe graphical configuration and independently reviewed dispatch plans for all remaining background operations and original interactive-only CLI functions.
 - [ ] Live operator acceptance, accessibility snapshots and end-to-end combat/administrative workflows.

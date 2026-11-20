@@ -535,3 +535,79 @@ def test_known_alert_preflight_rejection_before_process_creation():
         reply = server.handle_request(request)
     assert reply == {"status": "rejected", "reason": "notifications_required"}
     assert not server._daedalus_tasks
+
+
+def test_native_military_overview_is_read_only_and_does_not_restore_sessions():
+    """The original army parser runs under a verified existing account only."""
+    session = make_session()
+    server = IPCServer(default_session=session)
+    cities = {42: {"id": "42", "name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    with (
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("restore")),
+        patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=([42], cities)),
+        patch("ikabot.function.viewArmy.getCityMilitaryData",
+              return_value="<synthetic army panel>") as military,
+        patch("ikabot.function.viewArmy.parseUnits",
+              return_value=({"Swordsman": 17}, {"Ballista Ship": 3})),
+    ):
+        result = server.handle_request({
+            "action": "military_overview_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        })
+    assert result["status"] == "ok"
+    assert result["cities"] == [{
+        "city_id": 42, "city_name": "Athens",
+        "troops": [{"unit": "Swordsman", "amount": 17}],
+        "fleet": [{"unit": "Ballista Ship", "amount": 3}],
+    }]
+    military.assert_called_once_with(session, "42")
+    assert "synthetic@example.invalid" not in str(result)
+    session.post.assert_not_called()
+
+
+def test_native_ship_movements_are_a_read_only_military_advisor_query():
+    import json
+    session = make_session()
+    server = IPCServer(default_session=session)
+    cities = {42: {"id": "42", "name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    session.post.return_value = json.dumps([
+        [None, {"time": 1000}],
+        [None, [None, None, {
+            "viewScriptParams": {"militaryAndFleetMovements": [{
+                "origin": {"name": "Athens", "avatarName": "ExamplePlayer"},
+                "target": {"name": "Sparta", "avatarName": "Other"},
+                "event": {"isFleetReturning": False, "missionText": "Transport"},
+                "eventTime": 1600, "army": {"amount": 0},
+                "fleet": {"amount": 8}, "isHostile": False,
+            }]}
+        }]],
+    ])
+    with (
+        patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("restore")),
+        patch("ikabot.helpers.pedirInfo.getIdsOfCities", return_value=([42], cities)),
+    ):
+        result = server.handle_request({
+            "action": "ship_movements_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        })
+    assert result["status"] == "ok"
+    assert result["movements"][0]["seconds_remaining"] == 600
+    assert result["movements"][0]["destination"] == "Sparta"
+    assert result["movements"][0]["ships"] == 8
+    assert session.post.call_count == 1
+    url = session.post.call_args.args[0]
+    assert url.startswith("view=militaryAdvisor&")
+    assert "currentCityId=42" in url
+
+
+def test_native_military_actions_reject_wrong_identity_before_game_queries():
+    session = make_session()
+    server = IPCServer(default_session=session)
+    with patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("restore")):
+        for action in ("military_overview_existing", "ship_movements_existing"):
+            result = server.handle_request({
+                "action": action,
+                "world": "s302-en", "player": "ExamplePlayer",
+            })
+            assert result["status"] == "error"
+    session.post.assert_not_called()

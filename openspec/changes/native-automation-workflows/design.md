@@ -135,4 +135,21 @@ Until each adapter exists, keep it clearly labeled *Requires native planner / da
 
 ## Current implementation state
 
-On branch `feat/native-automation-workflows`, the category tabs and authenticated construction city chooser are implemented and covered by synthetic tests. The other domain widgets and essential read-only game DTOs, including the construction building table/preview, are **not yet implemented**. This OpenSpec remains active and must not be archived until all gates pass.
+This change is still **active**, not archived. The feature branch implements
+native editors for the source-verified subset of background tasks listed in
+docs/AUTOMATION-UX-AUDIT.md, including building levels and construction cost
+previews, unit recruitment and workshop improvements, trade quotes, tavern,
+academy, shrine, miracles, piracy and city/resource policies. The layout
+retains a compact, visible review/start footer and one form scroller.
+
+The original interactive-only viewArmy and shipMovements now have safe,
+read-only existing-session adapters and a separate, responsive native Military
+workspace with account and All accounts selectors. These endpoints never run
+an IkaBot background task and return only bounded unit counts and current
+movement descriptions. They fail closed on identity or malformed replies.
+
+The remaining combat planning, worker assignments, production management,
+transport ETA and other interactive administration tools are still unimplemented.
+Readiness, full accessibility evidence, fresh plan fingerprints and
+live-user-accepted game outcomes remain release gates; this change must not
+be archived until those gates are met.

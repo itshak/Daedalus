@@ -682,6 +682,30 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid pirate fortress inventory")
         return result
 
+    def military_overview(self, account_id: str) -> dict[str, object]:
+        """Read actual troops/fleets for one account, never start a task."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid military account")
+        data = self._read(f"accounts/{account_id}/military")
+        if (data.get("account_id") != account_id
+                or not isinstance(data.get("cities"), list)
+                or len(data["cities"]) > 100
+                or type(data.get("observed_at")) is not int):
+            raise APIConnectionError("Invalid military overview response")
+        return data
+
+    def ship_movements(self, account_id: str) -> dict[str, object]:
+        """Read sanitized movement rows for one account, never send ships."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid movement account")
+        data = self._read(f"accounts/{account_id}/ship-movements")
+        if (data.get("account_id") != account_id
+                or not isinstance(data.get("movements"), list)
+                or len(data["movements"]) > 250
+                or type(data.get("observed_at")) is not int):
+            raise APIConnectionError("Invalid ship movements response")
+        return data
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:

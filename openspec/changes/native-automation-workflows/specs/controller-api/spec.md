@@ -31,3 +31,10 @@ The API SHALL preserve durable request IDs, config fingerprint, explicit confirm
 #### Scenario: Ambiguous task result
 - **WHEN** the controller cannot establish whether an operation started
 - **THEN** it retains the unconfirmed receipt, blocks further launches on that account, and directs the operator to manual reconciliation
+
+### Requirement: Bound read-only military DTOs
+The controller SHALL expose authenticated existing-session military inventory and movement reads with explicit account/world/player checks, bounded list sizes and sanitized names, counts, and server-observed timestamps. It SHALL reject a city belonging to another account rather than returning guessed or cross-account military data.
+
+#### Scenario: Foreign military city
+- **WHEN** the source engine returns a unit row whose city is not in the selected account's verified city list
+- **THEN** the read fails without displaying any military rows or launching an order

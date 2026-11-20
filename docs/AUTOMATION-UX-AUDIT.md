@@ -43,8 +43,8 @@ A row with **Designed, pending engine data** represents a *specified* UI but not
 | Military | `autoBarbarians` | Target cycle, troop template, capacity and notifications | Designed; combat planner pending |
 | Military | `autoPirate` | Mission picker, pirate count and day/night schedule | **Native: account fortress mission eligibility, mission and day/night frequency controls; game outcomes require owner testing** |
 | Military | `stationArmy` | Garrison origin/destination and troop send preview | Designed; interactive-only adapter pending |
-| Military | `viewArmy` | Read-only garrison/unit table | Designed; interactive-only adapter pending |
-| Military | `shipMovements` | Read-only movement route/ETA table | Designed; interactive-only adapter pending |
+| Military | `viewArmy` | Read-only per-city troop and fleet tables, account / all-account scope | **Native read-only: current authenticated unit inventories via original upstream parser; no military order controls** |
+| Military | `shipMovements` | Current movement origin, target, mission, ETA and counts | **Native read-only: bounded military-advisor movements, hostile/returning state; no send/recall controls** |
 | Alerts | `alertAttacks` | Minutes polling interval + notification readiness | Existing basic native primitive control |
 | Alerts | `alertLowWine` | Warning threshold in hours, opt-in transfer and amount | Existing basic native primitive controls |
 | Alerts | `searchForIslandSpaces` | Island list/map, polling frequency and fight policy | **Native: actual owned-island coordinates and monitoring options; live free-space inventory pending** |
@@ -83,6 +83,6 @@ Use a synthetic/demo backend to verify grouping, empty states, account switching
 
 - Combat planners (`attackBarbarians`, `autoBarbarians`) still require an independently prepared, correctly scoped game plan. The ordinary form does **not** request JSON or suggest that an unverified army can attack; these operations remain expert-only until read-only troop/risk/ship previews and revalidation are implemented.
 - The `webServer` automation is administrative and retains an explicit expert setup/approval boundary; a secure native listener setup is not yet available.
-- IkaBot's original interactive-only operations (single-building actions, production/scientist/priest controls, garrison/movement inspection, notifications, proxies, cookies, updater and developer tools) are **not** background tasks and cannot be safely launched through the task dispatcher. They require individually scoped read-only/interactive controller adapters and dedicated screens.
+- IkaBot's original interactive-only operations (single-building actions, production/scientist/priest controls, garrison dispatch, notifications, proxies, cookies, updater and developer tools) are **not** background tasks and cannot be safely launched through the task dispatcher. Native **read-only** army and movement inspection now use separate audited existing-session adapters, not the generic task dispatcher. Remaining mutating CLI operations require individually scoped reviewed controllers and dedicated screens.
 - Shipment capacity and external-island destination validation, donation project balances, academy eligibility refinements, daily reward eligibility, task preview TTL/fingerprint and multi-screen accessibility evidence are pending. They must not be presented as already supported.
 - All game-changing tasks require explicit per-account review, the backend/engine's existing task preflight, and reconciliation of uncertain outcomes. Demo/synthetic tests do not constitute user acceptance or live Ikariam validation.
