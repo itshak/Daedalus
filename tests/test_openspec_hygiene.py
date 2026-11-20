@@ -55,7 +55,7 @@ def test_canonical_capability_specs_exist_for_all_active_deltas():
             continue
         delta = path.read_text(encoding="utf-8")
         operations = re.findall(
-            r"^## (ADDED|MODIFIED|REMOVED|RENAMED) Requirements\\s*$",
+            r"^## (ADDED|MODIFIED|REMOVED|RENAMED) Requirements\s*$",
             delta,
             flags=re.MULTILINE,
         )
