@@ -206,6 +206,8 @@ class APIWorker(QThread):
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "task_academies" and self.account_id:
+                result = self.client.academies(self.account_id)
             elif self.action == "task_market" and self.account_id and self.task_payload:
                 city_id = self.task_payload.get("city_id")
                 resource_type = self.task_payload.get("resource_type")
@@ -450,6 +452,7 @@ class MainWindow(FluentWindow):
         self._pending_workshop: tuple[str, int] | None = None
         self._pending_trainables: tuple[str, int, bool] | None = None
         self._pending_market: tuple[str, int, int, str] | None = None
+        self._pending_academies: str | None = None
         self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
@@ -607,6 +610,7 @@ class MainWindow(FluentWindow):
             view.workshop_requested.connect(self._queue_workshop)
             view.trainable_units_requested.connect(self._queue_trainables)
             view.market_quotes_requested.connect(self._queue_market)
+            view.academies_requested.connect(self._queue_academies)
             view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
@@ -1407,6 +1411,23 @@ class MainWindow(FluentWindow):
                               "side": scope[3]},
             )
 
+    def _queue_academies(self, account_id: str) -> None:
+        """Fetch academy research readiness for the selected account."""
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "research"):
+            return
+        self._pending_academies = account_id
+        self._run_next_academies()
+
+    def _run_next_academies(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_academies
+        self._pending_academies = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "research"):
+            self._launch(self.client, "task_academies", account_id=account_id)
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1523,6 +1544,7 @@ class MainWindow(FluentWindow):
                     self._pending_workshop = None
                     self._pending_trainables = None
                     self._pending_market = None
+                    self._pending_academies = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
@@ -1700,6 +1722,9 @@ class MainWindow(FluentWindow):
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
+        elif action == "task_academies":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_academies(payload)
         elif action == "task_market":
             assert isinstance(payload, dict)
             self.tasks_page.set_market_quotes(payload)
@@ -1819,6 +1844,10 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.tasks_page.set_cities_unavailable(account_id)
+        if action == "task_academies":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_academies_unavailable(account_id)
         if action == "task_market":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)
@@ -1904,7 +1933,7 @@ class MainWindow(FluentWindow):
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight", "task_cities",
                           "task_buildings", "task_construction_preview", "task_workshop",
-                          "task_trainables", "task_market"}:
+                          "task_trainables", "task_market", "task_academies"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -1969,6 +1998,8 @@ class MainWindow(FluentWindow):
             self._run_next_trainables()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_market()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_academies()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
