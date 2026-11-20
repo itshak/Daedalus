@@ -826,3 +826,92 @@ class MarketOffersEditor(QWidget):
             "offers": chosen, "resource_type": resource_type,
             "city_to_buy_from": snapshot["city"],
         }
+
+
+class AcademyResearchEditor(QWidget):
+    """Owned academies, current crystal/cooldown and experiment mode controls."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.table = _table((
+            "Use", "Academy city", "Crystal on hand", "Cooldown", "Ready now",
+        ))
+        self.table.setMinimumHeight(195)
+        self.table.setAccessibleName("Actual academy research eligibility table")
+        self.table.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.table)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Experiments"))
+        self.count = _amount(label="Number of crystal experiments in one city")
+        self.count.setRange(0, 10000)
+        self.count.setValue(0)
+        self.count.setSpecialValueText("Automatic (all selected cities)")
+        self.count.valueChanged.connect(self.changed.emit)
+        row.addWidget(self.count)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.description = QLabel(
+            "Loading current academy and crystal information; no experiments started."
+        )
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self._academies: list[dict[str, object]] | None = None
+
+    def set_academies(self, academies: list[dict[str, object]]) -> None:
+        self._academies = list(academies)
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(academies))
+            for row, academy in enumerate(academies):
+                checkbox = QTableWidgetItem("")
+                checkbox.setData(Qt.UserRole, academy["city_id"])
+                checkbox.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                checkbox.setCheckState(Qt.Unchecked)
+                self.table.setItem(row, 0, checkbox)
+                for col, value in (
+                    (1, academy["city_name"]),
+                    (2, f'{academy["crystal"]:,}'),
+                    (3, "Cooling down" if academy["cooldown"] else "None"),
+                    (4, "Yes" if academy["can_experiment_now"] else "Not yet"),
+                ):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.table.setItem(row, col, cell)
+        self.description.setText(
+            f"{len(academies)} verified academy cities. Each experiment needs at "
+            "least 300,000 crystal and has an approximately four-hour cooldown. "
+            "Manual experiments use exactly one city; automatic can use several."
+        )
+        self.changed.emit()
+
+    def set_unavailable(self) -> None:
+        self._academies = None
+        self.table.setRowCount(0)
+        self.description.setText(
+            "Academy information is unavailable for this account. "
+            "No research settings can be reviewed yet."
+        )
+        self.changed.emit()
+
+    def to_config(self) -> dict[str, object]:
+        if self._academies is None:
+            raise ValueError("Load actual academies for the selected account")
+        chosen = [
+            self._academies[row] for row in range(len(self._academies))
+            if self.table.item(row, 0) is not None
+            and self.table.item(row, 0).checkState() == Qt.Checked
+        ]
+        if not chosen:
+            raise ValueError("Choose at least one real academy")
+        count = self.count.value()
+        if count > 0 and len(chosen) != 1:
+            raise ValueError("Fixed experiment counts require exactly one academy")
+        if count > 0 and chosen[0]["crystal"] < 300000:
+            raise ValueError("A manual experiment requires at least 300,000 crystal")
+        return {
+            "cities_ids": [str(row["city_id"]) for row in chosen],
+            "qty": count if count > 0 else None,
+        }
