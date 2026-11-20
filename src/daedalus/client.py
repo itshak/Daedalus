@@ -596,6 +596,18 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid academy research inventory")
         return result
 
+    def taverns(self, account_id: str) -> dict[str, object]:
+        """Fetch verified wine and tavern state from one selected game account."""
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account for tavern management")
+        result = self._read(f"accounts/{account_id}/taverns")
+        if (result.get("account_id") != account_id
+                or not isinstance(result.get("taverns"), list)
+                or len(result["taverns"]) > 100
+                or any(not isinstance(row, dict) for row in result["taverns"])):
+            raise APIConnectionError("Backend returned an invalid tavern inventory")
+        return result
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
