@@ -592,7 +592,7 @@ class TrainableUnitsEditor(QWidget):
         for row, unit in enumerate(units):
             quantity = self.table.cellWidget(row, 2)
             if not isinstance(quantity, SpinBox):
-                raise ValueError("Training quantities unavailable")
+                raise TypeError("Training quantities unavailable")
             amount = quantity.value()
             if amount == 0:
                 continue
