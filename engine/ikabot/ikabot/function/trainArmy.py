@@ -277,7 +277,10 @@ def prepare_trainArmy(session, city, tranings, trainTroops, replicate,
     verified = []
     seen = set()
     for entry in tranings[0]:
-        if not isinstance(entry, dict) or set(entry) != {"unit_type_id", "cantidad"}:
+        raw_keys = {"unit_type_id", "cantidad"}
+        prepared_keys = raw_keys | {"costs", "identifier", "local_name"}
+        if (not isinstance(entry, dict)
+                or set(entry) not in (raw_keys, prepared_keys)):
             raise ValueError("Training selections require actual unit and quantity")
         unit_id, count = entry["unit_type_id"], entry["cantidad"]
         if (type(unit_id) is not int or unit_id not in available
@@ -285,6 +288,10 @@ def prepare_trainArmy(session, city, tranings, trainTroops, replicate,
                 or not 0 < count <= 100000):
             raise ValueError("Invalid or repeated training unit")
         unit = available[unit_id]
+        if set(entry) == prepared_keys and any(
+            entry[key] != unit[key] for key in ("costs", "identifier", "local_name")
+        ):
+            raise ValueError("Saved training unit data has changed; prepare a fresh plan")
         seen.add(unit_id)
         for key in budget:
             needed = unit["costs"].get(key, 0) * count
