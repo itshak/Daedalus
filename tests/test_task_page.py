@@ -415,7 +415,9 @@ def test_distribution_uses_verified_resource_policy_and_actual_city_multiselect(
 
 
 def test_tavern_cities_are_native_and_never_fabricated(page):
-    from PySide6.QtWidgets import QListWidget
+    from PySide6.QtCore import Qt
+
+    from daedalus.desktop.native_controls import TavernCitiesEditor
 
     page.set_capabilities([{
         "name": "tavernManager", "kind": "background_task",
@@ -424,12 +426,37 @@ def test_tavern_cities_are_native_and_never_fabricated(page):
             {"name": "cities_ids", "type": "json", "required": False},
         ],
     }], enabled=True)
-    assert isinstance(page._form_inputs["cities_ids"], QListWidget)
+    editor = page._form_inputs["cities_ids"]
+    assert isinstance(editor, TavernCitiesEditor)
+    # A list of city names is not sufficient: real tavern state must come
+    # from the selected account before the UI can prepare an executable plan.
     page.set_cities("alpha", [{"id": 30, "name": "Ephesus"}])
-    assert page._form_inputs["cities_ids"].count() == 1
-    # Uses engine default without explicitly choosing a city.
-    page._form_inputs["run_hours"].setValue(1)
-    assert page._form_config() == {"run_hours": 1}
+    with pytest.raises(ValueError, match="Load real tavern"):
+        page._form_config()
+    page.set_taverns({
+        "account_id": "other", "taverns": [],
+    })
+    with pytest.raises(ValueError, match="Load real tavern"):
+        page._form_config()
+    page.set_taverns({
+        "account_id": "alpha",
+        "taverns": [{
+            "city_id": 30, "city_name": "Ephesus",
+            "wine": 4000, "wine_per_hour": 25, "has_tavern": True,
+            "serving_level": 3, "population": 150, "capacity": 300,
+            "satisfaction": 50,
+        }],
+    })
+    assert editor.table.rowCount() == 1
+    editor.interval.setValue(1)
+    assert page._form_config() == {
+        "cities_ids": None, "run_hours": 1, "notification_mode": 2,
+    }
+    editor.all_cities.setChecked(False)
+    with pytest.raises(ValueError, match="Choose at least one city"):
+        page._form_config()
+    editor.table.item(0, 0).setCheckState(Qt.Checked)
+    assert page._form_config()["cities_ids"] == ["30"]
 
 
 def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
