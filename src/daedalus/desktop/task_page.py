@@ -53,6 +53,7 @@ from daedalus.desktop.native_controls import (
     MarketOffersEditor,
     MiracleTempleEditor,
     OlympusShrineEditor,
+    PiracyMissionsEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
@@ -131,6 +132,7 @@ class TasksPage(QWidget):
     taverns_requested = Signal(str)
     miracles_requested = Signal(str)
     shrine_requested = Signal(str)
+    pirate_fortresses_requested = Signal(str)
 
     def __init__(self, parent=None, *, workflow: str | None = None) -> None:
         super().__init__(parent)
@@ -1035,6 +1037,21 @@ class TasksPage(QWidget):
         if isinstance(editor, OlympusShrineEditor):
             editor.set_shrine(result["shrine"])
 
+    def set_pirate_fortresses(self, result: dict[str, object]) -> None:
+        if (result.get("account_id") != self.selected_account_id()
+                or self.selected_task_name() != "autoPirate"):
+            return
+        editor = self._form_inputs.get("pirateCount")
+        if isinstance(editor, PiracyMissionsEditor):
+            editor.set_fortresses(result["fortresses"])
+
+    def set_pirate_fortresses_unavailable(self, account_id: str) -> None:
+        if account_id != self.selected_account_id():
+            return
+        editor = self._form_inputs.get("pirateCount")
+        if isinstance(editor, PiracyMissionsEditor):
+            editor.set_unavailable()
+
     def set_shrine_unavailable(self, account_id: str) -> None:
         if account_id != self.selected_account_id():
             return
@@ -1113,14 +1130,14 @@ class TasksPage(QWidget):
         can_start = bool(count) and count <= 32 and not ineligible
         # One city's construction plan cannot be dispatched against other account IDs.
         if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources"}:
+                                            "buyResources", "sellResources", "autoPirate"}:
             can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
         if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources"}:
+                                            "buyResources", "sellResources", "autoPirate"}:
             self.bulk_note.setText(
                 "Construction, workshop, training and market plans are city-specific. Configure "
                 "each account separately; never reuse a quote or game plan across accounts."
@@ -1206,7 +1223,7 @@ class TasksPage(QWidget):
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
                 or self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                                 "buyResources", "sellResources"}
+                                                 "buyResources", "sellResources", "autoPirate"}
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.selected_task_name()):
@@ -1615,6 +1632,9 @@ class TasksPage(QWidget):
             elif kind == "map_center":
                 widget = MapAreaEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
+            elif kind == "piracy_missions":
+                widget = PiracyMissionsEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "olympus_shrine":
                 widget = OlympusShrineEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
@@ -1759,6 +1779,8 @@ class TasksPage(QWidget):
             self.miracles_requested.emit(self.selected_account_id())
         if name == "activateShrine" and self.selected_account_id():
             self.shrine_requested.emit(self.selected_account_id())
+        if name == "autoPirate" and self.selected_account_id():
+            self.pirate_fortresses_requested.emit(self.selected_account_id())
         if name == "donationBot":
             method = self._form_inputs.get("donate_method")
             policy = self._form_inputs.get("cities_dict")
@@ -1788,7 +1810,7 @@ class TasksPage(QWidget):
                 "donation_policies", "resource_limits", "resource_config",
                 "workshop_jobs", "train_units", "market_buy", "market_sell",
                 "academy_research", "tavern_cities", "miracle_temple",
-                "olympus_shrine",
+                "olympus_shrine", "piracy_missions",
             } for field in visible_fields) else 0
             self.parameter_scroll.setFixedHeight(
                 min(480, max(72, len(visible_fields) * 44 + 24 + list_extra))
@@ -1923,6 +1945,9 @@ class TasksPage(QWidget):
                 continue
             if isinstance(widget, ShipmentRoutesEditor):
                 config[key] = widget.to_config()
+                continue
+            if isinstance(widget, PiracyMissionsEditor):
+                config.update(widget.to_config())
                 continue
             if isinstance(widget, OlympusShrineEditor):
                 config.update(widget.to_config())
