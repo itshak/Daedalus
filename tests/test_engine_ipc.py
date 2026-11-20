@@ -84,6 +84,10 @@ def fake_worker(tmp_path, responder=None):
                 ],
                 "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
             }
+        if msg["action"] == "shrine_status_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "shrine": {"city_id": 42, "city_name": "Athens",
+                               "position": 4, "favor": 750}}
         if msg["action"] == "list_miracles_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
                     "miracles": [{"city_id": 42, "temple_city": "Athens",
@@ -639,3 +643,16 @@ def test_miracle_inventory_is_account_owned_and_exposes_real_cooldown(tmp_path):
             "player": "ExamplePlayer",
         }
         assert not any("start_task" in request["action"] for request in requests)
+
+
+def test_olympus_shrine_status_ipc_owns_city_and_favor(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.shrine_status(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["shrine"]["city_id"] == 42
+        assert result["shrine"]["favor"] == 750
+        assert requests[-1] == {
+            "action": "shrine_status_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        }
+        assert not any("start_task" in row["action"] for row in requests)
