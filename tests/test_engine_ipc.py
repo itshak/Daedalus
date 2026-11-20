@@ -84,6 +84,11 @@ def fake_worker(tmp_path, responder=None):
                 ],
                 "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
             }
+        if msg["action"] == "list_academies_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "academies": [{"city_id": 42, "city_name": "Athens", "position": 5,
+                                   "crystal": 400000, "cooldown": False,
+                                   "can_experiment_now": True}]}
         if msg["action"] == "market_quotes_existing":
             side = msg["market_side"]
             city = {"id": str(msg["city_id"]), "name": "Athens", "cityName": "Athens",
@@ -558,3 +563,38 @@ def test_market_quote_response_from_wrong_world_rejected(tmp_path):
         EngineIPCUnavailable
     ):
         client.market_quotes(ALPHA, 42, 0, "buy")
+
+
+def test_academy_research_ipc_lists_only_owned_and_real_game_stock(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        result = client.academies(ALPHA)
+        assert result["account_id"] == "alpha"
+        assert result["academies"] == [
+            {"city_id": 42, "city_name": "Athens", "position": 5,
+             "crystal": 400000, "cooldown": False, "can_experiment_now": True},
+        ]
+        assert requests[-1] == {
+            "action": "list_academies_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+        }
+        assert not any("task" in request["action"] for request in requests)
+
+
+def test_academy_research_ipc_rejects_wrong_city_and_false_readiness(tmp_path):
+    def responder(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{
+                "world": "s301-en", "player": "ExamplePlayer",
+            }]}
+        if request["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2",
+                                "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "academies": [{"city_id": 99, "city_name": "Other", "position": 2,
+                               "crystal": 50, "cooldown": True,
+                               "can_experiment_now": True}]}
+    with fake_worker(tmp_path, responder) as (client, _, _), pytest.raises(
+        EngineIPCUnavailable, match="foreign academy"
+    ):
+        client.academies(ALPHA)
