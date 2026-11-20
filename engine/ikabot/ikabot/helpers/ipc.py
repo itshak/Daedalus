@@ -754,6 +754,8 @@ class IPCServer:
                     return self._list_trainables_existing(request)
                 if action == "market_quotes_existing":
                     return self._market_quotes_existing(request)
+                if action == "list_academies_existing":
+                    return self._list_academies_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -983,6 +985,64 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id, **snapshot,
+        }
+
+    def _list_academies_existing(self, request):
+        """Return owned academy buildings, real crystal stock and cooldown state."""
+        from ikabot.config import actionRequest, city_url
+        from ikabot.function.research import find_academy_cities
+        from ikabot.helpers.getJson import getCity
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        ids, _cities = getIdsOfCities(session)
+        owned_ids = {_existing_city_id(value) for value in ids}
+        found = find_academy_cities(session)
+        if not isinstance(found, list) or len(found) > 100:
+            raise ValueError("Invalid academy list returned by the game")
+        academies = []
+        seen = set()
+        for academy in found:
+            if not isinstance(academy, dict):
+                raise ValueError("Invalid academy record")
+            raw_id = _existing_city_id(academy.get("cityID"))
+            position = academy.get("pos")
+            if (raw_id not in owned_ids or raw_id in seen
+                    or type(position) is not int or not 0 <= position <= 80):
+                raise ValueError("Academy does not belong to the selected account")
+            seen.add(raw_id)
+            city = getCity(session.get(city_url + str(raw_id)))
+            if _existing_city_id(city.get("id")) != raw_id:
+                raise ValueError("Game returned an unexpected academy city")
+            if not any(
+                building.get("position") == position
+                and building.get("building") == "academy"
+                for building in city.get("position", [])
+            ):
+                raise ValueError("Academy position has changed")
+            stock = city.get("availableResources")
+            if (not isinstance(stock, list) or len(stock) != 5
+                    or any(type(q) is not int or q < 0 for q in stock)):
+                raise ValueError("Academy resource amounts unavailable")
+            url = (
+                f"view=academy&cityId={raw_id}&position={position}"
+                f"&backgroundView=city&currentCityId={raw_id}&templateView=academy"
+                f"&actionRequest={actionRequest}&ajax=1"
+            )
+            cooldown_html = session.get(url)
+            if not isinstance(cooldown_html, str):
+                raise ValueError("Academy cooldown cannot be confirmed")
+            academies.append({
+                "city_id": raw_id, "city_name": str(city.get("name") or "")[:100],
+                "position": position, "crystal": stock[3],
+                "cooldown": "experimentCooldown" in cooldown_html,
+                "can_experiment_now": (
+                    stock[3] >= 300000 and "experimentCooldown" not in cooldown_html
+                ),
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "academies": academies,
         }
 
     def _warehouse_snapshots_existing(self, request):
