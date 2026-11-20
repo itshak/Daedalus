@@ -1583,7 +1583,8 @@ class TasksPage(QWidget):
                 # Complex planner internals belong to an expert imported plan,
                 # never to the normal construction interface.
                 continue
-            if field.get("type") in {"hidden_derived", "json"}:
+            if (field.get("type") in {"hidden_derived", "json"}
+                    and not (name == "constructionList" and key == "city_id")):
                 # Game-derived nested plans must never look like free-form text
                 # inputs in the normal workflow. Import a verified expert plan
                 # through Advanced until a source-backed native editor exists.
@@ -2118,8 +2119,9 @@ class TasksPage(QWidget):
             and not self._pending_launch
             # Every unspecialized structured field requires an expert-verified
             # plan. A guided form cannot silently omit required IkaBot settings.
-            and (self._advanced_visible or not expert_configuration_needed(
-                self._config_fields_by_task.get(self.selected_task_name() or "", [])))
+            and (self._advanced_visible or self.selected_task_name() == "constructionList"
+                 or not expert_configuration_needed(
+                     self._config_fields_by_task.get(self.selected_task_name() or "", [])))
             # Live building selection alone is NOT a prepared engine plan.
             and (self.selected_task_name() != "constructionList"
                  or self._advanced_visible or self._construction_preview_ready)
