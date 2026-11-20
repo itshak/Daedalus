@@ -206,6 +206,8 @@ class APIWorker(QThread):
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "task_piracy" and self.account_id:
+                result = self.client.pirate_fortresses(self.account_id)
             elif self.action == "task_shrine" and self.account_id:
                 result = self.client.shrine_status(self.account_id)
             elif self.action == "task_miracles" and self.account_id:
@@ -462,6 +464,7 @@ class MainWindow(FluentWindow):
         self._pending_taverns: str | None = None
         self._pending_miracles: str | None = None
         self._pending_shrine: str | None = None
+        self._pending_piracy: str | None = None
         self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
@@ -623,6 +626,7 @@ class MainWindow(FluentWindow):
             view.taverns_requested.connect(self._queue_taverns)
             view.miracles_requested.connect(self._queue_miracles)
             view.shrine_requested.connect(self._queue_shrine)
+            view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
@@ -1488,6 +1492,22 @@ class MainWindow(FluentWindow):
                 and self.tasks_page.selected_task_name() == "activateShrine"):
             self._launch(self.client, "task_shrine", account_id=account_id)
 
+    def _queue_piracy(self, account_id: str) -> None:
+        if (self.client is None or self.tasks_page.selected_account_id() != account_id
+                or self.tasks_page.selected_task_name() != "autoPirate"):
+            return
+        self._pending_piracy = account_id
+        self._run_next_piracy()
+
+    def _run_next_piracy(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        account_id = self._pending_piracy
+        self._pending_piracy = None
+        if (account_id and self.tasks_page.selected_account_id() == account_id
+                and self.tasks_page.selected_task_name() == "autoPirate"):
+            self._launch(self.client, "task_piracy", account_id=account_id)
+
     def _queue_task_preflight(self, account_id: str, task: str) -> None:
         """Queue only current-generation readiness checks for the single workspace."""
         view = self.tasks_page
@@ -1608,6 +1628,7 @@ class MainWindow(FluentWindow):
                     self._pending_taverns = None
                     self._pending_miracles = None
                     self._pending_shrine = None
+                    self._pending_piracy = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
                     self.home_page.set_accounts([])
@@ -1785,6 +1806,9 @@ class MainWindow(FluentWindow):
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
+        elif action == "task_piracy":
+            assert isinstance(payload, dict)
+            self.tasks_page.set_pirate_fortresses(payload)
         elif action == "task_shrine":
             assert isinstance(payload, dict)
             self.tasks_page.set_shrine(payload)
@@ -1916,6 +1940,10 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.tasks_page.set_cities_unavailable(account_id)
+        if action == "task_piracy":
+            account_id = getattr(self._worker, "account_id", None)
+            if isinstance(account_id, str):
+                self.tasks_page.set_pirate_fortresses_unavailable(account_id)
         if action == "task_shrine":
             account_id = getattr(self._worker, "account_id", None)
             if isinstance(account_id, str):
@@ -2018,7 +2046,7 @@ class MainWindow(FluentWindow):
         if action not in {"assistance_pending", "task_preflight", "task_cities",
                           "task_buildings", "task_construction_preview", "task_workshop",
                           "task_trainables", "task_market", "task_academies",
-                          "task_taverns", "task_miracles", "task_shrine"}:
+                          "task_taverns", "task_miracles", "task_shrine", "task_piracy"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -2091,6 +2119,8 @@ class MainWindow(FluentWindow):
             self._run_next_miracles()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_shrine()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_piracy()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
 
