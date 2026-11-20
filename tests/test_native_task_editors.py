@@ -20,6 +20,7 @@ from daedalus.desktop.native_controls import (
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
     WorkshopUpgradesEditor,
+    TrainableUnitsEditor,
 )
 from daedalus.desktop.task_page import TasksPage
 
@@ -371,4 +372,83 @@ def test_upgrade_units_is_prepared_from_actual_unit_choices_not_untrusted_json(p
     }]
     page.set_cities_unavailable("alpha")
     with pytest.raises(ValueError, match="load its verified"):
+        page._form_config()
+
+
+TRAINABLE = {
+    "account_id": "alpha", "city_id": 101, "train_troops": True,
+    "city": {"id": "101", "cityName": "Athens", "pos": "3"},
+    "available": [3000, 100, 0, 0, 1000], "free_citizens": 20,
+    "units": [
+        {"unit_type_id": 301, "local_name": "Swordsman",
+         "costs": {"wood": 100, "sulfur": 50, "citizens": 1, "upkeep": 3}},
+        {"unit_type_id": 302, "local_name": "Hoplite",
+         "costs": {"wood": 200, "sulfur": 70, "citizens": 1}},
+    ],
+}
+
+
+def test_unit_recruitment_table_validates_real_city_budget_and_modes(app):
+    editor = TrainableUnitsEditor()
+    try:
+        requested = []
+        editor.city_requested.connect(lambda *args: requested.append(args))
+        editor.set_cities(CITIES)
+        editor.city_picker.setCurrentIndex(1)
+        assert requested == [(101, True)]
+        with pytest.raises(ValueError, match="load its actual recruitable"):
+            editor.to_config()
+        editor.set_trainables({**TRAINABLE, "city_id": 102})
+        assert editor.table.rowCount() == 0
+        editor.set_trainables(TRAINABLE)
+        assert editor.table.rowCount() == 2
+        first = editor.table.cellWidget(0, 2)
+        first.setValue(4)
+        plan = editor.to_config()
+        assert plan["city"]["id"] == "101"
+        assert plan["tranings"] == [[{"unit_type_id": 301, "cantidad": 4}]]
+        assert plan["trainTroops"] is True
+        assert plan["replicate"] == "n"
+        first.setValue(100)
+        with pytest.raises(ValueError, match="Not enough wood"):
+            editor.to_config()
+        editor.mode.setCurrentIndex(1)
+        assert requested[-1] == (101, False)
+        with pytest.raises(ValueError, match="load its actual recruitable"):
+            editor.to_config()
+        editor.set_unavailable(101, False)
+        assert editor.table.rowCount() == 0
+        editor.set_cities([])
+        with pytest.raises(ValueError):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_native_army_task_ignores_outside_account_training_results(page):
+    requested = []
+    page.trainable_units_requested.connect(
+        lambda account_id, city, troops: requested.append((account_id, city, troops))
+    )
+    set_native(page, "trainArmy", [
+        field("city", required=True), field("tranings", required=True),
+        field("trainTroops", required=True), field("replicate", required=True),
+        field("countRepeat", required=True), field("cityTrainings", required=True),
+        field("units", required=True),
+    ])
+    editor = page._form_inputs["city"]
+    assert isinstance(editor, TrainableUnitsEditor)
+    editor.city_picker.setCurrentIndex(1)
+    assert requested == [("alpha", 101, True)]
+    page.set_trainable_units({**TRAINABLE, "account_id": "beta"})
+    with pytest.raises(ValueError, match="load its actual recruitable"):
+        page._form_config()
+    page.set_trainable_units(TRAINABLE)
+    editor.table.cellWidget(0, 2).setValue(5)
+    config = page._form_config()
+    assert config["tranings"][0][0] == {"unit_type_id": 301, "cantidad": 5}
+    assert config["city"]["id"] == "101"
+    page.set_cities_unavailable("alpha")
+    with pytest.raises(ValueError, match="load its actual recruitable"):
         page._form_config()
