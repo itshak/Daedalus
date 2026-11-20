@@ -762,6 +762,8 @@ class IPCServer:
                     return self._list_miracles_existing(request)
                 if action == "shrine_status_existing":
                     return self._shrine_status_existing(request)
+                if action == "list_pirate_fortresses_existing":
+                    return self._list_pirate_fortresses_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -1203,6 +1205,53 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "shrine": shrine,
+        }
+
+    def _list_pirate_fortresses_existing(self, request):
+        """Identify actual account-owned fortresses and supported mission durations."""
+        from ikabot.config import piracyMissionToBuildingLevel, piracyMissionWaitingTime
+        from ikabot.function.autoPirate import getPiracyCities
+
+        session = self._existing_session(request)
+        candidates = getPiracyCities(session, 1)
+        if not isinstance(candidates, list) or len(candidates) > 100:
+            raise ValueError("Game returned invalid pirate fortress inventory")
+        verified = []
+        seen = set()
+        for city in candidates:
+            if not isinstance(city, dict):
+                raise ValueError("Invalid pirate city")
+            city_id = _existing_city_id(city.get("id"))
+            if city_id in seen:
+                raise ValueError("Duplicate pirate fortress city")
+            seen.add(city_id)
+            fortress = next(
+                (item for item in city.get("position", [])
+                 if item.get("building") == "pirateFortress"), None
+            )
+            if fortress is None or type(fortress.get("level")) is not int:
+                raise ValueError("Pirate fortress level unavailable")
+            level = fortress["level"]
+            if not 1 <= level <= 100:
+                raise ValueError("Invalid pirate fortress level")
+            missions = []
+            for mission, required_level in piracyMissionToBuildingLevel.items():
+                if (type(mission) is not int or not 1 <= mission <= 9
+                        or type(required_level) is not int
+                        or mission not in piracyMissionWaitingTime):
+                    raise ValueError("Unknown IkaBot pirate mission schedule")
+                if level >= required_level:
+                    duration = piracyMissionWaitingTime[mission]
+                    if type(duration) is not int or not 0 < duration <= 86400:
+                        raise ValueError("Invalid pirate mission duration")
+                    missions.append({"number": mission, "duration_seconds": duration})
+            verified.append({
+                "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
+                "fortress_level": level, "missions": missions,
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "fortresses": verified,
         }
 
     def _warehouse_snapshots_existing(self, request):
