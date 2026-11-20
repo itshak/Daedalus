@@ -524,3 +524,29 @@ def test_market_quote_service_errors_hide_game_session_data(account_file):
     )
     assert response.status_code == 503
     assert "user-cookie" not in response.text
+
+
+def test_academy_research_api_requires_auth_and_does_not_spend_crystal(account_file):
+    class AcademyIPC:
+        def __init__(self):
+            self.accounts = []
+
+        def academies(self, account):
+            self.accounts.append(account.id)
+            return {"account_id": account.id, "academies": [{
+                "city_id": 42, "city_name": "Athens", "position": 6,
+                "crystal": 300000, "cooldown": False,
+                "can_experiment_now": True,
+            }]}
+
+    ipc = AcademyIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/api/v1/accounts/alpha/academies"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/academies", headers=auth).status_code == 404
+    result = client.get(path, headers=auth)
+    assert result.status_code == 200
+    assert result.json()["academies"][0]["can_experiment_now"]
+    assert ipc.accounts == ["alpha"]
+    assert client.post(path, json={}, headers=auth).status_code == 405
