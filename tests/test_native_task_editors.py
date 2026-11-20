@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication
 
 from daedalus.desktop.native_controls import (
     DonationPoliciesEditor,
+    MarketOffersEditor,
     MapAreaEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
@@ -451,4 +452,135 @@ def test_native_army_task_ignores_outside_account_training_results(page):
     assert config["city"]["id"] == "101"
     page.set_cities_unavailable("alpha")
     with pytest.raises(ValueError, match="load its actual recruitable"):
+        page._form_config()
+
+
+MARKET_QUOTE = {
+    "ciudadDestino": "Marketville", "jugadorAComprar": "Seller",
+    "amountAvailable": 300, "tipo": "wood", "precio": 7,
+    "destinationCityId": "987", "cityId": "101", "position": "4",
+    "type": "444", "resource": "resource",
+}
+MARKET_BASE = {
+    "account_id": "alpha", "city_id": 101, "resource_type": 0,
+    "city": {"id": "101", "pos": 4, "rango": 4, "name": "Athens",
+             "cityName": "Athens", "availableResources": [1000, 0, 0, 0, 0]},
+}
+
+
+def test_buy_market_uses_checked_real_quotes_with_live_limits(app):
+    editor = MarketOffersEditor(buying=True)
+    try:
+        requested = []
+        editor.market_requested.connect(lambda *items: requested.append(items))
+        editor.set_cities(CITIES)
+        editor.city_picker.setCurrentIndex(1)
+        assert requested == [(101, 0, "buy")]
+        with pytest.raises(ValueError, match="load real market offers"):
+            editor.to_config()
+        editor.set_quotes({**MARKET_BASE, "account_id": "beta",
+                           "side": "buy", "offers": [MARKET_QUOTE]})
+        # Scope-matched replies are already validated by TasksPage, not this widget.
+        editor.set_quotes({**MARKET_BASE, "side": "buy", "offers": [MARKET_QUOTE]})
+        assert editor.table.rowCount() == 1
+        with pytest.raises(ValueError, match="Select 1 to 50"):
+            editor.to_config()
+        editor.table.item(0, 0).setCheckState(Qt.Checked)
+        editor.amount.setValue(200)
+        plan = editor.to_config()
+        assert plan["amount_to_buy"] == 200
+        assert plan["offers"] == [MARKET_QUOTE]
+        editor.amount.setValue(301)
+        with pytest.raises(ValueError, match="exceeds selected"):
+            editor.to_config()
+        editor.resource.setCurrentIndex(1)
+        assert requested[-1] == (101, 1, "buy")
+        with pytest.raises(ValueError, match="load real"):
+            editor.to_config()
+        editor.set_cities([])
+        with pytest.raises(ValueError, match="load real"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_sell_market_editor_lists_only_current_quote_or_valid_price(app):
+    editor = MarketOffersEditor(buying=False)
+    try:
+        editor.set_cities(CITIES)
+        editor.city_picker.setCurrentIndex(1)
+        buyer = ["Marketville", "Buyer", 300, 12, 4, 987]
+        editor.set_quotes({**MARKET_BASE, "side": "sell_to_offers",
+                           "offers": [buyer], "price_min": None, "price_max": None})
+        editor.table.item(0, 0).setCheckState(Qt.Checked)
+        editor.amount.setValue(250)
+        assert editor.to_config()["offers"] == [buyer]
+        editor.amount.setValue(301)
+        with pytest.raises(ValueError, match="exceeds actual"):
+            editor.to_config()
+        editor.mode.setCurrentIndex(1)
+        with pytest.raises(ValueError, match="load real"):
+            editor.to_config()
+        editor.set_quotes({
+            **MARKET_BASE, "side": "create_offer", "offers": [],
+            "price_min": 5, "price_max": 25,
+            "sell_market_capacity": 2000, "currently_on_sale": 100,
+        })
+        assert not editor.table.isVisible() or editor.table.isHidden()
+        assert editor.price.minimum() == 5
+        assert editor.price.maximum() == 25
+        editor.price.setValue(17)
+        editor.amount.setValue(300)
+        result = editor.to_config()
+        assert result["mode"] == "create_offer"
+        assert result["price"] == 17
+        assert result["sell_market_capacity"] == 2000
+        editor.set_unavailable(101, 0, "create_offer")
+        with pytest.raises(ValueError, match="load real"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+@pytest.mark.parametrize("name,field_name,side,expected", [
+    ("buyResources", "city", "buy", "amount_to_buy"),
+    ("sellResources", "mode", "sell_to_offers", "amount_to_sell"),
+])
+def test_task_market_config_uses_real_quotes_and_account_guard(
+    page, name, field_name, side, expected,
+):
+    requests = []
+    page.market_quotes_requested.connect(lambda *args: requests.append(args))
+    fields = ([field("city", required=True), field("offers", required=True),
+               field("amount_to_buy", required=True)]
+              if name == "buyResources" else [
+                  field("mode", required=True), field("amount_to_sell", required=True),
+                  field("offers"), field("resource_type"), field("city_to_buy_from"),
+                  field("price"), field("sell_market_capacity"), field("city"),
+              ])
+    set_native(page, name, fields)
+    editor = page._form_inputs[field_name]
+    assert isinstance(editor, MarketOffersEditor)
+    editor.city_picker.setCurrentIndex(1)
+    assert requests == [("alpha", 101, 0, side)]
+    page.set_market_quotes({
+        **MARKET_BASE, "side": side, "offers": [MARKET_QUOTE] if name == "buyResources"
+        else [["Marketville", "Buyer", 300, 12, 4, 987]],
+        "account_id": "beta",
+    })
+    with pytest.raises(ValueError, match="load real market"):
+        page._form_config()
+    page.set_market_quotes({
+        **MARKET_BASE, "side": side, "offers": [MARKET_QUOTE] if name == "buyResources"
+        else [["Marketville", "Buyer", 300, 12, 4, 987]],
+    })
+    editor.table.item(0, 0).setCheckState(Qt.Checked)
+    editor.amount.setValue(200)
+    result = page._form_config()
+    assert result[expected] == 200
+    assert name == "buyResources" or result["mode"] == "sell_to_offers"
+    page.set_cities_unavailable("alpha")
+    with pytest.raises(ValueError, match="load real market"):
         page._form_config()
