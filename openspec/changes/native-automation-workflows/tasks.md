@@ -1,5 +1,22 @@
 # Implementation plan — all operation-specific native workflows
 
+## Verified implementation slice (desktop + backend + existing-session engine)
+
+- [x] Native group tabs and catalog with account/selected/all status viewing and account-specific execution guards.
+- [x] Native construction building table, upstream cost/queue calculation and engine-side stale/shortage rejection (self-funded upgrades).
+- [x] Own-city route editor, reserve/resource policy matrix, donation-by-city policy and optional map area/island controls.
+- [x] Verified read-only workshop upgrade, troop/ship recruitment, academy, tavern, miracle, shrine, piracy fortress and market inventories with dedicated Qt editors.
+- [x] Strict source-scoped API/client/IPC checks, no fabricated game IDs, and synthetic UI/engine tests for these native background workflows.
+- [x] Run-time validation of current game unit resources, training costs, construction targets and exact current market quotes before relevant task dispatch.
+- [x] Hide unsupported free-form JSON parameters in guided mode; require explicitly reviewed expert configuration for unsafe/unimplemented tasks.
+- [ ] Provide safe graphical configuration and independently reviewed dispatch plans for all remaining background operations and original interactive-only CLI functions.
+- [ ] Live operator acceptance, accessibility snapshots and end-to-end combat/administrative workflows.
+
+**Scope note:** Individual groups below are intentionally still unchecked when they
+include items beyond the completed slice. See \`docs/AUTOMATION-UX-AUDIT.md\`
+for exact supported and unsupported actions. Do not archive this proposal
+while any checked product scope remains unresolved.
+
 ## Foundation / navigation
 - [x] Replace duplicated category/template strip with a consistent category tab selection without changing canonical task identity.
 - [x] Fetch real account-scoped city options asynchronously and use them for construction city + paired city name.
