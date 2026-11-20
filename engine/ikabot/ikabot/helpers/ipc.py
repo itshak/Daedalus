@@ -758,6 +758,8 @@ class IPCServer:
                     return self._list_academies_existing(request)
                 if action == "list_taverns_existing":
                     return self._list_taverns_existing(request)
+                if action == "list_miracles_existing":
+                    return self._list_miracles_existing(request)
                 if action == "warehouse_snapshots_existing":
                     return self._warehouse_snapshots_existing(request)
                 if action == "task_preflight_existing":
@@ -1104,6 +1106,50 @@ class IPCServer:
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "taverns": taverns,
+        }
+
+    def _list_miracles_existing(self, request):
+        """Inspect real owned temples, wonder level, cooldown and activation state."""
+        from ikabot.function.activateMiracle import obtainMiraclesAvailable
+        from ikabot.helpers.pedirInfo import getIdsOfCities
+
+        session = self._existing_session(request)
+        owned, _cities = getIdsOfCities(session)
+        own = {_existing_city_id(raw) for raw in owned}
+        available = obtainMiraclesAvailable(session)
+        if not isinstance(available, list) or len(available) > 100:
+            raise ValueError("Invalid wonder inventory")
+        reviewed = []
+        seen = set()
+        for miracle in available:
+            if not isinstance(miracle, dict):
+                raise ValueError("Invalid miracle")
+            temple = miracle.get("ciudad")
+            if not isinstance(temple, dict):
+                raise ValueError("Miracle is not associated with a temple")
+            city_id = _existing_city_id(temple.get("id"))
+            wonder = str(miracle.get("wonder") or "")
+            level = miracle.get("wonderActivationLevel")
+            enabled = miracle.get("available")
+            pending = miracle.get("available_in") if enabled is False else 0
+            if (city_id not in own or wonder not in set("12345678")
+                    or wonder in seen or type(level) is not int
+                    or not 0 <= level <= 5 or type(enabled) is not bool
+                    or type(pending) is not int or pending < 0 or pending > 7 * 86400):
+                raise ValueError("Invalid or foreign wonder temple")
+            seen.add(wonder)
+            reviewed.append({
+                "city_id": city_id,
+                "temple_city": str(temple.get("name") or "")[:100],
+                "island_id": str(miracle.get("id") or "")[:30],
+                "wonder": wonder,
+                "wonder_name": str(miracle.get("wonderName") or "")[:100],
+                "level": level, "available": enabled,
+                "available_in_seconds": pending,
+            })
+        return {
+            "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+            "username": session.username, "miracles": reviewed,
         }
 
     def _warehouse_snapshots_existing(self, request):
