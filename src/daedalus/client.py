@@ -562,6 +562,28 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid trainable unit options")
         return data
 
+    def market_quotes(
+        self, account_id: str, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read live offer rows without placing a trade or exposing auth state."""
+        if (not _ACCOUNT_ID.fullmatch(account_id)
+                or type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market choice")
+        result = self._read(
+            f"accounts/{account_id}/cities/{city_id}/market-quotes"
+            f"?resource_type={resource_type}&side={side}"
+        )
+        if (result.get("account_id") != account_id
+                or result.get("city_id") != city_id
+                or result.get("resource_type") != resource_type
+                or result.get("side") != side
+                or not isinstance(result.get("city"), dict)
+                or not isinstance(result.get("offers"), list)):
+            raise APIConnectionError("Backend returned invalid market quotes")
+        return result
+
     def buildings(self, account_id: str, city_id: int) -> list[dict[str, object]]:
         """Read sanitized, account-scoped real building rows; never a task launch."""
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or city_id <= 0:
