@@ -599,3 +599,28 @@ def test_miracle_inventory_requires_authorization_and_remains_read_only(account_
     assert client.get(path, headers=auth).json()["miracles"][0]["wonder"] == "5"
     assert ipc.calls == ["alpha"]
     assert client.post(path, json={}, headers=auth).status_code == 405
+
+
+def test_shrine_favor_api_requires_auth_and_is_read_only(account_file):
+    class ShrineIPC:
+        def __init__(self):
+            self.calls = []
+
+        def shrine_status(self, account):
+            self.calls.append(account.id)
+            return {"account_id": account.id, "shrine": {
+                "city_id": 42, "city_name": "Athens", "position": 5,
+                "favor": None,
+            }}
+
+    ipc = ShrineIPC()
+    client = TestClient(create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=ipc))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    url = "/api/v1/accounts/alpha/shrine-status"
+    assert client.get(url).status_code == 401
+    assert client.get("/api/v1/accounts/unknown/shrine-status", headers=auth).status_code == 404
+    resp = client.get(url, headers=auth)
+    assert resp.status_code == 200
+    assert resp.json()["shrine"]["favor"] is None
+    assert ipc.calls == ["alpha"]
+    assert client.post(url, json={}, headers=auth).status_code == 405
