@@ -19,8 +19,8 @@ from daedalus.desktop.native_controls import (
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
-    WorkshopUpgradesEditor,
     TrainableUnitsEditor,
+    WorkshopUpgradesEditor,
 )
 from daedalus.desktop.task_page import TasksPage
 
