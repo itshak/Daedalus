@@ -198,11 +198,13 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
 
   const accountById=useMemo(()=>Object.fromEntries(accounts.map(a=>[a.id,a])) as Record<string,Account>,[accounts]);
   const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeKey,warehouseMap]);
-  const displayedRows=rows.filter(c=>!onlyLarge || {
-    const vals=RESOURCES.map(r=>c.resources?.unsecured?.[r]);return vals.some(v=>v===null||v===undefined)||vals.reduce<number>((sum,v)=>sum+(typeof v==="number"?v:0),0)>=220000;
-  }["valueOf"]());
+  const displayedRows=rows.filter(c=>{
+    if (!onlyLarge) return true;
+    const vals=RESOURCES.map(r=>c.resources?.unsecured?.[r]);
+    return vals.some(v => v===null||v===undefined) || vals.reduce<number>((sum,v)=>sum+(typeof v==="number"?v:0),0)>=220000;
+  });
   // Stable totals use exact observed numeric fields; an unknown field remains visually unknown.
-  const resourceTotals=Object.fromEntries(RESOURCES.map(k=>[k,{value:rows.reduce((sum,c)=>sum+(c.resources?.unsecured?.[k]??0),0),complete:rows.every(c=>typeof c.resources?.unsecured?.[k]==="number") && Object.keys(warehouseErrors).length===0}]));
+  const resourceTotals=Object.fromEntries(RESOURCES.map(k=>[k,{value:rows.reduce((sum,c)=>sum+(c.resources?.unsecured?.[k]??0),0),complete:rows.every(c=>typeof c.resources?.unsecured?.[k]==="number") && Object.keys(warehouseErrors).length===0}])) as Record<(typeof RESOURCES)[number], {value:number;complete:boolean}>;
   const countConnected=accounts.filter(isConnected).length;
   const errorCount=Object.keys(warehouseErrors).length;
   const pageInfo=NAV.find(n=>n.id===page)!;
