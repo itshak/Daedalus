@@ -526,6 +526,92 @@ class ExistingIPCClient:
             "available": list(resources), "free_citizens": citizens,
         }
 
+    def market_quotes(
+        self, account: Account, city_id: int, resource_type: int, side: str,
+    ) -> dict[str, object]:
+        """Read strict, owned-city actual market quotes without game mutation."""
+        if (type(city_id) is not int or not 0 < city_id < 10**12
+                or type(resource_type) is not int or not 0 <= resource_type <= 4
+                or side not in {"buy", "sell_to_offers", "create_offer"}):
+            raise ValueError("Invalid market selection")
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Market city is not owned by account")
+        data = self.request(
+            "market_quotes_existing", account=account, city_id=city_id,
+            resource_type=resource_type, market_side=side,
+        )
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or data.get("city_id") != city_id
+                or data.get("resource_type") != resource_type
+                or data.get("side") != side):
+            raise EngineIPCUnavailable("IkaBot market quotes belong to another account")
+        city = data.get("city")
+        offers = data.get("offers")
+        if (not isinstance(city, dict) or not isinstance(offers, list)
+                or len(offers) > 200 or city.get("id") != str(city_id)
+                or not isinstance(city.get("name"), str)
+                or not 0 < len(city["name"]) <= 100
+                or not isinstance(city.get("cityName"), str)
+                or not 0 < len(city["cityName"]) <= 100
+                or type(city.get("pos")) is not int
+                or not 0 <= city["pos"] <= 80
+                or type(city.get("rango")) is not int
+                or not 0 < city["rango"] <= 100
+                or not isinstance(city.get("availableResources"), list)
+                or len(city["availableResources"]) != 5
+                or any(type(v) is not int or v < 0
+                       for v in city["availableResources"])):
+            raise EngineIPCUnavailable("Invalid IkaBot market snapshot")
+        if side == "buy":
+            keys = {
+                "ciudadDestino", "jugadorAComprar", "amountAvailable",
+                "tipo", "precio", "destinationCityId", "cityId", "position",
+                "type", "resource",
+            }
+            for offer in offers:
+                if (not isinstance(offer, dict) or set(offer) != keys
+                        or any(not isinstance(offer.get(key), str)
+                               or not 0 < len(offer[key]) <= 100
+                               for key in ("ciudadDestino", "jugadorAComprar", "tipo"))
+                        or any(not isinstance(offer.get(key), str)
+                               or not offer[key].isdigit()
+                               for key in ("destinationCityId", "cityId", "position", "type"))
+                        or type(offer.get("amountAvailable")) is not int
+                        or not 0 < offer["amountAvailable"] <= 10**12
+                        or type(offer.get("precio")) is not int
+                        or not 0 < offer["precio"] <= 10**9
+                        or not isinstance(offer.get("resource"), str)
+                        or offer["resource"] != ("resource" if resource_type == 0
+                                                else str(resource_type))):
+                    raise EngineIPCUnavailable("IkaBot returned invalid buying quote")
+        elif side == "sell_to_offers":
+            for offer in offers:
+                if (not isinstance(offer, list) or len(offer) != 6
+                        or any(not isinstance(value, str) or not 0 < len(value) <= 100
+                               for value in offer[:2])
+                        or any(type(value) is not int or value < 0 or value > 10**12
+                               for value in offer[2:])
+                        or offer[2] == 0 or offer[3] == 0 or offer[5] == 0):
+                    raise EngineIPCUnavailable("IkaBot returned invalid selling quote")
+        else:
+            for key in ("price_min", "price_max", "sell_market_capacity", "currently_on_sale"):
+                if type(data.get(key)) is not int or data[key] < 0:
+                    raise EngineIPCUnavailable("IkaBot returned invalid market listing limits")
+            if data["price_min"] > data["price_max"]:
+                raise EngineIPCUnavailable("Inconsistent market pricing limits")
+            if offers:
+                raise EngineIPCUnavailable("Listing mode cannot return external quotes")
+        return {
+            "account_id": account.id, "city_id": city_id,
+            "resource_type": resource_type, "side": side,
+            "city": city, "offers": offers,
+            "price_min": data.get("price_min"),
+            "price_max": data.get("price_max"),
+            "sell_market_capacity": data.get("sell_market_capacity"),
+            "currently_on_sale": data.get("currently_on_sale"),
+        }
+
     def warehouses(self, account: Account) -> list[CityWarehouseSnapshot]:
         """Convert numeric-only engine IPC snapshots into typed warehouse records."""
         if sum(_is_exact_identity(row, account) for row in self.list_sessions()) != 1:
