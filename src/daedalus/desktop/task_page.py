@@ -48,8 +48,8 @@ from qfluentwidgets import (
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.native_controls import (
     DonationPoliciesEditor,
-    MarketOffersEditor,
     MapAreaEditor,
+    MarketOffersEditor,
     ResourceAmountsEditor,
     ResourceLimitsEditor,
     ShipmentRoutesEditor,
