@@ -71,6 +71,19 @@ def fake_worker(tmp_path, responder=None):
                          "upgrade_type": "defensive", "description": "Defense",
                          "current_level": 5, "max_level": 12},
                     ]}
+        if msg["action"] == "list_trainables_existing":
+            return {
+                "status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                "city_id": msg["city_id"], "train_troops": msg["train_troops"],
+                "city": {"id": str(msg["city_id"]), "cityName": "Athens", "pos": "3"},
+                "units": [
+                    {"unit_type_id": 301, "local_name": "Swordsman",
+                     "identifier": "swordsman", "costs": {
+                         "wood": 100, "sulfur": 50, "citizens": 1,
+                     }},
+                ],
+                "available": [3000, 0, 500, 0, 1000], "free_citizens": 20,
+            }
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
@@ -472,3 +485,21 @@ def test_workshop_malformed_engine_response_rejected_before_ui(tmp_path):
         EngineIPCUnavailable, match="Malformed workshop"
     ):
         client.workshop_upgrades(ALPHA, 42)
+
+
+def test_readonly_training_catalog_is_source_scoped_and_contains_actual_costs(tmp_path):
+    with fake_worker(tmp_path) as (client, requests, _):
+        catalog = client.trainable_units(ALPHA, 42, train_troops=True)
+        assert catalog["train_troops"] is True
+        assert catalog["units"][0]["unit_type_id"] == 301
+        assert catalog["units"][0]["costs"]["wood"] == 100
+        assert requests[-1] == {
+            "action": "list_trainables_existing",
+            "world": "s301-en", "player": "ExamplePlayer",
+            "city_id": 42, "train_troops": True,
+        }
+        with pytest.raises(ValueError, match="not owned"):
+            client.trainable_units(ALPHA, 99, train_troops=True)
+        with pytest.raises(ValueError, match="Invalid training selection"):
+            client.trainable_units(ALPHA, 42, train_troops="yes")
+        assert not any("start_task" in request["action"] for request in requests)
