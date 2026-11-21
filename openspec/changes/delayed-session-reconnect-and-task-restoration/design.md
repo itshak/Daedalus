@@ -58,7 +58,7 @@ Each transition persists a sanitized event with account ID, phase, correlation I
 
 Add a private SQLite store (mode 0600; directory 0700) outside the checkout, separate from existing task-requests.sqlite3:
 
-- recovery_policy: account_id; enabled; grace_seconds (default 300); browser_pause_until/indefinite; auto_resume_enabled; policy_revision; updated_at; approved_by; approved_at. Existing accounts default **disabled** until a policy is explicitly approved once. Selected/all-account bulk approval is supported.
+- recovery_policy: account_id; enabled; grace_seconds (default 300); browser_pause_until/indefinite; auto_resume_enabled; policy_revision; updated_at; approved_by; approved_at. **Updated policy (2026-11-21):** newly configured, enabled accounts default to session recovery and safe-job restoration ON if a monitored-task-control backend is configured. Explicit persisted OFF policies and browser pauses take precedence; changed world/player identities fail closed. Account-wide bulk disable remains available.
 - recovery_attempt: account_id; event/epoch; confirmed_lost_at; next_allowed_at; attempts; last_failure_code; status; lock/fence generation; timestamps. On restart use persisted timestamp conservatively—never accidentally shorten the grace after clock jumps.
 - desired_task: logical ID; account/world/player identity fingerprint; built-in task type; validated **secret-free** canonical config JSON and digest; policy_revision; desired_state ("running"/"stopped"); restart_class; source ("managed"/"reviewed_legacy"); approved_at; worker_generation; last_known task ID; last_launch_request ID; timestamps. Task configs require the existing schema and a bounded allowlist, not arbitrary Python or external URLs.
 - resume_receipt: logical desired_task ID; recovery epoch; fresh request ID; status ("reserved"/"dispatching"/"started"/"verified_running"/"rejected"/"unconfirmed"/"skipped"); observed engine task ID; timestamps. Unique (account, logical ID, epoch), with a durable atomic reservation/fence before the IPC call.
@@ -94,7 +94,7 @@ Operator status exposes aggregate dispatched/remaining resource vectors and unce
 
 ## Reconnection credentials and process isolation
 
-1. At opt-in, check only whether a server-usable, encrypted **lobby credential** is configured for the exact identity. A valid world cookie alone does not count. Do not assume a Mac Keychain/GF password is on the server.
+1. Before any recovery attempt, check whether a server-usable, encrypted **lobby credential** is configured for the exact identity. Default-enabled policy grants no credential access or new login by itself. A valid world cookie alone does not count. Do not assume a Mac Keychain/GF password is on the server.
 2. Prefer trusted IkaBot engine primitives; run the potentially blocking lobby flow in a supervisor-owned process with bounded network timeouts and killable descendants. Do not invoke UI Selenium or pull browser secrets via the desktop/web API.
 3. Refresh attempts must hold the canonical world/player lock, validate the exact lobby account mapping and independently attest game world/player. A single global refresh slot (across the 10 accounts), per-account fence and jitter prevent login storms.
 4. Respect challenge/MFA/CAPTCHA responses. Never auto-bypass or loop; surface **Sign in on Mac required** and allow existing encrypted human handoff.
@@ -114,9 +114,9 @@ Behind current bearer authentication and server-only web gateway:
 ## Safety/rollout
 
 - Stage 1: add read-only diagnostics and synthetic rotation simulations; no authenticated login side effects.
-- Stage 2: persist new desired-task policies, guarded task journal, management UI, migration previews; default off and no auto login.
-- Stage 3: implement one-account refresh supervisor, strict token/lease/identity controls and 300-second delay, still with job auto-resume disabled.
-- Stage 4: add verified restart-class allowlist, reconciler, receipts and bulk status; manual preview then opt-in automatic resume.
+- Stage 2: persist new desired-task policies, guarded task journal, management UI, migration previews; new enabled accounts default on, but no automatic login without confirmed loss and protected credentials.
+- Stage 3: implement one-account refresh supervisor, strict token/lease/identity controls and 300-second delay; existing explicit off policies always take precedence.
+- Stage 4: add verified restart-class allowlist, reconciler, receipts and bulk status; safe-job auto-resume is default-enabled for active accounts but still requires exact state reconciliation.
 - Stage 5: integration/CI, forced-crash/clock/IPC fault injection, macOS package, staged server deployment and operator acceptance on one low-risk account before bulk opt-in.
 - Rollback: disable policies, stop the supervisor safely without killing verified user-owned tasks, retain the old durable journal and server credentials, keep the API healthy even with zero verified workers, and never transform an uncertain start into "not running".
 
