@@ -1,12 +1,12 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { authorizedOperator } from "@/lib/supabase";
 import { ControlCenter } from "@/components/control-center";
 import { LOCALE_COOKIE, parseLocale, translate } from "@/lib/i18n";
 export const dynamic = "force-dynamic";
 export default async function Home() {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value ?? (await headers()).get("accept-language")?.split(",")[0]);
   const t = (text: string) => translate(text, locale);
   const auth = await authorizedOperator();
   if (auth.state === "not-configured")
