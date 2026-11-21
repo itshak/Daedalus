@@ -2,6 +2,10 @@
 
 Last reviewed: **2026-11-19** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
 
+## Planned Apple-inspired Next.js web control center — PR #72
+
+The `apple-style-nextjs-web-control-center` OpenSpec change is **ACTIVE, PLANNING ONLY, NOT IMPLEMENTED**. It proposes a responsive Apple-inspired Next.js/Refine/shadcn web application at `daedalus.tongrix.com`, with closed Supabase web authentication and a secure Vercel server-only gateway to the existing FastAPI/IkaBot controller. It includes an Apple design skill–based interaction and accessibility blueprint, web-safe feature-parity inventory, multi-account warehouse and automation controls, desktop-only Selenium login boundary and an entirely unchecked implementation checklist. No web build, provisioning, backend change, DNS, deployment, live task, visual acceptance or production cutover has been performed. Keep active until the implementation and owner-operated acceptance gates pass; see [proposal](../openspec/changes/apple-style-nextjs-web-control-center/proposal.md).
+
 ## Active native Mac redesign
 
 The `redesign-macos-desktop-experience` OpenSpec change remains active while implementation work is completed incrementally. PR #63 merged the Fluent shell, first-class all-account warehouse reporting, selected-account task workflows and a macOS preview. The follow-up implementation consolidates three automation editors into one, adds Accounts master/detail, safe keyboard shortcuts, a filtered local Activity timeline, backend-grounded enum pickers, draft consent invalidation and duplicate-launch protection. Human macOS visual/VoiceOver walkthroughs and real-account acceptance are deferred to the owner and are **not** recorded as passing. Do not archive the redesign change until its remaining implementation tasks are reconciled.
