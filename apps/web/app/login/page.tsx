@@ -1,7 +1,8 @@
 "use client";
 import { useState, type FormEvent } from "react";
 import { createBrowserClient } from "@supabase/ssr";
-import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
+import Image from "next/image";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,8 +23,8 @@ export default function Login() {
     finally { setBusy(false); }
   };
   return <main className="login-shell"><section className="login-card">
-    <div className="login-mark"><span>◈</span><span>DAEDALUS</span></div>
-    <div className="login-hero"><div className="login-emblem"><LockKeyhole size={27} strokeWidth={1.5} /></div><p className="eyebrow">PRIVATE CONTROL CENTER</p><h1>Welcome back.</h1><p>One workspace for your worlds, warehouses, and automations.</p></div>
+    <div className="login-mark"><Image src="/brand/daedalus-horizontal-light.svg" alt="Daedalus" width={1700} height={520} priority /></div>
+    <div className="login-hero"><div className="login-emblem"><Image src="/brand/daedalus-mark-light.svg" alt="" width={1200} height={715} /></div><p className="eyebrow">PRIVATE CONTROL CENTER</p><h1>Welcome back.</h1><p>One workspace for your worlds, warehouses, and automations.</p></div>
     <form onSubmit={signIn} className="login-form">
       <label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="you@example.com" />
       <label htmlFor="password">Password</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="Your password" />
@@ -31,5 +32,5 @@ export default function Login() {
       <button className="primary-button login-submit" type="submit" disabled={busy}>{busy ? "Verifying…" : "Sign in securely"}<ArrowRight size={16} /></button>
     </form>
     <div className="login-foot"><ShieldCheck size={16} /> Invite-only access · Secure administrator session</div>
-  </section><div className="login-aside"><div className="aside-orb"/><p>Everything in its right place.</p><span>Daedalus Management Suite</span></div></main>;
+  </section><div className="login-aside"><div className="aside-orb" aria-hidden="true"><Image src="/brand/daedalus-logo-dark.svg" alt="" width={1200} height={930} /></div><p>Everything in its right place.</p><span>Daedalus Management Suite</span></div></main>;
 }
