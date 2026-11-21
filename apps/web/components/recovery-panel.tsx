@@ -106,7 +106,7 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
       <p>Five-minute grace after confirmed session loss, followed by verified reconnection and safe job restoration.</p>
     </div><button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={15}/> Refresh</button></div>
     <div className="recovery-explainer"><ShieldCheck size={20}/>
-      <span>Recovery is <strong>opt-in per account</strong>. It cannot tell whether you are still browsing after five minutes; use Pause to extend the window. Native construction resumes unfinished target levels and recurring threshold transports recalculate current stock. Fixed-quantity shipments or uncertain game actions are not replayed.</span>
+      <span>Recovery is <strong>on by default for enabled accounts</strong>. Disable it per account to opt out, or use Pause while browsing; after confirmed session loss, automatic reconnect may end your browser session once the five-minute grace period passes. Unfinished construction, recurring threshold transport, and checkpointed own-city fixed shipments can resume. Uncertain shipments or game actions always require review.</span>
     </div>
     {message && <div role="status" className="notice"><CircleAlert size={17}/><span>{message}</span></div>}
     {!data?.enabled ? <div className="empty-state"><strong>Recovery controller unavailable</strong><p>No automatic login is authorized from this panel.</p></div> :
