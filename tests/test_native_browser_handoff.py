@@ -340,3 +340,49 @@ def test_wrong_world_session_cannot_replace_running_owned_worker(owned):
         assert not any(event[0] == "task-start" for event in owned.events)
     finally:
         owned.worker._restore = old_restore
+
+def test_native_login_survives_monitor_without_restored_worker(tmp_path):
+    """An expired saved cookie must not disable Mac login for all ten accounts."""
+    from daedalus.auth_assistance import AssistanceBroker
+    from daedalus.session_monitor import ExistingSessionRecoveryMonitor
+    from daedalus.task_control import TaskController
+
+    row = Account("alpha", "s301-en", "ExamplePlayer", "Example", True)
+    config = tmp_path / "accounts.toml"
+    config.write_text(
+        'schema = 1\n[[accounts]]\nid = "alpha"\n'
+        'world = "s301-en"\nplayer = "ExamplePlayer"\nlabel = "Example"\n'
+    )
+    owner = AccountSessionCoordinator([row], state_dir=tmp_path / "locks")
+
+    class UnattachedIPC:
+        def has_account(self, _account):
+            return False
+
+    controller = TaskController(
+        [row], owner, UnattachedIPC(),
+        ledger_path=tmp_path / "requests.sqlite3",
+        active_validation=True,
+    )
+    broker = AssistanceBroker(owner)
+    monitor = ExistingSessionRecoveryMonitor(controller, broker)
+    handoff = NativeBrowserHandoff([row], owner, credential_store=Keys())
+    try:
+        app = create_app(
+            accounts_path=config, api_token=TOKEN, session_coordinator=owner,
+            task_controller=controller, assistance_broker=broker,
+            recovery_monitor=monitor, native_browser_handoff=handoff,
+        )
+        client = TestClient(app)
+        response = client.get("/api/v1/native-browser-login", headers=_auth())
+        assert response.status_code == 200
+        assert response.json()["enabled"] is True
+        start = client.post(
+            "/api/v1/accounts/alpha/browser-login/start",
+            json={"confirmed": True}, headers=_auth(),
+        )
+        assert start.status_code == 200, start.text
+        assert start.json()["status"] == "browser_login_ready"
+        assert owner.status("alpha") == "not_connected"
+    finally:
+        controller.close()
