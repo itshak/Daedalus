@@ -138,7 +138,8 @@ def test_controller_assigns_server_owned_transfer_id_before_engine_dispatch(tmp_
     store = RecoveryStore(tmp_path / "recovery.sqlite3")
     owner = AccountSessionCoordinator([ACCOUNT], state_dir=tmp_path / "leases")
     class IPC:
-        sent = []
+        def __init__(self):
+            self.sent = []
         def has_account(self, account):
             return account == ACCOUNT
         def preflight_task(self, account, task):
