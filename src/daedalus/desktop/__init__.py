@@ -17,6 +17,9 @@ def main() -> int:
         return 2
 
     from daedalus.desktop.app import MainWindow
+    from daedalus.desktop.diagnostics import configure_desktop_diagnostics
+
+    configure_desktop_diagnostics()
     from daedalus.desktop.branding import application_icon
     from daedalus.desktop.theme import init_app_theme
 
@@ -36,6 +39,9 @@ def main() -> int:
     setTheme({"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}[saved.theme])
     init_app_theme()
     window = MainWindow()
+    # macOS's application-menu Quit may bypass the window close event.
+    # Always stop isolated Selenium/Chrome before Qt shuts down.
+    app.aboutToQuit.connect(window.abort_browser_login)
     window.show()
     return app.exec()
 

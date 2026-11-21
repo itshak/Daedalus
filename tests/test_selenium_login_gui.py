@@ -99,9 +99,7 @@ def test_browser_handoff_from_selenium_contains_only_ciphertext(window, monkeypa
                                    "nonce": "test-nonce", "ciphertext": "sealed"})
     window._automatic_login_active = True
     window._automatic_login_current = "account-a"
-    window._automatic_login_credentials = GameforgeCredentials(
-        "private@example.invalid", "do-not-transfer-this-password"
-    )
+    window._automatic_login_email = "private@example.invalid"
     window._automatic_login_challenge = {
         "account_id": "account-a", "world": "s53-ru", "ticket_id": "fake-ticket",
     }
@@ -157,9 +155,7 @@ def test_sequential_login_resume_waits_for_selenium_and_api_completion(window, m
 
 
 def test_completed_automatic_login_marks_verified_only_after_server_receipt(window, monkeypatch):
-    import daedalus.desktop.app as desktop
 
-    monkeypatch.setattr(desktop, "remember_login", lambda *_args: None)
     window._automatic_login_active = True
     window._automatic_login_current = "account-a"
     window._automatic_login_credentials = GameforgeCredentials(
@@ -177,9 +173,7 @@ def test_completed_automatic_login_marks_verified_only_after_server_receipt(wind
 
 def test_successful_login_advances_before_refreshing_accounts(window, monkeypatch, app):
     """A premature accounts fetch monopolizes the API slot and strands cohort B."""
-    from daedalus.desktop import app as desktop
 
-    monkeypatch.setattr(desktop, "remember_login", lambda *_args: None)
     advanced, requested = [], []
     monkeypatch.setattr(window, "_advance_automatic_login", lambda: advanced.append(True))
     monkeypatch.setattr(window, "_request", lambda action, **kw: requested.append(action))
@@ -237,3 +231,87 @@ def test_credential_dialog_uses_masked_password(app):
         assert not dialog.password_input.text()
     finally:
         dialog.deleteLater()
+
+def test_auto_login_looks_up_credentials_only_after_child_starts(window, monkeypatch):
+    import daedalus.desktop.app as desktop
+
+    monkeypatch.setattr(
+        desktop, "get_saved_login",
+        lambda *_args: pytest.fail("Keychain must never run on the GUI thread"),
+    )
+    calls = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append((action, kw)))
+    window._begin_automatic_logins(["account-a", "account-b"])
+    assert calls == [("native_login_start", {"account_id": "account-a"})]
+    assert window._automatic_login_credentials is None
+    assert window._automatic_login_queue == ["account-b"]
+    window._show_accounts([
+        {"id": "account-a", "world": "s53-ru", "player": "Xiaomi",
+         "label": "Alpha", "enabled": True, "session_status": "not_connected"},
+    ])
+
+
+def test_missing_child_credentials_prompts_after_worker_exits(window, monkeypatch, app):
+    called = []
+    monkeypatch.setattr(window, "_prompt_automatic_login_credentials",
+                        lambda: called.append(True))
+    window._automatic_login_active = True
+    window._automatic_login_needs_credentials = True
+    window._selenium_worker = SimpleNamespace(deleteLater=lambda: None)
+    window._selenium_finished()
+    app.processEvents()
+    assert called == [True]
+    assert window._selenium_worker is None
+
+
+def test_closing_window_kills_isolated_selenium_before_ending_gui(window):
+    cancelled, waited = [], []
+
+    class FakeWorker:
+        def isRunning(self): return True
+        def cancel(self): cancelled.append(True)
+        def wait(self, timeout): waited.append(timeout); return True
+
+    window._selenium_worker = FakeWorker()
+    assert window.close()
+    assert cancelled == [True]
+    assert waited == [2000]
+    assert window._closing_requested
+    window._selenium_worker = None
+
+def test_headless_login_watchdog_can_cancel_hung_child(window, monkeypatch):
+    calls = []
+
+    class FakeWorker:
+        def isRunning(self): return True
+        def cancel(self): calls.append("killed process group")
+
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._selenium_worker = FakeWorker()
+    monkeypatch.setattr(window, "_notice", lambda *_args: None)
+    window._selenium_timeout()
+    assert calls == ["killed process group"]
+    assert window._automatic_login_cancelled
+    window._selenium_worker = None
+    window._automatic_login_challenge = None
+
+
+def test_gui_close_does_not_block_waiting_on_http_request(window, app):
+    from PySide6.QtCore import QObject, Signal
+
+    class PendingAPI(QObject):
+        finished = Signal()
+        running = True
+
+        def isRunning(self): return self.running
+
+    api = PendingAPI()
+    window._worker = api
+    assert not window.close(), "Window must not close while API QThread is active"
+    assert window._closing_requested
+    api.running = False
+    api.finished.emit()
+    app.processEvents()
+    assert not window.isVisible()
+    window._worker = None
