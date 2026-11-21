@@ -36,7 +36,7 @@ legacy or state-changing tasks can be automatically replayed.
 ## 4. Fenced task reconciliation
 
 - [x] Introduce worker epoch, logical task identity, versioned desired configuration, durable per-epoch resume receipt and unique atomic reservations.
-- [x] Reconcile observed live managed tasks and upstream process state; only safe, approved, missing continuous tasks may launch with **new** idempotency keys.
+- [x] Reconcile live managed tasks; only approved, absent continuous or verified target-state/retained-stock jobs can restart with fresh idempotency keys. The construction planner reads actual remaining building levels; fixed-amount and in-flight shipments still need receipts.
 - [x] Keep manual gate for unknown or one-shot side effects, in-flight work, missing config and dispatching/unconfirmed task receipts; never replay a previous ambiguous request.
 - [ ] Handle crash before/after IPC launch, duplicated recovery signals, stopped task during grace, changed account identity, partial resume and rollback without duplicate work.
 

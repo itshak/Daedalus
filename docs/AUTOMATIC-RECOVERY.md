@@ -24,18 +24,23 @@ When a managed IkaBot task is launched through Daedalus, the controller now pers
 
 After the account has independently authenticated, the reconciler compares desired jobs to the current protected IPC task list and existing request receipts. It uses a fresh idempotency key, a per-recovery-epoch receipt, and atomic reservations to prevent duplicate launches. **Unknown or unconfirmed previous dispatches always block automatic restoration**.
 
-The initial **automatic restart allowlist is intentionally narrow**:
+The automatic restart allowlist is deliberately state-sensitive, based on each newly launched managed job's original approved engine configuration:
 
-| Managed background task | Auto-restart | Reason |
+| Managed task | Auto-resume | Safety rule |
 | --- | --- | --- |
-| \`alertAttacks\` | Allowed after verified worker and no active duplicate | Periodic alert/monitor rather than an immediate one-shot game purchase, build or attack; still requires IkaBot notification prerequisites |
-| \`alertLowWine\`, \`searchForIslandSpaces\`, \`dumpWorld\`, \`webServer\` | Manual review | Periodic scans and server-mode behaviors need separate runtime/input/output assurance before enabling |
-| \`constructionList\`, \`research\`, \`tavernManager\`, \`resourceTransportManager\`, \`distributeResources\`, \`consolidateResources\`, \`sendResources\`, \`donationBot\`, \`buyResources\`, \`sellResources\` | Manual review | Can issue repeated buildings, resources, research, transport or market mutations |
-| \`attackBarbarians\`, \`autoBarbarians\`, \`autoPirate\`, \`trainArmy\`, \`UpgradeUnits\` | Manual review | Military orders and resource commitments may be in flight or irreversible |
-| \`activateMiracle\`, \`activateShrine\`, \`loginDaily\` | Manual review | Daily/cooldown and activation semantics require current-game-state reconciliation |
+| `alertAttacks` | Yes | Continual alert only; requires the verified worker and no active duplicate |
+| `constructionList`, self-funded native plan without shipments | Yes, by target level | Read the actual building slots/levels, skip finished upgrades, wait for busy construction and obtain a fresh IkaBot plan for unfinished targets. Never replay original construction actions or shipments |
+| `consolidateResources` (recurring source-retained-stock policy) | Yes | The engine recalculates excess above the retained source balance using fresh city resources, rather than replaying a fixed cargo total |
+| `resourceTransportManager` (recurring `consolidate` with `keep` mode) | Yes | The engine recalculates excess above retained stock after checking the source cities are still owned. A new run may send newly generated excess earlier than the original interval |
+| `sendResources`, `distributeResources`, fixed-amount / one-shot `resourceTransportManager`, construction with shipments | No, needs review | In-flight cargo and per-route completed quantities require durable shipment-level receipts; original quantities cannot safely be sent again |
+| `research`, `tavernManager`, `donationBot`, `buyResources`, `sellResources` | No, needs review | These can issue repeated research, wine, donation and market actions |
+| `attackBarbarians`, `autoBarbarians`, `autoPirate`, `trainArmy`, `UpgradeUnits` | No, needs review | Military orders and resource commitments may be in flight or irreversible |
+| `activateMiracle`, `activateShrine`, `loginDaily` | No, needs review | Daily/cooldown and activation state needs authoritative reconciliation |
+| `alertLowWine`, `searchForIslandSpaces`, `dumpWorld`, `webServer` | No, needs review | Runtime/notification and server-mode behavior still requires separate assurance |
 
-This list includes all 23 currently catalogued upstream background tasks. For tasks not yet audited as repeat-safe, Daedalus **preserves the desired configuration** and displays **Needs review** rather than silently re-running a game action. A stopped/manual-only job can be restarted by a new explicit action and fresh preflight after checking game state.
+Construction recovery is an absolute-state reconciliation: an already reached target is marked completed in the durable desired-job journal, a currently busy building is left alone, and missing resources defer the job for the next healthy supervisor poll. Only the existing IkaBot read-only planner may issue the new plan, and the engine validates the plan again before dispatch. Unknown or unconfirmed request receipts still block every automatic dispatch. Threshold transport is a continuing source-balance policy, not a fixed amount or a guaranteed original shipment schedule.
 
+These task-specific classes apply when Daedalus captures the job configuration at a new managed start. Previously created manual-class entries are not silently promoted; review and reauthorize them once. Fixed-amount transports need future movement/dispatch/arrival checkpoints and a provable remaining quantity before auto-resume can be enabled.
 Legacy IkaBot tasks launched before Daedalus began capturing full configurations **cannot be reconstructed from the old request ledger** (only ID/name/hash are stored), nor from the current managed IPC task listing (which does not return configuration). Those jobs need a one-time reviewed configuration import or manual recreation. No missing data are invented.
 
 ## Rollout/acceptance

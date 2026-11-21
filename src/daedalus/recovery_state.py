@@ -16,6 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from daedalus.accounts import Account
+from daedalus.recovery_reconcile import restart_class_for
 from daedalus.task_control import validated_configuration
 
 # Only continuously observing tasks with no in-game state-changing operation may
@@ -325,9 +326,10 @@ class RecoveryStore:
     def capture_started(self, account: Account, task: str, config: dict,
                         task_id: str, *, restart_class: str | None = None) -> str:
         clean, digest = validated_configuration(config)
-        restart_class = restart_class or ("continuous" if task in RESTART_SAFE_TASKS else "manual")
-        if restart_class not in ("continuous","manual"):
-            raise RecoveryConflict("Invalid task restart class")
+        allowed_class = restart_class_for(task, clean)
+        if restart_class is not None and restart_class != allowed_class:
+            raise RecoveryConflict("Restartability cannot be escalated by caller")
+        restart_class = allowed_class
         now = self._clock()
         canonical = json.dumps(clean, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self._mutex, self._db() as conn:
@@ -362,6 +364,19 @@ class RecoveryStore:
             **({"config":json.loads(r["config_json"])} if include_config else {}),
         } for r in rows]
 
+    def complete_job(self, account: Account, job_id: str, *, revision: int) -> bool:
+        """Mark an absolute construction target completed only after game readback."""
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = conn.execute("""UPDATE desired_jobs
+                SET desired_state='completed', revision=revision+1
+                WHERE account_id=? AND identity=? AND logical_id=?
+                  AND revision=? AND desired_state='running'
+                  AND restart_class='reconcile_construction'""",
+                (account.id, identity(account), job_id, revision)).rowcount
+            conn.commit()
+            return changed == 1
+
     def begin_resume(self, account: Account, job_id: str, epoch: str) -> dict[str,str] | None:
         with self._mutex,self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -369,7 +384,8 @@ class RecoveryStore:
                 AND identity=? AND logical_id=?""",
                 (account.id,identity(account),job_id)).fetchone()
             if (not row or row["desired_state"] != "running"
-                    or row["restart_class"] != "continuous"):
+                    or row["restart_class"] not in (
+                        "continuous", "reconcile_construction", "convergent_transport")):
                 conn.rollback()
                 return None
             old=conn.execute("""SELECT * FROM resume_receipts WHERE account_id=?
@@ -417,7 +433,8 @@ class RecoveryStore:
         jobs=self.desired(account)
         return {"account_id":account.id,"policy":p,"event":e,
                 "desired_jobs":sum(j["desired_state"]=="running" for j in jobs),
-                "auto_resume_eligible":sum(j["restart_class"]=="continuous" and
-                                           j["desired_state"]=="running" for j in jobs),
+                "auto_resume_eligible":sum(j["restart_class"] in (
+                    "continuous", "reconcile_construction", "convergent_transport"
+                ) and j["desired_state"]=="running" for j in jobs),
                 "manual_review":sum(j["restart_class"]=="manual" and
                                     j["desired_state"]=="running" for j in jobs)}
