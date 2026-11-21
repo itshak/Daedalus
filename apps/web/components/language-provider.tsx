@@ -15,18 +15,13 @@ function persist(locale: Locale) {
   document.documentElement.lang = locale;
 }
 
-export function LanguageProvider({ children, initialLocale, hasPreference }: { children: ReactNode; initialLocale: Locale; hasPreference: boolean }) {
+export function LanguageProvider({ children, initialLocale }: { children: ReactNode; initialLocale: Locale }) {
   const [locale, updateLocale] = useState<Locale>(initialLocale);
   useEffect(() => {
-    if (hasPreference) {
-      document.documentElement.lang = initialLocale;
-      return;
-    }
-    // Only the browser knows its Accept-Language order. Never override a saved selection.
-    const detected = parseLocale(navigator.languages?.[0] ?? navigator.language);
-    updateLocale(detected);
-    persist(detected);
-  }, [hasPreference, initialLocale]);
+    // The initial locale is resolved from the request's Accept-Language header
+    // or a previously saved preference on the server, avoiding a hydration flash.
+    persist(initialLocale);
+  }, [initialLocale]);
 
   const setLocale = useCallback((choice: Locale) => {
     updateLocale(choice);
