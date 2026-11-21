@@ -198,10 +198,22 @@ class RecoveryStore:
             p = self._policy(conn, account)
             if not p["enabled"]:
                 raise RecoveryConflict("Automatic recovery must be enabled first")
-            conn.execute("""UPDATE policies SET pause_until=?,pause_indefinite=?,
-                             revision=revision+1,updated_at=? WHERE account_id=?""",
-                         (self._clock()+seconds if seconds else None,
-                          int(seconds is None), self._clock(), account.id))
+            now = self._clock()
+            # A new account uses a virtual default-on policy until its first
+            # write. Materialize it atomically before persisting a pause.
+            conn.execute("""INSERT INTO policies(
+                account_id,identity,enabled,auto_resume,grace,
+                pause_until,pause_indefinite,revision,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    pause_until=excluded.pause_until,
+                    pause_indefinite=excluded.pause_indefinite,
+                    revision=policies.revision+1,
+                    updated_at=excluded.updated_at""",
+                (account.id, identity(account), int(p["enabled"]),
+                 int(p["auto_resume"]), p["grace_seconds"],
+                 now+seconds if seconds else None, int(seconds is None),
+                 int(p["revision"])+1, now))
             conn.commit()
             return self._policy(conn, account)
 
