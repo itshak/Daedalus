@@ -186,7 +186,7 @@ def test_config_tables_have_no_lobby_secrets(item):
 def test_exact_schema_version_and_incompatible_newer_schema_fails_closed(item):
     store, _account, _ = item
     with sqlite3.connect(store.path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         conn.execute("PRAGMA user_version=9")
     with pytest.raises(RecoveryConflict, match="newer Daedalus"):
         RecoveryStore(store.path)
