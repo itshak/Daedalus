@@ -16,7 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from daedalus.accounts import Account
-from daedalus.recovery_reconcile import restart_class_for
+from daedalus.recovery_reconcile import canonical_fixed_transfer, restart_class_for
 from daedalus.task_control import validated_configuration
 
 # Only continuously observing tasks with no in-game state-changing operation may
@@ -52,7 +52,7 @@ class RecoveryStore:
         self._mutex = threading.RLock()
         with self._db() as conn:
             schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-            if schema_version not in (0, 1):
+            if schema_version not in (0, 1, 2):
                 raise RecoveryConflict("Recovery journal schema requires a newer Daedalus")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS policies(
@@ -89,6 +89,20 @@ class RecoveryStore:
                 );
                 CREATE INDEX IF NOT EXISTS attempts_window
                     ON login_attempts(account_id,attempted_at);
+                CREATE TABLE IF NOT EXISTS fixed_transfers(
+                    transfer_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                    identity TEXT NOT NULL, world TEXT NOT NULL, player TEXT NOT NULL,
+                    intent_json TEXT NOT NULL, dispatched_json TEXT NOT NULL,
+                    status TEXT NOT NULL, updated_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS fixed_transfer_chunks(
+                    chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    transfer_id TEXT NOT NULL, route_index INTEGER NOT NULL,
+                    cargo_json TEXT NOT NULL, status TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS fixed_transfer_pending
+                    ON fixed_transfer_chunks(transfer_id, status);
                 CREATE TABLE IF NOT EXISTS resume_receipts(
                     account_id TEXT NOT NULL, logical_id TEXT NOT NULL,
                     epoch TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -98,7 +112,7 @@ class RecoveryStore:
                     UNIQUE(account_id,request_id)
                 );
             """)
-            conn.execute("PRAGMA user_version=1")
+            conn.execute("PRAGMA user_version=2")
 
     def _db(self):
         base = self.path.parent
@@ -372,7 +386,7 @@ class RecoveryStore:
                 SET desired_state='completed', revision=revision+1
                 WHERE account_id=? AND identity=? AND logical_id=?
                   AND revision=? AND desired_state='running'
-                  AND restart_class='reconcile_construction'""",
+                  AND restart_class IN ('reconcile_construction','fixed_transfer')""",
                 (account.id, identity(account), job_id, revision)).rowcount
             conn.commit()
             return changed == 1
@@ -385,7 +399,8 @@ class RecoveryStore:
                 (account.id,identity(account),job_id)).fetchone()
             if (not row or row["desired_state"] != "running"
                     or row["restart_class"] not in (
-                        "continuous", "reconcile_construction", "convergent_transport")):
+                        "continuous", "reconcile_construction", "convergent_transport",
+                        "fixed_transfer")):
                 conn.rollback()
                 return None
             old=conn.execute("""SELECT * FROM resume_receipts WHERE account_id=?
@@ -434,7 +449,8 @@ class RecoveryStore:
         return {"account_id":account.id,"policy":p,"event":e,
                 "desired_jobs":sum(j["desired_state"]=="running" for j in jobs),
                 "auto_resume_eligible":sum(j["restart_class"] in (
-                    "continuous", "reconcile_construction", "convergent_transport"
+                    "continuous", "reconcile_construction", "convergent_transport",
+                    "fixed_transfer"
                 ) and j["desired_state"]=="running" for j in jobs),
                 "manual_review":sum(j["restart_class"]=="manual" and
                                     j["desired_state"]=="running" for j in jobs)}
