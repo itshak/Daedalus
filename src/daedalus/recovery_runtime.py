@@ -28,6 +28,7 @@ from daedalus.recovery_credentials import (
     RecoveryCredentialsUnavailable,
 )
 from daedalus.recovery_state import RecoveryStore, identity
+from daedalus.recovery_reconcile import construction_plan, convergent_transport_plan
 from daedalus.task_control import TaskController, TaskUnavailable
 
 logger = logging.getLogger("daedalus.recovery_runtime")
@@ -365,7 +366,7 @@ class RecoverySupervisor:
             self._suspected.pop(account.id,None)
 
     def _resume_jobs(self, account: Account, epoch: str) -> dict[str,int]:
-        totals={"restored":0,"skipped":0,"unconfirmed":0}
+        totals={"restored":0,"completed":0,"skipped":0,"unconfirmed":0}
         policy=self.store.policy(account)
         if not policy["auto_resume"]:
             return totals
@@ -383,7 +384,9 @@ class RecoverySupervisor:
         for job in jobs:
             if job["desired_state"]!="running":
                 continue
-            if job["restart_class"]!="continuous" or job["task"] in active:
+            if job["restart_class"] not in (
+                    "continuous", "reconcile_construction", "convergent_transport"
+                ) or job["task"] in active:
                 totals["skipped"]+=1
                 continue
             # Two identical task types with different configs are ambiguous
@@ -392,6 +395,32 @@ class RecoverySupervisor:
                    for j in jobs)>1:
                 totals["skipped"]+=1
                 continue
+            resume_config=job["config"]
+            if job["restart_class"] in ("reconcile_construction", "convergent_transport"):
+                try:
+                    if job["restart_class"]=="reconcile_construction":
+                        plan=construction_plan(self.controller._ipc,account,resume_config)
+                    else:
+                        plan=convergent_transport_plan(
+                            self.controller._ipc,account,job["task"],resume_config,
+                        )
+                except (EngineIPCUnavailable,TaskUnavailable,ValueError,OSError):
+                    # Cannot prove the remaining operations: retry only a
+                    # read-only preflight in a future healthy supervisor tick.
+                    totals["skipped"]+=1
+                    continue
+                if plan.state=="completed":
+                    if self.store.complete_job(
+                        account,job["id"],revision=job["revision"],
+                    ):
+                        totals["completed"]+=1
+                    else:
+                        totals["skipped"]+=1
+                    continue
+                if plan.state!="ready" or plan.config is None:
+                    totals["skipped"]+=1
+                    continue
+                resume_config=plan.config
             prepared=self.store.begin_resume(account,job["id"],epoch)
             if prepared is None:
                 totals["skipped"]+=1
@@ -409,7 +438,7 @@ class RecoverySupervisor:
                 continue
             try:
                 result=self.controller.start(
-                    account.id,prepared["task"],prepared["config"],
+                    account.id,prepared["task"],resume_config,
                     prepared["request_id"],confirmed=True,track_desired=False,
                 )
                 if result.get("status")!="started":
@@ -470,6 +499,19 @@ class RecoverySupervisor:
             except RecoveryWorkerError:
                 self.store.outcome(account,attempt["epoch"],
                                    success=False,reason="needs_assistance")
+        # Building work may already be queued in-game, or resources may be
+        # missing during the first fresh read. Re-check only after a verified
+        # worker is live. No dispatch receipt exists until a plan is ready.
+        for account in self.accounts.values():
+            policy=self.store.policy(account)
+            event=self.store.event(account)
+            worker=self.workers.get(account)
+            if (self._stop.is_set() or not policy["enabled"]
+                    or not policy["auto_resume"] or not event
+                    or event["phase"]!="restored" or worker is None
+                    or not worker.alive()):
+                continue
+            self._resume_jobs(account,event["epoch"])
 
     def _loop(self) -> None:
         while not self._stop.is_set():
