@@ -263,3 +263,19 @@ def test_restart_class_cannot_be_unilaterally_overridden(tmp_path):
             ACCOUNT, "sendResources", {"routes": []}, "old",
             restart_class="continuous",
         )
+
+def test_external_recipient_cannot_be_auto_restored_even_if_source_is_owned():
+    class IPC:
+        def cities(self, account):
+            return [{"id": 101}, {"id": 102}]
+
+    config = manager_config()
+    config["island"] = "201"
+    assert restart_class_for("resourceTransportManager", config) == "manual"
+    own_config = manager_config()
+    result = convergent_transport_plan(
+        IPC(), ACCOUNT, "resourceTransportManager", own_config,
+    )
+    assert (result.state, result.reason) == (
+        "review", "destination_city_changed",
+    )
