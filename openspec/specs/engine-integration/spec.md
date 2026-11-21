@@ -219,3 +219,16 @@ The engine SHALL expose an allowlisted, read-only task-prerequisite action for i
 
 - **WHEN** the client requests a preflight for a different or ambiguous world/player
 - **THEN** the engine rejects the request and does not open a new login or return session material
+
+### Requirement: IkaBot commits fixed cargo progress around transport mutations
+For Daedalus-managed own-city fixed-quantity transfers, the maintained IkaBot transport engine SHALL write an owner-only, route-scoped pending receipt before each irreversible transport POST and SHALL mark that receipt confirmed only following an explicit successful game response. Confirmed receipts SHALL atomically increase dispatched quantities without exceeding the original target. A definite rejection MAY release the reservation without incrementing cargo; a timeout, crash or unrecognized game response MUST leave an unresolved checkpoint that prevents silent replay.
+
+#### Scenario: Several ship batches complete before disconnect
+- **GIVEN** a single fixed resource route must be split across multiple ships
+- **WHEN** the first ship batches receive valid game success responses and the worker later loses its session
+- **THEN** the retained engine journal SHALL show the accepted quantities of each batch and a new worker SHALL resume only the outstanding quantities
+
+#### Scenario: Engine loses response after sending cargo
+- **WHEN** a transport request has a durable pending receipt but no definitive game acceptance or rejection
+- **THEN** the engine MUST NOT repeat that send automatically, even if a new worker or process begins
+
