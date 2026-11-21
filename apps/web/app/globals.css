@@ -266,6 +266,17 @@ tbody tr:hover {background:var(--surface-alt)}
 .hero-inner {background:radial-gradient(circle at 45% 40%,#52616b,#253c4c 65%,#1e2b36);box-shadow:0 9px 38px #0816239b}
 .setup-logo {width:180px;height:auto;margin-bottom:22px}
 
+/* Shared, keyboard-accessible locale control (login, toolbar and Settings). */
+.language-switcher {display:inline-flex;align-items:center;gap:9px;max-width:100%;font-size:12px;color:var(--text,#243444)}
+.language-switcher svg {flex-shrink:0;color:var(--muted,#738091)}
+.language-switcher select {font:inherit;min-width:105px;max-width:160px;padding:8px 11px;border:1px solid var(--border,#dce0e5);border-radius:9px;background:var(--surface,#fff);color:var(--text,#253445);cursor:pointer}
+.language-switcher select:focus-visible {outline:2px solid #bd9659;outline-offset:2px}
+.language-switcher-compact select {min-width:96px;max-width:114px}
+.login-language {display:flex;justify-content:flex-end;margin-bottom:14px}
+.login-language .language-switcher {color:#495667}
+.login-language .language-switcher select {background:#fff;color:#253445;border-color:#e0e4e8}
+@media(max-width:760px){.topbar .language-switcher-compact svg{display:none}.topbar .language-switcher-compact select{min-width:83px;max-width:98px;padding:7px 6px}}
+@media print {.language-switcher,.login-language{display:none!important}}
 
 /* Native-size Ikariam top-bar icons with their original alpha channel, no colored tiles. */
 .resource-image {display:block;width:30px;height:25px;object-fit:contain;object-position:center}
