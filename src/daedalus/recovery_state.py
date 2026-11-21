@@ -131,8 +131,15 @@ class RecoveryStore:
     def _policy(self, conn, account: Account) -> dict[str, object]:
         row = conn.execute("SELECT * FROM policies WHERE account_id=?", (account.id,)).fetchone()
         if row is None or row["identity"] != identity(account):
+            # New, enabled accounts recover automatically by default.
+            # A persisted user disable/paused policy is always authoritative.
+            # If an existing account ID changes world/player, do not
+            # accidentally authorize recovery for its new identity.
+            enabled_by_default = account.enabled and row is None
             return {
-                "account_id": account.id, "enabled": False, "auto_resume": False,
+                "account_id": account.id,
+                "enabled": bool(enabled_by_default),
+                "auto_resume": bool(enabled_by_default),
                 "grace_seconds": DEFAULT_GRACE_SECONDS, "pause_until": None,
                 "pause_indefinite": False, "revision": 0,
             }
