@@ -244,8 +244,10 @@ class TaskController:
         *,
         ledger_path: str | Path | None = None,
         active_validation: bool = False,
+        recovery_store: Any | None = None,
     ) -> None:
         self._active_validation = active_validation
+        self._recovery_store = recovery_store
         self._accounts = {a.id: a for a in accounts}
         if not coordinator.matches_accounts(accounts):
             raise ValueError("Account coordinator and task controller must use identical accounts")
@@ -349,7 +351,7 @@ class TaskController:
 
     def start(
         self, account_id: str, task: str, config: object,
-        request_id: str, *, confirmed: bool,
+        request_id: str, *, confirmed: bool, track_desired: bool = True,
     ) -> dict[str, object]:
         if not confirmed:
             raise ValueError("Explicit game task confirmation is required")
@@ -396,9 +398,19 @@ class TaskController:
                 account.id, request_id, status="started",
                 task_id=str(started["task_id"]), pid=int(started["pid"]),
             )
-            return {"account_id": account.id, "request_id": request_id,
-                    "task": task, "status": "started",
-                    "task_id": started["task_id"], "pid": started["pid"]}
+            receipt = {"account_id": account.id, "request_id": request_id,
+                       "task": task, "status": "started",
+                       "task_id": started["task_id"], "pid": started["pid"]}
+            if track_desired and self._recovery_store is not None:
+                try:
+                    receipt["desired_job_id"] = self._recovery_store.capture_started(
+                        account, task, clean, str(started["task_id"]),
+                    )
+                except (OSError, ValueError, sqlite3.Error):
+                    # The task did start; losing its optional recovery journal
+                    # must never misreport the engine dispatch as unconfirmed.
+                    receipt["recovery_tracking"] = "unavailable"
+            return receipt
 
     def list_tasks(self, account_id: str) -> dict[str, object]:
         account = self._account(account_id)
@@ -410,6 +422,13 @@ class TaskController:
     def stop(self, account_id: str, task_id: str) -> dict[str, object]:
         account = self._account(account_id)
         with self._mutex:
+            # User's stop intention wins even during a rotation grace period:
+            # never restart this task later if the IPC stop was interrupted.
+            if self._recovery_store is not None:
+                try:
+                    self._recovery_store.stop_task(account, task_id)
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    raise TaskUnavailable("Unable to persist desired task stop") from exc
             self._lease(account)
             result = self._ipc.stop_managed_task(account, task_id)
             return {"account_id": account.id, **result}

@@ -1796,6 +1796,7 @@ class Session:
     def from_saved(
         cls, mail=None, world=None, server=None, player=None, *,
         cookies_only=False, world_cookie_override=None,
+        lobby_token_override=None,
     ):
         """Restore a saved game session without any user interaction.
 
@@ -1805,6 +1806,17 @@ class Session:
         A failed cookie probe raises and MUST NOT be treated as authenticated.
         ``player`` identifies exactly one saved in-game identity.
         """
+        if lobby_token_override is not None:
+            if cookies_only or (
+                not isinstance(lobby_token_override, str)
+                or not 16 <= len(lobby_token_override) <= 4096
+                or not lobby_token_override.isascii()
+                or not lobby_token_override.isprintable()
+                or any(ch.isspace() for ch in lobby_token_override)
+            ):
+                raise ValueError("Invalid protected lobby credential for session restore")
+            if not player or not world or not mail:
+                raise ValueError("Lobby refresh requires exact saved account identity")
         if world_cookie_override is not None:
             if not cookies_only:
                 raise ValueError("Manual world cookie requires cookies-only recovery")
@@ -1945,7 +1957,8 @@ class Session:
             return self
 
         gf_token = (
-            user_data.get("shared", {}).get("lobby", {}).get("gf-token-production")
+            lobby_token_override if lobby_token_override is not None
+            else user_data.get("shared", {}).get("lobby", {}).get("gf-token-production")
         )
         lobby_ok = False
         if gf_token and not cookies_only:

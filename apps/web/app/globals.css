@@ -262,3 +262,37 @@ tbody tr:hover {background:var(--surface-alt)}
 @media print {.sidebar,.topbar,.heading-row .page-actions,.scope-row,.report-toolbar,.resource-grid,.content-footer,.notice {display:none!important}.app-shell,.main-panel,.main-content {display:block;background:white!important;color:black!important;padding:0!important}.heading-row {margin:0 0 15px}.print-panel {border:0!important}.print-panel .panel-heading {padding:10px 0}table {font-size:9px}th,td {padding:6px!important}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 @media(prefers-contrast:more){.panel,.metric-card,.resource-card,.scope-row {border-width:2px}.nav-active {outline:2px solid #eac793}}
+
+/* Per-account recovery — restrained, backend-grounded status and opt-in controls. */
+.recovery-dashboard{display:flex;flex-direction:column;gap:14px}
+.recovery-explainer{display:flex;align-items:flex-start;gap:12px;border:1px solid var(--line,rgba(127,134,149,.2));border-radius:12px;padding:15px 17px;font-size:13px;line-height:1.6;color:var(--text-secondary,#697383);background:var(--surface-alt,rgba(130,140,150,.035))}
+.recovery-explainer svg{flex-shrink:0;margin-top:2px;color:#678abf}
+.recovery-toolbar{display:flex;align-items:center;gap:15px;flex-wrap:wrap;padding:5px 0;font-size:13px}
+.recovery-toolbar>span{color:var(--text-secondary,#677181)}
+.recovery-actions{margin-left:auto;display:flex;gap:8px}
+.recovery-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:14px}
+.recovery-account{border:1px solid var(--line,rgba(128,140,155,.19));background:var(--surface-alt,rgba(130,140,155,.024));border-radius:14px;padding:17px;display:flex;flex-direction:column;gap:14px}
+.recovery-account-top{display:flex;align-items:center;gap:12px;min-width:0}
+.recovery-account-top>label{display:flex;align-items:center;cursor:pointer}
+.recovery-account-name{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.recovery-account-name strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recovery-account-name small{color:var(--text-secondary,#687483);font-size:12px}
+.recovery-state{border-radius:999px;padding:5px 9px;background:rgba(133,145,158,.12);color:var(--text-secondary,#687483);font-weight:600;font-size:11px;white-space:nowrap}
+.recovery-state.recovery-on{background:rgba(37,161,106,.12);color:#268763}
+.recovery-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.recovery-metrics>div{display:flex;flex-direction:column;gap:5px}
+.recovery-metrics small{font-size:11px;color:var(--text-secondary,#6c7787)}
+.recovery-metrics strong{font-weight:600;font-size:13px;line-height:1.4}
+.recovery-hint{font-size:12px;line-height:1.5;margin:0;color:var(--text-secondary,#6b7686)}
+.recovery-account-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.recovery-account-actions .secondary-button{font-size:12px;min-height:32px;padding:6px 10px}
+.recovery-account-actions select{min-height:32px;border:1px solid var(--line,rgba(130,140,150,.22));background:var(--surface,#fff);color:var(--text-primary,inherit);border-radius:8px;padding:5px 8px;font-size:12px;max-width:165px}
+.recovery-token{display:inline-flex;align-items:center;gap:5px;color:#32936e;font-size:11px;font-weight:600;width:100%;margin-bottom:2px}
+.recovery-token-missing{color:var(--text-secondary,#b38248)}
+.recovery-jobs{border-top:1px solid var(--line,rgba(130,140,150,.2));padding-top:10px;font-size:12px}
+.recovery-jobs p{color:var(--text-secondary,#697383);line-height:1.55}
+.recovery-job{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line,rgba(130,140,150,.15))}
+.recovery-job>span:first-child{display:flex;flex-direction:column;gap:4px}
+.recovery-job small{color:var(--text-secondary,#697383)}
+.recovery-job>span:last-child{color:var(--text-secondary,#697383);text-align:right;font-size:11px}
+@media(max-width:560px){.recovery-account{padding:14px}.recovery-account-top{flex-wrap:wrap}.recovery-toolbar{align-items:flex-start;flex-direction:column}.recovery-actions{margin-left:0;flex-wrap:wrap}}

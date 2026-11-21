@@ -134,6 +134,31 @@ class AssistanceBroker:
             self._tickets[account_id] = ticket
             return ticket.public()
 
+    def verified_auto_reconnect(
+        self, owner: OwnedAccountSession, *, confirmed: bool,
+    ) -> None:
+        """Trusted supervisor-only promotion after independent world/IPC proof.
+
+        The durable owner-approved recovery policy is the standing consent;
+        this is not exposed as an HTTP endpoint. A stale manual assistance
+        ticket must not keep claiming action is required after reauthentication.
+        """
+        if confirmed is not True:
+            raise AssistanceConflict("Verified automatic recovery requires prior approval")
+        with self._lock:
+            self._require_owner(owner.account.id, owner)
+            if owner.phase not in (SessionPhase.AUTHENTICATED,
+                                   SessionPhase.NEEDS_ASSISTANCE,
+                                   SessionPhase.ASSISTED_LOGIN,
+                                   SessionPhase.PAUSED,SessionPhase.FAILED):
+                raise AssistanceConflict("Account phase cannot be auto-recovered")
+            if owner.phase is not SessionPhase.AUTHENTICATED:
+                if owner.phase not in (SessionPhase.PAUSED, SessionPhase.FAILED):
+                    owner.transition(SessionPhase.PAUSED)
+                owner.transition(SessionPhase.VALIDATING_SESSION)
+                owner.transition(SessionPhase.AUTHENTICATED)
+            self._tickets.pop(owner.account.id,None)
+
     def snapshot(self, account_id: str) -> dict[str, object]:
         """Safe for bearer-authenticated GUI polling, no login secrets."""
         with self._lock:

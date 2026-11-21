@@ -231,6 +231,68 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned an unexpected response shape")
         return document
 
+    def recovery_index(self) -> dict[str, object]:
+        try:
+            return self._read("recovery")
+        except APIConnectionError as exc:
+            if exc.status_code in (404,503):
+                return {"enabled": False, "supervisor_enabled": False, "accounts": []}
+            raise
+
+    def recovery_import(self, account_id: str) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account identity")
+        return self._write(f"accounts/{account_id}/recovery/import-saved-token", {"confirmed": True})
+
+    def recovery_policy(self, account_id: str, *, enabled: bool,
+                        expected_revision: int) -> dict[str, object]:
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(enabled) is not bool
+                or type(expected_revision) is not int or expected_revision < 0):
+            raise ValueError("Invalid recovery policy selection")
+        try:
+            response = self._http.put(f"/api/v1/accounts/{account_id}/recovery/policy",
+                json={"confirmed": True, "enabled": enabled, "auto_resume": enabled,
+                      "grace_seconds": 300, "expected_revision": expected_revision})
+        except httpx.RequestError as exc:
+            raise APIConnectionError("Cannot connect to Daedalus backend") from exc
+        if response.status_code != 200:
+            raise APIConnectionError("Recovery policy change was rejected", response.status_code)
+        result = response.json()
+        if not isinstance(result, dict) or result.get("enabled") is not enabled:
+            raise APIConnectionError("Invalid recovery policy confirmation")
+        return result
+
+    def recovery_bulk(self, account_ids: list[str], *, enabled: bool) -> dict[str,object]:
+        if (not account_ids or len(set(account_ids)) != len(account_ids)
+                or not all(isinstance(aid,str) and _ACCOUNT_ID.fullmatch(aid)
+                           for aid in account_ids)):
+            raise ValueError("Invalid distinct account selection")
+        return self._write("recovery/policy/bulk", {
+            "account_ids": account_ids, "enabled": enabled,
+            "auto_resume": enabled, "grace_seconds": 300, "confirmed": True,
+        })
+
+    def recovery_pause(self, account_id: str, seconds: int | None) -> dict[str,object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or seconds not in (None,900,1800,3600):
+            raise ValueError("Invalid recovery pause")
+        return self._write(f"accounts/{account_id}/recovery/pause",
+                           {"confirmed": True, "seconds": seconds})
+
+    def recovery_unpause(self, account_id: str) -> dict[str,object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        return self._write(f"accounts/{account_id}/recovery/unpause", {"confirmed": True})
+
+    def recovery_resume(self, account_id: str) -> dict[str,object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        return self._write(f"accounts/{account_id}/recovery/resume-now", {"confirmed": True})
+
+    def recovery_jobs(self, account_id: str) -> dict[str,object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        return self._read(f"accounts/{account_id}/recovery/jobs")
+
     def health(self) -> dict[str, object]:
         return self._read("health")
 
