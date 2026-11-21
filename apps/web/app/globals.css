@@ -144,11 +144,7 @@ tbody tr:hover {background:var(--surface-alt)}
 .export-menu select {color:var(--text);border:0;background:transparent;font-size:11px;font-weight:650}
 .resource-grid {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:13px}
 .resource-card {display:flex;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:17px 13px;min-width:0}
-.resource-gem {display:grid;place-items:center;flex-shrink:0;width:31px;height:31px;border-radius:10px;background:#e8f1e9;color:#519264;font-size:17px}
-.resource-wine {background:#f6e6ea;color:#ba677a}
-.resource-marble {background:#ebedf1;color:#8591a2}
-.resource-glass {background:#e5f1f5;color:#61a9c1}
-.resource-sulfur {background:#fff0d5;color:#ce9a3f}
+.resource-gem {display:grid;place-items:center;flex-shrink:0;width:36px;height:32px;background:transparent}
 .resource-card>div {min-width:0}
 .resource-card span:not(.resource-gem) {display:block;font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .resource-card strong {display:block;font-size:20px;letter-spacing:-.04em;margin:5px 0}
@@ -269,3 +265,10 @@ tbody tr:hover {background:var(--surface-alt)}
 .aside-orb {display:flex;justify-content:center;align-items:center}
 .hero-inner {background:radial-gradient(circle at 45% 40%,#52616b,#253c4c 65%,#1e2b36);box-shadow:0 9px 38px #0816239b}
 .setup-logo {width:180px;height:auto;margin-bottom:22px}
+
+
+/* Native-size Ikariam top-bar icons with their original alpha channel, no colored tiles. */
+.resource-image {display:block;width:30px;height:25px;object-fit:contain;object-position:center}
+.resource-image-small {width:25px;height:20px}
+.resource-heading {display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
+.resource-heading .resource-image {flex-shrink:0}

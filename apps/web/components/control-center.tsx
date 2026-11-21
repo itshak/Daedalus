@@ -28,6 +28,27 @@ const NAV: { id: Page; title: string; icon: typeof LayoutDashboard; subtitle: st
   { id: "settings", title: "Settings", icon: Settings2, subtitle: "Preferences, access and connection" }
 ];
 const RESOURCES = ["wood", "wine", "marble", "glass", "sulfur"] as const;
+type Resource = (typeof RESOURCES)[number];
+// Native Ikariam top-bar sprite dimensions, not the larger island-resource paintings.
+const RESOURCE_ICON_SIZE: Record<Resource, {width: number; height: number}> = {
+  wood: {width: 25, height: 20},
+  wine: {width: 24, height: 20},
+  marble: {width: 25, height: 19},
+  glass: {width: 23, height: 18},
+  sulfur: {width: 25, height: 19},
+};
+function ResourceIcon({resource, small = false}: {resource: Resource; small?: boolean}) {
+  return <Image
+    src={`/ikariam-resources/${resource}.webp`}
+    alt=""
+    aria-hidden="true"
+    width={RESOURCE_ICON_SIZE[resource].width}
+    height={RESOURCE_ICON_SIZE[resource].height}
+    className={small ? "resource-image resource-image-small" : "resource-image"}
+    unoptimized
+  />;
+}
+
 const TASK_GROUPS = [
   { name: "City & research", icon: Building2, tasks: ["constructionList", "research", "tavernManager", "loginDaily", "activateMiracle", "activateShrine"] },
   { name: "Resources & trade", icon: Layers3, tasks: ["sendResources", "resourceTransportManager", "consolidateResources", "distributeResources", "buyResources", "sellResources", "donationBot"] },
@@ -327,9 +348,9 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
         {page==="warehouses"&&<div className="content-stack">
           <div className="report-toolbar"><div><strong>Live warehouse report</strong><span>{reportLoading?"Fetching selected accounts…":rows.length+" city snapshots · "+Object.keys(warehouseMap).length+" accounts reported"}{errorCount>0&&" · "+errorCount+" unavailable"}</span></div><div className="report-tools"><label className="check-label"><input type="checkbox" checked={onlyLarge} onChange={e=>setOnlyLarge(e.target.checked)}/> ≥ 220K unsecured</label><div className="export-menu"><Download size={16}/><select aria-label="Export report" defaultValue="" onChange={e=>{if(e.target.value)exportRows(e.target.value as "csv"|"json"|"txt");e.target.value="";}}><option value="" disabled>Export report</option><option value="csv">CSV</option><option value="json">JSON</option><option value="txt">TXT</option></select></div></div></div>
           {Object.keys(warehouseErrors).length>0&&<div role="alert" className="notice"><CircleAlert size={18}/><span>Some accounts could not be retrieved: {Object.entries(warehouseErrors).map(([id])=>name(accountById[id]||{id})).join(", ")}. Totals may be incomplete.</span></div>}
-          <div className="resource-grid">{RESOURCES.map(k=><div className="resource-card" key={k}><span className={"resource-gem resource-"+k}>{k==="wood"?"◆":k==="wine"?"●":k==="marble"?"⬡":k==="glass"?"◇":"✧"}</span><div><span>{readable(k)} · unsecured</span><strong>{rows.length?format(resourceTotals[k].value):"—"}</strong><small>{resourceTotals[k].complete?"Observed total":"Partial / unknown"}</small></div></div>)}</div>
+          <div className="resource-grid">{RESOURCES.map(k=><div className="resource-card" key={k}><span className={"resource-gem resource-"+k}><ResourceIcon resource={k}/></span><div><span>{readable(k)} · unsecured</span><strong>{rows.length?format(resourceTotals[k].value):"—"}</strong><small>{resourceTotals[k].complete?"Observed total":"Partial / unknown"}</small></div></div>)}</div>
           <section className="panel print-panel"><div className="panel-heading"><div><h3>City inventory <span className="muted-count">{displayedRows.length}</span></h3><p>Grouped by island · authenticated observations, not estimates</p></div><span className="table-info">{reportLoading?"Loading…":"Last refreshed on demand"}</span></div>
-          {displayedRows.length?<div className="table-scroll"><table><thead><tr><th>Island / City</th><th>Account</th>{RESOURCES.map(k=><th className="numeric" key={k}>{readable(k)}</th>)}<th className="numeric">Capacity</th></tr></thead><tbody>{displayedRows.slice().sort((a,b)=>(a.island||"").localeCompare(b.island||"")||a.city_name.localeCompare(b.city_name)).map(c=><tr key={c.account_id+":"+c.city_id}><td><div className="city-cell"><strong>{c.city_name}</strong><small>{c.island||"Island unknown"}</small></div></td><td>{name(accountById[c.account_id]||{id:c.account_id})}</td>{RESOURCES.map(k=><td className="numeric tabular" key={k}>{format(c.resources?.unsecured?.[k])}</td>)}<td className="numeric tabular">{format(c.resources?.capacity)}</td></tr>)}</tbody></table></div>:<Empty title={reportLoading?"Retrieving warehouses…":"No warehouse snapshots"} description={onlyLarge?"No observed cities satisfy the current filter. Unknown values are not treated as zero.":"Use a connected IkaBot session to fetch real warehouses. Unavailable accounts remain explicit."} icon={Warehouse}/>}</section>
+          {displayedRows.length?<div className="table-scroll"><table><thead><tr><th>Island / City</th><th>Account</th>{RESOURCES.map(k=><th className="numeric" key={k}><span className="resource-heading"><ResourceIcon resource={k} small/>{readable(k)}</span></th>)}<th className="numeric">Capacity</th></tr></thead><tbody>{displayedRows.slice().sort((a,b)=>(a.island||"").localeCompare(b.island||"")||a.city_name.localeCompare(b.city_name)).map(c=><tr key={c.account_id+":"+c.city_id}><td><div className="city-cell"><strong>{c.city_name}</strong><small>{c.island||"Island unknown"}</small></div></td><td>{name(accountById[c.account_id]||{id:c.account_id})}</td>{RESOURCES.map(k=><td className="numeric tabular" key={k}>{format(c.resources?.unsecured?.[k])}</td>)}<td className="numeric tabular">{format(c.resources?.capacity)}</td></tr>)}</tbody></table></div>:<Empty title={reportLoading?"Retrieving warehouses…":"No warehouse snapshots"} description={onlyLarge?"No observed cities satisfy the current filter. Unknown values are not treated as zero.":"Use a connected IkaBot session to fetch real warehouses. Unavailable accounts remain explicit."} icon={Warehouse}/>}</section>
         </div>}
         {page==="automations"&&<div className="content-stack">
           <div className="notice"><ShieldCheck size={18}/><span>Automation uses the existing game engine. Inspect authoritative city data and preflight before preparing a change. No task starts without a separate reviewed, account-specific confirmation.</span></div>
