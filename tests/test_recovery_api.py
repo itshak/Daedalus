@@ -130,3 +130,41 @@ def test_all_recovery_endpoints_require_bearer_and_exact_account(tmp_path):
                            headers=AUTH,json={"confirmed":True,"cookie":"bad"}).status_code==422
     finally:
         ctl.close()
+
+def test_backend_cli_opt_in_starts_idle_supervisor_without_game_login(tmp_path,monkeypatch):
+    import uvicorn
+
+    from daedalus import cli as cli_module
+
+    config=tmp_path/"accounts.toml"
+    config.write_text(
+        'schema = 1\n[[accounts]]\nid = "alpha"\n'
+        'world = "s301-en"\nplayer = "ExamplePlayer"\nlabel = "Example"\n',
+    )
+    monkeypatch.setenv("DAEDALUS_API_TOKEN",TOKEN)
+    monkeypatch.setenv("XDG_STATE_HOME",str(tmp_path/"state"))
+    responses=[]
+
+    def fake_run(app,**kwargs):
+        with TestClient(app) as client:
+            status=client.get("/api/v1/health")
+            recovered=client.get("/api/v1/recovery",headers=AUTH)
+            assert status.status_code==200
+            assert recovered.status_code==200
+            body=recovered.json()
+            assert body["enabled"] is True
+            assert body["supervisor_enabled"] is True
+            assert body["accounts"][0]["policy"]["enabled"] is False
+            assert body["accounts"][0]["desired_jobs"] == 0
+            assert body["accounts"][0]["event"] is None
+            responses.append(body["accounts"][0]["account_id"])
+
+    monkeypatch.setattr(uvicorn,"run",fake_run)
+    result=cli_module.main([
+        "serve","--host","127.0.0.1","--port","8765",
+        "--accounts-file",str(config),"--connect-existing-ipc",
+        "--enable-task-control","--monitor-existing-sessions",
+        "--enable-auto-recovery","--task-ledger",str(tmp_path/"ledger.sqlite3"),
+    ])
+    assert result==0
+    assert responses==["alpha"]
