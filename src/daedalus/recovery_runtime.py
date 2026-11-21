@@ -27,8 +27,8 @@ from daedalus.recovery_credentials import (
     RecoveryCredentials,
     RecoveryCredentialsUnavailable,
 )
-from daedalus.recovery_state import RecoveryStore, identity
 from daedalus.recovery_reconcile import construction_plan, convergent_transport_plan
+from daedalus.recovery_state import RecoveryStore, identity
 from daedalus.task_control import TaskController, TaskUnavailable
 
 logger = logging.getLogger("daedalus.recovery_runtime")
