@@ -106,10 +106,12 @@ def construction_plan(ipc: Any, account: Account, config: dict[str, Any]) -> Res
                 or type(current.get("level")) is not int
                 or current["level"] < target["level"]):
             return ResumePlan("review", "building_changed")
-        if current["level"] >= target["upgradeTo"]:
-            continue
+        # A queued final level is not necessarily finished yet: never mark
+        # a still-busy slot complete, even if the game shows its next level.
         if current.get("busy") is True:
             return ResumePlan("deferred", "building_busy")
+        if current["level"] >= target["upgradeTo"]:
+            continue
         if current.get("can_upgrade") is not True:
             return ResumePlan("review", "building_unavailable")
         remaining.append({
