@@ -361,6 +361,11 @@ class RecoveryStore:
     def stop_task(self, account: Account, task_id: str) -> int:
         with self._mutex, self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            conn.execute("""UPDATE fixed_transfers
+                SET status='stopped',updated_at=? WHERE transfer_id IN (
+                    SELECT logical_id FROM desired_jobs
+                    WHERE account_id=? AND identity=? AND last_task_id=?
+                )""", (self._clock(), account.id, identity(account), task_id))
             changed=conn.execute("""UPDATE desired_jobs SET desired_state='stopped',
                 revision=revision+1 WHERE account_id=? AND identity=? AND last_task_id=?""",
                 (account.id,identity(account),task_id)).rowcount
