@@ -16,8 +16,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from daedalus.accounts import Account
-from daedalus.task_control import validated_configuration
 from daedalus.recovery_reconcile import restart_class_for
+from daedalus.task_control import validated_configuration
 
 # Only continuously observing tasks with no in-game state-changing operation may
 # auto-resume without a game-state-specific reconciliation adapter.
