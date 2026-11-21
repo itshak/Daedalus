@@ -269,3 +269,11 @@ tbody tr:hover {background:var(--surface-alt)}
 .aside-orb {display:flex;justify-content:center;align-items:center}
 .hero-inner {background:radial-gradient(circle at 45% 40%,#52616b,#253c4c 65%,#1e2b36);box-shadow:0 9px 38px #0816239b}
 .setup-logo {width:180px;height:auto;margin-bottom:22px}
+
+
+/* Authentic Ikariam resource artwork, shared by warehouse summaries and headers. */
+.resource-gem {width:40px;height:40px;flex-shrink:0;border-radius:10px}
+.resource-image {display:block;width:36px;height:36px;object-fit:contain;object-position:center}
+.resource-image-small {width:22px;height:22px}
+.resource-heading {display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
+.resource-heading .resource-image {flex-shrink:0}
