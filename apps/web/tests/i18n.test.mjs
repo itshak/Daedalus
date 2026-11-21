@@ -51,7 +51,7 @@ test("login, settings, global toolbar and HTML support persisted Russian", () =>
   assert.match(shell, /Language preference/);
   assert.match(shell, /LanguageSelector compact/);
   assert.match(layout, /lang=\{locale\}/);
-  assert.match(provider, /navigator\.languages/);
+  assert.match(layout, /accept-language/);
   assert.match(provider, /document\.cookie/);
   assert.match(provider, /document\.documentElement\.lang = locale/);
   assert.doesNotMatch(shell, /tr\("accounts"\)/, "API identifiers must not be localized");
