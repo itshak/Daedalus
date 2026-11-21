@@ -40,7 +40,7 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
     """
     if task == "alertAttacks":
         return "continuous"
-    if task == "constructionList":
+    if task == "constructionList":  # noqa: SIM102 - explicit task allowlist
         if (config.get("expand_overall") is True
                 and config.get("wait_resources") is False
                 and config.get("shipments") == []
@@ -61,7 +61,7 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
                 and len({row["position"] for row in config["buildings"]})
                 == len(config["buildings"])):
             return "reconcile_construction"
-    if task == "consolidateResources":
+    if task == "consolidateResources":  # noqa: SIM102 - explicit task allowlist
         if (_thresholds(config.get("limits"), allow_null=False)
                 and _ids(config.get("sourceCityIds"))
                 and type(config.get("destinationCityId")) is int
@@ -72,7 +72,7 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
                 and type(config.get("shipType")) is int
                 and 1 <= config["shipType"] <= 3):
             return "convergent_transport"
-    if task == "resourceTransportManager":
+    if task == "resourceTransportManager":  # noqa: SIM102 - explicit task allowlist
         if (config.get("mode") == "consolidate"
                 and config.get("send_mode") == "keep"
                 and _thresholds(config.get("resource_config"), allow_null=True)
