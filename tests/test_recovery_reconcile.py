@@ -197,3 +197,67 @@ def test_reconciler_can_complete_without_mutating_game(tmp_path):
     assert supervisor._resume_jobs(ACCOUNT, "e")["completed"] == 1
     assert journal.desired(ACCOUNT)[0]["desired_state"] == "completed"
     assert supervisor._resume_jobs(ACCOUNT, "e")["completed"] == 0
+
+def test_even_a_reported_final_level_is_not_complete_while_busy():
+    ipc = ConstructionIPC(current=6, busy=True)
+    plan = construction_plan(ipc, ACCOUNT, construction_config(building()))
+    assert plan.state == "deferred"
+    assert ipc.previewed == 0
+
+
+def test_reconciler_retries_deferred_construction_without_replaying_prior_dispatch(tmp_path):
+    ipc = ConstructionIPC(current=3, busy=True)
+    journal = RecoveryStore(tmp_path / "recover.db")
+    journal.set_policy(ACCOUNT, enabled=True, auto_resume=True)
+    journal.capture_started(ACCOUNT, "constructionList",
+                            construction_config(building()), "initial")
+    class Controller:
+        _ipc = ipc
+        _ledger = SimpleNamespace(has_unresolved=lambda _: False)
+        def __init__(self):
+            self.start_count = 0
+        def list_tasks(self, _):
+            return {"engine_tasks": [
+                {"task": "constructionList", "task_id": "new", "status": "running"}
+            ] if self.start_count else []}
+        def start(self, _aid, _task, _cfg, _rid, *, confirmed, track_desired):
+            self.start_count += 1
+            return {"status": "started", "task_id": "new"}
+    controller = Controller()
+    worker = SimpleNamespace(
+        alive=lambda: True,
+        lease=SimpleNamespace(phase="authenticated"),
+    )
+    workers = SimpleNamespace(
+        get=lambda _: worker,
+        router=SimpleNamespace(validate_account=lambda _: True),
+    )
+    supervisor = RecoverySupervisor(
+        [ACCOUNT], journal, workers, controller,
+        SimpleNamespace(available=lambda _: True),
+    )
+    journal.record_loss(ACCOUNT)
+    attempt = journal.claim_due(ACCOUNT, force=True)
+    journal.outcome(ACCOUNT, attempt["epoch"], success=True)
+    supervisor.tick()
+    assert controller.start_count == 0
+    assert journal.receipts(ACCOUNT) == []
+    ipc.busy = False
+    ipc.current = 4
+    supervisor.tick()
+    assert controller.start_count == 1
+    assert journal.receipts(ACCOUNT)[0]["status"] == "started"
+    supervisor.tick()
+    assert controller.start_count == 1
+
+
+def test_restart_class_cannot_be_unilaterally_overridden(tmp_path):
+    from daedalus.recovery_state import RecoveryConflict
+    import pytest
+
+    store = RecoveryStore(tmp_path / "recover.db")
+    with pytest.raises(RecoveryConflict, match="escalated"):
+        store.capture_started(
+            ACCOUNT, "sendResources", {"routes": []}, "old",
+            restart_class="continuous",
+        )
