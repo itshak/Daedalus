@@ -93,7 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
     serve.add_argument(
         "--enable-auto-recovery", action="store_true",
-        help="Enable host-only opt-in 5-minute session recovery supervisor; account policies default off",
+        help="Enable verified 5-minute recovery (automatic with monitored task control)",
+    )
+    serve.add_argument(
+        "--disable-auto-recovery", action="store_true",
+        help="Explicitly disable automatic recovery despite configured monitored task control",
     )
     serve.add_argument(
         "--monitor-existing-sessions", action="store_true",
@@ -314,6 +318,16 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--task-ledger requires --enable-task-control")
             if args.monitor_existing_sessions and not args.enable_task_control:
                 parser.error("--monitor-existing-sessions requires --enable-task-control")
+            if args.enable_auto_recovery and args.disable_auto_recovery:
+                parser.error("Recovery enable and disable flags cannot be combined")
+            if not args.disable_auto_recovery and (
+                args.accounts_file and args.connect_existing_ipc
+                and args.enable_task_control and args.monitor_existing_sessions
+                and not args.demo and not args.enable_account_editing
+            ):
+                # A fully configured, monitored daemon runs the supervisor by
+                # default. Read-only/demo or incomplete hosts never auto-login.
+                args.enable_auto_recovery = True
             if args.enable_auto_recovery and not (
                 args.accounts_file and args.connect_existing_ipc and
                 args.enable_task_control and args.monitor_existing_sessions
