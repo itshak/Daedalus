@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from daedalus.accounts import Account
 
@@ -32,6 +33,42 @@ def _thresholds(value: object, *, allow_null: bool) -> bool:
                         and v <= 10**15) for v in value))
 
 
+def canonical_fixed_transfer(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Only explicitly specified own-city routes are checkpointable."""
+    if not isinstance(config, dict) or set(config) - {
+        "routes", "useFreighters", "transfer_id",
+    }:
+        return None
+    routes = config.get("routes")
+    freighters = config.get("useFreighters", False)
+    if type(freighters) is not bool or not isinstance(routes, list) or not 0 < len(routes) <= 40:
+        return None
+    clean = []
+    for row in routes:
+        if not isinstance(row, dict) or set(row) != {"from", "to", "resources"}:
+            return None
+        origin, dest, amounts = row["from"], row["to"], row["resources"]
+        if (type(origin) is not int or type(dest) is not int
+                or not 0 < origin < 10**12 or not 0 < dest < 10**12
+                or origin == dest or not isinstance(amounts, list)
+                or len(amounts) != 5 or any(
+                    type(amount) is not int or not 0 <= amount <= 10**12
+                    for amount in amounts
+                ) or sum(amounts) == 0):
+            return None
+        clean.append({"from": origin, "to": dest, "resources": list(amounts)})
+    return {"routes": clean, "useFreighters": freighters}
+
+
+def _valid_transfer_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return UUID(value).version == 4 and str(UUID(value)) == value
+    except (ValueError, AttributeError):
+        return False
+
+
 def restart_class_for(task: str, config: dict[str, Any]) -> str:
     """Explicit allowlist: one-shot amount-based transfers are never replayed.
 
@@ -40,6 +77,9 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
     """
     if task == "alertAttacks":
         return "continuous"
+    if (task == "sendResources" and canonical_fixed_transfer(config) is not None
+            and _valid_transfer_id(config.get("transfer_id"))):
+        return "fixed_transfer"
     if task == "constructionList":  # noqa: SIM102 - explicit task allowlist
         if (config.get("expand_overall") is True
                 and config.get("wait_resources") is False
@@ -160,3 +200,22 @@ def convergent_transport_plan(ipc: Any, account: Account,
     # taken from an old shipment plan. It can send only stock above the retained
     # threshold, so successfully dispatched cargo is no longer in that stock.
     return ResumePlan("ready", "stock_threshold_rechecked", config)
+
+def fixed_transfer_plan(store: Any, ipc: Any, account: Account,
+                        config: dict[str, Any]) -> ResumePlan:
+    """Only verified outstanding dispatched amounts can be scheduled."""
+    if restart_class_for("sendResources", config) != "fixed_transfer":
+        return ResumePlan("review", "untracked_fixed_transfer")
+    intent = canonical_fixed_transfer(config)
+    if intent is None:
+        return ResumePlan("review", "untracked_fixed_transfer")
+    own_ids = {city["id"] for city in ipc.cities(account)}
+    if any(route["from"] not in own_ids or route["to"] not in own_ids
+           for route in intent["routes"]):
+        return ResumePlan("review", "fixed_transfer_city_changed")
+    progress = store.fixed_transfer_progress(account, config)
+    if progress["uncertain"]:
+        return ResumePlan("review", "fixed_transfer_uncertain")
+    if progress["completed"]:
+        return ResumePlan("completed", "fixed_transfer_dispatched")
+    return ResumePlan("ready", "fixed_transfer_remaining", config)

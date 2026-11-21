@@ -27,7 +27,11 @@ from daedalus.recovery_credentials import (
     RecoveryCredentials,
     RecoveryCredentialsUnavailable,
 )
-from daedalus.recovery_reconcile import construction_plan, convergent_transport_plan
+from daedalus.recovery_reconcile import (
+    construction_plan,
+    convergent_transport_plan,
+    fixed_transfer_plan,
+)
 from daedalus.recovery_state import RecoveryStore, identity
 from daedalus.task_control import TaskController, TaskUnavailable
 
@@ -385,7 +389,8 @@ class RecoverySupervisor:
             if job["desired_state"]!="running":
                 continue
             if job["restart_class"] not in (
-                    "continuous", "reconcile_construction", "convergent_transport"
+                    "continuous", "reconcile_construction", "convergent_transport",
+                    "fixed_transfer"
                 ) or job["task"] in active:
                 totals["skipped"]+=1
                 continue
@@ -396,10 +401,16 @@ class RecoverySupervisor:
                 totals["skipped"]+=1
                 continue
             resume_config=job["config"]
-            if job["restart_class"] in ("reconcile_construction", "convergent_transport"):
+            if job["restart_class"] in (
+                "reconcile_construction", "convergent_transport", "fixed_transfer"
+            ):
                 try:
                     if job["restart_class"]=="reconcile_construction":
                         plan=construction_plan(self.controller._ipc,account,resume_config)
+                    elif job["restart_class"]=="fixed_transfer":
+                        plan=fixed_transfer_plan(
+                            self.store,self.controller._ipc,account,resume_config,
+                        )
                     else:
                         plan=convergent_transport_plan(
                             self.controller._ipc,account,job["task"],resume_config,

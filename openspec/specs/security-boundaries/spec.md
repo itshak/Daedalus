@@ -112,3 +112,12 @@ A Linux service MAY opt in to a protected host-bound encrypted credential store 
 
 - **WHEN** the service's configured encrypted credential cannot be loaded or a saved account record fails authentication
 - **THEN** no plaintext fallback is written, no other account's secret is accepted, and the worker fails safely without a game task
+
+### Requirement: Fixed transfer checkpoints remain account-bound and private
+Fixed-resource recovery checkpoints SHALL be stored outside the checkout in an owner-only SQLite file. The controller MUST bind each logical transfer ID to its configured account/world/player and immutable route/quantity intent. Managed engine child processes MUST receive the checkpoint file location from a server-controlled environment, not a user-supplied task file path. A cross-account, mismatched-target, missing or corrupt checkpoint MUST fail closed before game mutations.
+
+#### Scenario: Recovery attempts another identity's transfer
+- **GIVEN** a recorded transfer belongs to a particular world/player
+- **WHEN** a different authenticated world/player attempts to load that checkpoint
+- **THEN** the engine SHALL refuse to send any resources and SHALL not disclose other account material
+

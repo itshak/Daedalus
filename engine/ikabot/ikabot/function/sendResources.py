@@ -59,7 +59,7 @@ def resource_amounts(value, name):
     return amounts
 
 
-def prepare_sendResources(session, routes, useFreighters=False):
+def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None):
     """Checks the config of a sendResources task started from the CLI
     Parameters
     ----------
@@ -104,8 +104,18 @@ def prepare_sendResources(session, routes, useFreighters=False):
         checked.append(checked_route)
         asked[origin] = [a + b for a, b in zip(asked.get(origin, [0] * len(RESOURCE_KEYS)), amounts)]
 
-    # like the menu, which only lets you send what the origin has
-    for origin, amounts in asked.items():
+    if transfer_id is not None:
+        # A Daedalus-managed transfer must already have a protected, approved
+        # checkpoint bound to this exact world/player, route and quantity.
+        # Earlier confirmed cargo is subtracted later by the journal.
+        from ikabot.helpers.fixedTransferJournal import FixedTransferJournal
+        if any(str(route["to"]) not in own_ids for route in checked):
+            raise ValueError("Unattended fixed transfers require owned recipients")
+        FixedTransferJournal(
+            session, transfer_id, checked, bool(useFreighters),
+        )
+    # Historical unmanaged tasks keep the original available-stock preflight.
+    for origin, amounts in ({} if transfer_id is not None else asked).items():
         city = getCityById(session, origin)
         for key, amount, available in zip(RESOURCE_KEYS, amounts, city["availableResources"]):
             if amount > int(available):
@@ -115,11 +125,14 @@ def prepare_sendResources(session, routes, useFreighters=False):
                     )
                 )
 
-    return {"routes": checked, "useFreighters": asBool(useFreighters, "useFreighters")}
+    result = {"routes": checked, "useFreighters": asBool(useFreighters, "useFreighters")}
+    if transfer_id is not None:
+        result["transfer_id"] = transfer_id
+    return result
 
 
 @task("sendResources", prepare=prepare_sendResources)
-def do_it(session, routes, useFreighters=False):
+def do_it(session, routes, useFreighters=False, transfer_id=None):
     """
     Parameters
     ----------
@@ -153,7 +166,13 @@ def do_it(session, routes, useFreighters=False):
                 *route["resources"],
             )
         )
-    executeRoutes(session, shipments, useFreighters)
+    checkpoint = None
+    if transfer_id is not None:
+        from ikabot.helpers.fixedTransferJournal import FixedTransferJournal
+        checkpoint = FixedTransferJournal(
+            session, transfer_id, list(routes), useFreighters,
+        )
+    executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
 
 
 @configurator

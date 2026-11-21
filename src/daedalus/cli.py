@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 from daedalus import __version__
 from daedalus.accounts import AccountConfigError, load_accounts
@@ -376,6 +377,9 @@ def main(argv: list[str] | None = None) -> int:
                 from daedalus.task_control import TaskController
 
                 recovery_store = RecoveryStore()
+                # Dedicated IkaBot children inherit the exact same private
+                # SQLite checkpoint, without a user-writable task-config path.
+                os.environ["DAEDALUS_FIXED_TRANSFER_DB"] = str(recovery_store.path)
                 task_controller = TaskController(
                     configured, owner, ipc, ledger_path=args.task_ledger,
                     active_validation=args.monitor_existing_sessions,

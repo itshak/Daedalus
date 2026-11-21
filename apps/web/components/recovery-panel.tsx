@@ -8,6 +8,9 @@ type Policy = { enabled: boolean; auto_resume: boolean; grace_seconds: number; r
 type Event = { phase: string; lost_at: number; due_at: number; attempts: number; last_reason: string | null } | null;
 type Recovery = { account_id: string; policy: Policy; event: Event; desired_jobs: number; auto_resume_eligible: number; manual_review: number; server_token_available: boolean; session_status: string };
 type Index = { enabled: boolean; supervisor_enabled: boolean; accounts: Recovery[] };
+type TransferProgress = { dispatched?:number[][]; remaining?:number[][]; uncertain:boolean; completed?:boolean };
+type SavedJob = {id:string;task:string;restart_class:string;desired_state:string;transfer_progress?:TransferProgress};
+function cargoTotal(values?: number[][]) { return (values||[]).flat().reduce((sum,n)=>sum+n,0).toLocaleString(); }
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const response = await fetch("/api/controller/" + path, {
@@ -26,6 +29,7 @@ function recoveryClassLabel(kind: string) {
     case "continuous": return "Restarts if absent";
     case "reconcile_construction": return "Checks remaining target levels";
     case "convergent_transport": return "Resumes source-stock threshold policy";
+    case "fixed_transfer": return "Resumes only checkpointed unsent cargo";
     default: return "Manual review (no replay)";
   }
 }
@@ -42,7 +46,7 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
   const [message, setMessage] = useState("");
   const [now, setNow] = useState(0);
   const [jobAccount, setJobAccount] = useState("");
-  const [jobs, setJobs] = useState<{jobs:{id:string;task:string;restart_class:string;desired_state:string}[];receipts:{status:string;logical_id:string}[]} | null>(null);
+  const [jobs, setJobs] = useState<{jobs:SavedJob[];receipts:{status:string;logical_id:string}[]} | null>(null);
   const canWrite = role !== "viewer";
   const byId = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a])) as Record<string,Account>, [accounts]);
   const refresh = useCallback(async () => {
@@ -150,7 +154,11 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
           {jobAccount===r.account_id&&<div className="recovery-jobs">
             {!jobs?<p>Loading saved job records…</p>:jobs.jobs.length?<>{jobs.jobs.map(job=>
               <div className="recovery-job" key={job.id}><span><strong>{job.task}</strong><small>{label(job.desired_state)}</small></span>
-                <span>{recoveryClassLabel(job.restart_class)}</span></div>)}
+                <span><span>{recoveryClassLabel(job.restart_class)}</span>
+                {job.transfer_progress && <small>{job.transfer_progress.uncertain
+                  ? "Needs review: a shipment dispatch is uncertain"
+                  : "Accepted cargo: " + cargoTotal(job.transfer_progress.dispatched) +
+                    " · Remaining: " + cargoTotal(job.transfer_progress.remaining)}</small>}</span></div>)}
               {jobs.receipts.length>0&&<p>{jobs.receipts.length} restoration receipt(s). Unknown outcomes require manual reconciliation.</p>}
             </>:<p>No managed job configurations captured for this account. Old task IDs alone cannot reconstruct them.</p>}
           </div>}
