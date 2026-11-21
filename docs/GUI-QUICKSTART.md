@@ -109,3 +109,27 @@ remain clearly labeled as requiring a reviewed native planner.
 One owner-authorized field smoke verified Monjo saved-cookie restoration, the exact game-world player, seven city records and seven real warehouse snapshots on the Mac. No owner-approved game-task execution, **new native Mac Gameforge browser/CAPTCHA login**, dedicated-worker rebind, persistent server keyring after host reboot or completed production cutover has been demonstrated. Those live acceptance checks remain open in the owner acceptance checklist in [NATIVE-MAC-LOGIN.md](NATIVE-MAC-LOGIN.md). GUI and backend synthetic tests cannot substitute for them.
 
 The GitHub Actions macOS build produces an ad-hoc signed preview app. Updating backend code on Linux does **not** automatically replace an older installed Mac `.app`; to use new GUI controls, install the rebuilt preview from the relevant successful macOS CI run. Windows/Linux GUI support is not a guarantee of notarized macOS distribution.
+
+### Automatic Gameforge sign-in and cancellation (macOS)
+
+- **Sign in selected / Sign in all** is sequential: Daedalus prepares a one-time
+  server handoff and runs **one account at a time**, never ten simultaneous Chrome
+  instances. The chosen account's WebDriver + Keychain lookup run in a separate
+  macOS helper process, outside the Qt event loop. The server never receives a
+  Gameforge password.
+- The helper tries this Mac's previously saved credential, then the account's
+  client-sealed login vault, then an exact local legacy warehouse alias. If none
+  is available, the GUI asks for credentials. Headless Chrome is the default;
+  visible Chrome is opened only when an actual CAPTCHA is detected.
+- **Cancel sign-in**, **Cmd+Q**, or closing the window terminates the isolated
+  helper's process group, including its ChromeDriver and Chrome children.
+  There is also a 5.5-minute watchdog for stuck attempts. Cancellation does
+  not turn an unverified account into an authenticated worker or replay tasks.
+- If an attempt fails, consult **Activity** and the rotating **macOS diagnostic
+  log** at ~/Library/Logs/Daedalus/desktop.log. It contains operation stages
+  and sanitized errors, **not** passwords, session cookies, login vaults or
+  browser output. Log size is limited to 1 MB with two older backups.
+- For this change, automated tests use synthetic browser processes only.
+  Recheck real Gameforge login, a CAPTCHA, and Chrome cleanup interactively
+  on a Mac; neither Gameforge availability nor success for a specific account
+  has been established by offline CI.
