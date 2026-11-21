@@ -15,14 +15,5 @@ const nextConfig: NextConfig = {
       ]
     }];
   },
-  async rewrites() {
-    // Preserve existing macOS clients using /api/v1/* after the host moves to Vercel.
-    // The separate backend alias still requires its own strong bearer on all private routes.
-    if (!process.env.DAEDALUS_LEGACY_API_ORIGIN) return [];
-    return [{
-      source: "/api/v1/:path*",
-      destination: process.env.DAEDALUS_LEGACY_API_ORIGIN + "/api/v1/:path*"
-    }];
-  }
 };
 export default nextConfig;

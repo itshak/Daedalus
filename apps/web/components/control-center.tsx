@@ -34,6 +34,19 @@ const TASK_GROUPS = [
   { name: "Alerts & exploration", icon: Compass, tasks: ["alertAttacks", "alertLowWine", "searchForIslandSpaces"] },
   { name: "System & advanced", icon: Settings2, tasks: ["dumpWorld", "viewArmy", "shipMovements"] }
 ];
+const INVENTORIES: Record<string, { resource: string; scope: "account" | "city"; title: string }> = {
+  research: {resource: "academies", scope: "account", title: "Academy research & cooldowns"},
+  tavernManager: {resource: "taverns", scope: "account", title: "City taverns & wine"},
+  activateMiracle: {resource: "miracles", scope: "account", title: "Miracles & cooldowns"},
+  activateShrine: {resource: "shrine-status", scope: "account", title: "Shrine status"},
+  autoPirate: {resource: "pirate-fortresses", scope: "account", title: "Pirate fortresses"},
+  trainArmy: {resource: "trainable-units", scope: "city", title: "Trainable units"},
+  UpgradeUnits: {resource: "workshop-upgrades", scope: "city", title: "Workshop upgrades"},
+  buyResources: {resource: "market-quotes", scope: "city", title: "Market offers"},
+  sellResources: {resource: "market-quotes", scope: "city", title: "Market offers"},
+  viewArmy: {resource: "military", scope: "account", title: "Military inventory"},
+  shipMovements: {resource: "ship-movements", scope: "account", title: "Ship movements"}
+};
 const format = (n: number | null | undefined) => typeof n === "number" ? new Intl.NumberFormat("en-US").format(n) : "—";
 function name(a: Account) { return a.email || a.name || a.player || a.id; }
 function readable(text: string) { return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
@@ -67,6 +80,16 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
   return <div className="table-scroll"><table><thead><tr>{keys.map(k=><th key={k}>{readable(k)}</th>)}</tr></thead><tbody>
     {rows.map((row,i)=><tr key={i}>{keys.map(k=><td key={k}>{typeof row[k]==="object" && row[k]!==null ? "Details available in controller" : String(row[k] ?? "—")}</td>)}</tr>)}
   </tbody></table></div>;
+}
+
+function InventoryDetails({ data }: { data: Result }) {
+  const entries = Object.entries(data).filter(([key]) => !["account_id", "raw", "cookie", "token", "synthetic_demo"].includes(key));
+  return <div>{entries.map(([key, value]) => <div key={key} className="military-group">
+    <strong className="table-label">{readable(key)}</strong>
+    {Array.isArray(value) ? <DataTable rows={value.filter(x => x && typeof x === "object") as Record<string, unknown>[]} />
+      : value && typeof value === "object" ? <DataTable rows={Object.entries(value).map(([name, v]) => ({name, value: typeof v === "object" ? "See controller details" : v}))} />
+      : <div className="key-value"><span>{readable(key)}</span><strong>{String(value ?? "Unknown")}</strong></div>}
+  </div>)}</div>;
 }
 
 export function ControlCenter({ email, role }: { email: string; role: string }) {
@@ -107,6 +130,11 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const [automationError, setAutomationError] = useState("");
   const [preflight, setPreflight] = useState<Result | null>(null);
   const [automationBusy, setAutomationBusy] = useState(false);
+  const [inventory, setInventory] = useState<Result | null>(null);
+  const [inventoryBusy, setInventoryBusy] = useState(false);
+  const [inventoryError, setInventoryError] = useState("");
+  const [marketResource, setMarketResource] = useState(0);
+  const [marketSide, setMarketSide] = useState("buy");
 
   useEffect(() => {
     try { const stored = localStorage.getItem("daedalus-appearance"); if (stored === "dark") setTheme("dark"); } catch {}
@@ -195,6 +223,23 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
       .then(r=>{if(live)setBuildings(r.buildings??[])}).catch(()=>{if(live)setBuildings([])});
     return ()=>{live=false};
   },[page,selectedCity,automationAccount,chosenTask,reload]);
+
+  useEffect(() => {
+    const observation = INVENTORIES[chosenTask];
+    if (page !== "automations" || !observation || !automationAccount || (observation.scope === "city" && !selectedCity)) {
+      setInventory(null); setInventoryBusy(false); setInventoryError(""); return;
+    }
+    let live = true;
+    setInventoryBusy(true); setInventoryError(""); setInventory(null);
+    const url = "accounts/" + encodeURIComponent(automationAccount)
+      + (observation.scope === "city" ? "/cities/" + encodeURIComponent(selectedCity) : "")
+      + "/" + observation.resource
+      + (observation.resource === "market-quotes" ? "?resource_type=" + marketResource + "&side=" + encodeURIComponent(marketSide) : "");
+    controller<Result>(url).then(data => {if (live) setInventory(data);})
+      .catch(error => {if (live) setInventoryError(error instanceof Error ? error.message : "Current inventory unavailable");})
+      .finally(() => {if (live) setInventoryBusy(false);});
+    return () => {live = false;};
+  }, [page, chosenTask, automationAccount, selectedCity, marketResource, marketSide, reload]);
 
   const accountById=useMemo(()=>Object.fromEntries(accounts.map(a=>[a.id,a])) as Record<string,Account>,[accounts]);
   const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeKey,warehouseMap]);
@@ -291,7 +336,13 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
             <section className="panel automation-detail"><div className="panel-heading"><div><div className="section-kicker">WORKFLOW INSPECTOR</div><h3>{readable(chosenTask)}</h3><p>Live account-bound data and availability</p></div><Status ok={preflight?.ready===true} label={preflight?.ready===true?"Ready to review":"Not approved"}/></div>
               <div className="editor-body"><label className="field"><span>Account</span><select value={automationAccount} onChange={e=>setAutomationAccount(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{name(a)} · {accountWorld(a)}</option>)}</select></label>
                 {preflight&&<div className="preflight-card"><div className="preflight-top"><span><ShieldCheck size={18}/> Authoritative preflight</span><Status ok={preflight.ready===true} label={preflight.ready===true?"Ready":"Unavailable"}/></div><p>{typeof preflight.reason==="string"?preflight.reason:"The controller has checked prerequisites for this account and operation."}</p>{preflight.unresolved_request===true&&<p className="warning-text">An earlier request is unresolved. Review Activity before any new operation.</p>}</div>}
-                {chosenTask==="constructionList"?<><div className="form-section-title">Choose a real city</div><label className="field"><span>City</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">Select an authenticated city</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??"City")}</option>)}</select></label>{selectedCity&&<><div className="form-section-title">Buildings in this city</div><div className="building-list">{buildings.length?buildings.map((b,i)=><label key={i} className={"building-item "+(buildingPosition===String(b.position)?"building-chosen":"")}><input type="radio" name="building" checked={buildingPosition===String(b.position)} onChange={()=>{setBuildingPosition(String(b.position??""));setTargetLevel(Number(b.level??0)+1);setPreview(null);}}/><span><strong>{String(b.name??b.building??b.type??"Building")}</strong><small>Position {String(b.position??"—")}</small></span><span className="level-pill">Level {String(b.level??"—")}</span></label>):<Empty title="Building data not available" description="This account/city has no authenticated building inventory." icon={Building2}/>}</div><label className="field"><span>Target level</span><input type="number" min="1" max="150" value={targetLevel} onChange={e=>{setTargetLevel(Number(e.target.value));setPreview(null);}}/></label><button className="primary-button" disabled={automationBusy||!buildingPosition} onClick={showPreview}>{automationBusy?"Preparing preview…":"Preview upgrade (read-only)"}<ArrowRight size={16}/></button></>}</>:<div className="empty-adapter"><Landmark size={24}/><strong>Domain editor pending audit</strong><p>This upstream operation is catalogued, but a web-safe, independently reviewed adapter is required before this browser can execute it. The preflight shown above is informational.</p></div>}
+                {chosenTask==="constructionList"?<><div className="form-section-title">Choose a real city</div><label className="field"><span>City</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">Select an authenticated city</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??"City")}</option>)}</select></label>{selectedCity&&<><div className="form-section-title">Buildings in this city</div><div className="building-list">{buildings.length?buildings.map((b,i)=><label key={i} className={"building-item "+(buildingPosition===String(b.position)?"building-chosen":"")}><input type="radio" name="building" checked={buildingPosition===String(b.position)} onChange={()=>{setBuildingPosition(String(b.position??""));setTargetLevel(Number(b.level??0)+1);setPreview(null);}}/><span><strong>{String(b.name??b.building??b.type??"Building")}</strong><small>Position {String(b.position??"—")}</small></span><span className="level-pill">Level {String(b.level??"—")}</span></label>):<Empty title="Building data not available" description="This account/city has no authenticated building inventory." icon={Building2}/>}</div><label className="field"><span>Target level</span><input type="number" min="1" max="150" value={targetLevel} onChange={e=>{setTargetLevel(Number(e.target.value));setPreview(null);}}/></label><button className="primary-button" disabled={automationBusy||!buildingPosition} onClick={showPreview}>{automationBusy?"Preparing preview…":"Preview upgrade (read-only)"}<ArrowRight size={16}/></button></>}</> :INVENTORIES[chosenTask]?<div className="inventory-editor">
+                  {INVENTORIES[chosenTask].scope === "city" && <label className="field"><span>Choose your city</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">Select an authenticated city</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??"City")}</option>)}</select></label>}
+                  {INVENTORIES[chosenTask].resource === "market-quotes" && <div className="market-fields"><label className="field"><span>Resource</span><select value={marketResource} onChange={e=>setMarketResource(Number(e.target.value))}>{RESOURCES.map((resource,index)=><option key={resource} value={index}>{readable(resource)}</option>)}</select></label><label className="field"><span>Market action</span><select value={marketSide} onChange={e=>setMarketSide(e.target.value)}><option value="buy">Buy available offers</option><option value="sell_to_offers">Sell to available offers</option><option value="create_offer">Create offer (preview)</option></select></label></div>}
+                  <div className="form-section-title">{INVENTORIES[chosenTask].title}</div>
+                  {inventoryBusy ? <p className="soft-loading">Retrieving authenticated controller data…</p> : inventoryError ? <div role="alert" className="inline-error">{inventoryError}</div> : inventory ? <InventoryDetails data={inventory}/> : <p className="subtle-message">Select an authenticated city to inspect the available data.</p>}
+                  <div className="read-only-foot"><LockKeyhole size={16}/><span>Inventory is read-only. Starting this task requires a separately audited, account-scoped configuration and confirmation flow.</span></div>
+                </div> :<div className="empty-adapter"><Landmark size={24}/><strong>Domain editor pending audit</strong><p>This upstream operation is catalogued, but a web-safe, independently reviewed adapter is required before this browser can execute it. The preflight shown above is informational.</p></div>}
                 {preview&&<div className="preview-panel"><h4>Read-only construction preview</h4><p>These values come from IkaBot. Preview does not authorize or execute upgrades.</p>{Object.entries(preview).filter(([k,v])=>typeof v!=="object").map(([k,v])=><div key={k} className="key-value"><span>{readable(k)}</span><strong>{String(v??"Unknown")}</strong></div>)}{Object.entries(preview).filter(([k,v])=>Array.isArray(v)).map(([k,v])=><div key={k}><div className="form-section-title">{readable(k)}</div><DataTable rows={(v as unknown[]).filter(x=>x && typeof x==="object").map(x=>x as Record<string,unknown>)} /></div>)}</div>}
                 {automationError&&<p role="alert" className="form-error">{automationError}</p>}
                 <div className="read-only-foot"><LockKeyhole size={16}/><span>Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.</span></div>

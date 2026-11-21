@@ -45,7 +45,9 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });
     body = JSON.stringify(value);
   }
-  const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "") : "";
+  const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "")
+    : parts.at(-1) === "market-quotes" ? "?resource_type=" + encodeURIComponent(url.searchParams.get("resource_type") ?? "") + "&side=" + encodeURIComponent(url.searchParams.get("side") ?? "")
+    : parts.at(-1) === "trainable-units" && url.searchParams.has("train_troops") ? "?train_troops=" + encodeURIComponent(url.searchParams.get("train_troops") ?? "") : "";
   try {
     const upstream = await fetch(origin + "/api/v1/" + parts.map(encodeURIComponent).join("/") + query, {
       method: request.method, body,
