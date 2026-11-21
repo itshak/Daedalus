@@ -200,3 +200,22 @@ def convergent_transport_plan(ipc: Any, account: Account,
     # taken from an old shipment plan. It can send only stock above the retained
     # threshold, so successfully dispatched cargo is no longer in that stock.
     return ResumePlan("ready", "stock_threshold_rechecked", config)
+
+def fixed_transfer_plan(store: Any, ipc: Any, account: Account,
+                        config: dict[str, Any]) -> ResumePlan:
+    """Only verified outstanding dispatched amounts can be scheduled."""
+    if restart_class_for("sendResources", config) != "fixed_transfer":
+        return ResumePlan("review", "untracked_fixed_transfer")
+    intent = canonical_fixed_transfer(config)
+    if intent is None:
+        return ResumePlan("review", "untracked_fixed_transfer")
+    own_ids = {city["id"] for city in ipc.cities(account)}
+    if any(route["from"] not in own_ids or route["to"] not in own_ids
+           for route in intent["routes"]):
+        return ResumePlan("review", "fixed_transfer_city_changed")
+    progress = store.fixed_transfer_progress(account, config)
+    if progress["uncertain"]:
+        return ResumePlan("review", "fixed_transfer_uncertain")
+    if progress["completed"]:
+        return ResumePlan("completed", "fixed_transfer_dispatched")
+    return ResumePlan("ready", "fixed_transfer_remaining", config)
