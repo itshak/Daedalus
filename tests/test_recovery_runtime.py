@@ -205,6 +205,9 @@ def test_router_dispatches_only_to_correct_account_and_legacy_fallback():
 
 
 def test_engine_account_descriptor_env_is_exact_and_private(tmp_path,monkeypatch):
+    pytest.importorskip(
+        "ikabot.helpers.ipc", reason="Bundled IkaBot engine not installed in core-only CI"
+    )
     from ikabot.helpers.ipc import get_ipc_file_path, get_ipc_lock_path
     monkeypatch.delenv("DAEDALUS_ACCOUNT_IPC_FILE",raising=False)
     assert get_ipc_file_path().endswith(".ikabot/ipc.json")
@@ -232,6 +235,9 @@ def test_child_uses_exact_bounded_secret_pipe_only(monkeypatch,capfd):
         def from_saved(cls,**kw):
             calls.append(("from_saved",kw["world"],kw["player"]))
             return SimpleNamespace()
+    pytest.importorskip(
+        "ikabot.web.session", reason="Bundled IkaBot engine not installed in core-only CI"
+    )
     import ikabot.web.session as original
     from ikabot.helpers import ipc
     monkeypatch.setattr(original,"Session",FakeSession)

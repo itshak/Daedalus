@@ -23,7 +23,9 @@ class MemoryStore:
 
 @pytest.fixture
 def fixture(monkeypatch):
-    from ikabot.helpers import sessionStorage
+    sessionStorage = pytest.importorskip(
+        "ikabot.helpers.sessionStorage", reason="Bundled IkaBot engine not installed in core-only CI"
+    )
     entries={
         "monjo@example.invalid":{
             "email":"monjo@example.invalid",
