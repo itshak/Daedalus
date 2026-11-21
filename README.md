@@ -19,7 +19,7 @@ handoff, server-side player attestation and idle dedicated-worker rebind are
 implemented and pass offline CI. Real human Gameforge/MFA/CAPTCHA, task/rebind
 trial and host reboot remain **untested** in
 [owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
-Automatic unattended login and production cutover remain unsupported/unapproved.
+Opt-in automatic session recovery is implemented behind disabled-by-default policy and server flags; live Gameforge acceptance and production cutover remain unapproved.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -221,6 +221,14 @@ The normative, maintained requirements are in [OpenSpec capabilities](openspec/s
 The [saved-cookie worker](docs/SAVED-WORKER.md) is an explicitly opted-in, single-account bootstrap from **previously authenticated** cookies. It does not provide a fresh Gameforge login, browser/CAPTCHA handoff, unattended recovery or live-account certification. The [synthetic demo](docs/SYNTHETIC-DEMO.md) remains the safe first test.
 
 Authentication recovery implementation and limitations: [Human browser recovery](docs/BROWSER-RECOVERY.md).
+
+### Automatic session and managed-job recovery (opt-in; live acceptance pending)
+
+After confirmed loss of the game session (including a browser login elsewhere), the optional host supervisor observes a five-minute grace period, then attempts a verified account-bound IkaBot session refresh using a protected server-side lobby credential. Approved managed jobs can resume only after the exact world/player identity is independently verified. The owner can pause recovery while using the browser.
+
+**Fixed-quantity resource transfers:** For newly approved Daedalus-managed `sendResources` jobs between your own cities, each shipment chunk has a durable write-ahead/accepted receipt. Following reconnect, the worker dispatches only the original quantity **not already confirmed as sent**. Pending, unconfirmed cargo is held for review instead of risking a second shipment. Legacy jobs, shipments to other players, and other one-shot transport modules are not automatically replayed.
+
+See [automatic recovery and fixed-cargo safeguards](docs/AUTOMATIC-RECOVERY.md). These features are not a claim of completed live-game acceptance or active production deployment.
 
 Production engine source review and nonsecret upstream reconciliation: [Engine authentication reconciliation](docs/ENGINE-AUTH-RECONCILIATION.md).
 
