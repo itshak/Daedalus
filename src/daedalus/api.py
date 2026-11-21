@@ -124,7 +124,12 @@ def create_app(
         native_browser_handoff.owner is not owner
         or not native_browser_handoff.owner.matches_accounts(configured_accounts)
         or native_browser_handoff.worker is not saved_worker
-        or native_browser_handoff.monitor is not recovery_monitor
+        # A session monitor may exist with zero attached workers, such as
+        # after a saved world cookie expires. A new account's encrypted Mac
+        # handoff must still be available without claiming a monitor lease.
+        or native_browser_handoff.monitor is not (
+            recovery_monitor if saved_worker is not None else None
+        )
         or enable_account_editing
     ):
         raise ValueError("Native browser handoff needs the exact fixed authoritative owner")
