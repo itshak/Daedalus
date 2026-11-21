@@ -454,3 +454,113 @@ class RecoveryStore:
                 ) and j["desired_state"]=="running" for j in jobs),
                 "manual_review":sum(j["restart_class"]=="manual" and
                                     j["desired_state"]=="running" for j in jobs)}
+
+    def prepare_fixed_transfer(self, account: Account, config: dict) -> str:
+        """Persist approved absolute cargo intent BEFORE engine task dispatch."""
+        if restart_class_for("sendResources", config) != "fixed_transfer":
+            raise RecoveryConflict("Fixed transfer lacks a verified checkpoint key")
+        clean, digest = validated_configuration(config)
+        intent = canonical_fixed_transfer(clean)
+        if intent is None:
+            raise RecoveryConflict("Unsupported fixed transfer routes")
+        transfer_id = config["transfer_id"]
+        canonical = json.dumps(clean, sort_keys=True, separators=(",", ":"))
+        target = json.dumps(intent, sort_keys=True, separators=(",", ":"))
+        zero = json.dumps([[0] * 5 for _ in intent["routes"]])
+        now = self._clock()
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            prior = conn.execute(
+                "SELECT digest FROM desired_jobs WHERE logical_id=?",
+                (transfer_id,),
+            ).fetchone()
+            if prior is not None:
+                raise RecoveryConflict("Fixed transfer identifier has already been used")
+            conn.execute("""INSERT INTO desired_jobs(
+                logical_id,account_id,identity,task,config_json,digest,
+                restart_class,desired_state,last_task_id,approved_at)
+                VALUES(?,?,?,?,?,?,'fixed_transfer','dispatching',NULL,?)""",
+                (transfer_id, account.id, identity(account), "sendResources",
+                 canonical, digest, now))
+            conn.execute("""INSERT INTO fixed_transfers(
+                transfer_id,account_id,identity,world,player,intent_json,
+                dispatched_json,status,updated_at)
+                VALUES(?,?,?,?,?,?,?,'prepared',?)""",
+                (transfer_id, account.id, identity(account),
+                 account.world.casefold(), account.player.casefold(),
+                 target, zero, now))
+            conn.commit()
+        return transfer_id
+
+    def finish_fixed_transfer(self, account: Account, transfer_id: str,
+                              *, status: str, task_id: str | None = None) -> None:
+        """Preserve uncertainty if IPC launch cannot be proved unsuccessful."""
+        if status not in ("started", "rejected", "unconfirmed"):
+            raise RecoveryConflict("Unknown fixed transfer launch result")
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("""SELECT desired_state FROM desired_jobs
+                WHERE logical_id=? AND account_id=? AND identity=?
+                AND restart_class='fixed_transfer'""",
+                (transfer_id, account.id, identity(account))).fetchone()
+            if row is None or row[0] != "dispatching":
+                raise RecoveryConflict("Fixed transfer start receipt was already resolved")
+            state = "running" if status == "started" else (
+                "stopped" if status == "rejected" else "review"
+            )
+            conn.execute("""UPDATE desired_jobs
+                SET desired_state=?,last_task_id=?,revision=revision+1
+                WHERE logical_id=?""", (state, task_id, transfer_id))
+            if status != "started":
+                conn.execute("""UPDATE fixed_transfers
+                    SET status=?,updated_at=? WHERE transfer_id=?""",
+                    ("stopped" if status == "rejected" else "unconfirmed",
+                     self._clock(), transfer_id))
+            else:
+                conn.execute("""UPDATE fixed_transfers
+                    SET status='running',updated_at=?
+                    WHERE transfer_id=? AND status='prepared'""",
+                    (self._clock(), transfer_id))
+            conn.commit()
+
+    def fixed_transfer_progress(self, account: Account,
+                                config: dict) -> dict[str, object]:
+        """Read accepted transport receipts; a pending POST blocks replay."""
+        if restart_class_for("sendResources", config) != "fixed_transfer":
+            raise RecoveryConflict("Fixed transfer intent is untracked")
+        tid = config["transfer_id"]
+        normalized = canonical_fixed_transfer(config)
+        expected = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        with self._mutex, self._db() as conn:
+            row = conn.execute("""SELECT ft.intent_json,ft.dispatched_json,ft.status
+                FROM fixed_transfers ft JOIN desired_jobs j
+                  ON j.logical_id=ft.transfer_id
+                WHERE ft.transfer_id=? AND ft.account_id=? AND ft.identity=?
+                  AND j.account_id=? AND j.identity=? AND j.task='sendResources'
+                  AND j.config_json=?""", (
+                    tid, account.id, identity(account), account.id,
+                    identity(account), json.dumps(config, sort_keys=True,
+                                                 separators=(",", ":")),
+                )).fetchone()
+            pending = conn.execute("""SELECT COUNT(*) FROM fixed_transfer_chunks
+                WHERE transfer_id=? AND status='pending'""", (tid,)).fetchone()[0]
+        if row is None or row["intent_json"] != expected:
+            raise RecoveryConflict("Missing or mismatched fixed transfer checkpoint")
+        try:
+            sent = json.loads(row["dispatched_json"])
+            target = [route["resources"] for route in normalized["routes"]]
+            if (not isinstance(sent, list) or len(sent) != len(target)
+                    or any(not isinstance(vector, list) or len(vector) != 5
+                           or any(type(v) is not int or not 0 <= v <= cap
+                                  for v, cap in zip(vector, limits))
+                           for vector, limits in zip(sent, target))):
+                raise ValueError("Invalid fixed shipment counters")
+        except (ValueError, TypeError) as exc:
+            raise RecoveryConflict("Fixed transfer progress is corrupt") from exc
+        return {
+            "dispatched": sent,
+            "remaining": [[limit - actual for limit, actual in zip(t, s)]
+                          for t, s in zip(target, sent)],
+            "uncertain": pending > 0 or row["status"] not in ("prepared", "running", "complete"),
+            "completed": all(t == s for t, s in zip(target, sent)),
+        }
