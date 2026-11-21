@@ -81,3 +81,27 @@ For newly approved Daedalus-managed `sendResources` tasks between cities belongi
 - **WHEN** recovery checks the desired job
 - **THEN** the job MUST remain in manual review without dispatching resources
 
+
+### Requirement: Default-on verified session and safe-job recovery
+A backend configured with fixed accounts, authenticated engine IPC, managed task control and existing-session monitoring MUST start its recovery supervisor by default. Newly configured, enabled accounts MUST default to five-minute delayed recovery and safe-job auto-resume, without requiring a manual per-account enable action. The system MUST preserve any explicitly saved disabled policy, indefinite or timed browser pause and account-identity binding. A host-wide opt-out MUST be available. Missing protected credentials, uncertain task receipts, unverified identities and absent prior managed sessions MUST NOT cause opportunistic login or game task replay.
+
+#### Scenario: New enabled account uses default recovery
+- **GIVEN** a fully configured monitored daemon and an enabled account without a prior policy row
+- **WHEN** its recovery policy is read
+- **THEN** both session recovery and eligible managed-job restoration SHALL be enabled with a 300-second grace period, without initiating any login
+
+#### Scenario: Explicit disable persists through deployment
+- **GIVEN** an account has a stored disabled recovery policy
+- **WHEN** the service is upgraded or restarted
+- **THEN** automatic recovery SHALL remain disabled for that account despite the new defaults
+
+#### Scenario: Owner uses browser pause
+- **GIVEN** recovery is enabled by default and the owner has paused the account
+- **WHEN** a world session expires during the pause
+- **THEN** the supervisor SHALL respect the pause and SHALL NOT reauthenticate early
+
+#### Scenario: Host-wide recovery opt-out
+- **GIVEN** an otherwise fully configured daemon
+- **WHEN** the operator starts it with the explicit disable-auto-recovery flag
+- **THEN** no automatic recovery supervisor SHALL be started
+

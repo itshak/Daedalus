@@ -20,14 +20,22 @@ def enable(store, account):
     return store.set_policy(account, enabled=True, auto_resume=True)
 
 
-def test_opt_in_defaults_off_and_is_identity_scoped(item):
+def test_recovery_defaults_on_and_is_identity_scoped(item):
     store, account, _ = item
-    assert store.policy(account)["enabled"] is False
+    initial = store.policy(account)
+    assert initial["enabled"] is True
+    assert initial["auto_resume"] is True
+    assert initial["grace_seconds"] == 300
+    assert initial["revision"] == 0
     result = enable(store, account)
     assert result["enabled"] and result["grace_seconds"] == 300
     different = Account(id="a", world="s53-ru", player="Other", label="Other", enabled=True)
     assert store.policy(different)["enabled"] is False
     assert store.event(different) is None
+
+    unconfigured = Account(id="b", world="s53-ru", player="Other", label="Other", enabled=False)
+    assert store.policy(unconfigured)["enabled"] is False
+    assert store.policy(unconfigured)["auto_resume"] is False
 
 
 def test_policy_revision_and_revoke(item):
@@ -43,9 +51,8 @@ def test_policy_revision_and_revoke(item):
 
 def test_five_minute_grace_from_confirmed_loss_not_a_generic_timer(item):
     store, account, now = item
-    assert store.record_loss(account) is None
-    enable(store, account)
     event = store.record_loss(account)
+    assert store.policy(account)["enabled"] is True
     assert event["due_at"] == 1300
     now[0] = 1299
     assert store.record_loss(account)["epoch"] == event["epoch"]
@@ -216,3 +223,17 @@ def test_user_can_disable_during_grace_and_no_attempts_are_started(item):
     now[0] = 2000
     assert store.event(account) is None
     assert store.claim_due(account) is None
+
+
+def test_explicit_disable_survives_restart_even_though_default_is_on(item):
+    store, account, now = item
+    assert store.policy(account)["enabled"] is True
+    store.pause(account, seconds=None)
+    assert store.policy(account)["pause_indefinite"] is True
+    reopened = RecoveryStore(store.path, clock=lambda: now[0])
+    assert reopened.policy(account)["pause_indefinite"] is True
+    reopened.set_policy(account, enabled=False, auto_resume=False)
+    after_restart = RecoveryStore(store.path, clock=lambda: now[0])
+    assert after_restart.policy(account)["enabled"] is False
+    assert after_restart.policy(account)["auto_resume"] is False
+    assert after_restart.record_loss(account) is None

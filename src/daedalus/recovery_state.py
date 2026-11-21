@@ -131,8 +131,15 @@ class RecoveryStore:
     def _policy(self, conn, account: Account) -> dict[str, object]:
         row = conn.execute("SELECT * FROM policies WHERE account_id=?", (account.id,)).fetchone()
         if row is None or row["identity"] != identity(account):
+            # New, enabled accounts recover automatically by default.
+            # A persisted user disable/paused policy is always authoritative.
+            # If an existing account ID changes world/player, do not
+            # accidentally authorize recovery for its new identity.
+            enabled_by_default = account.enabled and row is None
             return {
-                "account_id": account.id, "enabled": False, "auto_resume": False,
+                "account_id": account.id,
+                "enabled": bool(enabled_by_default),
+                "auto_resume": bool(enabled_by_default),
                 "grace_seconds": DEFAULT_GRACE_SECONDS, "pause_until": None,
                 "pause_indefinite": False, "revision": 0,
             }
@@ -191,10 +198,22 @@ class RecoveryStore:
             p = self._policy(conn, account)
             if not p["enabled"]:
                 raise RecoveryConflict("Automatic recovery must be enabled first")
-            conn.execute("""UPDATE policies SET pause_until=?,pause_indefinite=?,
-                             revision=revision+1,updated_at=? WHERE account_id=?""",
-                         (self._clock()+seconds if seconds else None,
-                          int(seconds is None), self._clock(), account.id))
+            now = self._clock()
+            # A new account uses a virtual default-on policy until its first
+            # write. Materialize it atomically before persisting a pause.
+            conn.execute("""INSERT INTO policies(
+                account_id,identity,enabled,auto_resume,grace,
+                pause_until,pause_indefinite,revision,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    pause_until=excluded.pause_until,
+                    pause_indefinite=excluded.pause_indefinite,
+                    revision=policies.revision+1,
+                    updated_at=excluded.updated_at""",
+                (account.id, identity(account), int(p["enabled"]),
+                 int(p["auto_resume"]), p["grace_seconds"],
+                 now+seconds if seconds else None, int(seconds is None),
+                 int(p["revision"])+1, now))
             conn.commit()
             return self._policy(conn, account)
 

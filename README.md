@@ -19,7 +19,7 @@ handoff, server-side player attestation and idle dedicated-worker rebind are
 implemented and pass offline CI. Real human Gameforge/MFA/CAPTCHA, task/rebind
 trial and host reboot remain **untested** in
 [owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
-Opt-in automatic session recovery is implemented behind disabled-by-default policy and server flags; live Gameforge acceptance and production cutover remain unapproved.
+Automatic session recovery and safe-job restoration now default on for enabled accounts with a configured monitored backend; live Gameforge acceptance remains unapproved.
 
 Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
 
@@ -224,7 +224,7 @@ Authentication recovery implementation and limitations: [Human browser recovery]
 
 ### Automatic session and managed-job recovery (opt-in; live acceptance pending)
 
-After confirmed loss of the game session (including a browser login elsewhere), the optional host supervisor observes a five-minute grace period, then attempts a verified account-bound IkaBot session refresh using a protected server-side lobby credential. Approved managed jobs can resume only after the exact world/player identity is independently verified. The owner can pause recovery while using the browser.
+After confirmed loss of the game session (including a browser login elsewhere), the recovery supervisor is enabled by default on configured monitored backends and observes a five-minute grace period before attempting a verified account-bound IkaBot session refresh using a protected server-side lobby credential. Approved managed jobs can resume only after the exact world/player identity is independently verified. The owner can pause recovery while using the browser, disable recovery for an account, or disable the host supervisor with \`--disable-auto-recovery\`. Explicitly saved disables and pauses take precedence over the new defaults.
 
 **Fixed-quantity resource transfers:** For newly approved Daedalus-managed `sendResources` jobs between your own cities, each shipment chunk has a durable write-ahead/accepted receipt. Following reconnect, the worker dispatches only the original quantity **not already confirmed as sent**. Pending, unconfirmed cargo is held for review instead of risking a second shipment. Legacy jobs, shipments to other players, and other one-shot transport modules are not automatically replayed.
 

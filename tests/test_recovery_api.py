@@ -58,7 +58,8 @@ def test_authenticated_policy_import_pause_resume_and_bulk(tmp_path):
             root="/api/v1/accounts/alpha/recovery"
             assert client.get(root).status_code==401
             data=client.get(root,headers=AUTH).json()
-            assert data["policy"]["enabled"] is False
+            assert data["policy"]["enabled"] is True
+            assert data["policy"]["auto_resume"] is True
             assert data["server_token_available"] is False
             policy={"confirmed":True,"enabled":True,"auto_resume":True,
                     "expected_revision":0,"grace_seconds":300}
@@ -131,7 +132,7 @@ def test_all_recovery_endpoints_require_bearer_and_exact_account(tmp_path):
     finally:
         ctl.close()
 
-def test_backend_cli_opt_in_starts_idle_supervisor_without_game_login(tmp_path,monkeypatch):
+def test_backend_cli_defaults_to_supervisor_without_game_login(tmp_path,monkeypatch):
     import uvicorn
 
     from daedalus import cli as cli_module
@@ -154,7 +155,8 @@ def test_backend_cli_opt_in_starts_idle_supervisor_without_game_login(tmp_path,m
             body=recovered.json()
             assert body["enabled"] is True
             assert body["supervisor_enabled"] is True
-            assert body["accounts"][0]["policy"]["enabled"] is False
+            assert body["accounts"][0]["policy"]["enabled"] is True
+            assert body["accounts"][0]["policy"]["auto_resume"] is True
             assert body["accounts"][0]["desired_jobs"] == 0
             assert body["accounts"][0]["event"] is None
             responses.append(body["accounts"][0]["account_id"])
@@ -164,7 +166,35 @@ def test_backend_cli_opt_in_starts_idle_supervisor_without_game_login(tmp_path,m
         "serve","--host","127.0.0.1","--port","8765",
         "--accounts-file",str(config),"--connect-existing-ipc",
         "--enable-task-control","--monitor-existing-sessions",
-        "--enable-auto-recovery","--task-ledger",str(tmp_path/"ledger.sqlite3"),
+        "--task-ledger",str(tmp_path/"ledger.sqlite3"),
     ])
     assert result==0
     assert responses==["alpha"]
+
+
+def test_cli_allows_explicit_recovery_opt_out(tmp_path, monkeypatch):
+    import uvicorn
+
+    from daedalus import cli as cli_module
+
+    config = tmp_path / "accounts.toml"
+    config.write_text(
+        'schema = 1\n[[accounts]]\nid = "alpha"\n'
+        'world = "s301-en"\nplayer = "ExamplePlayer"\nlabel = "Example"\n',
+    )
+    monkeypatch.setenv("DAEDALUS_API_TOKEN", TOKEN)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    observed = []
+
+    def fake_run(app, **kwargs):
+        with TestClient(app) as client:
+            payload = client.get("/api/v1/recovery", headers=AUTH).json()
+            observed.append(payload["supervisor_enabled"])
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    assert cli_module.main([
+        "serve", "--accounts-file", str(config),
+        "--connect-existing-ipc", "--enable-task-control",
+        "--monitor-existing-sessions", "--disable-auto-recovery",
+    ]) == 0
+    assert observed == [False]
