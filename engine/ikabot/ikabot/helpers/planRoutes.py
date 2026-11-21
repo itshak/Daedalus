@@ -15,7 +15,7 @@ from ikabot.helpers.varios import wait
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
-def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False):
+def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None):
     """This function will execute one route
     Parameters
     ----------
@@ -91,16 +91,25 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = send[i]
 
+        # Reserve before transport POST; unknown outcomes remain uncertain.
+        chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         resp = session.post(params=data)
         resp = json.loads(resp, strict=False)
-        if resp[3][1][0]["type"] == 10:
+        outcome = resp[3][1][0]["type"]
+        if outcome == 10:
+            if checkpoint:
+                checkpoint.confirmed(chunk_id, send)
             break
-        elif resp[3][1][0]["type"] == 11:
+        if outcome == 11:
+            if checkpoint:
+                checkpoint.rejected(chunk_id, send)
             wait(getMinimumWaitingTime(session))
+        elif checkpoint:
+            raise RuntimeError("Unrecognized transport outcome needs manual reconciliation")
         time.sleep(5)
 
 
-def executeRoutes(session, routes, useFreighters=False):
+def executeRoutes(session, routes, useFreighters=False, checkpoint=None):
     """This function will execute all the routes passed to it, regardless if there are enough ships available to do so
     Parameters
     ----------
@@ -110,8 +119,10 @@ def executeRoutes(session, routes, useFreighters=False):
         a list of tuples, each of which represent a route. A route is defined like so : (originCity,destinationCity,islandId,wood,wine,marble,crystal,sulfur). originCity and destintionCity should be passed as City objects
     """
     ship_capacity, freighter_capacity = getShipCapacity(session)
-    for route in routes:
+    for route_index, route in enumerate(routes):
         (origin_city, destination_city, island_id, *toSend) = route
+        if checkpoint:
+            toSend = checkpoint.remaining(route_index, list(toSend))
         destination_city_id = destination_city["id"]
 
         while sum(toSend) > 0:
@@ -149,7 +160,8 @@ def executeRoutes(session, routes, useFreighters=False):
                     )
                 send.append(min_val)
                 storageCapacityInShips -= send[i]
-                toSend[i] -= send[i]
+                if checkpoint is None:
+                    toSend[i] -= send[i]
 
             resources_to_send = sum(send)
             if resources_to_send == 0:
@@ -174,7 +186,11 @@ def executeRoutes(session, routes, useFreighters=False):
                 available_ships,
                 send,
                 useFreighters,
+                checkpoint=checkpoint, route_index=route_index,
             )
+            if checkpoint:
+                toSend = [remaining - transferred
+                          for remaining, transferred in zip(toSend, send)]
             time.sleep(random.randint(5, 15))
 
 
