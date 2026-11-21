@@ -6,7 +6,7 @@ The current PySide6 desktop interface is necessary for secure local Selenium/Gam
 
 ## What changes
 
-- Add `apps/web/` using supported stable versions of **Next.js App Router (target 16), React, TypeScript, Refine v5, shadcn/ui + Radix, Tailwind CSS, TanStack Table/Query, React Hook Form and Zod**; deploy to **Vercel** under `https://daedalus.tongrix.com`.
+- Add `apps/web/` using supported stable versions of **Next.js App Router (target 16), React, TypeScript, Refine v5, shadcn/ui + Radix, Tailwind CSS, TanStack Table/Query, React Hook Form and Zod**; deploy to **Vercel** under the project default `https://daedalus-web-chi.vercel.app`, preserving `https://daedalus.tongrix.com` as the existing backend and Mac API host.
 - **Apply the public `apple-design` skill** (Emil Kowalski, https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md) and Apple Human Interface Guidelines (https://developer.apple.com/design/human-interface-guidelines/). The app SHALL embody clarity, crafted typography, restrained materials, responsive feedback, physical and interruptible interactions, predictable navigation, accessibility and reduced-motion/transparency/contrast variants. Apple-inspired, not a macOS-window imitation.
 - Use **Supabase Auth + PostgreSQL** only for closed, owner-approved administrator identities, web sessions, preferences and redacted audit metadata. No public registration or first-visitor owner claim.
 - Implement a **server-only, typed allowlisted Next.js backend-for-frontend** connecting to the existing HTTPS FastAPI controller with its existing bearer. Never send the Daedalus token, SSH credentials, Gameforge credentials, cookies or vault blobs to the browser or Supabase.
