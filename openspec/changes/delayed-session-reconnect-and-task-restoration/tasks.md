@@ -1,7 +1,7 @@
 # Implementation plan: delayed session reconnection and task restoration
 
 Implementation is in progress: the private policy/configuration journal, protected token import,
-host-only opt-in supervisor, cautious continuous-task reconciliation, and Mac/web controls
+host-only opt-in supervisor, continuous/construction/threshold and fixed-quantity sendResources reconciliation, and Mac/web controls
 are implemented and offline-tested. This is NOT field acceptance or a claim that all
 legacy or state-changing tasks can be automatically replayed.
 
@@ -36,9 +36,19 @@ legacy or state-changing tasks can be automatically replayed.
 ## 4. Fenced task reconciliation
 
 - [x] Introduce worker epoch, logical task identity, versioned desired configuration, durable per-epoch resume receipt and unique atomic reservations.
-- [x] Reconcile live managed tasks; only approved, absent continuous or verified target-state/retained-stock jobs can restart with fresh idempotency keys. The construction planner reads actual remaining building levels; fixed-amount and in-flight shipments still need receipts.
+- [x] Reconcile live managed tasks; only approved, absent continuous or verified target-state/retained-stock jobs can restart with fresh idempotency keys. The construction planner reads actual remaining building levels; newly managed owned-city fixed-amount sendResources jobs now use durable per-batch dispatch receipts. Other one-shot and unknown in-flight shipments still require review.
 - [x] Keep manual gate for unknown or one-shot side effects, in-flight work, missing config and dispatching/unconfirmed task receipts; never replay a previous ambiguous request.
 - [ ] Handle crash before/after IPC launch, duplicated recovery signals, stopped task during grace, changed account identity, partial resume and rollback without duplicate work.
+
+## 4a. Fixed-quantity sendResources restoration
+
+- [x] Create an owner-only SQLite v2 migration and distinct immutable logical ID/target for a newly approved same-account fixed cargo transfer *before* any task launch.
+- [x] Add write-ahead per-ship-batch cargo reservation and explicit accepted/rejected engine receipts, with partial-progress persistence across worker restarts.
+- [x] Recompute each route/resource's outstanding cargo from authoritative accepted totals and refuse to replay any pending/unknown game POST.
+- [x] Bind original routes, both owned-city endpoints, world/player and one exact recovery journal; stop and mismatched identity fail closed.
+- [x] Expose authenticated remaining/confirmed quantity and uncertainty in the web recovery Jobs panel and update permanent controller/engine/security requirements.
+- [ ] Owner-supervised network trial: forcibly rotate the browser session during multiple partial dispatches and verify no resource is sent twice after a successful credential-based reconnect.
+- [ ] Extend verified per-chunk receipt tracking to other fixed-quantity transfer modules and foreign destinations only if authoritative recipient/transaction evidence is available.
 
 ## 5. UI/API and diagnostics
 
@@ -57,7 +67,7 @@ legacy or state-changing tasks can be automatically replayed.
 - [ ] Enable additional accounts only after the field test and review; reconcile spec deltas, update docs, archive change only when verified implementation tasks are checked.
 
 **Not production approved.** The implementation is staged off by default. Remaining unchecked
-items include true multi-account/legacy engine cutover, a reviewed import for older
+items include owner-operated fixed cargo acceptance and true multi-account/legacy engine cutover, a reviewed import for older
 untracked jobs, engine-specific restore adapters for state-changing tasks,
 complete reason-code telemetry, CI/rollout and operator-supervised real
 Gameforge browser takeover with a previously authorized account.
