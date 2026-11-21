@@ -1050,9 +1050,21 @@ def create_app(
              dependencies=[Depends(authorized)])
     def desired_account_jobs(account_id: str) -> dict[str,object]:
         journal=require_recovery_store(account_id)
+        account = account_by_id[account_id]
+        jobs = journal.desired(account, include_config=True)
+        for job in jobs:
+            if job["restart_class"] == "fixed_transfer":
+                try:
+                    job["transfer_progress"] = journal.fixed_transfer_progress(
+                        account, job["config"],
+                    )
+                except RecoveryConflict:
+                    # Missing or corrupt progress must be visible as uncertain,
+                    # not silently interpreted as zero shipments.
+                    job["transfer_progress"] = {"uncertain": True}
         return {"account_id":account_id,
-                "jobs":journal.desired(account_by_id[account_id],include_config=True),
-                "receipts":journal.receipts(account_by_id[account_id])}
+                "jobs":jobs,
+                "receipts":journal.receipts(account)}
 
     @app.get("/api/v1/accounts/{account_id}/tasks/preflight", dependencies=[Depends(authorized)])
     def task_preflight(account_id: str, task: str) -> dict[str, object]:
