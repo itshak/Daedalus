@@ -144,11 +144,7 @@ tbody tr:hover {background:var(--surface-alt)}
 .export-menu select {color:var(--text);border:0;background:transparent;font-size:11px;font-weight:650}
 .resource-grid {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:13px}
 .resource-card {display:flex;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:17px 13px;min-width:0}
-.resource-gem {display:grid;place-items:center;flex-shrink:0;width:31px;height:31px;border-radius:10px;background:#e8f1e9;color:#519264;font-size:17px}
-.resource-wine {background:#f6e6ea;color:#ba677a}
-.resource-marble {background:#ebedf1;color:#8591a2}
-.resource-glass {background:#e5f1f5;color:#61a9c1}
-.resource-sulfur {background:#fff0d5;color:#ce9a3f}
+.resource-gem {display:grid;place-items:center;flex-shrink:0;width:36px;height:32px;background:transparent}
 .resource-card>div {min-width:0}
 .resource-card span:not(.resource-gem) {display:block;font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .resource-card strong {display:block;font-size:20px;letter-spacing:-.04em;margin:5px 0}
@@ -239,9 +235,7 @@ tbody tr:hover {background:var(--surface-alt)}
 .login-shell {min-height:100vh;display:grid;grid-template-columns:52% 48%;background:#f7f8fa}
 .login-card {display:flex;flex-direction:column;width:min(435px,calc(100% - 56px));margin:0 auto;justify-content:center;padding:45px 0}
 .login-mark {display:flex;align-items:center;gap:12px;font-size:13px;font-weight:780;letter-spacing:.19em;color:#1e2e3e;margin-bottom:68px}
-.login-mark span:first-child {font-size:29px;color:#b18b55}
 .login-hero {margin-bottom:25px}
-.login-emblem {display:grid;place-items:center;width:57px;height:57px;border:1px solid #e4e6e8;border-radius:16px;background:#fff;color:#b38a4a;box-shadow:0 6px 20px #15293c09;margin-bottom:27px}
 .login-hero .eyebrow {font-size:10px;letter-spacing:.17em;font-weight:780;color:#b28a50}
 .login-hero h1 {font-size:40px;letter-spacing:-.05em;margin:10px 0}
 .login-hero p:not(.eyebrow) {max-width:340px;font-size:13px;line-height:1.7;color:#7b8592}
@@ -254,7 +248,6 @@ tbody tr:hover {background:var(--surface-alt)}
 .login-aside p {position:relative;font-size:28px;font-weight:680;letter-spacing:-.04em;margin:0 0 9px}
 .login-aside span {position:relative;font-size:12px;color:#91a6bb}
 .aside-orb {position:absolute;left:20%;top:9%;width:440px;height:440px;border-radius:50%;border:1px solid #bda27a58;box-shadow:0 0 0 48px #d6b4830c,0 0 0 102px #d6b4830a,0 0 0 180px #d6b48308;background:radial-gradient(circle at 45% 35%,#526a7a,#1d384b 57%,#102333 70%);display:grid;place-items:center}
-.aside-orb::after {content:"◈";color:#d8b47c;font-size:190px;font-weight:100;text-shadow:0 15px 35px #06131f80}
 @media(max-width:1230px){.resource-grid {grid-template-columns:repeat(3,minmax(0,1fr))}.metric-grid {grid-template-columns:repeat(2,minmax(0,1fr))}.hero-art {right:-40px}.hero-copy {max-width:450px}}
 @media(max-width:1020px){.sidebar {flex-basis:210px;min-width:210px}.main-content {padding:33px 25px}.topbar {padding:0 24px}.two-column {grid-template-columns:1fr}.hero-art {right:0;opacity:.4}.automation-layout {grid-template-columns:1fr}.action-list {max-height:330px}}
 @media(max-width:760px){.sidebar {position:fixed;left:0;top:0;bottom:0;transform:translateX(-101%);transition:transform .2s ease;height:100dvh;width:258px;min-width:258px}.sidebar-open {transform:translateX(0)}.mobile-backdrop {display:block;position:fixed;inset:0;border:0;background:#0007;z-index:35}.mobile-menu {display:grid}.topbar {height:60px;padding:0 16px;gap:9px}.topbar .breadcrumb {font-size:11px}.search-box {display:none}.main-content {padding:26px 16px}.heading-row {align-items:flex-start;flex-direction:column;gap:15px}.heading-row h1 {font-size:28px}.page-actions {width:100%}.metric-grid {gap:10px}.metric-card {padding:16px}.resource-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.resource-card {padding:13px 10px}.resource-card strong {font-size:17px}.hero-banner {padding:29px 25px;min-height:220px}.hero-copy h2 {font-size:29px}.hero-art {right:-200px;opacity:.24}.scope-row {gap:10px}.scope-count {width:100%;margin:0}.settings-grid {grid-template-columns:1fr}.panel-heading {padding:18px}.report-tools {gap:11px}.login-shell {grid-template-columns:1fr}.login-aside {display:none}.login-card {width:min(410px,calc(100% - 40px))}.login-mark {margin-bottom:45px}}
@@ -262,6 +255,34 @@ tbody tr:hover {background:var(--surface-alt)}
 @media print {.sidebar,.topbar,.heading-row .page-actions,.scope-row,.report-toolbar,.resource-grid,.content-footer,.notice {display:none!important}.app-shell,.main-panel,.main-content {display:block;background:white!important;color:black!important;padding:0!important}.heading-row {margin:0 0 15px}.print-panel {border:0!important}.print-panel .panel-heading {padding:10px 0}table {font-size:9px}th,td {padding:6px!important}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 @media(prefers-contrast:more){.panel,.metric-card,.resource-card,.scope-row {border-width:2px}.nav-active {outline:2px solid #eac793}}
+
+/* Use the official Daedalus identity across app surfaces. */
+.brand {flex-direction:column;align-items:flex-start;gap:1px;padding:0 7px;margin:0 9px 34px}
+.brand .sidebar-wordmark {display:block;width:177px;height:auto}
+.brand small {display:block;padding-left:8px;letter-spacing:.25em;color:#9baebe}
+.login-mark {margin-bottom:45px;display:block;line-height:0}
+.login-mark img {display:block;width:215px;max-width:100%;height:auto}
+.aside-orb {display:flex;justify-content:center;align-items:center}
+.hero-inner {background:radial-gradient(circle at 45% 40%,#52616b,#253c4c 65%,#1e2b36);box-shadow:0 9px 38px #0816239b}
+.setup-logo {width:180px;height:auto;margin-bottom:22px}
+
+/* Shared, keyboard-accessible locale control (login, toolbar and Settings). */
+.language-switcher {display:inline-flex;align-items:center;gap:9px;max-width:100%;font-size:12px;color:var(--text,#243444)}
+.language-switcher svg {flex-shrink:0;color:var(--muted,#738091)}
+.language-switcher select {font:inherit;min-width:105px;max-width:160px;padding:8px 11px;border:1px solid var(--border,#dce0e5);border-radius:9px;background:var(--surface,#fff);color:var(--text,#253445);cursor:pointer}
+.language-switcher select:focus-visible {outline:2px solid #bd9659;outline-offset:2px}
+.language-switcher-compact select {min-width:96px;max-width:114px}
+.login-language {display:flex;justify-content:flex-end;margin-bottom:14px}
+.login-language .language-switcher {color:#495667}
+.login-language .language-switcher select {background:#fff;color:#253445;border-color:#e0e4e8}
+@media(max-width:760px){.topbar .language-switcher-compact svg{display:none}.topbar .language-switcher-compact select{min-width:83px;max-width:98px;padding:7px 6px}}
+@media print {.language-switcher,.login-language{display:none!important}}
+
+/* Native-size Ikariam top-bar icons with their original alpha channel, no colored tiles. */
+.resource-image {display:block;width:30px;height:25px;object-fit:contain;object-position:center}
+.resource-image-small {width:25px;height:20px}
+.resource-heading {display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
+.resource-heading .resource-image {flex-shrink:0}
 
 /* Per-account recovery — restrained, backend-grounded status and opt-in controls. */
 .recovery-dashboard{display:flex;flex-direction:column;gap:14px}
