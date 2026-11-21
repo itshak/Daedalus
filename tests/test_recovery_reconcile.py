@@ -12,7 +12,6 @@ from daedalus.recovery_reconcile import (
 from daedalus.recovery_runtime import RecoverySupervisor
 from daedalus.recovery_state import RecoveryStore
 
-
 ACCOUNT = Account("a", "s53-ru", "monjo", "Monjo", True)
 
 
