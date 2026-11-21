@@ -8,11 +8,11 @@ The owner wants to use the ordinary Ikariam website temporarily, then have Daeda
 
 ## Desired behavior
 
-1. An owner explicitly enables **Auto reconnect and restore jobs** for one, selected, or all configured accounts. The account policy defaults to a **300-second grace period** measured from confirmed loss, not from the last healthy sample or a generic network timeout. Enablement is a durable, revocable consent to this narrowly scoped future action.
+1. **Auto reconnect and restore safe jobs is ON by default** for enabled accounts under a fully configured, monitored-task-control daemon. The account policy uses a **300-second grace period** measured from confirmed loss, not a generic network timeout. An explicit account-level disable, persisted browser pause, account identity change or host-wide `--disable-auto-recovery` overrides the default. Credential availability and independently verified game loss are still mandatory before a new login.
 2. An independently confirmed session rotation marks that account as **Browser grace period**; task dispatch freezes immediately, the desired ongoing task set remains durable, and the supervisor does **not** log in for at least five minutes.
 3. After the grace period, a **single authoritative, host-local supervisor** may attempt one bounded, noninteractive Gameforge lobby-to-world restore using an already-authorized protected credential, if one is actually available. It must use the maintained IkaBot engine, not a second game client or remote HTTP credential exchange, and verify the exact world/player via a fresh server-side attestation before publishing a worker.
 4. Only then may a task reconciler restore preauthorized, restart-safe desired jobs that are demonstrably not running. Each restoration is a new fenced launch with a fresh durable idempotency key; an uncertain/duplicate/one-shot operation is never blindly replayed.
-5. If the owner is still in the game browser at the five-minute mark, Daedalus **cannot reliably infer browser activity** from an expired worker cookie. Offer **Pause for browser use** (15/30/60 minutes or until resumed), **Resume now**, and policy timing/status in Mac and web control centers. An unattended retry could invalidate an active browser session; explain this before enablement.
+5. If the owner is still in the game browser at the five-minute mark, Daedalus **cannot reliably infer browser activity** from an expired worker cookie. Offer **Pause for browser use** (15/30/60 minutes or until resumed), **Resume now**, and policy timing/status in Mac and web control centers. An unattended retry could invalidate an active browser session; explain this in the default-on recovery UI and documentation.
 6. Token invalid/expired, CAPTCHA/MFA, wrong identity, busy lease, task ambiguity, or repeated browser takeovers yield an explicit **Needs attention / Paused** state and bounded retries, never an infinite login loop or task storm.
 
 ## Scope
@@ -26,7 +26,7 @@ The owner wants to use the ordinary Ikariam website temporarily, then have Daeda
 ## Non-goals
 
 - Keeping game and independent browser sessions simultaneously authenticated, overriding Gameforge's session policy, bypassing CAPTCHA/MFA, using an untrusted raw token from a browser/API, replaying a known-uncertain game action, restarting all one-shot operations, importing arbitrary custom Python tasks, exposing session material in web UI/Supabase, or claiming that a still-valid lobby token is already verified in production.
-- Auto-enabling the policy for existing accounts without an owner's approval; running real game login or game tasks during this planning change.
+- Overriding saved account-level disables or browser pauses; running real game login or game tasks during synthetic CI.
 
 ## Success criteria
 
@@ -35,4 +35,4 @@ The owner wants to use the ordinary Ikariam website temporarily, then have Daeda
 - A user can put an account in **browser-use pause** or explicitly select **Resume now**; account isolation and background processing survive API restart and do not block other accounts.
 - Validation includes offline fault injection (time, token loss, rotation, shutdown, ambiguous receipts) and owner-supervised browser-login/live-task tests before production enablement.
 
-**Planning only.** No automatic login, job restoration, task dispatch, daemon change, account policy or production cutover is implemented by this proposal. The implementation tasks remain unchecked.
+**Implementation note (2026-11-21).** The account-level and host-level defaults were revised to ON for eligible configured accounts, while saved opt-outs, identity checks, 300-second grace and no-replay safety remain. Backend service deployment and owner-operated live acceptance are tracked separately in tasks.md; the OpenSpec change is not archived until those gates are resolved.
