@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 from daedalus.accounts import Account
 from daedalus.recovery_reconcile import (
-    construction_plan, convergent_transport_plan, restart_class_for,
+    construction_plan,
+    convergent_transport_plan,
+    restart_class_for,
 )
 from daedalus.recovery_runtime import RecoverySupervisor
 from daedalus.recovery_state import RecoveryStore
@@ -252,8 +254,9 @@ def test_reconciler_retries_deferred_construction_without_replaying_prior_dispat
 
 
 def test_restart_class_cannot_be_unilaterally_overridden(tmp_path):
-    from daedalus.recovery_state import RecoveryConflict
     import pytest
+
+    from daedalus.recovery_state import RecoveryConflict
 
     store = RecoveryStore(tmp_path / "recover.db")
     with pytest.raises(RecoveryConflict, match="escalated"):
