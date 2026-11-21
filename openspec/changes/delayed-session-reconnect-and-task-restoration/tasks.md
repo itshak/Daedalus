@@ -1,7 +1,7 @@
 # Implementation plan: delayed session reconnection and task restoration
 
 Implementation is in progress: the private policy/configuration journal, protected token import,
-host-only opt-in supervisor, continuous/construction/threshold and fixed-quantity sendResources reconciliation, and Mac/web controls
+default-on monitored supervisor with explicit opt-out, continuous/construction/threshold and fixed-quantity sendResources reconciliation, and Mac/web controls
 are implemented and offline-tested. This is NOT field acceptance or a claim that all
 legacy or state-changing tasks can be automatically replayed.
 
@@ -14,7 +14,7 @@ legacy or state-changing tasks can be automatically replayed.
 
 ## 1. Durable opt-in policy and desired-job state
 
-- [x] Define versioned schemas, migrations, private SQLite ownership and backup/rollback; existing accounts disabled by default and current task ledger preserved.
+- [x] Define versioned schemas, migrations, private SQLite ownership and backup/rollback; enabled accounts now default to recovery and safe-job resume ON, preserving explicit disables/pauses and the existing task ledger.
 - [ ] Persist approved, secret-free configuration at managed task start; update desired state on explicit stop/edit/delete; reject malformed and secret-bearing payloads.
 - [x] Add per-task restartability audit for every built-in background task, including non-idempotent construction, resource transfers, military actions and queued jobs; document why each is restartable, reconcilable, or manual-only.
 - [ ] Build read-only import and explicit approval for legacy process-list/batch jobs with available config; never silently adopt unknown tasks.
@@ -62,11 +62,11 @@ legacy or state-changing tasks can be automatically replayed.
 - [ ] Run engine/UI/API security tests and OpenSpec strict validation, complete GitHub macOS/Linux/Windows CI, and build a new ad-hoc signed Mac artifact.
 - [ ] Test fake clock at 299s/300s, browser-use pause, duplicate events, ten accounts, invalid token, mismatched player, network flakiness, worker dying mid-recovery and task IPC timeout.
 - [ ] Verify full daemon restart retains desired jobs, preserves encrypted credential files and task receipts, and stays healthy with zero authenticated accounts.
-- [ ] Deploy disabled-by-default to the server after backup; validate health, protected storage, monitoring and optional token availability without exposing secrets.
+- [ ] Deploy default-on supervised recovery to the server after backup; validate health, protected storage, monitoring and credential availability without exposing secrets.
 - [ ] Owner-supervised live test: one account, browser login rotation, five-minute grace, verified token-based re-login (if eligible), exact restoration of safe jobs, repeated browser pause and no duplicate tasks.
 - [ ] Enable additional accounts only after the field test and review; reconcile spec deltas, update docs, archive change only when verified implementation tasks are checked.
 
-**Not production approved.** The implementation is staged off by default. Remaining unchecked
+**Live Gameforge recovery acceptance is still pending.** Recovery policies now default on for enabled accounts under a correctly configured monitored daemon; the current deployment and health must be verified separately. Remaining unchecked
 items include owner-operated fixed cargo acceptance and true multi-account/legacy engine cutover, a reviewed import for older
 untracked jobs, engine-specific restore adapters for state-changing tasks,
 complete reason-code telemetry, CI/rollout and operator-supervised real
