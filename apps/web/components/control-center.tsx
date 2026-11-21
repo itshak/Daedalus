@@ -29,13 +29,21 @@ const NAV: { id: Page; title: string; icon: typeof LayoutDashboard; subtitle: st
 ];
 const RESOURCES = ["wood", "wine", "marble", "glass", "sulfur"] as const;
 type Resource = (typeof RESOURCES)[number];
+// Native Ikariam top-bar sprite dimensions, not the larger island-resource paintings.
+const RESOURCE_ICON_SIZE: Record<Resource, {width: number; height: number}> = {
+  wood: {width: 25, height: 20},
+  wine: {width: 24, height: 20},
+  marble: {width: 25, height: 19},
+  glass: {width: 23, height: 18},
+  sulfur: {width: 25, height: 19},
+};
 function ResourceIcon({resource, small = false}: {resource: Resource; small?: boolean}) {
   return <Image
     src={`/ikariam-resources/${resource}.webp`}
     alt=""
     aria-hidden="true"
-    width={64}
-    height={64}
+    width={RESOURCE_ICON_SIZE[resource].width}
+    height={RESOURCE_ICON_SIZE[resource].height}
     className={small ? "resource-image resource-image-small" : "resource-image"}
     unoptimized
   />;
