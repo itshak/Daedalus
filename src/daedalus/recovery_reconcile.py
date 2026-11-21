@@ -74,6 +74,7 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
             return "convergent_transport"
     if task == "resourceTransportManager":  # noqa: SIM102 - explicit task allowlist
         if (config.get("mode") == "consolidate"
+                and "island" not in config  # Never auto-send to an external city.
                 and config.get("send_mode") == "keep"
                 and _thresholds(config.get("resource_config"), allow_null=True)
                 and any(v is not None for v in config["resource_config"])
@@ -151,7 +152,9 @@ def convergent_transport_plan(ipc: Any, account: Account,
                else config["origin_cities"])
     if not set(origins) <= own_ids:
         return ResumePlan("review", "source_city_changed")
-    if task == "consolidateResources" and config["destinationCityId"] not in own_ids:
+    destination_id = (config["destinationCityId"] if task == "consolidateResources"
+                      else config["destination_city"])
+    if destination_id not in own_ids:
         return ResumePlan("review", "destination_city_changed")
     # The source amount is re-read by the upstream engine at every run, never
     # taken from an old shipment plan. It can send only stock above the retained
