@@ -1,6 +1,9 @@
 # Implementation plan: delayed session reconnection and task restoration
 
-All implementation work is **UNSTARTED**. Checked source-audit items below are planning evidence only, not a completed rollout.
+Implementation is in progress: the private policy/configuration journal, protected token import,
+host-only opt-in supervisor, continuous/construction/threshold and fixed-quantity sendResources reconciliation, and Mac/web controls
+are implemented and offline-tested. This is NOT field acceptance or a claim that all
+legacy or state-changing tasks can be automatically replayed.
 
 ## 0. Verify problem and baseline
 
@@ -11,31 +14,41 @@ All implementation work is **UNSTARTED**. Checked source-audit items below are p
 
 ## 1. Durable opt-in policy and desired-job state
 
-- [ ] Define versioned schemas, migrations, private SQLite ownership and backup/rollback; existing accounts disabled by default and current task ledger preserved.
+- [x] Define versioned schemas, migrations, private SQLite ownership and backup/rollback; existing accounts disabled by default and current task ledger preserved.
 - [ ] Persist approved, secret-free configuration at managed task start; update desired state on explicit stop/edit/delete; reject malformed and secret-bearing payloads.
-- [ ] Add per-task restartability audit for every built-in background task, including non-idempotent construction, resource transfers, military actions and queued jobs; document why each is restartable, reconcilable, or manual-only.
+- [x] Add per-task restartability audit for every built-in background task, including non-idempotent construction, resource transfers, military actions and queued jobs; document why each is restartable, reconcilable, or manual-only.
 - [ ] Build read-only import and explicit approval for legacy process-list/batch jobs with available config; never silently adopt unknown tasks.
 
 ## 2. Detection, five-minute grace and browser-use pause
 
 - [ ] Add event-driven/verified session-rotation detection, distinguish unknown network errors from invalid credentials, and mark the account as blocked before more tasks dispatch.
-- [ ] Persist confirmed loss and enforce a 300-second grace anchored to that event; restart and clock-jump tests MUST never shorten it.
-- [ ] Add owner-visible browser-use pause (15/30/60 min or until resumed), Resume now, configurable per-account grace and approved all/selected-account policy controls.
+- [x] Persist confirmed loss and enforce a 300-second grace anchored to that event; restart and clock-jump tests MUST never shorten it.
+- [x] Add owner-visible browser-use pause (15/30/60 min or until resumed), Resume now, configurable per-account grace and approved all/selected-account policy controls.
 - [ ] Validate multi-account concurrency: one lost account does not block other accounts, and polling does not trigger ten simultaneous relogins.
 
 ## 3. Trusted credential refresh and worker recovery
 
-- [ ] Design explicit host-encrypted server lobby credential provisioning; verify exact world/player mapping without reading, printing or transmitting token values.
+- [x] Design explicit host-encrypted server lobby credential provisioning; verify exact world/player mapping without reading, printing or transmitting token values.
 - [ ] Integrate a single, isolated, bounded, noninteractive IkaBot lobby-token/loginLink flow under the existing authoritative lease, with global rate limits, retry budget and jitter; never use Mac-only sealed passwords on the server.
 - [ ] Validate exact game host/player and owner after refresh, then atomically swap/recreate the engine IPC worker; retain fence and fail closed if old IPC is uncertain.
 - [ ] On expired token, challenge, CAPTCHA/MFA, wrong identity, proxy outage or persistent rotation, stop retries safely and signal the existing Mac-assisted login fallback.
 
 ## 4. Fenced task reconciliation
 
-- [ ] Introduce worker epoch, logical task identity, versioned desired configuration, durable per-epoch resume receipt and unique atomic reservations.
-- [ ] Reconcile observed live managed tasks and upstream process state; only safe, approved, missing continuous tasks may launch with **new** idempotency keys.
-- [ ] Keep manual gate for unknown or one-shot side effects, in-flight work, missing config and dispatching/unconfirmed task receipts; never replay a previous ambiguous request.
+- [x] Introduce worker epoch, logical task identity, versioned desired configuration, durable per-epoch resume receipt and unique atomic reservations.
+- [x] Reconcile live managed tasks; only approved, absent continuous or verified target-state/retained-stock jobs can restart with fresh idempotency keys. The construction planner reads actual remaining building levels; newly managed owned-city fixed-amount sendResources jobs now use durable per-batch dispatch receipts. Other one-shot and unknown in-flight shipments still require review.
+- [x] Keep manual gate for unknown or one-shot side effects, in-flight work, missing config and dispatching/unconfirmed task receipts; never replay a previous ambiguous request.
 - [ ] Handle crash before/after IPC launch, duplicated recovery signals, stopped task during grace, changed account identity, partial resume and rollback without duplicate work.
+
+## 4a. Fixed-quantity sendResources restoration
+
+- [x] Create an owner-only SQLite v2 migration and distinct immutable logical ID/target for a newly approved same-account fixed cargo transfer *before* any task launch.
+- [x] Add write-ahead per-ship-batch cargo reservation and explicit accepted/rejected engine receipts, with partial-progress persistence across worker restarts.
+- [x] Recompute each route/resource's outstanding cargo from authoritative accepted totals and refuse to replay any pending/unknown game POST.
+- [x] Bind original routes, both owned-city endpoints, world/player and one exact recovery journal; stop and mismatched identity fail closed.
+- [x] Expose authenticated remaining/confirmed quantity and uncertainty in the web recovery Jobs panel and update permanent controller/engine/security requirements.
+- [ ] Owner-supervised network trial: forcibly rotate the browser session during multiple partial dispatches and verify no resource is sent twice after a successful credential-based reconnect.
+- [ ] Extend verified per-chunk receipt tracking to other fixed-quantity transfer modules and foreign destinations only if authoritative recipient/transaction evidence is available.
 
 ## 5. UI/API and diagnostics
 
@@ -53,4 +66,8 @@ All implementation work is **UNSTARTED**. Checked source-audit items below are p
 - [ ] Owner-supervised live test: one account, browser login rotation, five-minute grace, verified token-based re-login (if eligible), exact restoration of safe jobs, repeated browser pause and no duplicate tasks.
 - [ ] Enable additional accounts only after the field test and review; reconcile spec deltas, update docs, archive change only when verified implementation tasks are checked.
 
-**Not implemented or production approved by this proposal.**
+**Not production approved.** The implementation is staged off by default. Remaining unchecked
+items include owner-operated fixed cargo acceptance and true multi-account/legacy engine cutover, a reviewed import for older
+untracked jobs, engine-specific restore adapters for state-changing tasks,
+complete reason-code telemetry, CI/rollout and operator-supervised real
+Gameforge browser takeover with a previously authorized account.

@@ -157,6 +157,31 @@ class APIWorker(QThread):
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "recovery_index":
+                result = self.client.recovery_index()
+            elif self.action == "recovery_import" and self.account_id:
+                result = self.client.recovery_import(self.account_id)
+            elif (self.action == "recovery_policy" and self.account_id
+                  and self.task_payload is not None):
+                result = self.client.recovery_policy(
+                    self.account_id,
+                    enabled=self.task_payload["enabled"],
+                    expected_revision=self.task_payload["expected_revision"],
+                )
+            elif self.action == "recovery_bulk" and self.task_payload:
+                result = self.client.recovery_bulk(
+                    self.task_payload["account_ids"],
+                    enabled=self.task_payload["enabled"],
+                )
+            elif (self.action == "recovery_pause" and self.account_id
+                  and self.task_payload is not None):
+                result = self.client.recovery_pause(
+                    self.account_id, self.task_payload.get("seconds"),
+                )
+            elif self.action == "recovery_resume" and self.account_id:
+                result = self.client.recovery_resume(self.account_id)
+            elif self.action == "recovery_jobs" and self.account_id:
+                result = self.client.recovery_jobs(self.account_id)
             elif self.action == "login_vault_sync" and self.task_payload:
                 from daedalus.desktop.selenium_vault import seal_login
 
@@ -640,6 +665,34 @@ class MainWindow(FluentWindow):
         )
         self.accounts_page.monitor_requested.connect(
             lambda account_id: self._request("monitor_attach", account_id=account_id)
+        )
+        self.accounts_page.recovery_refresh_requested.connect(
+            lambda: self._request("recovery_index")
+        )
+        self.accounts_page.recovery_import_requested.connect(
+            lambda aid: self._request("recovery_import", account_id=aid)
+        )
+        self.accounts_page.recovery_policy_requested.connect(
+            lambda aid, enabled, rev: self._request(
+                "recovery_policy", account_id=aid,
+                task_payload={"enabled": enabled, "expected_revision": rev},
+            )
+        )
+        self.accounts_page.recovery_bulk_requested.connect(
+            lambda ids, enabled: self._request(
+                "recovery_bulk", task_payload={"account_ids": ids, "enabled": enabled},
+            )
+        )
+        self.accounts_page.recovery_pause_requested.connect(
+            lambda aid, seconds: self._request(
+                "recovery_pause", account_id=aid, task_payload={"seconds": seconds},
+            )
+        )
+        self.accounts_page.recovery_resume_requested.connect(
+            lambda aid: self._request("recovery_resume", account_id=aid)
+        )
+        self.accounts_page.recovery_jobs_requested.connect(
+            lambda aid: self._request("recovery_jobs", account_id=aid)
         )
         self.accounts_page.assistance_check_requested.connect(
             lambda account_id: self._request("auth_assistance", account_id=account_id)
@@ -1850,9 +1903,44 @@ class MainWindow(FluentWindow):
                 payload.get("account_config", {"enabled": False})
             )
             logger.info("Connected to Daedalus API")
+            self._recovery_followup = ("recovery_index", "")
         elif action == "accounts":
             self._show_accounts(payload)
             logger.info("Accounts refreshed")
+            self._recovery_followup = ("recovery_index", "")
+        elif action == "recovery_index":
+            assert isinstance(payload, dict)
+            self.accounts_page.set_recovery_status(payload)
+        elif action in {
+            "recovery_policy", "recovery_bulk", "recovery_pause",
+            "recovery_resume", "recovery_import",
+        }:
+            if action == "recovery_bulk":
+                results = payload.get("results", []) if isinstance(payload, dict) else []
+                saved = sum(r.get("status") == "saved" for r in results if isinstance(r, dict))
+                self._notice("Recovery policy updated", f"{saved} accounts updated; review skipped accounts.")
+            else:
+                self._notice("Recovery settings updated",
+                             "Refresh the account recovery panel to review current status.")
+            self._recovery_followup = ("recovery_index", "")
+        elif action == "recovery_jobs":
+            if isinstance(payload, dict):
+                jobs = payload.get("jobs")
+                receipts = payload.get("receipts")
+                job_rows = jobs if isinstance(jobs, list) else []
+                record_rows = receipts if isinstance(receipts, list) else []
+                # User-facing summaries never print raw stored configuration.
+                safe = [
+                    f"{row.get('task','Job')}: "
+                    f"{row.get('desired_state','unknown')} "
+                    f"({'auto eligible' if row.get('restart_class') == 'continuous' else 'review needed'})"
+                    for row in job_rows if isinstance(row, dict)
+                ]
+                self._notice(
+                    "Saved jobs",
+                    ("\n".join(safe[:15]) if safe else "No persisted managed jobs yet.")
+                    + f"\n{len(record_rows)} recovery receipts.",
+                )
         elif action == "login_vault_sync":
             assert isinstance(payload, dict)
             self._notice(

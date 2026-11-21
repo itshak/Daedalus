@@ -79,6 +79,19 @@ The owner's desired outcome is **the same running set of automations**, not blin
 - Keep existing TaskLedger and engine IPC deduplication unchanged; a new **resume** is a distinct, explicitly preauthorized policy reconciliation with a fresh request ID, and only after all prior starts are known/reconciled. A timeout after dispatch is **unconfirmed** and halts further dispatch for that account pending manual resolution.
 - No automatic restart of unmanaged arbitrary processes, generic Python jobs, or operations whose in-flight side effects cannot be verified.
 
+## Implemented fixed-quantity shipment continuation (2026-11-21)
+
+This part of the earlier design is now implemented for **new Daedalus-managed `sendResources` jobs from one owned city to another owned city**. All other one-shot resource transfer modules, historic jobs without recorded IDs, and external recipients remain excluded from automatic restart.
+
+- Schema v2 adds `fixed_transfers` (identity/world/player; immutable normalized route/resource targets; acknowledged per-route/per-resource vectors; status) and `fixed_transfer_chunks` (per-batch route index, cargo vector, pending/confirmed/rejected receipt and timestamp) in the existing mode-0600 recovery database. V1 upgrades in place without discarding desired jobs or receipts.
+- Before the original IPC launch, the backend assigns its own UUID4 fixed transfer ID, atomically records a `dispatching` desired job and the immutable target, then creates its normal task-request receipt. The engine child inherits the authoritative journal path only from the trusted daemon environment.
+- At every outgoing `sendGoods` POST, the IkaBot engine first reserves one pending batch. An explicit successful `type=10` response atomically commits its quantities, and an explicit `type=11` non-dispatch marks the reservation rejected. Malformed/unknown/lost replies and process death leave the pending batch unresolved.
+- During recovery, the original routes remain the authority. The controller checks a verified worker, exact world/player and current ownership of **both** route endpoints; checks for pending dispatches; and resumes by passing the original approved config and ID. The engine reads authoritative acknowledged vectors and sends only `target - dispatched`, never trusting the browser, cached resource stock, or a guessed transport movement.
+- If every cargo vector equals the original targets, the desired job is completed without sending. A user stop fences future sends. Missing/corrupt checkpoints, non-owned destinations, two same-task active plans or an uncertain prior request remain blocked.
+- A dispatched shipment is counted even while in transit; arrival is not mistaken for sending it again. There is a narrow unavoidable uncertainty window after a game's successful POST but before a local acknowledgment is persisted. Without a reliable game-provided cargo transaction ID, the correct result there is **Needs review**, not automatic retransmission.
+
+Operator status exposes aggregate dispatched/remaining resource vectors and uncertainty flags through the authenticated API and Next.js panel; no cookies, session HTML or login tokens are added. Synthetic tests are not a substitute for an owner-supervised game trial.
+
 ## Reconnection credentials and process isolation
 
 1. At opt-in, check only whether a server-usable, encrypted **lobby credential** is configured for the exact identity. A valid world cookie alone does not count. Do not assume a Mac Keychain/GF password is on the server.

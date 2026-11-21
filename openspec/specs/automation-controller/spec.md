@@ -62,3 +62,22 @@ A task start SHALL preserve original idempotent receipts and SHALL treat only ex
 
 - **WHEN** the controller cannot establish that the engine rejected before starting a task
 - **THEN** it records `unconfirmed` and refuses automatic replay, including if the user changes the task's parameters
+
+### Requirement: Fixed-quantity cargo restoration uses confirmed dispatch progress
+For newly approved Daedalus-managed `sendResources` tasks between cities belonging to the same verified account, the controller MUST durably retain the original per-route, per-resource quantity and a server-generated logical transfer ID before task launch. On verified reconnection it MUST compute remaining cargo as original targets minus independently confirmed engine dispatch receipts. It MUST NOT infer a dispatched cargo amount from warehouse stock changes or the presence of trading ships.
+
+#### Scenario: Worker dies after a partially accepted route
+- **GIVEN** a fixed route requests 1,000 wood and durable engine receipts confirm 600 wood was dispatched
+- **WHEN** the exact account is reauthenticated and its managed task is absent
+- **THEN** the restored job MAY dispatch at most 400 further wood, without repeating the confirmed 600
+
+#### Scenario: A shipment POST may have reached the server
+- **GIVEN** the private journal contains a pending but unconfirmed outbound chunk
+- **WHEN** session rotation or worker death triggers automatic restoration
+- **THEN** Daedalus MUST pause that fixed job for review and MUST NOT resend the uncertain chunk
+
+#### Scenario: Fixed route recipient is no longer owned
+- **GIVEN** a saved route's destination city is not in the reauthenticated player's current city list
+- **WHEN** recovery checks the desired job
+- **THEN** the job MUST remain in manual review without dispatching resources
+

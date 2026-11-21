@@ -39,6 +39,9 @@ from daedalus.login_vault import (
     write_login_vault,
 )
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
+from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentialsUnavailable
+from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
+from daedalus.recovery_state import RecoveryConflict, RecoveryStore
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
@@ -67,6 +70,9 @@ def create_app(
     recovery_monitor: ExistingSessionRecoveryMonitor | None = None,
     saved_worker: SavedCookieWorker | None = None,
     native_browser_handoff: NativeBrowserHandoff | None = None,
+    recovery_store: RecoveryStore | None = None,
+    recovery_credentials: RecoveryCredentials | None = None,
+    recovery_supervisor: RecoverySupervisor | None = None,
     demo_mode: bool = False,
 ) -> FastAPI:
     """Create an API with mandatory bearer authentication and no game side effects."""
@@ -79,6 +85,8 @@ def create_app(
         or task_controller is not None or enable_account_editing
         or assistance_broker is not None or recovery_monitor is not None
         or saved_worker is not None or native_browser_handoff is not None
+        or recovery_store is not None or recovery_credentials is not None
+        or recovery_supervisor is not None
     ):
         raise ValueError("Synthetic demo cannot connect to real accounts, IPC or task controls")
     if demo_mode:
@@ -133,6 +141,14 @@ def create_app(
         or enable_account_editing
     ):
         raise ValueError("Native browser handoff needs the exact fixed authoritative owner")
+    if recovery_supervisor is not None and (
+        recovery_store is None or recovery_credentials is None
+        or recovery_supervisor.store is not recovery_store
+        or recovery_supervisor.controller is not task_controller
+    ):
+        raise ValueError("Auto recovery must use the same single authoritative task controller")
+    if recovery_store is not None and (task_controller is None or enable_account_editing):
+        raise ValueError("Recovery journal requires the fixed authoritative task controller")
     store = AccountMetadataStore(accounts_path) if enable_account_editing else None
     if store is not None:
         saved = store.snapshot()
@@ -142,9 +158,13 @@ def create_app(
     async def monitor_lifespan(_app: FastAPI):
         if recovery_monitor is not None:
             recovery_monitor.start()
+        if recovery_supervisor is not None:
+            recovery_supervisor.start()
         try:
             yield
         finally:
+            if recovery_supervisor is not None:
+                recovery_supervisor.stop()
             if recovery_monitor is not None:
                 recovery_monitor.stop()
             if task_controller is not None:
@@ -878,6 +898,173 @@ def create_app(
         if task_controller is None:
             raise HTTPException(status_code=503, detail="Task dispatch is not enabled")
         return task_controller
+
+    def require_recovery_store(account_id: str) -> RecoveryStore:
+        if account_id not in account_by_id:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if recovery_store is None:
+            raise HTTPException(status_code=503, detail="Recovery policy is not available")
+        return recovery_store
+
+    @app.get("/api/v1/recovery", dependencies=[Depends(authorized)])
+    def all_account_recovery() -> dict[str, object]:
+        if recovery_store is None:
+            return {"enabled": False, "accounts": []}
+        return {"enabled": True, "supervisor_enabled": recovery_supervisor is not None,
+                "accounts": [{
+                    **recovery_store.summary(account),
+                    "server_token_available": bool(
+                        recovery_credentials and recovery_credentials.available(account)),
+                    "session_status": owner.status(account.id),
+                } for account in configured_accounts]}
+
+    @app.get("/api/v1/accounts/{account_id}/recovery", dependencies=[Depends(authorized)])
+    def account_recovery(account_id: str) -> dict[str, object]:
+        journal = require_recovery_store(account_id)
+        account=account_by_id[account_id]
+        return {**journal.summary(account),
+                "server_token_available": bool(
+                    recovery_credentials and recovery_credentials.available(account)),
+                "supervisor_enabled": recovery_supervisor is not None,
+                "session_status": owner.status(account.id)}
+
+    @app.put("/api/v1/accounts/{account_id}/recovery/policy",
+             dependencies=[Depends(authorized)])
+    def set_account_recovery_policy(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        journal = require_recovery_store(account_id)
+        if (set(payload) - {"enabled","auto_resume","grace_seconds",
+                            "expected_revision","confirmed"}
+                or payload.get("confirmed") is not True):
+            raise HTTPException(status_code=422, detail="Explicit approved recovery policy required")
+        if (payload.get("enabled") is True and (
+            recovery_credentials is None or
+            not recovery_credentials.available(account_by_id[account_id])
+        )):
+            raise HTTPException(status_code=409,detail="Import an exact protected lobby token first")
+        try:
+            return journal.set_policy(
+                account_by_id[account_id],
+                enabled=payload.get("enabled"),
+                auto_resume=payload.get("auto_resume",False),
+                grace_seconds=payload.get("grace_seconds",300),
+                expected_revision=payload.get("expected_revision"),
+            )
+        except RecoveryConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/recovery/pause",
+              dependencies=[Depends(authorized)])
+    def pause_account_recovery(
+        account_id: str, payload: Annotated[dict[str,object],Body()],
+    ) -> dict[str,object]:
+        journal=require_recovery_store(account_id)
+        if set(payload)-{"seconds","confirmed"} or payload.get("confirmed") is not True:
+            raise HTTPException(status_code=422,detail="Explicit browser-use pause approval required")
+        try:
+            return journal.pause(account_by_id[account_id],seconds=payload.get("seconds"))
+        except RecoveryConflict as exc:
+            raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/recovery/unpause",
+              dependencies=[Depends(authorized)])
+    def unpause_account_recovery(
+        account_id: str, payload: Annotated[dict[str,object],Body()],
+    ) -> dict[str,object]:
+        journal=require_recovery_store(account_id)
+        if set(payload)!={"confirmed"} or payload.get("confirmed") is not True:
+            raise HTTPException(status_code=422,detail="Explicit browser-resume approval required")
+        try:
+            return journal.unpause(account_by_id[account_id])
+        except RecoveryConflict as exc:
+            raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/recovery/import-saved-token",
+              dependencies=[Depends(authorized)])
+    def import_saved_recovery_token(
+        account_id: str, payload: Annotated[dict[str, object],Body()],
+    ) -> dict[str,object]:
+        require_recovery_store(account_id)
+        if set(payload)!={"confirmed"} or payload.get("confirmed") is not True:
+            raise HTTPException(status_code=422,detail="Exact account credential import consent required")
+        if recovery_credentials is None:
+            raise HTTPException(status_code=503,detail="Protected credential import unavailable")
+        try:
+            recovery_credentials.import_saved(account_by_id[account_id],confirmed=True)
+        except RecoveryCredentialsUnavailable as exc:
+            raise HTTPException(status_code=409,detail=str(exc)) from exc
+        return {"account_id":account_id,"server_token_available":True,"status":"imported"}
+
+    @app.post("/api/v1/accounts/{account_id}/recovery/resume-now",
+              dependencies=[Depends(authorized)])
+    def resume_account_recovery(
+        account_id: str, payload: Annotated[dict[str, object],Body()],
+    ) -> dict[str,str]:
+        require_recovery_store(account_id)
+        if set(payload)!={"confirmed"} or payload.get("confirmed") is not True:
+            raise HTTPException(status_code=422,detail="Explicit browser-session interruption consent required")
+        if recovery_supervisor is None:
+            raise HTTPException(status_code=503,detail="Automatic recovery supervisor is disabled")
+        try:
+            return recovery_supervisor.request_now(account_by_id[account_id])
+        except (RecoveryWorkerError,RecoveryConflict) as exc:
+            raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+    @app.post("/api/v1/recovery/policy/bulk",dependencies=[Depends(authorized)])
+    def bulk_recovery_policy(
+        payload: Annotated[dict[str,object],Body()],
+    ) -> dict[str,object]:
+        if recovery_store is None:
+            raise HTTPException(status_code=503,detail="Recovery policy unavailable")
+        if (set(payload)-{"account_ids","enabled","auto_resume","grace_seconds","confirmed"}
+                or payload.get("confirmed") is not True):
+            raise HTTPException(status_code=422,detail="Explicit bulk policy approval required")
+        ids=payload.get("account_ids")
+        if not isinstance(ids,list) or not 1<=len(ids)<=len(configured_accounts) or any(
+            not isinstance(aid,str) for aid in ids
+        ) or len(set(ids))!=len(ids):
+            raise HTTPException(status_code=422,detail="Select unique configured account IDs")
+        results=[]
+        for aid in ids:
+            account=account_by_id.get(aid)
+            if account is None:
+                results.append({"account_id":aid,"status":"unknown_account"})
+                continue
+            if (payload.get("enabled") is True and
+                    (recovery_credentials is None or not recovery_credentials.available(account))):
+                results.append({"account_id":aid,"status":"token_unavailable"})
+                continue
+            try:
+                policy=recovery_store.set_policy(
+                    account, enabled=payload.get("enabled"),
+                    auto_resume=payload.get("auto_resume",False),
+                    grace_seconds=payload.get("grace_seconds",300),
+                )
+                results.append({"account_id":aid,"status":"saved","policy":policy})
+            except RecoveryConflict:
+                results.append({"account_id":aid,"status":"conflict"})
+        return {"results":results}
+
+    @app.get("/api/v1/accounts/{account_id}/recovery/jobs",
+             dependencies=[Depends(authorized)])
+    def desired_account_jobs(account_id: str) -> dict[str,object]:
+        journal=require_recovery_store(account_id)
+        account = account_by_id[account_id]
+        jobs = journal.desired(account, include_config=True)
+        for job in jobs:
+            if job["restart_class"] == "fixed_transfer":
+                try:
+                    job["transfer_progress"] = journal.fixed_transfer_progress(
+                        account, job["config"],
+                    )
+                except RecoveryConflict:
+                    # Missing or corrupt progress must be visible as uncertain,
+                    # not silently interpreted as zero shipments.
+                    job["transfer_progress"] = {"uncertain": True}
+        return {"account_id":account_id,
+                "jobs":jobs,
+                "receipts":journal.receipts(account)}
 
     @app.get("/api/v1/accounts/{account_id}/tasks/preflight", dependencies=[Depends(authorized)])
     def task_preflight(account_id: str, task: str) -> dict[str, object]:

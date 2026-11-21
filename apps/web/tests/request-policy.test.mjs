@@ -22,3 +22,25 @@ test('mutation allowlist forbids browser authentication and metadata editing', (
   assert.equal(allowedRequest('POST', 'accounts/a/tasks/123/stop'.split('/'), params()), true);
   assert.equal(allowedRequest('POST', 'accounts/a/browser-login/start'.split('/'), params()), false);
 });
+
+test('recovery routes allow only audited nonsecret controls', () => {
+  for (const path of [
+    'recovery', 'accounts/a/recovery', 'accounts/a/recovery/jobs',
+  ]) assert.equal(allowedRequest('GET', path.split('/'), params()), true, path);
+  for (const path of [
+    'accounts/a/recovery/pause', 'accounts/a/recovery/unpause',
+    'accounts/a/recovery/resume-now', 'accounts/a/recovery/import-saved-token',
+    'recovery/policy/bulk',
+  ]) assert.equal(allowedRequest('POST', path.split('/'), params()), true, path);
+  assert.equal(allowedRequest('PUT', 'accounts/a/recovery/policy'.split('/'), params()), true);
+  for (const path of [
+    'accounts/a/recovery/lobby-token', 'accounts/a/recovery/secret',
+    'accounts/a/recovery/credentials', 'accounts/a/recovery/execute',
+    'accounts/a/browser-login/start', 'accounts/a/recovery/../../password',
+  ]) {
+    assert.equal(allowedRequest('POST', path.split('/'), params()), false, path);
+    assert.equal(allowedRequest('PUT', path.split('/'), params()), false, path);
+  }
+  assert.equal(allowedRequest('PUT', 'accounts/a/recovery/pause'.split('/'), params()), false);
+  assert.equal(allowedRequest('GET', 'accounts/a/recovery/secret'.split('/'), params()), false);
+});

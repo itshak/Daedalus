@@ -244,8 +244,10 @@ class TaskController:
         *,
         ledger_path: str | Path | None = None,
         active_validation: bool = False,
+        recovery_store: Any | None = None,
     ) -> None:
         self._active_validation = active_validation
+        self._recovery_store = recovery_store
         self._accounts = {a.id: a for a in accounts}
         if not coordinator.matches_accounts(accounts):
             raise ValueError("Account coordinator and task controller must use identical accounts")
@@ -349,7 +351,7 @@ class TaskController:
 
     def start(
         self, account_id: str, task: str, config: object,
-        request_id: str, *, confirmed: bool,
+        request_id: str, *, confirmed: bool, track_desired: bool = True,
     ) -> dict[str, object]:
         if not confirmed:
             raise ValueError("Explicit game task confirmation is required")
@@ -360,7 +362,20 @@ class TaskController:
             raise ValueError("A valid UUID request_id is required for idempotency")
         if task not in self._supported:
             raise ValueError("Unsupported engine task")
-        clean, digest = validated_configuration(config)
+        clean, _ = validated_configuration(config)
+        clean = dict(clean)
+        is_fixed = False
+        if task == "sendResources" and self._recovery_store is not None:
+            from daedalus.recovery_reconcile import canonical_fixed_transfer
+            if track_desired:
+                if "transfer_id" in clean:
+                    raise ValueError("Fixed transfer journal key is server-owned")
+                if canonical_fixed_transfer(clean) is not None:
+                    clean["transfer_id"] = request_id
+                    is_fixed = True
+            else:
+                is_fixed = "transfer_id" in clean
+        clean, digest = validated_configuration(clean)
         account = self._account(account_id)
         with self._mutex:
             if self._ledger.unresolved_except(account.id, request_id):
@@ -374,6 +389,12 @@ class TaskController:
             prereq = self._ipc.preflight_task(account, task)
             if not prereq["ready"]:
                 raise TaskPrerequisiteMissing(prereq["reason"])
+            if is_fixed and track_desired:
+                # Record the immutable original intent before engine dispatch.
+                try:
+                    self._recovery_store.prepare_fixed_transfer(account, clean)
+                except (ValueError, OSError, sqlite3.Error) as exc:
+                    raise TaskUnavailable("Unable to persist fixed transfer intent") from exc
             fresh, receipt = self._ledger.reserve(account.id, request_id, task, digest)
             if not fresh:
                 # Never dispatch again after an ambiguous failure or controller restart.
@@ -385,20 +406,45 @@ class TaskController:
                 # This specific typed IPC reply proves there was no process
                 # start. Do not block a corrected future request.
                 self._ledger.finish(account.id, request_id, status="rejected")
+                if is_fixed and track_desired:
+                    self._recovery_store.finish_fixed_transfer(
+                        account, request_id, status="rejected",
+                    )
                 if exc.reason == "notifications_required":
                     raise TaskPrerequisiteMissing(exc.reason) from exc
                 raise TaskRejected(exc.reason) from exc
             except BaseException:
                 # Unknown IPC results could have started a real game operation.
                 self._ledger.finish(account.id, request_id, status="unconfirmed")
+                if is_fixed and track_desired:
+                    self._recovery_store.finish_fixed_transfer(
+                        account, request_id, status="unconfirmed",
+                    )
                 raise
             self._ledger.finish(
                 account.id, request_id, status="started",
                 task_id=str(started["task_id"]), pid=int(started["pid"]),
             )
-            return {"account_id": account.id, "request_id": request_id,
-                    "task": task, "status": "started",
-                    "task_id": started["task_id"], "pid": started["pid"]}
+            receipt = {"account_id": account.id, "request_id": request_id,
+                       "task": task, "status": "started",
+                       "task_id": started["task_id"], "pid": started["pid"]}
+            if track_desired and self._recovery_store is not None:
+                try:
+                    if is_fixed:
+                        self._recovery_store.finish_fixed_transfer(
+                            account, request_id, status="started",
+                            task_id=str(started["task_id"]),
+                        )
+                        receipt["desired_job_id"] = request_id
+                    else:
+                        receipt["desired_job_id"] = self._recovery_store.capture_started(
+                            account, task, clean, str(started["task_id"]),
+                        )
+                except (OSError, ValueError, sqlite3.Error):
+                    # The task did start; losing its optional recovery journal
+                    # must never misreport the engine dispatch as unconfirmed.
+                    receipt["recovery_tracking"] = "unavailable"
+            return receipt
 
     def list_tasks(self, account_id: str) -> dict[str, object]:
         account = self._account(account_id)
@@ -410,6 +456,13 @@ class TaskController:
     def stop(self, account_id: str, task_id: str) -> dict[str, object]:
         account = self._account(account_id)
         with self._mutex:
+            # User's stop intention wins even during a rotation grace period:
+            # never restart this task later if the IPC stop was interrupted.
+            if self._recovery_store is not None:
+                try:
+                    self._recovery_store.stop_task(account, task_id)
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    raise TaskUnavailable("Unable to persist desired task stop") from exc
             self._lease(account)
             result = self._ipc.stop_managed_task(account, task_id)
             return {"account_id": account.id, **result}

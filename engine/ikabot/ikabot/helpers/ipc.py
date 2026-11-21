@@ -74,12 +74,35 @@ _LOCAL_SERVER_LOCK = threading.Lock()
 
 
 def get_ipc_file_path():
-    """Return path to ~/.ikabot/ipc.json."""
+    """Default IPC or a supervisor-confined, account-scoped descriptor.
+
+    The env override is valid ONLY for a 64-character identity digest within
+    this user's private Daedalus account IPC directory. Existing CLI behavior
+    never changes without the explicit override.
+    """
+    selected = os.environ.get("DAEDALUS_ACCOUNT_IPC_FILE")
+    if selected:
+        import pathlib
+        root = pathlib.Path.home() / ".local" / "state" / "daedalus" / "account-ipc"
+        candidate = pathlib.Path(selected)
+        if (
+            not candidate.is_absolute() or candidate.parent != root
+            or not re.fullmatch(r"[0-9a-f]{64}\.json", candidate.name)
+            or root.is_symlink() or candidate.is_symlink()
+        ):
+            raise ValueError("Invalid account-scoped IPC descriptor path")
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name != "nt":
+            os.chmod(root, 0o700)
+        return str(candidate)
     return os.path.join(get_ikabot_dir(), "ipc.json")
 
 
 def get_ipc_lock_path():
-    """Return path to ~/.ikabot/ipc.lock."""
+    """Use a separate startup lock per isolated account worker."""
+    selected = os.environ.get("DAEDALUS_ACCOUNT_IPC_FILE")
+    if selected:
+        return str(get_ipc_file_path()[:-5] + ".lock")
     return os.path.join(get_ikabot_dir(), "ipc.lock")
 
 

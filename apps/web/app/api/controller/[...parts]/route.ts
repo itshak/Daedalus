@@ -17,6 +17,21 @@ const buildingTargets = z.object({ upgrades: z.array(z.object({
   target_level: z.number().int().min(1).max(150)
 }).strict()).min(1).max(12) }).strict();
 
+const confirmedOnly = z.object({ confirmed: z.literal(true) }).strict();
+const recoveryPolicy = z.object({
+  confirmed: z.literal(true), enabled: z.boolean(), auto_resume: z.boolean(),
+  grace_seconds: z.number().int().min(60).max(3600),
+  expected_revision: z.number().int().min(0).optional(),
+}).strict();
+const recoveryPause = z.object({
+  confirmed: z.literal(true),
+  seconds: z.union([z.literal(900),z.literal(1800),z.literal(3600),z.null()]),
+}).strict();
+const recoveryBulk = z.object({
+  confirmed: z.literal(true), account_ids: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,72}$/)).min(1).max(256),
+  enabled: z.boolean(), auto_resume: z.boolean(), grace_seconds: z.number().int().min(60).max(3600),
+}).strict();
+
 type RouteContext = { params: Promise<{ parts: string[] }> };
 async function proxy(request: NextRequest, context: RouteContext) {
   const operator = await authorizedOperator();
@@ -43,6 +58,16 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });
+    if (parts[0] === "recovery" && parts[1] === "policy" && parts[2] === "bulk" && !recoveryBulk.safeParse(value).success)
+      return NextResponse.json({ error: "Invalid bulk recovery policy" }, { status: 422, headers: responseHeaders });
+    if (parts[0] === "accounts" && parts[2] === "recovery") {
+      const action = parts[3];
+      const valid = action === "policy" && request.method === "PUT" ? recoveryPolicy.safeParse(value).success
+        : action === "pause" ? recoveryPause.safeParse(value).success
+        : ["unpause","resume-now","import-saved-token"].includes(action || "") ? confirmedOnly.safeParse(value).success
+        : false;
+      if (!valid) return NextResponse.json({ error: "Invalid recovery confirmation" }, { status: 422, headers: responseHeaders });
+    }
     body = JSON.stringify(value);
   }
   const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "")

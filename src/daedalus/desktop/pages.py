@@ -359,6 +359,13 @@ class AccountsPage(QWidget):
     automatic_login_cancel_requested = Signal()
     sync_saved_logins_requested = Signal(object)
     monitor_requested = Signal(str)
+    recovery_refresh_requested = Signal()
+    recovery_import_requested = Signal(str)
+    recovery_policy_requested = Signal(str, bool, int)
+    recovery_pause_requested = Signal(str, object)
+    recovery_resume_requested = Signal(str)
+    recovery_bulk_requested = Signal(object, bool)
+    recovery_jobs_requested = Signal(str)
     report_selection_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
@@ -380,6 +387,8 @@ class AccountsPage(QWidget):
         self._auto_login_busy = False
         self._monitor_enabled = False
         self._advanced_open = False
+        self._recovery_by_account: dict[str, dict[str, object]] = {}
+        self._recovery_supervisor_enabled = False
 
         header = QHBoxLayout()
         header.setSpacing(8)
@@ -443,6 +452,51 @@ class AccountsPage(QWidget):
         self.selection_status = CaptionLabel("No accounts loaded")
         self.selection_status.setAccessibleName("Selected account and session status")
         layout.addWidget(self.selection_status)
+
+        # Opt-in browser-friendly auto recovery, separate from Mac Selenium.
+        # This panel exposes only redacted backend metadata and deliberate
+        # operator actions; no login token or password input.
+        recovery_header = QHBoxLayout()
+        recovery_header.addWidget(SubtitleLabel("Automatic recovery"))
+        recovery_header.addStretch(1)
+        self.recovery_refresh_button = PushButton("Refresh recovery")
+        self.recovery_refresh_button.clicked.connect(self.recovery_refresh_requested.emit)
+        recovery_header.addWidget(self.recovery_refresh_button)
+        layout.addLayout(recovery_header)
+        self.recovery_status_label = CaptionLabel(
+            "Automatic reconnection is off until explicitly approved for each account."
+        )
+        self.recovery_status_label.setWordWrap(True)
+        layout.addWidget(self.recovery_status_label)
+        recovery_actions = QHBoxLayout()
+        recovery_actions.setSpacing(7)
+        self.recovery_import_button = PushButton("Import saved lobby token")
+        self.recovery_import_button.clicked.connect(self._recovery_import)
+        self.recovery_policy_button = PushButton("Enable auto recovery")
+        self.recovery_policy_button.clicked.connect(self._recovery_policy)
+        self.recovery_pause_button = PushButton("Pause browser use ▾")
+        self.recovery_pause_menu = QMenu(self)
+        for caption, seconds in (
+            ("15 minutes", 900), ("30 minutes", 1800),
+            ("60 minutes", 3600), ("Until resumed", None),
+        ):
+            item = self.recovery_pause_menu.addAction(caption)
+            item.triggered.connect(lambda checked=False, s=seconds: self._recovery_pause(s))
+        self.recovery_pause_button.setMenu(self.recovery_pause_menu)
+        self.recovery_resume_button = PushButton("Resume now")
+        self.recovery_resume_button.clicked.connect(self._recovery_resume)
+        self.recovery_jobs_button = PushButton("Review saved jobs")
+        self.recovery_jobs_button.clicked.connect(self._recovery_jobs)
+        for button in (self.recovery_import_button, self.recovery_policy_button,
+                       self.recovery_pause_button, self.recovery_resume_button,
+                       self.recovery_jobs_button):
+            recovery_actions.addWidget(button)
+        recovery_actions.addStretch(1)
+        layout.addLayout(recovery_actions)
+        self.recovery_bulk_button = PushButton("Recovery for selected / all…")
+        self.recovery_bulk_button.clicked.connect(self._recovery_bulk)
+        layout.addWidget(self.recovery_bulk_button)
+        self._update_recovery_controls()
 
         # Keep existing named actions and backend signals for compatibility,
         # but display them only in the contextual More menu.
@@ -542,6 +596,151 @@ class AccountsPage(QWidget):
         self.auto_login_status.setWordWrap(True)
         layout.addWidget(self.auto_login_status)
         self.auto_login_status.hide()
+
+    def set_recovery_status(self, response: dict[str, object]) -> None:
+        """Refresh nonsecret data after a backend request, not a local timer."""
+        entries = response.get("accounts")
+        self._recovery_by_account = (
+            {str(row["account_id"]): row for row in entries
+             if isinstance(row, dict) and isinstance(row.get("account_id"), str)}
+            if response.get("enabled") is True and isinstance(entries, list) else {}
+        )
+        self._recovery_supervisor_enabled = response.get("supervisor_enabled") is True
+        self._update_recovery_controls()
+
+    def _recovery_selection(self) -> tuple[str | None, dict[str, object] | None]:
+        account_id = self._selected_visible_id()
+        return account_id, self._recovery_by_account.get(account_id) if account_id else None
+
+    def _update_recovery_controls(self) -> None:
+        aid, status = self._recovery_selection()
+        policy = status.get("policy") if isinstance(status, dict) else None
+        policy = policy if isinstance(policy, dict) else {}
+        enabled = policy.get("enabled") is True
+        available = status.get("server_token_available") is True if status else False
+        self.recovery_policy_button.setText(
+            "Disable auto recovery" if enabled else "Enable auto recovery"
+        )
+        selected = aid is not None
+        self.recovery_import_button.setEnabled(selected and bool(status) and not available)
+        self.recovery_policy_button.setEnabled(selected and bool(status) and (enabled or available))
+        self.recovery_pause_button.setEnabled(selected and enabled)
+        self.recovery_resume_button.setEnabled(
+            selected and enabled and self._recovery_supervisor_enabled
+        )
+        self.recovery_jobs_button.setEnabled(selected and bool(status))
+        self.recovery_bulk_button.setEnabled(bool(self._recovery_by_account))
+        if not selected:
+            self.recovery_status_label.setText(
+                "Choose an account to review its five-minute recovery policy and saved jobs."
+            )
+            return
+        if not status:
+            self.recovery_status_label.setText(
+                "Recovery status not yet loaded. Select Refresh recovery."
+            )
+            return
+        event = status.get("event")
+        event = event if isinstance(event, dict) else {}
+        phase = str(event.get("phase") or "idle").replace("_", " ")
+        deadline = event.get("due_at")
+        import datetime
+        deadline_text = ""
+        if isinstance(deadline, (int, float)) and phase in ("grace", "retry"):
+            deadline_text = " · Not before " + datetime.datetime.fromtimestamp(
+                deadline, datetime.UTC
+            ).strftime("%H:%M UTC")
+        paused = policy.get("pause_indefinite") is True or (
+            isinstance(policy.get("pause_until"), (int, float))
+            and policy["pause_until"] > datetime.datetime.now(
+                datetime.UTC
+            ).timestamp()
+        )
+        self.recovery_status_label.setText(
+            f"{'Enabled' if enabled else 'Off'} · "
+            f"{'Paused for browser use' if paused else phase} · "
+            f"{'Protected token ready' if available else 'No server lobby token'} · "
+            f"{status.get('desired_jobs', 0)} desired / "
+            f"{status.get('auto_resume_eligible', 0)} auto-eligible"
+            + deadline_text
+            + (" · Host supervisor OFF" if not self._recovery_supervisor_enabled else "")
+        )
+
+    def _recovery_import(self) -> None:
+        aid, _ = self._recovery_selection()
+        if aid is None:
+            return
+        if QMessageBox.question(
+            self, "Import saved Gameforge lobby token",
+            "Import the selected account's existing server-side IkaBot lobby "
+            "credential into the encrypted Daedalus store? No game login or task starts.",
+        ) == QMessageBox.Yes:
+            self.recovery_import_requested.emit(aid)
+
+    def _recovery_policy(self) -> None:
+        aid, status = self._recovery_selection()
+        if aid is None or not status:
+            return
+        policy = status.get("policy") or {}
+        if not isinstance(policy, dict):
+            return
+        enabled = policy.get("enabled") is not True
+        question = (
+            "Enable automatic game login five minutes after confirmed loss, "
+            "plus restoration of approved restart-safe tasks? The new login "
+            "can end an active browser session. Pause for browser use to delay it."
+            if enabled else "Disable automatic game recovery for this account?"
+        )
+        if QMessageBox.question(self, "Confirm recovery policy", question) == QMessageBox.Yes:
+            self.recovery_policy_requested.emit(aid, enabled, int(policy.get("revision", 0)))
+
+    def _recovery_pause(self, seconds: int | None) -> None:
+        aid, _ = self._recovery_selection()
+        if aid is not None and QMessageBox.question(
+            self, "Pause for browser use",
+            "Delay automatic Gameforge sign-in while you use the browser?",
+        ) == QMessageBox.Yes:
+            self.recovery_pause_requested.emit(aid, seconds)
+
+    def _recovery_resume(self) -> None:
+        aid, _ = self._recovery_selection()
+        if aid is not None and QMessageBox.question(
+            self, "Reconnect this account now",
+            "A new Gameforge login can invalidate the game session open in another "
+            "browser. Continue with a verified worker and safe job reconciliation?",
+        ) == QMessageBox.Yes:
+            self.recovery_resume_requested.emit(aid)
+
+    def _recovery_jobs(self) -> None:
+        aid, _ = self._recovery_selection()
+        if aid is not None:
+            self.recovery_jobs_requested.emit(aid)
+
+    def _recovery_bulk(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        values = ["Enable for selected report accounts",
+                  "Enable for all configured accounts",
+                  "Disable for selected report accounts",
+                  "Disable for all configured accounts"]
+        choice, ok = QInputDialog.getItem(
+            self, "Bulk recovery policy", "Choose exact account scope:", values,
+            0, False,
+        )
+        if not ok:
+            return
+        all_accounts = "all configured" in choice.lower()
+        enabled = choice.startswith("Enable")
+        aids = ([a["id"] for a in self._accounts if a.get("enabled") is True]
+                if all_accounts else self.selected_report_account_ids())
+        if not aids:
+            return
+        if QMessageBox.question(
+            self, "Confirm bulk recovery",
+            f"{'Enable' if enabled else 'Disable'} automatic game reconnection for "
+            f"{len(aids)} accounts? Enabling can sign your game browser out after "
+            "the grace period. Unsupported credentials are skipped.",
+        ) == QMessageBox.Yes:
+            self.recovery_bulk_requested.emit(aids, enabled)
 
     def _sync_account_menu(self) -> None:
         self.check_engine_button.setEnabled(bool(self._accounts))
@@ -772,6 +971,7 @@ class AccountsPage(QWidget):
 
     def _update_assistance_buttons(self) -> None:
         account_id = self._selected_visible_id()
+        self._update_recovery_controls()
         selected = self.account_record(account_id) if account_id else None
         if selected:
             session = str(selected.get("session_status") or "not_connected")

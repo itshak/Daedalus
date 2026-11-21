@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 from daedalus import __version__
 from daedalus.accounts import AccountConfigError, load_accounts
@@ -90,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Opt in to authorized start/list/stop of existing-session IkaBot tasks",
     )
     serve.add_argument("--task-ledger", help="Private SQLite idempotency ledger outside checkout")
+    serve.add_argument(
+        "--enable-auto-recovery", action="store_true",
+        help="Enable host-only opt-in 5-minute session recovery supervisor; account policies default off",
+    )
     serve.add_argument(
         "--monitor-existing-sessions", action="store_true",
         help="Opt in to read-only validation of managed existing engine sessions (no new login)",
@@ -309,6 +314,11 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--task-ledger requires --enable-task-control")
             if args.monitor_existing_sessions and not args.enable_task_control:
                 parser.error("--monitor-existing-sessions requires --enable-task-control")
+            if args.enable_auto_recovery and not (
+                args.accounts_file and args.connect_existing_ipc and
+                args.enable_task_control and args.monitor_existing_sessions
+            ):
+                parser.error("Automatic recovery needs fixed accounts, monitored task control and IPC")
             if args.enable_account_editing and args.enable_task_control:
                 parser.error("--enable-account-editing is incompatible with --enable-task-control")
             if args.restore_saved_account and (
@@ -333,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.accounts_file or args.connect_existing_ipc or args.ipc_descriptor
                 or args.enable_task_control or args.task_ledger or args.enable_account_editing
                 or args.monitor_existing_sessions or args.restore_saved_account
-                or args.enable_native_browser_login
+                or args.enable_native_browser_login or args.enable_auto_recovery
             ):
                 parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
@@ -350,16 +360,30 @@ def main(argv: list[str] | None = None) -> int:
                     if args.enable_task_control
                     else ExistingIPCClient(args.ipc_descriptor)
                 )
+                if args.enable_auto_recovery:
+                    from daedalus.recovery_runtime import RoutedAccountIPC
+                    ipc = RoutedAccountIPC(ipc)
             if (args.enable_task_control or args.restore_saved_account
                     or args.enable_native_browser_login):
                 configured = load_accounts(args.accounts_file)
                 owner = AccountSessionCoordinator(configured)
+            recovery_credentials = None
+            recovery_supervisor = None
             if args.enable_task_control:
+                from daedalus.recovery_credentials import RecoveryCredentials
+                from daedalus.recovery_state import RecoveryStore
+
+                recovery_credentials = RecoveryCredentials()
                 from daedalus.task_control import TaskController
 
+                recovery_store = RecoveryStore()
+                # Dedicated IkaBot children inherit the exact same private
+                # SQLite checkpoint, without a user-writable task-config path.
+                os.environ["DAEDALUS_FIXED_TRANSFER_DB"] = str(recovery_store.path)
                 task_controller = TaskController(
                     configured, owner, ipc, ledger_path=args.task_ledger,
                     active_validation=args.monitor_existing_sessions,
+                    recovery_store=recovery_store,
                 )
                 if args.monitor_existing_sessions:
                     from daedalus.auth_assistance import AssistanceBroker
@@ -389,12 +413,25 @@ def main(argv: list[str] | None = None) -> int:
                     configured, owner, monitor=monitor if worker is not None else None,
                     dedicated_worker=worker,
                 )
+            if args.enable_auto_recovery:
+                from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkers
+
+                workers = RecoveryWorkers(
+                    owner, task_controller, ipc, recovery_credentials, broker,
+                )
+                recovery_supervisor = RecoverySupervisor(
+                    configured, recovery_store, workers, task_controller,
+                    recovery_credentials,
+                )
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,
                 enable_account_editing=args.enable_account_editing,
                 assistance_broker=broker, recovery_monitor=monitor,
                 saved_worker=worker, native_browser_handoff=native_handoff,
+                recovery_store=recovery_store if args.enable_task_control else None,
+                recovery_credentials=recovery_credentials,
+                recovery_supervisor=recovery_supervisor,
                 demo_mode=args.demo,
             )
         except (
