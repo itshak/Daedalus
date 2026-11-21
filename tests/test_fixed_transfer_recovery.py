@@ -130,3 +130,74 @@ def test_database_schema_migrates_v1_without_losing_existing_job(tmp_path):
     assert upgraded.desired(ACCOUNT)[0]["task"] == "alertAttacks"
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+
+def test_controller_assigns_server_owned_transfer_id_before_engine_dispatch(tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.task_control import TaskController
+
+    store = RecoveryStore(tmp_path / "recovery.sqlite3")
+    owner = AccountSessionCoordinator([ACCOUNT], state_dir=tmp_path / "leases")
+    class IPC:
+        sent = []
+        def has_account(self, account):
+            return account == ACCOUNT
+        def preflight_task(self, account, task):
+            return {"ready": True, "reason": "none"}
+        def start_managed_task(self, account, task, configuration, request_id):
+            self.sent.append((configuration, request_id))
+            return {"task_id": "test-task", "pid": 2323}
+    ipc = IPC()
+    controller = TaskController(
+        [ACCOUNT], owner, ipc, ledger_path=tmp_path / "task-requests.db",
+        recovery_store=store,
+    )
+    try:
+        original = config()
+        original.pop("transfer_id")
+        request_id = str(uuid4())
+        result = controller.start(
+            ACCOUNT.id, "sendResources", original, request_id, confirmed=True,
+        )
+        assert result["desired_job_id"] == request_id
+        assert len(ipc.sent) == 1
+        assert ipc.sent[0][0]["transfer_id"] == request_id
+        entry = store.desired(ACCOUNT, include_config=True)[0]
+        assert entry["restart_class"] == "fixed_transfer"
+        assert entry["desired_state"] == "running"
+        assert store.fixed_transfer_progress(ACCOUNT, entry["config"])["remaining"] == [
+            [75, 10, 0, 0, 0], [0, 0, 20, 0, 0]
+        ]
+    finally:
+        controller.close()
+
+
+def test_controller_never_replays_uncertain_initial_fixed_task_start(tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.task_control import TaskController
+
+    store = RecoveryStore(tmp_path / "recovery.sqlite3")
+    owner = AccountSessionCoordinator([ACCOUNT], state_dir=tmp_path / "leases")
+    class IPC:
+        def has_account(self, account):
+            return True
+        def preflight_task(self, account, task):
+            return {"ready": True, "reason": "none"}
+        def start_managed_task(self, *_):
+            raise OSError("synthetic IPC reply lost after possible dispatch")
+    controller = TaskController(
+        [ACCOUNT], owner, IPC(), ledger_path=tmp_path / "tasks.db",
+        recovery_store=store,
+    )
+    try:
+        original = config()
+        original.pop("transfer_id")
+        with pytest.raises(OSError):
+            controller.start(
+                ACCOUNT.id, "sendResources", original, str(uuid4()),
+                confirmed=True,
+            )
+        entry = store.desired(ACCOUNT, include_config=True)[0]
+        assert entry["desired_state"] == "review"
+        assert store.fixed_transfer_progress(ACCOUNT, entry["config"])["uncertain"]
+    finally:
+        controller.close()
