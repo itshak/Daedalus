@@ -978,7 +978,9 @@ class AccountsPage(QWidget):
         self.auto_cancel_button.setVisible(bool(busy))
         if status:
             self.auto_login_status.setText(status)
-        self.auto_login_status.setVisible(bool(busy and status))
+        # Keep the final receipt readable after the child/HTTP workers finish.
+        # Previously success/failure disappeared as soon as busy became false.
+        self.auto_login_status.setVisible(bool(status))
         self._update_assistance_buttons()
 
     def _native_browser_login(self) -> None:
@@ -1006,7 +1008,7 @@ class AccountsPage(QWidget):
                 "authenticated": "Session verified. Warehouse reports and eligible automations are available.",
                 "needs_assistance": "Session needs sign-in. Use automatic headless login; only CAPTCHA requires input.",
                 "paused": "Worker is paused. Inspect session status before resuming any operation.",
-                "not_connected": "No verified session is attached to this account.",
+                "not_connected": "No game worker is connected. A verified world cookie may be saved for later attachment; check the Worker column.",
                 "disabled": "Account is disabled on the authoritative backend.",
             }.get(session, "Session: " + session.replace("_", " "))
             self.selected_account_summary.set_status(
