@@ -8,9 +8,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 
 from PySide6.QtCore import QThread, Signal
@@ -83,6 +85,7 @@ class SeleniumLoginWorker(QThread):
 
     def run(self) -> None:
         process = None
+        profile_root = None
         terminal_received = False
         try:
             if self._cancel.is_set():
@@ -97,6 +100,13 @@ class SeleniumLoginWorker(QThread):
                     "password": self._credentials.password,
                 } if self._credentials is not None else None),
             }
+            # Parent owns the private Chrome profile root, so hard-killing a
+            # stuck helper also scrubs its temporary browser cookies.
+            if sys.platform == "darwin":
+                profile_root = tempfile.mkdtemp(prefix="daedalus-login-")
+            environment = None
+            if profile_root is not None:
+                environment = {**os.environ, "DAEDALUS_LOGIN_PROFILE_ROOT": profile_root}
             # A new process group ensures cancellation cannot kill the GUI.
             logger.info("Starting isolated Gameforge login helper")
             self.stage_changed.emit("helper_starting")
@@ -104,6 +114,7 @@ class SeleniumLoginWorker(QThread):
                 child_command(),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, start_new_session=(os.name == "posix"),
+                env=environment,
             )
             with self._lock:
                 self._process = process
@@ -179,5 +190,10 @@ class SeleniumLoginWorker(QThread):
                     process.stdin.close()
             with self._lock:
                 self._process = None
+            if profile_root is not None:
+                try:
+                    shutil.rmtree(profile_root)
+                except OSError:
+                    logger.warning("Temporary Chrome session cleanup was incomplete")
             self._credentials = None
             logger.info("Isolated Gameforge login helper stopped")
