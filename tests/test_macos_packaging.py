@@ -97,3 +97,35 @@ def test_native_mac_browser_packaging_requires_renderer_helper(packager, tmp_pat
     helper.parent.mkdir(parents=True)
     helper.write_bytes(b"synthetic Qt WebEngine helper")
     packager.require_native_browser_runtime(bundle)
+
+
+def test_direct_dmg_distribution_is_release_only_after_verified_main_build():
+    """A release asset is a raw DMG; PRs must never get a write-scoped job."""
+    source = (Path(__file__).resolve().parents[1]
+              / ".github/workflows/macos-app.yml").read_text()
+    assert "  publish-direct-dmg:" in source
+    package, publish = source.split("  publish-direct-dmg:", 1)
+    assert "permissions:\n  contents: read" in package
+    assert "name: Daedalus-macos-dmg" in package
+    assert "name: Publish directly downloadable macOS DMG" in publish
+    assert "needs: [package]" in publish
+    assert "github.ref == 'refs/heads/main'" in publish
+    assert "github.event_name == 'push'" in publish
+    assert "github.event_name == 'workflow_dispatch'" in publish
+    assert "contents: write" in publish
+    assert "actions/download-artifact@v4" in publish
+    assert "gh release create" in publish
+    assert "--prerelease" in publish
+    assert "gh release upload" in publish
+    assert "Daedalus-macos-preview.dmg.sha256" in publish
+    assert ".assets[] | select(.name == \"Daedalus-macos-preview.dmg\")" in publish
+    assert "gh release" not in package
+
+
+def test_direct_dmg_documentation_does_not_promise_gatekeeper_bypass():
+    docs = (Path(__file__).resolve().parents[1]
+            / "docs/MACOS-BUILD.md").read_text()
+    assert "GitHub Releases" in docs
+    assert "**not wrapped in an Actions ZIP**" in docs
+    assert "not Apple notarized" in docs
+    assert "first-launch" in docs
