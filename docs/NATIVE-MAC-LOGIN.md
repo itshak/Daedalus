@@ -4,6 +4,39 @@
 
 **The historical native Qt WebEngine instructions below describe only the advanced manual fallback.**
 
+### macOS Keychain and Chromium focus behavior
+
+Daedalus distinguishes **two** independent Keychain operations:
+
+- The genuine **macOS Keychain**, which protects saved Gameforge credentials,
+  the API bearer and the Mac-only key used for encrypted login backups. The
+  user may need to approve access per item, especially when changing to an
+  ad-hoc-signed preview build. Daedalus now restores a valid exact-world legacy
+  session first (without any Keychain read), avoids querying both credential
+  and vault key records for a single login, and never re-encrypts an existing
+  server vault merely because the user signs in again.
+- **Chromium Safe Storage**, which is internal to Chrome and not needed for
+  Daedalus's temporary browser. On macOS, Selenium uses a fresh owner-private
+  profile and Chromium's documented test-only `--use-mock-keychain` switch
+  to avoid repeated browser-side OS authorization dialogs. The profile is
+  removed when the helper exits, and this switch must NEVER be applied to
+  the operator's regular browser profile. The real Daedalus Keychain is still
+  used to protect persistent secrets.
+
+Chrome's visibility is also bounded: after the lobby Play click, Selenium
+follows the game window without switching back to the lobby every poll,
+and secondary windows are inspected at a lower frequency before Play. If
+Gameforge changes its registration/login layout, Selenium matches the
+explicit **Sign in** tab and a visible sign-in form; it must not select the
+first tab blindly or submit a password to the registration form.
+
+**Limit:** Apple Keychain's consent rules are controlled by macOS, not by
+Selenium. An ad-hoc-signed preview cannot guarantee that "Always Allow"
+persists across future rebuilds. Stable Developer ID signing and normal
+notarized distribution remain the supported way to retain code identity
+across releases; the application must not bypass OS approval for persistent
+credentials.
+
 ### Interpreting a successful browser sign-in
 
 A Mac can restore a saved exact-world cookie and the server can independently
