@@ -2409,8 +2409,12 @@ class MainWindow(FluentWindow):
             if self.client is None:
                 self.connection_page.set_connection_error(error)
             else:
-                # A failed reconnect must not hide an existing authorized session.
+                # A failed reconnect must not hide an existing authorized session,
+                # but the user must not confuse it with successful new credentials.
                 self.connection_page.set_connected(True)
+                self.connection_page.status_label.setText(
+                    "New connection failed. The previously verified backend remains connected."
+                )
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight", "task_cities",
                           "task_buildings", "task_construction_preview", "task_workshop",
