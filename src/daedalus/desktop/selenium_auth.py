@@ -206,6 +206,7 @@ def _await_world(driver, world_host: str, *, deadline: float,
 
     lobby_handle = driver.current_window_handle
     play_clicked = False
+    last_secondary_scan = 0.0
     notify("waiting_for_world")
     while time.monotonic() < deadline:
         if cancelled():
@@ -235,6 +236,13 @@ def _await_world(driver, world_host: str, *, deadline: float,
                 for handle in reversed(handles):
                     if handle == lobby_handle:
                         continue
+                    # Detached uc/Chrome windows can sit blank for a long
+                    # time. Inspect at most once every few seconds before
+                    # Play, not on every poll (which steals Mac focus).
+                    now = time.monotonic()
+                    if now - last_secondary_scan < 4.0:
+                        break
+                    last_secondary_scan = now
                     if driver.current_window_handle != handle:
                         driver.switch_to.window(handle)
                     if challenge_present(driver):
