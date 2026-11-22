@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QScrollArea, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, SubtitleLabel
 
+from daedalus.account_display import account_display_name
 from daedalus.desktop.design_system import METRICS
 
 
@@ -63,7 +64,7 @@ class AccountSelectionDialog(QDialog):
         self.checkboxes: dict[str, CheckBox] = {}
         for row in self._accounts:
             aid = str(row["id"])
-            label = str(row.get("label") or row.get("player") or aid)
+            label = account_display_name(row)
             world = str(row.get("world") or "")
             checkbox = CheckBox(f"{label}  ·  {world}" if world else label)
             checkbox.setChecked(aid in selected_ids)
