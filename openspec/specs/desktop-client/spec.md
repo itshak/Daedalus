@@ -335,6 +335,13 @@ The desktop SHALL offer a button to establish a local SSH tunnel using the user'
 - **AND** reconnect SHALL reuse Keychain credentials only for the exact saved HTTPS
   origin; failure SHALL show a safe error and not a misleading success state
 
+#### Scenario: Verified backend connection with saved token
+
+- **GIVEN** a trusted backend origin and a valid token
+- **WHEN** the client receives an authenticated connection handshake
+- **THEN** the user sees a success notification and a masked token hint
+- **AND** the token text is absent from the UI widget, logs and plaintext preferences
+
 ### Requirement: Default secure HTTPS and OS-Keychain reconnection
 
 The native client SHALL prefer direct TLS-verified HTTPS as its primary connection workflow, without requiring an SSH tunnel on the user's Mac. After an authenticated connection, the default selected preference SHALL save the bearer only in the OS Keychain, associate it with the exact validated HTTPS origin, and automatically reconnect on subsequent launches. Explicit opt-out SHALL allow an ephemeral session. The client MUST NOT silently copy a token to a different hostname, log credentials, or save bearer tokens in plaintext.
