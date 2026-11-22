@@ -69,7 +69,10 @@ def execute(request: dict[str, object]) -> int:
     # is required to bind the resulting world cookie to the chosen account.
     _emit("credentials", {"email": credentials.email, "remember": remember})
     _emit("stage", "launching_chrome")
-    cookie = login_world(credentials, world, notify=lambda stage: _emit("stage", stage))
+    login_options = {"visible_only": True} if request.get("visible_only") is True else {}
+    cookie = login_world(
+        credentials, world, notify=lambda stage: _emit("stage", stage), **login_options,
+    )
 
     # Only the client-sealed login envelope is prepared here. The server may
     # persist it ONLY after independent account verification. Never persist
