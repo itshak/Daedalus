@@ -36,7 +36,23 @@ Daedalus follows BlindBase's **GitHub Releases** distribution model: a verified
    and select the latest **Desktop Preview** prerelease.
 2. Click `Daedalus-macos-preview.dmg` under **Assets**. Your browser downloads
    the **DMG itself**, without another ZIP extraction step.
-3. Double-click the DMG and drag **Daedalus.app** onto **Applications**.
+3. Open the DMG. The folder now matches BlindBase's HFS+ DMG:
+   **Daedalus.app**, **Applications** shortcut and **readme_first.txt**.
+   Daedalus additionally offers **Install Daedalus.command** because its
+   verified app-specific quarantine-clearing behavior is already covered by
+   synthetic macOS CI.
+4. **For an install without opening Privacy & Security**, explicitly run
+   **Install Daedalus.command**. It checks the bundle signature, installs into
+   `~/Applications`, removes only the installed app's quarantine attribute,
+   and never changes global Gatekeeper settings. Finder may open the command in
+   Terminal; if Finder restricts the command itself, open Terminal and run
+   `bash "/Volumes/Daedalus/Install Daedalus.command"` instead.
+   Then launch Daedalus from Applications.
+5. **Alternatively, to reproduce BlindBase's exact manual drag-and-drop
+   instructions**, drag **Daedalus.app** onto **Applications**, then run
+   `xattr -cr /Applications/Daedalus.app` in Terminal before first launch.
+   This is the same explicit command BlindBase ships in its
+   `readme_first.txt`. Do this only for an installer you trust.
 
 Each successful `main` build publishes a separate preview tagged
 `desktop-preview-<12-character commit SHA>`, alongside
@@ -45,11 +61,9 @@ builds never publish public releases. GitHub Actions may still retain
 ZIP-wrapped artifacts for CI debugging; those are **not** the primary download.
 
 
-**No install script or Terminal command is required for the drag-and-drop step.** The DMG includes only the app and Applications link; it cannot automatically execute a script.
+**Gatekeeper limitation:** BlindBase's actual DMG builder packages a `readme_first.txt` advising `xattr -cr` for first installations. Its in-app quarantine-clearing command works **after** an app update and cannot resolve an app's first launch. Daedalus reproduces that documentation and HFS+ image format, while additionally embedding the already-reviewed explicit installer. The command must be run by the user; macOS does not permit DMGs to silently auto-execute commands. Installing by drag-and-drop without following either quarantine-clearing option can still produce the macOS Privacy & Security warning. A normal first-launch experience on other people's Macs requires Apple Developer ID signing and notarization. Never globally disable Gatekeeper.
 
-**Gatekeeper limitation:** like BlindBase's first-install DMG, this build remains ad-hoc signed and **not Apple notarized**. Installing from a DMG is convenient, but macOS may still block the app on first launch. This packaging change does **not** promise a warning-free first launch. BlindBase automatically uses `xattr -cr` only **after an in-app update**, once its original app is already running; its first-install documentation still describes manual approval/quarantine removal. Shipping a DMG cannot silently override macOS security checks. For guaranteed standard first-launch behavior on typical Macs, distribute a Developer ID-signed and Apple-notarized build.
-
-The older **Daedalus-macos-app-preview** ZIP artifact and optional `Install Daedalus.command` remain as an alternative for explicitly trusted local preview installs, but are **not part of the DMG**. The new primary workflow does not ask users to run them. Never globally disable Gatekeeper.
+The legacy **Daedalus-macos-app-preview** ZIP artifact continues as a secondary CI/testing download and includes the same installer, but is no longer needed to get it.
 
 ## Local macOS DMG build
 
@@ -59,13 +73,19 @@ After building the signed local preview app as above, run:
 python packaging/build_macos_dmg.py --app dist/Daedalus.app --output dist/Daedalus-macos-preview.dmg
 ```
 
-This verifies the ad-hoc code signature and bundle identifier, uses `ditto` to stage the app, creates an `/Applications` link, builds a compressed UDZO DMG with `hdiutil`, and verifies the disk image. No Finder Automation permission or desktop session is required for packaging.
+This verifies the ad-hoc code signature and bundle identifier, creates an
+**HFS+** read/write image as in BlindBase, stages the app using `ditto`, adds
+an `/Applications` symlink, includes `readme_first.txt` and the opt-in
+installer, converts to compressed **UDZO**, and verifies the disk image.
+No Finder Automation permission or desktop session is required.
 
 ## GitHub CI
 
 The `macos-app.yml` workflow builds a DMG, mounts it on the macOS runner,
 checks the app and Applications symlink, verifies the code signature, and
-runs a synthetic ZIP installer check. **Only after this succeeds**, a separate
+tests the quarantine-clearing installer **both from the legacy ZIP and from
+the new mounted DMG**, without modifying global Gatekeeper settings.
+**Only after these pass**, a separate
 `main`-only job with scoped `contents: write` permission publishes the
 exact DMG as a **GitHub prerelease asset** with a SHA-256 checksum.
 Pull-request jobs have read-only repository permissions; they cannot
