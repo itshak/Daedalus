@@ -347,3 +347,29 @@ def test_secondary_game_tab_captcha_is_detected_before_timeout(monkeypatch):
             headless=True, notify=lambda _event: None,
             cancelled=lambda: False,
         )
+
+def test_visible_only_recovery_never_replays_saved_headless_session(monkeypatch):
+    """A fresh ticket and interactive Chrome, not the rejected legacy cookie."""
+    from daedalus.desktop import selenium_auth as auth
+    from daedalus.desktop import selenium_credentials
+
+    modes, stages = [], []
+    monkeypatch.setattr(
+        selenium_credentials, "legacy_saved_session",
+        lambda *_args: pytest.fail("rejected saved cookie must never be replayed"),
+    )
+
+    def login_once(_driver, _credentials, _host, *, headless, **_kwargs):
+        assert headless is False
+        return "synthetic-visible-cookie"
+
+    monkeypatch.setattr(auth, "_login_once", login_once)
+    result = auth.login_world(
+        _creds(), "s53-ru", visible_only=True,
+        driver_factory=lambda headless: (modes.append(headless) or FakeChrome()),
+        notify=stages.append,
+    )
+    assert result == "synthetic-visible-cookie"
+    assert modes == [False]
+    assert stages[0] == "opening_visible_browser"
+    assert "checking_saved_session" not in stages
