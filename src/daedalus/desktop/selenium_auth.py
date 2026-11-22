@@ -317,6 +317,7 @@ def login_world(
     *, driver_factory: Callable[[bool], object] = create_chrome,
     notify: Callable[[str], None] | None = None, timeout_seconds: float = 240,
     cancelled: Callable[[], bool] | None = None,
+    visible_only: bool = False,
 ) -> str:
     """Try headless first; give failures a bounded visible-browser recovery.
 
@@ -335,7 +336,9 @@ def login_world(
     )
     host = f"{world.casefold()}.ikariam.gameforge.com"
 
-    for headless in (True, False):
+    # A rejected server-side handoff must use a fresh, human-visible browser;
+    # replaying the same locally restored cookie would repeat the rejection.
+    for headless in ((False,) if visible_only else (True, False)):
         if stop_requested():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
         if time.monotonic() >= deadline:
