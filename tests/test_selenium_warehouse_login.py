@@ -373,3 +373,152 @@ def test_visible_only_recovery_never_replays_saved_headless_session(monkeypatch)
     assert modes == [False]
     assert stages[0] == "opening_visible_browser"
     assert "checking_saved_session" not in stages
+
+def test_sign_in_tab_is_selected_by_semantics_not_registration_index():
+    pytest.importorskip("selenium")
+
+    class Tab:
+        def __init__(self, label):
+            self.text = label
+            self.clicked = False
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, _name):
+            return None
+
+        def click(self):
+            self.clicked = True
+
+    register = Tab("Регистрация")
+    login = Tab("Вход")
+
+    class Browser:
+        def find_elements(self, _by, selector):
+            assert selector == auth.LOGIN_TAB_XPATH
+            return [register, login]
+
+    events = []
+    auth._select_sign_in_tab(Browser(), events.append)
+    assert login.clicked is True
+    assert register.clicked is False
+    assert events == ["sign_in_tab_selected"]
+
+
+def test_unknown_sign_in_tab_does_not_type_into_registration():
+    pytest.importorskip("selenium")
+
+    class UnknownTab:
+        text = "Create your new account"
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, _name):
+            return None
+
+        def click(self):
+            pytest.fail("Never click an unrecognized or registration tab")
+
+    class Browser:
+        def find_elements(self, *_args):
+            return [UnknownTab()]
+
+    stages = []
+    with pytest.raises(auth.SeleniumLoginUnavailable, match="sign-in tab"):
+        auth._select_sign_in_tab(Browser(), stages.append)
+    assert stages == ["sign_in_tab_not_found"]
+
+
+def test_only_visible_sign_in_form_can_receive_credentials():
+    pytest.importorskip("selenium")
+
+    class Input:
+        def is_displayed(self):
+            return True
+
+        def is_enabled(self):
+            return True
+
+    class Form:
+        def __init__(self, identity):
+            self.identity = identity
+            self.email, self.password, self.submit = Input(), Input(), Input()
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, name):
+            return self.identity if name == "id" else ""
+
+        def find_elements(self, _by, selector):
+            return {
+                "input[name='email']": [self.email],
+                "input[name='password']": [self.password],
+                "button[type='submit'],input[type='submit']": [self.submit],
+            }.get(selector, [])
+
+    register = Form("registerForm")
+    login = Form("loginForm")
+
+    class Browser:
+        def find_elements(self, _by, selector):
+            assert selector == "form"
+            return [register, login]
+
+    assert auth._visible_sign_in_form(Browser()) == (
+        login.email, login.password, login.submit,
+    )
+
+
+def test_visible_chrome_does_not_switch_tabs_on_every_poll(monkeypatch):
+    pytest.importorskip("selenium")
+
+    class Play:
+        def __init__(self, browser):
+            self.browser = browser
+
+        def click(self):
+            self.browser.played = True
+            self.browser.window_handles = ["lobby", "game"]
+
+    class TabControl:
+        def __init__(self, browser):
+            self.browser = browser
+
+        def window(self, handle):
+            self.browser.switches.append(handle)
+            self.browser.current_window_handle = handle
+
+    class Browser:
+        def __init__(self):
+            self.current_window_handle = "lobby"
+            self.window_handles = ["lobby"]
+            self.switches = []
+            self.played = False
+            self.switch_to = TabControl(self)
+            self.play = Play(self)
+
+        def find_elements(self, _by, selector):
+            return [self.play] if selector == auth.PLAY_BUTTON_XPATH and not self.played else []
+
+    browser = Browser()
+    polled = []
+    monkeypatch.setattr(auth, "challenge_present", lambda *_args: False)
+
+    def world_ready(driver, *_args):
+        if driver.current_window_handle == "game":
+            polled.append("game")
+            return len(polled) >= 5
+        return False
+
+    monkeypatch.setattr(auth, "_world_ready", world_ready)
+    monkeypatch.setattr(auth.time, "sleep", lambda *_args: None)
+    auth._await_world(
+        browser, "s53-ru.ikariam.gameforge.com",
+        deadline=auth.time.monotonic() + 3,
+        headless=False, notify=lambda *_args: None, cancelled=lambda: False,
+    )
+    assert browser.switches == ["game"]
+    assert len(polled) == 5
