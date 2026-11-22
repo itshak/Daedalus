@@ -26,31 +26,35 @@ The script creates the native PyInstaller `Daedalus.app` bundle from the **check
 
 The `--adhoc-sign` option creates an **ad-hoc signature** suitable for local testing; it is not notarized and is not a Developer ID signature. Gatekeeper may prevent installation by other users, so do not represent this as a production-signed public release.
 
-## Download and install the preview without Privacy & Security approval
+## macOS drag-and-drop DMG — preferred installation
 
-1. Download the latest **Daedalus-macos-app-preview** artifact from [macOS Actions](https://github.com/itshak/Daedalus/actions/workflows/macos-app.yml).
-2. Extract the GitHub Actions artifact ZIP, then extract **Daedalus-macos-preview.zip** inside it. The resulting folder contains **Daedalus.app** and **Install Daedalus.command**.
-3. Open Terminal in that extracted folder and run:
+Daedalus now ships a **BlindBase-style disk image**, not just a nested app ZIP:
 
-   ```bash
-   bash "Install Daedalus.command"
-   ```
+1. Download the **Daedalus-macos-dmg** artifact from [macOS Actions](https://github.com/itshak/Daedalus/actions/workflows/macos-app.yml) (GitHub downloads CI artifacts inside a ZIP), and extract it once.
+2. Double-click **Daedalus-macos-preview.dmg** to mount it in Finder.
+3. Drag **Daedalus.app** onto the **Applications** shortcut, then open Daedalus from Applications.
 
-   Depending on the Mac's policies, you may also be able to double-click **Install Daedalus.command** directly in Finder. The Terminal command is the reliable fallback when Finder blocks an untrusted script.
+**No install script or Terminal command is required for the drag-and-drop step.** The DMG includes only the app and Applications link; it cannot automatically execute a script.
 
-4. The installer verifies the bundle identifier and the ad-hoc code-signature integrity, copies the app to **~/Applications/Daedalus.app**, then removes **only** the `com.apple.quarantine` extended attribute from this installed app. Launch it normally from your Applications folder.
+**Gatekeeper limitation:** like BlindBase's first-install DMG, this build remains ad-hoc signed and **not Apple notarized**. Installing from a DMG is convenient, but macOS may still block the app on first launch. This packaging change does **not** promise a warning-free first launch. BlindBase automatically uses `xattr -cr` only **after an in-app update**, once its original app is already running; its first-install documentation still describes manual approval/quarantine removal. Shipping a DMG cannot silently override macOS security checks. For guaranteed standard first-launch behavior on typical Macs, distribute a Developer ID-signed and Apple-notarized build.
 
-This avoids the manual **System Settings → Privacy & Security → Open Anyway** step for the preview *when the installer runs successfully*. It does **not** disable Gatekeeper globally, modify system settings, require `sudo`, or send credentials anywhere. It may not bypass organization-managed macOS restrictions. Install only artifacts you trust.
+The older **Daedalus-macos-app-preview** ZIP artifact and optional `Install Daedalus.command` remain as an alternative for explicitly trusted local preview installs, but are **not part of the DMG**. The new primary workflow does not ask users to run them. Never globally disable Gatekeeper.
 
-**Why this must run on your Mac:** macOS adds quarantine as a download/extraction attribute on the receiving Mac, so an `xattr` command during the GitHub build does not solve first-launch blocking. An ad-hoc signature is not an Apple Developer ID signature or a notarization ticket. The proper public-distribution route remains Developer ID signing plus Apple notarization.
+## Local macOS DMG build
 
-To install a newer preview, run the new installer again. It replaces only an existing app with the expected Daedalus bundle identifier. Your Keychain and application settings are not part of the .app and are not touched.
+After building the signed local preview app as above, run:
+
+```bash
+python packaging/build_macos_dmg.py --app dist/Daedalus.app --output dist/Daedalus-macos-preview.dmg
+```
+
+This verifies the ad-hoc code signature and bundle identifier, uses `ditto` to stage the app, creates an `/Applications` link, builds a compressed UDZO DMG with `hdiutil`, and verifies the disk image. No Finder Automation permission or desktop session is required for packaging.
 
 ## GitHub CI
 
-The `macos-app.yml` workflow builds the preview app on macOS, verifies its bundle and ad-hoc signature, archives the app **alongside the local install command**, and tests installing a quarantined extract into a temporary user-owned directory. Artifacts are built only from the current source checkout, with unprivileged read-only GitHub permissions. There are no game-account secrets, deployment tokens or PyPI credentials.
+The `macos-app.yml` workflow produces **Daedalus-macos-dmg** as the preferred artifact, mounts the DMG on the macOS runner, checks that Daedalus.app and the Applications symlink are present, and re-verifies the app signature. The legacy ZIP installer continues to undergo its separate synthetic quarantine test. Neither artifact contains game-account credentials or production tokens.
 
-The workflow intentionally does **not** release automatically, notarize, attach an update feed or install an app in the runner's system Applications folder.
+The workflow intentionally does **not** automatically publish a signed/notarized public release, attach an update feed, or install to the CI runner's system Applications folder.
 
 ## Native browser requirements
 
