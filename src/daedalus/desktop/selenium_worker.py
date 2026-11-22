@@ -39,6 +39,7 @@ class SeleniumLoginWorker(QThread):
         self, world: str, credentials: GameforgeCredentials | None, parent=None, *,
         origin: str = "", account_id: str = "", record: dict[str, object] | None = None,
         sealed_vault: dict[str, object] | None = None, remember: bool = False,
+        visible_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self._world = world
@@ -48,6 +49,7 @@ class SeleniumLoginWorker(QThread):
         self._record = dict(record or {})
         self._sealed_vault = sealed_vault
         self._remember = remember
+        self._visible_only = visible_only
         self._cancel = threading.Event()
         self._lock = threading.Lock()
         self._process: subprocess.Popen[bytes] | None = None
@@ -89,6 +91,7 @@ class SeleniumLoginWorker(QThread):
                 "world": self._world, "account_id": self._account_id,
                 "origin": self._origin, "record": self._record,
                 "sealed_vault": self._sealed_vault, "remember": self._remember,
+                "visible_only": self._visible_only,
                 "credentials": ({
                     "email": self._credentials.email,
                     "password": self._credentials.password,
