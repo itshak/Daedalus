@@ -37,6 +37,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.account_display import account_display_name
 from daedalus.desktop.design_system import PageHeading, StatusPanel
 from daedalus.desktop.widgets import OpaqueCardWidget, ScrollTableWidget
 from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
@@ -81,15 +82,8 @@ _OFFICIAL_WORLD_NAMES = {"s52-ru": "Adonis", "s53-ru": "Eurydike"}
 
 
 def _account_title(account: dict[str, object]) -> str:
-    """Prefer the saved identity over an obsolete imported placeholder."""
-    email = account.get("email")
-    if (isinstance(email, str) and "@" in email
-            and not any(char in email for char in "\r\n\x00")):
-        return email
-    label = str(account.get("label") or "")
-    if label and not _IMPORTED_LABEL.fullmatch(label.strip()):
-        return label
-    return str(account.get("player") or account.get("id") or "—")
+    """Prefer server-bound email, meaningful label or player fallback."""
+    return account_display_name(account)
 
 
 def _world_title(account: dict[str, object]) -> str:
@@ -1564,7 +1558,7 @@ class WarehousesPage(QWidget):
         self._account_ids = list(self._accounts)
         self.account_combo.clear()
         for account in self._accounts.values():
-            self.account_combo.addItem(str(account.get("label") or account.get("player") or account["id"]))
+            self.account_combo.addItem(account_display_name(account))
         if previous in self._account_ids:
             self.account_combo.setCurrentIndex(self._account_ids.index(previous))
         self.load_all_button.setEnabled(bool(self._account_ids))
@@ -1715,7 +1709,7 @@ class WarehousesPage(QWidget):
             status = "No warehouses match the 220K+ filter; disable it to see all cities"
         if self._failed_accounts:
             labels = [
-                str(self._accounts.get(aid, {}).get("label") or aid)
+                account_display_name(self._accounts.get(aid, {"id": aid}))
                 for aid in self._failed_accounts
             ]
             status += "; unavailable account snapshots: " + ", ".join(labels[:5])
