@@ -225,6 +225,25 @@ def test_saved_connection_is_opt_in_and_never_written_to_text_inputs(qt_app, mon
         window.close()
 
 
+def test_failed_new_connection_discloses_old_session_remains(qt_app, monkeypatch):
+    window = MainWindow()
+
+    class ExistingClient:
+        def close(self):
+            pass
+
+    window.client = ExistingClient()
+    window.connection_page.set_connected(True)
+    monkeypatch.setattr(window, "_notice", lambda *_args: None)
+    try:
+        window._on_failed("connect", "401 unauthorized")
+        assert "New connection failed" in window.connection_page.status_label.text()
+        assert "previously verified backend" in window.connection_page.status_label.text()
+        assert window.connection_page.overview_button.isEnabled()
+    finally:
+        window.close()
+
+
 def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
