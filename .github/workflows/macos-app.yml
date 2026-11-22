@@ -64,7 +64,29 @@ jobs:
             echo "Installer failed to clear the app-specific quarantine flag" >&2
             exit 1
           fi
-      - name: Upload CI preview, not a public release
+      - name: Build BlindBase-style drag-and-drop DMG
+        run: python packaging/build_macos_dmg.py --app dist/Daedalus.app --output dist/Daedalus-macos-preview.dmg
+      - name: Verify mounted DMG contents and app integrity
+        run: |
+          mount_dir="$(mktemp -d "$RUNNER_TEMP/daedalus-mounted.XXXXXX")"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" dist/Daedalus-macos-preview.dmg
+          trap 'hdiutil detach "$mount_dir" || true' EXIT
+          test -f "$mount_dir/Daedalus.app/Contents/MacOS/Daedalus"
+          test -L "$mount_dir/Applications"
+          test "$(readlink "$mount_dir/Applications")" = /Applications
+          test ! -e "$mount_dir/Install Daedalus.command"
+          codesign --verify --deep --strict "$mount_dir/Daedalus.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mount_dir/Daedalus.app/Contents/Info.plist")" = io.github.itshak.daedalus
+          hdiutil detach "$mount_dir"
+          trap - EXIT
+      - name: Upload drag-and-drop macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daedalus-macos-dmg
+          path: dist/Daedalus-macos-preview.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload legacy ZIP preview as an alternative
         uses: actions/upload-artifact@v4
         with:
           name: Daedalus-macos-app-preview
