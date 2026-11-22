@@ -430,6 +430,36 @@ bound to HTTPS backend origin, account ID and world.
 - **AND** no session is reported verified until an exact-host secure cookie
   passes independent backend player/world attestation
 
+#### Scenario: Server rejects the headless world-cookie handoff
+
+- **GIVEN** the isolated helper successfully restored or obtained an exact-world cookie,
+  but the server rejects independent account validation or cookie binding
+- **WHEN** the browser's encrypted handoff receives a rejected server receipt
+- **THEN** the desktop SHALL NOT report a connected or verified account
+- **AND** the client SHALL request a fresh one-use account-scoped challenge and
+  attempt one visible-only Chrome login without replaying the rejected saved cookie
+- **AND** a second server rejection, cancellation or inability to issue a fresh
+  challenge SHALL terminate recovery without claiming success or launching game tasks
+
+#### Scenario: Verified world cookie is saved without an attached worker
+
+- **WHEN** independent server verification returns a cookie-bound receipt but no
+  dedicated game worker was reconnected
+- **THEN** the desktop SHALL explicitly report "session verified and saved; worker
+  not connected" instead of calling the account authenticated
+- **AND** the final per-cohort outcome SHALL remain visible after sign-in completes,
+  distinguishing saved sessions from reconnected workers
+- **AND** the account's authoritative session/worker status SHALL remain unchanged
+  until the server actually attaches and validates the game worker
+
+#### Scenario: Actionable sanitized login failure diagnostics
+
+- **WHEN** a browser login, backend challenge or one-use session handoff fails
+- **THEN** the Activity page SHALL distinguish the reviewed failure category and
+  the stage at which it happened, rather than showing a generic warning only
+- **AND** neither the timeline nor technical diagnostics SHALL display plaintext
+  passwords, secure cookies or unreviewed Gameforge/API response details
+
 #### Scenario: Headless login telemetry and isolation
 
 - **GIVEN** a headless Selenium sign-in is requested
