@@ -81,6 +81,10 @@ def _safe_api_failure(reason: str) -> str:
         "This worker is busy or has an uncertain task; reconcile it before login",
         "Running or uncertain tasks must be reconciled before login",
         "This backend has not enabled native browser login",
+        "Server did not verify the exact game account; login was not accepted",
+        "Gameforge email differs from the existing account binding",
+        "Another worker owns this game account",
+        "Browser handoff is expired or already consumed",
     }
     return reason if reason in permitted else "request failed (unreviewed detail suppressed)"
 
@@ -2489,6 +2493,10 @@ class MainWindow(FluentWindow):
                     "A Gameforge email is required for first-time account binding",
                     "This worker is busy or has an uncertain task; reconcile it before login",
                     "Running or uncertain tasks must be reconciled before login",
+                    "Server did not verify the exact game account; login was not accepted",
+                    "Gameforge email differs from the existing account binding",
+                    "Another worker owns this game account",
+                    "Browser handoff is expired or already consumed",
                 } else None
                 self._notice(
                     "Mac browser recovery unavailable",
