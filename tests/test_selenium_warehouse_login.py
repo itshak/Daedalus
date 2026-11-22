@@ -47,7 +47,7 @@ def test_headless_login_succeeds_without_visible_browser(monkeypatch):
     assert all(browser.closed for browser in browsers)
 
 
-def test_visible_chrome_only_for_detected_captcha(monkeypatch):
+def test_visible_chrome_retries_captcha_failure(monkeypatch):
     modes = []
     stages = []
 
@@ -63,22 +63,87 @@ def test_visible_chrome_only_for_detected_captcha(monkeypatch):
         notify=stages.append,
     ) == "manual-result"
     assert modes == [True, False]
-    assert stages == ["opening_visible_captcha"]
+    assert stages == [
+        "starting_headless_browser", "checking_saved_session",
+        "headless_login_failed", "opening_visible_captcha",
+        "opening_visible_browser",
+    ]
 
 
-def test_wrong_password_does_not_open_visible_chrome(monkeypatch):
-    modes = []
+def test_wrong_password_opens_visible_chrome_for_manual_correction(monkeypatch):
+    modes, stages = [], []
 
     def attempt(*_args, **_kwargs):
         raise auth.SeleniumLoginUnavailable("Gameforge rejected credentials")
 
     monkeypatch.setattr(auth, "_login_once", attempt)
-    with pytest.raises(auth.SeleniumLoginUnavailable, match="rejected"):
-        auth.login_world(_creds(), "s53-ru",
-                         driver_factory=lambda headless: (
-                             modes.append(headless) or FakeChrome()
-                         ))
-    assert modes == [True]
+    monkeypatch.setattr(auth, "_await_world", lambda *_args, **_kwargs: (
+        (_ for _ in ()).throw(auth.SeleniumLoginUnavailable(
+            "Manual login not completed"
+        ))
+    ))
+    with pytest.raises(auth.SeleniumLoginUnavailable, match="Manual login not completed"):
+        auth.login_world(
+            _creds(), "s53-ru",
+            driver_factory=lambda headless: (
+                modes.append(headless) or FakeChrome()
+            ), notify=stages.append,
+        )
+    assert modes == [True, False]
+    assert "opening_visible_recovery" in stages
+    assert "manual_login_required" in stages
+
+
+def test_non_captcha_failure_recovers_with_visible_browser(monkeypatch):
+    modes, stages, browsers = [], [], []
+
+    def attempt(_driver, _credentials, _host, *, headless, **_kwargs):
+        if headless:
+            raise auth.SeleniumLoginUnavailable("Headless page did not load")
+        return "synthetic-visible-session"
+
+    def factory(headless):
+        modes.append(headless)
+        chrome = FakeChrome()
+        browsers.append(chrome)
+        return chrome
+
+    monkeypatch.setattr(auth, "_login_once", attempt)
+    result = auth.login_world(
+        _creds(), "s53-ru", driver_factory=factory, notify=stages.append,
+    )
+    assert result == "synthetic-visible-session"
+    assert modes == [True, False]
+    assert "headless_login_failed" in stages
+    assert "opening_visible_recovery" in stages
+    assert all(browser.closed for browser in browsers)
+
+
+def test_visible_browser_can_complete_manual_corrected_login(monkeypatch):
+    modes, stages = [], []
+
+    class ManualBrowser(FakeChrome):
+        def get_cookies(self):
+            return [{
+                "name": "ikariam", "domain": "s53-ru.ikariam.gameforge.com",
+                "secure": True, "value": "x" * 48,
+            }]
+
+    def attempt(*_args, **_kwargs):
+        raise auth.SeleniumLoginUnavailable("Login form needs manual correction")
+
+    monkeypatch.setattr(auth, "_login_once", attempt)
+    monkeypatch.setattr(auth, "_await_world", lambda *_args, **_kwargs: None)
+    result = auth.login_world(
+        _creds(), "s53-ru",
+        driver_factory=lambda headless: (
+            modes.append(headless) or ManualBrowser()
+        ), notify=stages.append,
+    )
+    assert result == "x" * 48
+    assert modes == [True, False]
+    assert "manual_login_required" in stages
+    assert "world_cookie_ready" in stages
 
 
 def test_invalid_world_fails_before_driver_start():
