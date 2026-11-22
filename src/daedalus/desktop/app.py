@@ -1295,6 +1295,22 @@ class MainWindow(FluentWindow):
         if self._automatic_login_challenge is not None:
             self._cancel_selenium_handoff(self._automatic_login_challenge)
 
+    def _retry_rejected_handoff_visibly(self) -> bool:
+        """Wait until BOTH the API and Selenium workers stop before retry."""
+        if not self._automatic_login_pending_visible_retry:
+            return False
+        if (self._worker is not None or self._selenium_worker is not None
+                or self._closing_requested):
+            return True
+        if (not self._automatic_login_active or self._automatic_login_cancelled
+                or self._automatic_login_current is None or self.client is None):
+            self._automatic_login_pending_visible_retry = False
+            return False
+        self._automatic_login_pending_visible_retry = False
+        self._automatic_login_challenge = None
+        self._request("native_login_start", account_id=self._automatic_login_current)
+        return True
+
     def _selenium_finished(self) -> None:
         self._selenium_watchdog.stop()
         worker = self._selenium_worker
@@ -1309,6 +1325,8 @@ class MainWindow(FluentWindow):
         if self._automatic_login_needs_credentials:
             self._automatic_login_needs_credentials = False
             QTimer.singleShot(0, self._prompt_automatic_login_credentials)
+            return
+        if self._retry_rejected_handoff_visibly():
             return
         # The Selenium finished signal and HTTP cancellation response can
         # arrive in either order. Advance exactly once after BOTH are idle.
@@ -2523,12 +2541,7 @@ class MainWindow(FluentWindow):
         self.connection_page.set_connecting(False)
         if self._closing_requested:
             return
-        if (self._automatic_login_pending_visible_retry and self._automatic_login_active
-                and not self._automatic_login_cancelled and self._automatic_login_current
-                and self.client is not None):
-            self._automatic_login_pending_visible_retry = False
-            self._automatic_login_challenge = None
-            self._request("native_login_start", account_id=self._automatic_login_current)
+        if self._retry_rejected_handoff_visibly():
             return
         pending_cancel, self._pending_selenium_cancel = self._pending_selenium_cancel, None
         if pending_cancel is not None:
