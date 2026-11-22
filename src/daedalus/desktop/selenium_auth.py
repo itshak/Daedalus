@@ -331,6 +331,50 @@ def _visible_sign_in_form(driver):
     return matching[0] if len(matching) == 1 else False
 
 
+def restore_saved_world_without_keychain(
+    email: str, world: str, *,
+    driver_factory: Callable[[bool], object] = create_chrome,
+    notify: Callable[[str], None] | None = None,
+) -> str | None:
+    """Attempt a bounded exact-world legacy restore before asking Keychain.
+
+    Only an account email already supplied by the authenticated Daedalus
+    backend can be used by the caller. This never accesses passwords or
+    writes to the old warehouse bot's files.
+    """
+    from daedalus.desktop.selenium_credentials import legacy_saved_session
+
+    if not isinstance(email, str) or "@" not in email or not WORLD.fullmatch(world):
+        return None
+    saved = legacy_saved_session(email, world)
+    if saved is None:
+        return None
+    report = notify or (lambda _stage: None)
+    report("checking_saved_session")
+    driver = None
+    try:
+        report("starting_headless_browser")
+        driver = driver_factory(True)
+        cookie = _restore_legacy_session(
+            driver, saved, f"{world.casefold()}.ikariam.gameforge.com",
+            deadline=time.monotonic() + 18,
+        )
+        if cookie is not None:
+            report("saved_session_restored")
+        else:
+            report("saved_session_expired")
+        return cookie
+    except Exception:  # noqa: BLE001 - the normal credential login may still work
+        report("saved_session_expired")
+        return None
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:  # noqa: BLE001 - webdriver cleanup is best effort
+                log.warning("Saved world Chrome cleanup did not complete")
+
+
 def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
                 headless: bool, deadline: float, notify: Callable[[str], None],
                 cancelled: Callable[[], bool]) -> str:
@@ -400,6 +444,7 @@ def login_world(
     notify: Callable[[str], None] | None = None, timeout_seconds: float = 240,
     cancelled: Callable[[], bool] | None = None,
     visible_only: bool = False,
+    skip_saved_session: bool = False,
 ) -> str:
     """Try headless first; give failures a bounded visible-browser recovery.
 
@@ -429,7 +474,7 @@ def login_world(
         report("starting_headless_browser" if headless else "opening_visible_browser")
         try:
             driver = driver_factory(headless)
-            if headless:
+            if headless and not skip_saved_session:
                 from daedalus.desktop.selenium_credentials import legacy_saved_session
 
                 report("checking_saved_session")
