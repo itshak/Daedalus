@@ -14,6 +14,7 @@ from daedalus.desktop.selenium_auth import (
     GameforgeCredentials,
     SeleniumLoginUnavailable,
     login_world,
+    restore_saved_world_without_keychain,
 )
 from daedalus.desktop.selenium_credentials import (
     LoginCredentialError,
@@ -42,6 +43,26 @@ def execute(request: dict[str, object]) -> int:
     credentials = None
     remember = request.get("remember") is True
     entered = request.get("credentials")
+    server_vault = request.get("sealed_vault")
+    has_vault = isinstance(server_vault, dict)
+    visible_only = request.get("visible_only") is True
+    skip_saved_session = False
+
+    # If the already-bound backend email has a usable saved exact-world
+    # session, do not access either Keychain item at all. This is read-only
+    # and still requires the independent encrypted backend verification.
+    if entered is None and not visible_only:
+        bound_email = record.get("email")
+        if isinstance(bound_email, str) and "@" in bound_email:
+            skip_saved_session = True
+            restored = restore_saved_world_without_keychain(
+                bound_email, world, notify=lambda stage: _emit("stage", stage),
+            )
+            if restored is not None:
+                _emit("credentials", {"email": bound_email, "remember": False})
+                _emit("cookie", restored)
+                return 0
+
     if entered is not None:
         if not isinstance(entered, dict) or set(entered) != {"email", "password"}:
             _emit("error", "Invalid login credentials")
@@ -50,20 +71,50 @@ def execute(request: dict[str, object]) -> int:
     else:
         _emit("stage", "resolving_saved_login")
         try:
-            credentials = get_saved_login(origin, aid, world)
-            if credentials is None:
-                envelope = request.get("sealed_vault")
-                if isinstance(envelope, dict):
-                    credentials = unseal_login(origin, aid, world, envelope)
+            # The server already retains an encrypted vault? Use its local
+            # Mac key once. Do NOT query the other per-account Keychain item
+            # first and then reseal the same password after every login.
+            if has_vault:
+                credentials = unseal_login(origin, aid, world, server_vault)
+            else:
+                credentials = get_saved_login(origin, aid, world)
             if credentials is None:
                 credentials = legacy_warehouse_login(record)
             remember = credentials is not None
         except LoginCredentialError:
-            # Keychain may be locked/unavailable. The GUI can offer manual input.
+            # One failed item access is sufficient. Re-prompting through an
+            # additional Keychain item would cause repetitive macOS dialogs.
             _emit("stage", "keychain_unavailable")
+            credentials = legacy_warehouse_login(record)
+            remember = credentials is not None
+
     if credentials is None:
         _emit("credentials_required")
         return 0
+
+    # Only the email is returned to the GUI; the password stays in the child.
+    _emit("credentials", {"email": credentials.email, "remember": remember})
+    _emit("stage", "launching_chrome")
+    login_options = {"visible_only": True} if visible_only else {}
+    if skip_saved_session:
+        login_options["skip_saved_session"] = True
+    cookie = login_world(
+        credentials, world, notify=lambda stage: _emit("stage", stage), **login_options,
+    )
+
+    # Reuse an existing server vault as-is. Generate a new encrypted login
+    # only on first backup or when the operator manually changed credentials.
+    # This avoids redundant per-account Keychain prompts and writes.
+    vault = None
+    if remember and (entered is not None or not has_vault):
+        try:
+            vault = seal_login(origin, aid, world, credentials)
+        except LoginCredentialError:
+            _emit("stage", "keychain_save_failed")
+    if vault is not None:
+        _emit("vault", vault)
+    _emit("cookie", cookie)
+    return 0
 
     # Do not send a saved password back to the GUI. Only an email address
     # is required to bind the resulting world cookie to the chosen account.
