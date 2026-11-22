@@ -8,6 +8,7 @@ the established encrypted server handoff and independent player verification.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import sys
@@ -103,7 +104,15 @@ def create_chrome(headless: bool):
         # Chromium test-only keychain switch is safe here ONLY because each
         # browser gets a fresh private profile that we erase on exit. Never
         # use it to read someone's normal Chrome profile or saved passwords.
-        profile = tempfile.mkdtemp(prefix="daedalus-selenium-")
+        parent = os.environ.get("DAEDALUS_LOGIN_PROFILE_ROOT")
+        tempdir = tempfile.gettempdir()
+        if (not isinstance(parent, str)
+                or not parent.startswith(tempdir + os.sep + "daedalus-login-")
+                or not os.path.isdir(parent) or os.path.islink(parent)
+                or os.stat(parent).st_uid != os.getuid()
+                or os.stat(parent).st_mode & 0o077):
+            parent = None
+        profile = tempfile.mkdtemp(prefix="daedalus-selenium-", dir=parent)
         options.add_argument(f"--user-data-dir={profile}")
         options.add_argument("--use-mock-keychain")
         options.add_argument("--password-store=basic")
@@ -145,7 +154,10 @@ def _dispose_chrome(driver) -> None:
         log.warning("Selenium Chrome cleanup did not complete")
     finally:
         if (isinstance(profile, str)
-                and profile.startswith(str(tempfile.gettempdir()) + "/daedalus-selenium-")):
+                and os.path.basename(profile).startswith("daedalus-selenium-")
+                and not os.path.islink(profile)
+                and os.path.isdir(profile)
+                and os.stat(profile).st_uid == os.getuid()):
             try:
                 shutil.rmtree(profile)
             except OSError:
