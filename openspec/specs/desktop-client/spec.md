@@ -65,6 +65,34 @@ Mac packaging SHALL distinguish local ad-hoc signing from a developer-signed and
 - **WHEN** the user downloads the app artifact
 - **THEN** documentation explains that it is a preview and may be blocked by macOS Gatekeeper without developer notarization
 
+### Requirement: Direct-download macOS preview release assets
+
+After a verified macOS preview build on the trusted default branch, Daedalus
+SHALL publish the DMG **directly as a GitHub prerelease asset** rather than
+requiring users to download an Actions-generated ZIP archive. Each prerelease
+SHALL identify its exact source revision and include a file checksum. The
+release-publishing job SHALL run only for the default branch, after macOS
+bundle and mounted-DMG validation succeeds, with write permissions unavailable
+to pull-request build jobs. The app SHALL be accurately labeled as ad-hoc
+signed and not notarized; the direct download MUST NOT be described as a
+Gatekeeper workaround.
+
+#### Scenario: Main-branch macOS build passes validation
+- **GIVEN** a trusted main-branch commit with a successful macOS packaging job
+- **WHEN** its DMG is verified and publishing begins
+- **THEN** a named public prerelease exposes the original `.dmg` as a direct
+  download with no Actions ZIP wrapper
+- **AND** its tag, release notes and SHA-256 checksum identify the build
+
+#### Scenario: Pull-request build completes
+- **WHEN** an unmerged pull request completes its macOS build
+- **THEN** no public release is created and the job has no release-write permission
+
+#### Scenario: User installs an unsigned development preview
+- **WHEN** the user opens the downloaded DMG and copies its app
+- **THEN** documentation explains that unnotarized apps may still require
+  macOS first-launch approval, independently of the download container
+
 ### Requirement: Native desktop can inspect attached engine sessions without account secrets
 The desktop SHALL show whether configured accounts match authenticated existing IkaBot sessions, obtained only after an explicit user request, without exposing engine authentication credentials or account emails.
 
