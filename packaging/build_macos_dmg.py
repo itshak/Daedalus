@@ -1,21 +1,55 @@
 #!/usr/bin/env python3
-"""Build a simple drag-to-Applications DMG from an already-built Daedalus.app.
+"""Build a BlindBase-style HFS+ DMG with a user-initiated preview installer.
 
-Modelled on BlindBase's custom macOS DMG packaging: the disk image contains
-only Daedalus.app and an Applications shortcut, so users do not run scripts.
-It does NOT sign/notarize the app or bypass macOS Gatekeeper.
+BlindBase includes a readme_first.txt with an xattr -cr instruction because
+its first-run DMG is not Apple-notarized. This package keeps that instruction,
+the drag-to-Applications shortcut, and an optional *explicitly run* helper that
+copies the signature-verified app and removes quarantine only on that copy.
+
+Neither a DMG nor a shell installer automatically bypasses macOS Gatekeeper.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 EXPECTED_BUNDLE_ID = "io.github.itshak.daedalus"
+INSTALLER_NAME = "Install Daedalus.command"
+README_NAME = "readme_first.txt"
+INSTALLER_SOURCE = Path(__file__).resolve().parent / INSTALLER_NAME
+
+README_TEXT = """Daedalus macOS Installation Instructions
+=========================================
+
+Daedalus is a development preview without an Apple Developer ID signature.
+Like BlindBase, macOS may block a first launch from a normal drag-and-drop
+install. The two installation choices are:
+
+OPTION 1 - Easier preview installation (user-initiated):
+  Run "Install Daedalus.command" from this volume. This copies the verified
+  Daedalus.app to ~/Applications and removes only the copied app's
+  com.apple.quarantine extended attribute. It does not alter global Gatekeeper
+  settings. Depending on your Mac's policy, Finder may require you to open
+  Terminal and run the command explicitly instead.
+
+OPTION 2 - Exact BlindBase drag-and-drop procedure:
+  Drag Daedalus.app to Applications, then in Terminal run:
+
+    xattr -cr /Applications/Daedalus.app
+
+  Launch Daedalus from Applications. The command is the same app-specific
+  quarantine-clearing step documented by BlindBase, not a global policy change.
+
+These instructions apply only if you trust the source of this exact build.
+To avoid a first-launch override altogether, the publisher needs an Apple
+Developer ID signature and Apple notarization.
+"""
 
 
 def check_app(app: Path) -> None:
@@ -39,25 +73,53 @@ def make_dmg(app: Path, output: Path) -> None:
     check_app(app)
     if output.suffix.lower() != ".dmg":
         raise RuntimeError("Output must be a .dmg file")
+    if not INSTALLER_SOURCE.is_file():
+        raise RuntimeError("Missing reviewed Daedalus installer")
+    subprocess.run(["bash", "-n", str(INSTALLER_SOURCE)], check=True)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="daedalus-dmg-") as temp:
-        stage = Path(temp) / "staging"
-        stage.mkdir()
-        copied = stage / "Daedalus.app"
-        # ditto copies the full app including its code signatures and symlinks.
-        subprocess.run(["ditto", str(app), str(copied)], check=True)
-        check_app(copied)
-        os.symlink("/Applications", stage / "Applications")
 
-        # hdiutil does not invoke Finder/AppleScript, so CI does not need
-        # Finder Automation permission or a live desktop session.
+    # BlindBase's DMG uses an HFS+ read/write image, then UDZO conversion.
+    # Preserve that disk format and no-Finder-automation build process.
+    app_kib = int(
+        subprocess.check_output(["du", "-sk", str(app)], text=True).split()[0]
+    )
+    size_mb = max(200, int(app_kib * 1.5 / 1024) + 60)
+    with tempfile.TemporaryDirectory(prefix="daedalus-dmg-") as temp:
+        root = Path(temp)
+        rw_image = root / "Daedalus-rw.dmg"
+        volume = root / "volume"
+        volume.mkdir()
         subprocess.run(
-            ["hdiutil", "create", "-ov", "-volname", "Daedalus",
-             "-srcfolder", str(stage), "-format", "UDZO", str(output)],
+            ["hdiutil", "create", "-size", f"{size_mb}m",
+             "-fs", "HFS+", "-volname", "Daedalus", str(rw_image)],
+            check=True,
+        )
+        attached = False
+        try:
+            subprocess.run(
+                ["hdiutil", "attach", "-nobrowse", "-mountpoint",
+                 str(volume), str(rw_image)],
+                check=True,
+            )
+            attached = True
+            copied = volume / "Daedalus.app"
+            subprocess.run(["ditto", str(app), str(copied)], check=True)
+            check_app(copied)
+            os.symlink("/Applications", volume / "Applications")
+            (volume / README_NAME).write_text(README_TEXT, encoding="utf-8")
+            shutil.copy2(INSTALLER_SOURCE, volume / INSTALLER_NAME)
+            (volume / INSTALLER_NAME).chmod(0o755)
+        finally:
+            if attached:
+                subprocess.run(["hdiutil", "detach", str(volume)], check=True)
+
+        subprocess.run(
+            ["hdiutil", "convert", str(rw_image), "-format", "UDZO",
+             "-imagekey", "zlib-level=9", "-o", str(output), "-ov"],
             check=True,
         )
         subprocess.run(["hdiutil", "verify", str(output)], check=True)
-    print(f"Drag-and-drop DMG ready: {output}")
+    print(f"BlindBase-style DMG ready: {output}")
 
 
 def main() -> int:
@@ -68,7 +130,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         make_dmg(args.app, args.output)
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.error(str(exc))
     return 0
 
