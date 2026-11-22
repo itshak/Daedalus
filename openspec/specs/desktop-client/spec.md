@@ -460,6 +460,34 @@ bound to HTTPS backend origin, account ID and world.
 - **AND** neither the timeline nor technical diagnostics SHALL display plaintext
   passwords, secure cookies or unreviewed Gameforge/API response details
 
+#### Scenario: Registration tab must never receive saved credentials
+
+- **WHEN** the Gameforge lobby presents sign-in and registration tabs
+- **THEN** Selenium SHALL select the sign-in tab based on its identity and
+  SHALL type only into one visible login form, never the form selected by
+  blind tab index or a registration submit button
+- **AND** when it cannot distinguish the form, it SHALL fail closed and offer
+  human-visible recovery instead of submitting sensitive data to registration
+
+#### Scenario: Visible Chrome does not repeatedly steal application focus
+
+- **WHEN** a human-visible Selenium login remains pending or navigates to
+  the selected game tab
+- **THEN** polling SHALL avoid switching to every browser tab on each tick
+  or repeatedly bringing Chrome to the foreground, while preserving
+  CAPTCHA visibility, cancellation and world verification
+
+#### Scenario: Disposable Chromium profile never invokes persistent Chrome Keychain
+
+- **WHEN** a macOS Selenium browser starts for automated sign-in
+- **THEN** it SHALL use a fresh owner-private profile with Chromium's mock
+  Keychain only inside that disposable profile, and erase the profile on exit
+- **AND** persisted Gameforge credentials, encryption keys and backend bearer
+  SHALL continue to require genuine macOS OS-keychain protection
+- **AND** a verified legacy world session SHALL be restored without reading
+  Keychain credentials; redundant Keychain reads and vault resealing SHALL
+  be avoided on other login paths
+
 #### Scenario: Headless login telemetry and isolation
 
 - **GIVEN** a headless Selenium sign-in is requested
