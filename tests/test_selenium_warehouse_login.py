@@ -5,6 +5,7 @@ Never opens a real browser or contacts Gameforge, Daedalus API, or keyrings.
 from __future__ import annotations
 
 import configparser
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -526,8 +527,6 @@ def test_visible_chrome_does_not_switch_tabs_on_every_poll(monkeypatch):
 def test_ephemeral_chromium_profile_uses_mock_keychain_only_on_mac(monkeypatch):
     """Chrome Safe Storage must not prompt or read the user's normal profile."""
     pytest.importorskip("selenium")
-    import os
-    from types import SimpleNamespace
     from selenium import webdriver
     from selenium.webdriver.chrome import options as chrome_options
 
