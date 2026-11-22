@@ -8,7 +8,11 @@ the established encrypted server handoff and independent player verification.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
+import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,7 +34,12 @@ CAPTCHA_FRAMES = (
     "iframe[src*='hcaptcha']", "iframe[src*='recaptcha']",
     "iframe[src*='challenges.cloudflare.com']",
 )
-LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']/ul[@class='tabsList']/li"
+LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']//li"
+_SIGN_IN_LABELS = ("войти", "вход", "авторизация", "login", "log in",
+                   "sign in", "anmelden", "se connecter", "iniciar sesión",
+                   "acceder", "entrar")
+_REGISTER_LABELS = ("регистрация", "зарегистр", "register", "sign up", "sign-up",
+                    "create account", "создать аккаунт", "registrieren")
 CITY_BREAD_XPATH = "//span[@id='js_cityBread']"
 PLAY_BUTTON_XPATH = (
     "//button[contains(text(), 'Последнее сохранение') "
@@ -73,7 +82,12 @@ class GameforgeCredentials:
 
 
 def create_chrome(headless: bool):
-    """Legacy Chrome driver selection and headless flags with plain fallback."""
+    """Use only an isolated Selenium profile, never the user's real Chrome.
+
+    On macOS, Chromium's separate "Safe Storage" Keychain prompt is disabled
+    for this disposable profile only. The actual Gameforge login vault still
+    uses real OS Keychain access and is never put in the browser profile.
+    """
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
@@ -85,25 +99,69 @@ def create_chrome(headless: bool):
         options.add_argument("--window-size=1920,1080")
     for arg in CHROME_FLAGS:
         options.add_argument(arg)
+    profile = None
+    if sys.platform == "darwin":
+        # Chromium test-only keychain switch is safe here ONLY because each
+        # browser gets a fresh private profile that we erase on exit. Never
+        # use it to read someone's normal Chrome profile or saved passwords.
+        parent = os.environ.get("DAEDALUS_LOGIN_PROFILE_ROOT")
+        tempdir = tempfile.gettempdir()
+        if (not isinstance(parent, str)
+                or not parent.startswith(tempdir + os.sep + "daedalus-login-")
+                or not os.path.isdir(parent) or os.path.islink(parent)
+                or os.stat(parent).st_uid != os.getuid()
+                or os.stat(parent).st_mode & 0o077):
+            parent = None
+        profile = tempfile.mkdtemp(prefix="daedalus-selenium-", dir=parent)
+        options.add_argument(f"--user-data-dir={profile}")
+        options.add_argument("--use-mock-keychain")
+        options.add_argument("--password-store=basic")
+        options.add_argument("--disable-sync")
     try:
-        import undetected_chromedriver as uc
-
-        opts = uc.ChromeOptions()
-        for arg in options.arguments:
-            opts.add_argument(arg)
-        driver = uc.Chrome(options=opts, use_subprocess=False)
-    except Exception:  # noqa: BLE001 - optional legacy Chrome driver may fail in many ways
         try:
-            driver = webdriver.Chrome(options=options)
-        except Exception as exc:
-            raise SeleniumLoginUnavailable(
-                "Google Chrome or a compatible ChromeDriver could not start"
-            ) from exc
+            import undetected_chromedriver as uc
+
+            opts = uc.ChromeOptions()
+            for arg in options.arguments:
+                opts.add_argument(arg)
+            driver = uc.Chrome(options=opts, use_subprocess=False)
+        except Exception:  # noqa: BLE001 - optional Chrome driver fallback
+            try:
+                driver = webdriver.Chrome(options=options)
+            except Exception as exc:
+                raise SeleniumLoginUnavailable(
+                    "Google Chrome or a compatible ChromeDriver could not start"
+                ) from exc
+    except BaseException:
+        if profile is not None:
+            shutil.rmtree(profile, ignore_errors=True)
+        raise
+    if profile is not None:
+        driver._daedalus_temporary_profile = profile
     try:
         driver.set_page_load_timeout(45)
     except Exception:  # noqa: BLE001 - best-effort Selenium timeout setting
         log.debug("Chrome does not support page load timeout configuration")
     return driver
+
+
+def _dispose_chrome(driver) -> None:
+    """Quit the child browser and securely discard only our own temp profile."""
+    profile = getattr(driver, "_daedalus_temporary_profile", None)
+    try:
+        driver.quit()
+    except Exception:  # noqa: BLE001 - driver may already have exited
+        log.warning("Selenium Chrome cleanup did not complete")
+    finally:
+        if (isinstance(profile, str)
+                and os.path.basename(profile).startswith("daedalus-selenium-")
+                and not os.path.islink(profile)
+                and os.path.isdir(profile)
+                and os.stat(profile).st_uid == os.getuid()):
+            try:
+                shutil.rmtree(profile)
+            except OSError:
+                log.warning("Temporary Selenium profile cleanup was incomplete")
 
 
 def _visible(element) -> bool:
@@ -160,47 +218,83 @@ def _await_world(driver, world_host: str, *, deadline: float,
 
     lobby_handle = driver.current_window_handle
     play_clicked = False
+    last_secondary_scan = 0.0
     notify("waiting_for_world")
     while time.monotonic() < deadline:
         if cancelled():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
-        for handle in list(driver.window_handles):
-            try:
-                driver.switch_to.window(handle)
-            except Exception:  # noqa: BLE001 - a stale tab is not a valid session
-                log.debug("Gameforge tab no longer exists")
-                continue
-            # Gameforge can open a CAPTCHA in the secondary game tab after
-            # the lobby Play click. Detect it there too rather than treating
-            # the resulting world timeout as an ordinary login failure.
-            if challenge_present(driver):
-                if headless:
-                    raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
-                _wait_challenge(
-                    driver, deadline=deadline, notify=notify, cancelled=cancelled,
-                )
-            if _world_ready(driver, world_host):
-                notify("world_ready")
-                return
         try:
-            driver.switch_to.window(lobby_handle)
-            if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH) and headless:
-                raise SeleniumLoginUnavailable("Gameforge rejected the saved credentials")
-            buttons = driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH)
-            if buttons and not play_clicked:
-                for item in driver.find_elements(
-                    By.XPATH, "//button[contains(@class,'cookiebanner') "
-                    "and (contains(., 'Принять') or contains(., 'Accept'))]"
-                ):
-                    if _visible(item):
-                        item.click()
-                buttons[0].click()
-                play_clicked = True
-                notify("play_clicked")
-        except SeleniumLoginUnavailable:
+            handles = list(driver.window_handles)
+            # Once Play is pressed, follow the newest game tab only. The old
+            # code switched *every* open tab on every 700-ms poll, repeatedly
+            # pulling visible Chrome to the foreground on macOS.
+            if play_clicked:
+                handle = next((h for h in reversed(handles) if h != lobby_handle),
+                              lobby_handle)
+                if driver.current_window_handle != handle:
+                    driver.switch_to.window(handle)
+                if challenge_present(driver):
+                    if headless:
+                        raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                    _wait_challenge(
+                        driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                    )
+                if _world_ready(driver, world_host):
+                    notify("world_ready")
+                    return
+            else:
+                # Before Play, inspect other open tabs once per new handle to
+                # recognize an already active world, then return to the lobby.
+                for handle in reversed(handles):
+                    if handle == lobby_handle:
+                        continue
+                    # Detached uc/Chrome windows can sit blank for a long
+                    # time. Inspect at most once every few seconds before
+                    # Play, not on every poll (which steals Mac focus).
+                    now = time.monotonic()
+                    if now - last_secondary_scan < 4.0:
+                        break
+                    last_secondary_scan = now
+                    if driver.current_window_handle != handle:
+                        driver.switch_to.window(handle)
+                    if challenge_present(driver):
+                        if headless:
+                            raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                        _wait_challenge(
+                            driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                        )
+                    if _world_ready(driver, world_host):
+                        notify("world_ready")
+                        return
+                    break
+                if driver.current_window_handle != lobby_handle:
+                    driver.switch_to.window(lobby_handle)
+                if challenge_present(driver):
+                    if headless:
+                        raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                    _wait_challenge(
+                        driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                    )
+                if _world_ready(driver, world_host):
+                    notify("world_ready")
+                    return
+                if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH) and headless:
+                    raise SeleniumLoginUnavailable("Gameforge rejected the saved credentials")
+                buttons = driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH)
+                if buttons:
+                    for item in driver.find_elements(
+                        By.XPATH, "//button[contains(@class,'cookiebanner') "
+                        "and (contains(., 'Принять') or contains(., 'Accept'))]"
+                    ):
+                        if _visible(item):
+                            item.click()
+                    buttons[0].click()
+                    play_clicked = True
+                    notify("play_clicked")
+        except (SeleniumLoginUnavailable, ManualChallengeRequired):
             raise
         except Exception:  # noqa: BLE001 - game may be navigating between tabs
-            log.debug("Gameforge lobby is still navigating")
+            log.debug("Gameforge browser is still navigating")
         time.sleep(0.7)
     raise SeleniumLoginUnavailable(
         "The exact selected game world did not open; no session was imported"
@@ -244,12 +338,106 @@ def _restore_legacy_session(driver, saved: tuple[str, list[dict[str, object]]],
     return None
 
 
+def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
+    """Never use the first tab blindly: it can be Registration on Gameforge."""
+    from selenium.webdriver.common.by import By
+
+    tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
+    if not tabs:
+        # A direct login form on a newer Gameforge page needs no tab switch.
+        return
+    for tab in tabs:
+        if not _visible(tab):
+            continue
+        # Some translations place the label in aria-label or title instead of
+        # visible text. Do not infer sign-in from an unrecognized tab index.
+        description = " ".join(
+            str(value or "") for value in (
+                tab.text, tab.get_attribute("aria-label"), tab.get_attribute("title")
+            )
+        ).casefold()
+        if any(label in description for label in _REGISTER_LABELS):
+            continue
+        if any(label in description for label in _SIGN_IN_LABELS):
+            tab.click()
+            notify("sign_in_tab_selected")
+            return
+    notify("sign_in_tab_not_found")
+    raise SeleniumLoginUnavailable(
+        "Could not identify the Gameforge sign-in tab; use visible manual recovery"
+    )
+
+
+def _visible_sign_in_form(driver):
+    """Choose *one* visible login form; never fill the registration panel."""
+    from selenium.webdriver.common.by import By
+
+    matching = []
+    for form in driver.find_elements(By.CSS_SELECTOR, "form"):
+        if not _visible(form):
+            continue
+        identity = " ".join(str(form.get_attribute(k) or "") for k in ("id", "class"))
+        if any(label in identity.casefold() for label in ("register", "signup", "sign-up")):
+            continue
+        emails = [field for field in form.find_elements(By.CSS_SELECTOR, "input[name='email']")
+                  if _visible(field)]
+        passwords = [field for field in form.find_elements(
+            By.CSS_SELECTOR, "input[name='password']"
+        ) if _visible(field)]
+        submits = [button for button in form.find_elements(
+            By.CSS_SELECTOR, "button[type='submit'],input[type='submit']"
+        ) if _visible(button) and button.is_enabled()]
+        if len(emails) == len(passwords) == 1 and len(submits) == 1:
+            matching.append((emails[0], passwords[0], submits[0]))
+    return matching[0] if len(matching) == 1 else False
+
+
+def restore_saved_world_without_keychain(
+    email: str, world: str, *,
+    driver_factory: Callable[[bool], object] = create_chrome,
+    notify: Callable[[str], None] | None = None,
+) -> str | None:
+    """Attempt a bounded exact-world legacy restore before asking Keychain.
+
+    Only an account email already supplied by the authenticated Daedalus
+    backend can be used by the caller. This never accesses passwords or
+    writes to the old warehouse bot's files.
+    """
+    from daedalus.desktop.selenium_credentials import legacy_saved_session
+
+    if not isinstance(email, str) or "@" not in email or not WORLD.fullmatch(world):
+        return None
+    saved = legacy_saved_session(email, world)
+    if saved is None:
+        return None
+    report = notify or (lambda _stage: None)
+    report("checking_saved_session")
+    driver = None
+    try:
+        report("starting_headless_browser")
+        driver = driver_factory(True)
+        cookie = _restore_legacy_session(
+            driver, saved, f"{world.casefold()}.ikariam.gameforge.com",
+            deadline=time.monotonic() + 18,
+        )
+        if cookie is not None:
+            report("saved_session_restored")
+        else:
+            report("saved_session_expired")
+        return cookie
+    except Exception:  # noqa: BLE001 - the normal credential login may still work
+        report("saved_session_expired")
+        return None
+    finally:
+        if driver is not None:
+            _dispose_chrome(driver)
+
+
 def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
                 headless: bool, deadline: float, notify: Callable[[str], None],
                 cancelled: Callable[[], bool]) -> str:
     """Original warehouse bot's lobby -> login -> play -> game logic."""
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 
     notify("headless_login" if headless else "visible_captcha_login")
@@ -265,13 +453,9 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
             _wait_challenge(driver, deadline=deadline, notify=notify, cancelled=cancelled)
         if not driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH):
             notify("waiting_for_login_form")
-            tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
-            if tabs and _visible(tabs[0]):
-                tabs[0].click()
+            _select_sign_in_tab(driver, notify)
             wait = WebDriverWait(driver, max(1.0, min(12.0, deadline - time.monotonic())))
-            email_field = wait.until(EC.element_to_be_clickable((By.NAME, "email")))
-            password_field = wait.until(EC.element_to_be_clickable((By.NAME, "password")))
-            submit = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@type='submit']")))
+            email_field, password_field, submit = wait.until(_visible_sign_in_form)
             email_field.clear()
             email_field.send_keys(credentials.email)
             password_field.clear()
@@ -317,6 +501,8 @@ def login_world(
     *, driver_factory: Callable[[bool], object] = create_chrome,
     notify: Callable[[str], None] | None = None, timeout_seconds: float = 240,
     cancelled: Callable[[], bool] | None = None,
+    visible_only: bool = False,
+    skip_saved_session: bool = False,
 ) -> str:
     """Try headless first; give failures a bounded visible-browser recovery.
 
@@ -335,7 +521,9 @@ def login_world(
     )
     host = f"{world.casefold()}.ikariam.gameforge.com"
 
-    for headless in (True, False):
+    # A rejected server-side handoff must use a fresh, human-visible browser;
+    # replaying the same locally restored cookie would repeat the rejection.
+    for headless in ((False,) if visible_only else (True, False)):
         if stop_requested():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
         if time.monotonic() >= deadline:
@@ -344,7 +532,7 @@ def login_world(
         report("starting_headless_browser" if headless else "opening_visible_browser")
         try:
             driver = driver_factory(headless)
-            if headless:
+            if headless and not skip_saved_session:
                 from daedalus.desktop.selenium_credentials import legacy_saved_session
 
                 report("checking_saved_session")
@@ -406,8 +594,5 @@ def login_world(
             report("opening_visible_recovery")
         finally:
             if driver is not None:
-                try:
-                    driver.quit()
-                except Exception:  # noqa: BLE001 - driver may already have exited
-                    log.warning("Selenium Chrome cleanup did not complete")
+                _dispose_chrome(driver)
     raise SeleniumLoginUnavailable("Login session expired")

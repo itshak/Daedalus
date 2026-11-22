@@ -98,3 +98,19 @@ def test_missing_or_malformed_island_is_unknown_and_csv_json_stay_compatible():
     assert csv_rows[1]["island"] == "3:4"
     json_rows = json.loads(report_json(rows))
     assert json_rows[0]["island"] is None
+
+def test_warehouse_account_names_prefer_email_over_imported_placeholder():
+    from daedalus.account_display import account_display_name
+
+    imported = {
+        "id": "account-a", "world": "s53-ru", "player": "Monjo",
+        "label": "Imported IkaBot identity 01",
+        "email": "verified@example.invalid",
+    }
+    assert account_display_name(imported) == "verified@example.invalid"
+    assert account_display_name({**imported, "email": None}) == "Monjo"
+    assert account_display_name({**imported, "label": "Chosen nickname", "email": None}) == "Chosen nickname"
+    assert account_display_name({**imported, "email": "bad\r\ninjection"}) == "Monjo"
+    assert rows_for_warehouse(imported, [{
+        "city": "Marble city", "world": "s53-ru", "wood": 12,
+    }])[0]["account"] == "verified@example.invalid"

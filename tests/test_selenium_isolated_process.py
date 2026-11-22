@@ -191,3 +191,55 @@ def test_private_diagnostics_are_rotated_and_never_store_login_material(tmp_path
     if os.name == "posix":
         assert path.stat().st_mode & 0o077 == 0
     assert diagnostics.configure_desktop_diagnostics() == path
+
+def test_saved_world_cookie_skips_keychain_entirely(monkeypatch):
+    output = []
+    monkeypatch.setattr(child, "_emit", lambda kind, value=None: output.append((kind, value)))
+    monkeypatch.setattr(
+        child, "restore_saved_world_without_keychain",
+        lambda email, world, *, notify: "synthetic-world-cookie",
+    )
+    monkeypatch.setattr(child, "get_saved_login", lambda *_args: pytest.fail("No Keychain read"))
+    monkeypatch.setattr(child, "unseal_login", lambda *_args: pytest.fail("No vault read"))
+    monkeypatch.setattr(child, "seal_login", lambda *_args: pytest.fail("No Keychain write"))
+    monkeypatch.setattr(child, "login_world", lambda *_args, **_kw: pytest.fail("No fresh login"))
+    record = {**_request()["record"], "email": "verified@example.invalid"}
+    assert child.execute(_request(record=record)) == 0
+    assert output == [
+        ("credentials", {"email": "verified@example.invalid", "remember": False}),
+        ("cookie", "synthetic-world-cookie"),
+    ]
+
+
+def test_preexisting_encrypted_vault_does_not_requery_or_reseal_keychain(monkeypatch):
+    output, args_seen = [], []
+    monkeypatch.setattr(child, "_emit", lambda kind, value=None: output.append((kind, value)))
+    monkeypatch.setattr(child, "get_saved_login", lambda *_args: pytest.fail("Duplicate read"))
+    monkeypatch.setattr(child, "seal_login", lambda *_args: pytest.fail("Duplicate write"))
+    monkeypatch.setattr(child, "unseal_login", lambda *_args: _credentials())
+    monkeypatch.setattr(child, "login_world", lambda *args, **kw: (
+        args_seen.append(kw) or "synthetic-world-cookie"
+    ))
+    assert child.execute(_request(sealed_vault={"version": 1})) == 0
+    assert output[-1] == ("cookie", "synthetic-world-cookie")
+    assert all(kind != "vault" for kind, _ in output)
+    assert args_seen and args_seen[0].keys() == {"notify"}
+
+
+def test_visible_retry_never_uses_cached_world_or_duplicate_keychain_item(monkeypatch):
+    modes = []
+    monkeypatch.setattr(
+        child, "restore_saved_world_without_keychain",
+        lambda *_args, **_kw: pytest.fail("Visible retry must not replay rejected cookie"),
+    )
+    monkeypatch.setattr(child, "get_saved_login", lambda *_args: pytest.fail("Duplicate read"))
+    monkeypatch.setattr(child, "seal_login", lambda *_args: pytest.fail("Duplicate write"))
+    monkeypatch.setattr(child, "unseal_login", lambda *_args: _credentials())
+    monkeypatch.setattr(child, "login_world", lambda *args, **kw: (
+        modes.append(kw.get("visible_only")) or "new-visible-cookie"
+    ))
+    record = {**_request()["record"], "email": "verified@example.invalid"}
+    assert child.execute(
+        _request(record=record, sealed_vault={"version": 1}, visible_only=True)
+    ) == 0
+    assert modes == [True]

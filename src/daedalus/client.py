@@ -104,6 +104,10 @@ class DaedalusClient:
                     "This worker is busy or has an uncertain task; reconcile it before login",
                     "Running or uncertain tasks must be reconciled before login",
                     "This backend has not enabled native browser login",
+                    "Server did not verify the exact game account; login was not accepted",
+                    "Gameforge email differs from the existing account binding",
+                    "Another worker owns this game account",
+                    "Browser handoff is expired or already consumed",
                 }
                 if (response.status_code == 409 and detail in safe_409) or (
                     response.status_code == 422 and detail ==

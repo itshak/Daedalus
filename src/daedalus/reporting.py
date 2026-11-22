@@ -12,6 +12,8 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 
+from daedalus.account_display import account_display_name
+
 RESOURCES = ("wood", "wine", "marble", "glass", "sulfur")
 _COLUMNS = ("account", "city", "island", "world", *RESOURCES, "capacity", "captured_at", "incomplete")
 
@@ -43,7 +45,7 @@ def rows_for_warehouse(
             and re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", raw_island)
         ) else None
         row: dict[str, object] = {
-            "account": account.get("label") or account.get("player") or account.get("id") or "",
+            "account": account_display_name(account),
             "city": city.get("city_name") or "",
             "island": island,
             "world": account.get("world") or "",
