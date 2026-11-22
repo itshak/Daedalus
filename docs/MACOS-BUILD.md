@@ -1,6 +1,6 @@
 # Native macOS Daedalus.app — CI-first packaging
 
-This is a **preview build** of the *read-only* native GUI. It does not embed the server, any IkaBot game session, users' saved credentials, browser profiles, or existing scraper settings. Game-task execution and assisted login are not yet implemented.
+This is a **development preview** of the native Fluent desktop GUI. It does not embed the server, an IkaBot game session, saved credentials, browser profiles, or existing scraper settings. The built-in login and task controls depend on the separate backend and still require owner-supervised live acceptance.
 
 The build is adapted from the owner's earlier `packaging/build_macos_app.py` for the private PySide6 GUI. The previous tool installed IkaBot.app into `/Applications`, seeded a legacy configuration file, and bundled Selenium/undetected-chromedriver. **All three behaviors are intentionally absent here.**
 
@@ -28,11 +28,22 @@ The `--adhoc-sign` option creates an **ad-hoc signature** suitable for local tes
 
 ## macOS drag-and-drop DMG — preferred installation
 
-Daedalus now ships a **BlindBase-style disk image**, not just a nested app ZIP:
+Daedalus follows BlindBase's **GitHub Releases** distribution model: a verified
+`Daedalus-macos-preview.dmg` is attached directly to a public prerelease,
+**not wrapped in an Actions ZIP**.
 
-1. Download the **Daedalus-macos-dmg** artifact from [macOS Actions](https://github.com/itshak/Daedalus/actions/workflows/macos-app.yml) (GitHub downloads CI artifacts inside a ZIP), and extract it once.
-2. Double-click **Daedalus-macos-preview.dmg** to mount it in Finder.
-3. Drag **Daedalus.app** onto the **Applications** shortcut, then open Daedalus from Applications.
+1. Open [Daedalus Releases](https://github.com/itshak/Daedalus/releases)
+   and select the latest **Desktop Preview** prerelease.
+2. Click `Daedalus-macos-preview.dmg` under **Assets**. Your browser downloads
+   the **DMG itself**, without another ZIP extraction step.
+3. Double-click the DMG and drag **Daedalus.app** onto **Applications**.
+
+Each successful `main` build publishes a separate preview tagged
+`desktop-preview-<12-character commit SHA>`, alongside
+`Daedalus-macos-preview.dmg.sha256` for file integrity checks. Pull-request
+builds never publish public releases. GitHub Actions may still retain
+ZIP-wrapped artifacts for CI debugging; those are **not** the primary download.
+
 
 **No install script or Terminal command is required for the drag-and-drop step.** The DMG includes only the app and Applications link; it cannot automatically execute a script.
 
@@ -52,9 +63,14 @@ This verifies the ad-hoc code signature and bundle identifier, uses `ditto` to s
 
 ## GitHub CI
 
-The `macos-app.yml` workflow produces **Daedalus-macos-dmg** as the preferred artifact, mounts the DMG on the macOS runner, checks that Daedalus.app and the Applications symlink are present, and re-verifies the app signature. The legacy ZIP installer continues to undergo its separate synthetic quarantine test. Neither artifact contains game-account credentials or production tokens.
-
-The workflow intentionally does **not** automatically publish a signed/notarized public release, attach an update feed, or install to the CI runner's system Applications folder.
+The `macos-app.yml` workflow builds a DMG, mounts it on the macOS runner,
+checks the app and Applications symlink, verifies the code signature, and
+runs a synthetic ZIP installer check. **Only after this succeeds**, a separate
+`main`-only job with scoped `contents: write` permission publishes the
+exact DMG as a **GitHub prerelease asset** with a SHA-256 checksum.
+Pull-request jobs have read-only repository permissions; they cannot
+publish releases. The workflow does not notarize the app, install it in
+the runner's system Applications directory, or publish an automatic update feed.
 
 ## Native browser requirements
 
@@ -68,7 +84,7 @@ and `webdriver-manager` in `daedalus[desktop]` and the PyInstaller bundle.
 Google Chrome or a compatible ChromeDriver is still needed on the Mac,
 and first-use driver provisioning may require access to its official
 distribution endpoints. The app uses headless Chrome for normal login and
-opens visible Chrome **only** when a Gameforge CAPTCHA is detected.
+opens visible Chrome when a CAPTCHA is detected or headless login fails.
 The original warehouse bot's legacy config/session files are read only
 for explicitly selected accounts and never bundled into the installer.
 The app passes only an encrypted world-cookie handoff to the backend;
