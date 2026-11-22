@@ -129,3 +129,46 @@ def test_direct_dmg_documentation_does_not_promise_gatekeeper_bypass():
     assert "**not wrapped in an Actions ZIP**" in docs
     assert "not Apple notarized" in docs
     assert "first-launch" in docs
+
+
+
+def test_blindbase_first_install_quarantine_flow_is_in_dmg_builder():
+    """Copy BlindBase's actual HFS+ and xattr first-run pattern, not auto-execution."""
+    source = (Path(__file__).resolve().parents[1]
+              / "packaging/build_macos_dmg.py").read_text()
+    assert '"-fs", "HFS+"' in source
+    assert '"-format", "UDZO"' in source
+    assert "readme_first.txt" in source
+    assert "xattr -cr /Applications/Daedalus.app" in source
+    assert "Install Daedalus.command" in source
+    assert "shutil.copy2(INSTALLER_SOURCE" in source
+    assert "chmod(0o755)" in source
+    assert "subprocess.run([\"ditto\"" in source
+    assert "codesign" in source
+    assert "os.symlink(\"/Applications\"" in source
+
+
+def test_verified_dmg_installer_is_tested_with_synthetic_quarantine():
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github/workflows/macos-app.yml").read_text()
+    assert 'test -x "$mount_dir/Install Daedalus.command"' in workflow
+    assert 'test -f "$mount_dir/readme_first.txt"' in workflow
+    assert 'grep -F \'xattr -cr /Applications/Daedalus.app\'' in workflow
+    assert 'DAEDALUS_INSTALL_ROOT="$RUNNER_TEMP/daedalus-dmg-install-test"' in workflow
+    assert 'xattr -w com.apple.quarantine' in workflow
+    assert 'DMG installer failed to clear app-specific quarantine' in workflow
+    installer = (Path(__file__).resolve().parents[1]
+                 / "packaging/Install Daedalus.command").read_text()
+    assert 'expected_id="io.github.itshak.daedalus"' in installer
+    assert "/usr/bin/codesign --verify --deep --strict" in installer
+    assert "/usr/bin/xattr -dr com.apple.quarantine" in installer
+    assert "DAEDALUS_INSTALL_ROOT" in installer
+
+
+def test_blindbase_package_docs_warn_about_gatekeeper():
+    docs = (Path(__file__).resolve().parents[1]
+            / "docs/MACOS-BUILD.md").read_text()
+    assert "BlindBase" in docs
+    assert "xattr -cr /Applications/Daedalus.app" in docs
+    assert "not permit DMGs to silently auto-execute commands" in docs
+    assert "Apple Developer ID signing and notarization" in docs
