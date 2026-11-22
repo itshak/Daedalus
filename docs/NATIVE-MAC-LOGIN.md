@@ -1,6 +1,6 @@
 # Native Mac Gameforge authentication — headless Selenium default, manual fallback
 
-**Implementation:** automatic headless Selenium Chrome with CAPTCHA-only visible handoff; the older native Qt WebEngine browser remains an Advanced manual fallback. Both paths use one-use encrypted session handoff to the authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
+**Implementation:** automatic headless Selenium Chrome with one visible-browser retry on login failure; the older native Qt WebEngine browser remains an Advanced manual fallback. Both paths use one-use encrypted session handoff to the authoritative Linux game worker. Synthetic code and GUI tests passed. **Real Gameforge browser/CAPTCHA and dedicated-worker rebind acceptance remain owner-dependent, and are not certified by CI.**
 
 **The historical native Qt WebEngine instructions below describe only the advanced manual fallback.**
 
@@ -14,9 +14,12 @@ This is adapted from the original local warehouse bot in
 world session when available, otherwise enter Gameforge lobby using stored
 email/password, select the game's play/world entry, and detect the exact-world
 authenticated city UI. Selenium starts with **headless Chrome**. A visible
-Chrome window is opened **only when an actual CAPTCHA is detected**, so the user
-can solve it; Selenium resumes navigation itself. A wrong password, missing
-browser, timeout or world mismatch does *not* open a random visible browser.
+Chrome window is opened **when a CAPTCHA is detected or headless login
+fails**, including rejected credentials, a changed form or a world timeout.
+The operator can complete the challenge, correct the password or log in
+manually in the visible window. Selenium then validates the exact selected
+world and securely hands off only its world cookie. An invalid world, missing
+credentials or cancelled login never initiates an unsolicited browser.
 CAPTCHA is never solved or bypassed by software.
 
 In Daedalus **Accounts**, select **Sign in automatically (headless)**, **Sign in
@@ -26,7 +29,14 @@ sign-in for those accounts before collecting **one combined warehouse report**.
 Already authenticated accounts require no new login. Existing island grouping,
 220K filter, native Print preview and CSV/JSON/TXT exports remain unchanged.
 All attempts are account-scoped, proceed sequentially and report errors
-independently rather than aborting a full multi-account report.
+independently rather than aborting a full multi-account report. The native
+**Activity** page now records the live login stages (helper start, saved-login
+lookup, Chrome launch, lobby, form submission, world navigation, visible
+fallback, error and handoff verification). **Diagnostics** opens a bounded
+technical stream; the private macOS `~/Library/Logs/Daedalus/desktop.log`
+also records sanitized stages. A browser/Keychain stall does not block the
+GUI thread, and cancellation terminates the isolated browser process.
+No credentials, browser session, cookie, or raw page exception is logged.
 
 On the first use, Daedalus tries an exact account alias match in the previous
 local bot's owner-owned `~/.ikabot/config.ini` and an unexpired, exact-world
