@@ -379,6 +379,7 @@ def test_second_server_handoff_failure_stops_without_retry(window, monkeypatch):
 
 def test_saved_cookie_receipt_does_not_claim_connected_worker(window, monkeypatch):
     monkeypatch.setattr(window, "_notice", lambda *args: None)
+    monkeypatch.setattr(window, "_request", lambda *args, **kwargs: None)
     window._automatic_login_active = True
     window._automatic_login_current = "account-a"
     window._on_completed(
