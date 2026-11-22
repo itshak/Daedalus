@@ -30,7 +30,12 @@ CAPTCHA_FRAMES = (
     "iframe[src*='hcaptcha']", "iframe[src*='recaptcha']",
     "iframe[src*='challenges.cloudflare.com']",
 )
-LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']/ul[@class='tabsList']/li"
+LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']//li"
+_SIGN_IN_LABELS = ("войти", "вход", "авторизация", "login", "log in",
+                   "sign in", "anmelden", "se connecter", "iniciar sesión",
+                   "acceder", "entrar")
+_REGISTER_LABELS = ("регистрация", "зарегистр", "register", "sign up", "sign-up",
+                    "create account", "создать аккаунт", "registrieren")
 CITY_BREAD_XPATH = "//span[@id='js_cityBread']"
 PLAY_BUTTON_XPATH = (
     "//button[contains(text(), 'Последнее сохранение') "
@@ -164,43 +169,71 @@ def _await_world(driver, world_host: str, *, deadline: float,
     while time.monotonic() < deadline:
         if cancelled():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
-        for handle in list(driver.window_handles):
-            try:
-                driver.switch_to.window(handle)
-            except Exception:  # noqa: BLE001 - a stale tab is not a valid session
-                log.debug("Gameforge tab no longer exists")
-                continue
-            # Gameforge can open a CAPTCHA in the secondary game tab after
-            # the lobby Play click. Detect it there too rather than treating
-            # the resulting world timeout as an ordinary login failure.
-            if challenge_present(driver):
-                if headless:
-                    raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
-                _wait_challenge(
-                    driver, deadline=deadline, notify=notify, cancelled=cancelled,
-                )
-            if _world_ready(driver, world_host):
-                notify("world_ready")
-                return
         try:
-            driver.switch_to.window(lobby_handle)
-            if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH) and headless:
-                raise SeleniumLoginUnavailable("Gameforge rejected the saved credentials")
-            buttons = driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH)
-            if buttons and not play_clicked:
-                for item in driver.find_elements(
-                    By.XPATH, "//button[contains(@class,'cookiebanner') "
-                    "and (contains(., 'Принять') or contains(., 'Accept'))]"
-                ):
-                    if _visible(item):
-                        item.click()
-                buttons[0].click()
-                play_clicked = True
-                notify("play_clicked")
-        except SeleniumLoginUnavailable:
+            handles = list(driver.window_handles)
+            # Once Play is pressed, follow the newest game tab only. The old
+            # code switched *every* open tab on every 700-ms poll, repeatedly
+            # pulling visible Chrome to the foreground on macOS.
+            if play_clicked:
+                handle = next((h for h in reversed(handles) if h != lobby_handle),
+                              lobby_handle)
+                if driver.current_window_handle != handle:
+                    driver.switch_to.window(handle)
+                if challenge_present(driver):
+                    if headless:
+                        raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                    _wait_challenge(
+                        driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                    )
+                if _world_ready(driver, world_host):
+                    notify("world_ready")
+                    return
+            else:
+                # Before Play, inspect other open tabs once per new handle to
+                # recognize an already active world, then return to the lobby.
+                for handle in reversed(handles):
+                    if handle == lobby_handle:
+                        continue
+                    if driver.current_window_handle != handle:
+                        driver.switch_to.window(handle)
+                    if challenge_present(driver):
+                        if headless:
+                            raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                        _wait_challenge(
+                            driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                        )
+                    if _world_ready(driver, world_host):
+                        notify("world_ready")
+                        return
+                    break
+                if driver.current_window_handle != lobby_handle:
+                    driver.switch_to.window(lobby_handle)
+                if challenge_present(driver):
+                    if headless:
+                        raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
+                    _wait_challenge(
+                        driver, deadline=deadline, notify=notify, cancelled=cancelled,
+                    )
+                if _world_ready(driver, world_host):
+                    notify("world_ready")
+                    return
+                if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH) and headless:
+                    raise SeleniumLoginUnavailable("Gameforge rejected the saved credentials")
+                buttons = driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH)
+                if buttons:
+                    for item in driver.find_elements(
+                        By.XPATH, "//button[contains(@class,'cookiebanner') "
+                        "and (contains(., 'Принять') or contains(., 'Accept'))]"
+                    ):
+                        if _visible(item):
+                            item.click()
+                    buttons[0].click()
+                    play_clicked = True
+                    notify("play_clicked")
+        except (SeleniumLoginUnavailable, ManualChallengeRequired):
             raise
         except Exception:  # noqa: BLE001 - game may be navigating between tabs
-            log.debug("Gameforge lobby is still navigating")
+            log.debug("Gameforge browser is still navigating")
         time.sleep(0.7)
     raise SeleniumLoginUnavailable(
         "The exact selected game world did not open; no session was imported"
@@ -244,12 +277,65 @@ def _restore_legacy_session(driver, saved: tuple[str, list[dict[str, object]]],
     return None
 
 
+def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
+    """Never use the first tab blindly: it can be Registration on Gameforge."""
+    from selenium.webdriver.common.by import By
+
+    tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
+    if not tabs:
+        # A direct login form on a newer Gameforge page needs no tab switch.
+        return
+    for tab in tabs:
+        if not _visible(tab):
+            continue
+        # Some translations place the label in aria-label or title instead of
+        # visible text. Do not infer sign-in from an unrecognized tab index.
+        description = " ".join(
+            str(value or "") for value in (
+                tab.text, tab.get_attribute("aria-label"), tab.get_attribute("title")
+            )
+        ).casefold()
+        if any(label in description for label in _REGISTER_LABELS):
+            continue
+        if any(label in description for label in _SIGN_IN_LABELS):
+            tab.click()
+            notify("sign_in_tab_selected")
+            return
+    notify("sign_in_tab_not_found")
+    raise SeleniumLoginUnavailable(
+        "Could not identify the Gameforge sign-in tab; use visible manual recovery"
+    )
+
+
+def _visible_sign_in_form(driver):
+    """Choose *one* visible login form; never fill the registration panel."""
+    from selenium.webdriver.common.by import By
+
+    matching = []
+    for form in driver.find_elements(By.CSS_SELECTOR, "form"):
+        if not _visible(form):
+            continue
+        identity = " ".join(str(form.get_attribute(k) or "") for k in ("id", "class"))
+        if any(label in identity.casefold() for label in ("register", "signup", "sign-up")):
+            continue
+        emails = [field for field in form.find_elements(By.CSS_SELECTOR, "input[name='email']")
+                  if _visible(field)]
+        passwords = [field for field in form.find_elements(
+            By.CSS_SELECTOR, "input[name='password']"
+        ) if _visible(field)]
+        submits = [button for button in form.find_elements(
+            By.CSS_SELECTOR, "button[type='submit'],input[type='submit']"
+        ) if _visible(button) and button.is_enabled()]
+        if len(emails) == len(passwords) == 1 and len(submits) == 1:
+            matching.append((emails[0], passwords[0], submits[0]))
+    return matching[0] if len(matching) == 1 else False
+
+
 def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
                 headless: bool, deadline: float, notify: Callable[[str], None],
                 cancelled: Callable[[], bool]) -> str:
     """Original warehouse bot's lobby -> login -> play -> game logic."""
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 
     notify("headless_login" if headless else "visible_captcha_login")
@@ -265,13 +351,9 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
             _wait_challenge(driver, deadline=deadline, notify=notify, cancelled=cancelled)
         if not driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH):
             notify("waiting_for_login_form")
-            tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
-            if tabs and _visible(tabs[0]):
-                tabs[0].click()
+            _select_sign_in_tab(driver, notify)
             wait = WebDriverWait(driver, max(1.0, min(12.0, deadline - time.monotonic())))
-            email_field = wait.until(EC.element_to_be_clickable((By.NAME, "email")))
-            password_field = wait.until(EC.element_to_be_clickable((By.NAME, "password")))
-            submit = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@type='submit']")))
+            email_field, password_field, submit = wait.until(_visible_sign_in_form)
             email_field.clear()
             email_field.send_keys(credentials.email)
             password_field.clear()
