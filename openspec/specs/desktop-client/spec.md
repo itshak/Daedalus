@@ -326,6 +326,15 @@ The desktop SHALL offer a button to establish a local SSH tunnel using the user'
 - **WHEN** the host key or SSH identity cannot be verified
 - **THEN** the app fails with a sanitized connection error and does not disable host-key checking or expose the backend to the public network
 
+### Requirement: Confirmed backend connection and masked token state
+
+- **WHEN** the native client successfully completes an authenticated backend handshake
+- **THEN** it SHALL show a Fluent success notification and persistent connected status
+- **AND** the API token input SHALL display a masked configured-value indicator
+  without retaining the actual bearer in the UI widget or writing it to logs
+- **AND** reconnect SHALL reuse Keychain credentials only for the exact saved HTTPS
+  origin; failure SHALL show a safe error and not a misleading success state
+
 ### Requirement: Default secure HTTPS and OS-Keychain reconnection
 
 The native client SHALL prefer direct TLS-verified HTTPS as its primary connection workflow, without requiring an SSH tunnel on the user's Mac. After an authenticated connection, the default selected preference SHALL save the bearer only in the OS Keychain, associate it with the exact validated HTTPS origin, and automatically reconnect on subsequent launches. Explicit opt-out SHALL allow an ephemeral session. The client MUST NOT silently copy a token to a different hostname, log credentials, or save bearer tokens in plaintext.
@@ -365,7 +374,7 @@ The signed-preview build SHALL include the Qt WebEngine renderer helper and cryp
 - **WHEN** the native .app is built in CI
 - **THEN** the app package includes Qt WebEngine modules and its process helper
 
-### Requirement: Automatic headless Gameforge authentication with human CAPTCHA only
+### Requirement: Observable headless Gameforge authentication with visible failure recovery
 
 The Mac desktop SHALL use the prior local `itshak/ikabot` warehouse-bot
 authentication lifecycle instead of requiring manual browser login for every
@@ -373,11 +382,14 @@ account: first attempt to restore a matching unexpired saved world session;
 otherwise log in through the Gameforge lobby in **headless Selenium Chrome**
 using securely stored per-account credentials, select the matching game world,
 and return only an exact-host secure world cookie to the existing one-time
-encrypted server handoff. A visible Selenium Chrome window SHALL open
-**only upon detection of an actual user CAPTCHA challenge** and SHALL resume
-automatically after the user resolves it. The app MUST NOT solve or bypass
-CAPTCHA, fabricate authentication, ship plaintext game secrets through the
-backend API or start/duplicate game tasks. If credentials are absent,
+encrypted server handoff. A visible Selenium Chrome window SHALL open on a
+detected CAPTCHA or after a failed headless authentication attempt (including
+changed login markup, rejected credentials or a page/world timeout), to allow
+the user to complete or correct the login. A bounded headless attempt SHALL
+leave time for the visible retry, which SHALL remain available until a valid
+world session is found, the user cancels or the overall deadline expires.
+The app MUST NOT solve or bypass CAPTCHA, fabricate authentication, ship
+plaintext game secrets through the backend API or start/duplicate game tasks. If credentials are absent,
 the user may supply them once and persist them to a macOS OS-keychain entry
 bound to HTTPS backend origin, account ID and world.
 
@@ -405,8 +417,23 @@ bound to HTTPS backend origin, account ID and world.
 
 - **WHEN** Gameforge rejects credentials, Chrome fails, the game world
   mismatches, or a normal login times out without a detected challenge
-- **THEN** the account is marked unavailable without opening a visible
-  browser, leaking credentials or claiming a verified world session
+- **THEN** the desktop reports the failure and opens one visible Chrome
+  recovery attempt if the browser can start; the operator may correct
+  authentication before the overall deadline expires
+- **AND** no session is reported verified until an exact-host secure cookie
+  passes independent backend player/world attestation
+
+#### Scenario: Headless login telemetry and isolation
+
+- **GIVEN** a headless Selenium sign-in is requested
+- **WHEN** the isolated child starts, checks saved login, loads the lobby,
+  submits credentials, waits for the world, falls back to visible Chrome,
+  encounters an error or finishes
+- **THEN** the GUI SHALL show sanitized timestamped stages in the primary
+  Activity timeline and bounded technical diagnostics while the browser runs
+- **AND** the child SHALL run outside the GUI event loop, support hard
+  cancellation and never log passwords, cookies, full browser URLs or
+  unreviewed subprocess output/exception details
 
 #### Scenario: All-account warehouse run needs some logins
 
