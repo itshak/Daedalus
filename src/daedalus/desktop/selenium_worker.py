@@ -96,6 +96,7 @@ class SeleniumLoginWorker(QThread):
             }
             # A new process group ensures cancellation cannot kill the GUI.
             logger.info("Starting isolated Gameforge login helper")
+            self.stage_changed.emit("helper_starting")
             process = subprocess.Popen(
                 child_command(),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -103,6 +104,7 @@ class SeleniumLoginWorker(QThread):
             )
             with self._lock:
                 self._process = process
+            self.stage_changed.emit("helper_running")
             if self._cancel.is_set():
                 self._kill_group(process)
                 return
@@ -114,12 +116,15 @@ class SeleniumLoginWorker(QThread):
                 if self._cancel.is_set():
                     return
                 if len(raw) > 16384:
+                    self.stage_changed.emit("helper_protocol_error")
                     break
                 try:
                     message = json.loads(raw)
                 except (ValueError, UnicodeError):
+                    self.stage_changed.emit("helper_protocol_error")
                     break
                 if not isinstance(message, dict):
+                    self.stage_changed.emit("helper_protocol_error")
                     break
                 kind, value = message.get("kind"), message.get("value")
                 if kind == "stage" and isinstance(value, str):
@@ -145,14 +150,18 @@ class SeleniumLoginWorker(QThread):
                     self.login_failed.emit(value[:180])
                     break
                 else:
+                    self.stage_changed.emit("helper_protocol_error")
                     break
             if not terminal_received and not self._cancel.is_set():
+                logger.warning("Selenium helper ended before reporting a result (exit code %s)", process.poll())
+                self.stage_changed.emit("helper_exited_early")
                 self.login_failed.emit(
                     "The isolated Selenium browser exited unexpectedly; no session was imported"
                 )
         except (OSError, ValueError, TypeError) as exc:
             if not self._cancel.is_set():
                 logger.warning("Unable to start or read isolated Selenium process: %s", type(exc).__name__)
+                self.stage_changed.emit("helper_start_failed")
                 self.login_failed.emit("The isolated Selenium login process could not start")
         finally:
             if process is not None:
