@@ -1,6 +1,6 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-21** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
+Last reviewed: **2026-11-22** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
 
 ## Automatic recovery implementation (active OpenSpec; approval pending)
 
@@ -48,12 +48,27 @@ completed.** See [full UX feature audit](AUTOMATION-UX-AUDIT.md),
 [design](../openspec/changes/native-automation-workflows/design.md) and
 [remaining checklist](../openspec/changes/native-automation-workflows/tasks.md).
 
+## Desktop sign-in observability and connection feedback (2026-11-22)
+
+PR [#85](https://github.com/itshak/Daedalus/pull/85) updates the existing
+isolated Mac headless Selenium login to open one visible Chrome recovery when
+the headless authentication cannot complete, including non-CAPTCHA failures.
+Sanitized browser stages now feed the primary Activity timeline and rotating
+local diagnostics without exposing credentials or cookies. Verified backend
+handshakes display Fluent success feedback; the token input retains only
+a masked placeholder, not the secret itself. Offline synthetic tests cover
+these behaviors; **real Gameforge login/CAPTCHA and visual Mac acceptance are
+NOT TESTED / NOT APPROVED**, and remain in
+[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
+This release does not certify any live automation or backend deployment.
+
 ## Complete and archived
 
 The following changes have implemented and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
+| `observable-selenium-login-and-connection` | Visible Chrome recovery after headless failure, sanitized live Activity stages and Fluent backend-success/masked-token feedback | [#85](https://github.com/itshak/Daedalus/pull/85) |
 | `persistent-login-identity-status` | Encrypted Mac-bound server login backups, protected email identities, Russian world flags and accessible account/session/worker status indicators | Pending PR for this change |
 | `bootstrap-public-monorepo` | Clean open-source package, CI, OpenSpec, license and security boundaries | [Initial foundation](https://github.com/itshak/Daedalus/commits/main/) |
 | `add-readonly-controller-api` | Credential-free account TOML, authenticated read-only API, warehouse parser | [#6](https://github.com/itshak/Daedalus/pull/6) |
@@ -85,7 +100,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 | `persist-headless-credentials` | Host-encrypted persistent credential collection, receipt reconciliation and service restart/startup-order regression | [#59](https://github.com/itshak/Daedalus/pull/59) |
 | `validate-live-authentication` | Offline/field-preflight implementation archived; **unperformed owner-only acceptance is still open in [issue #60](https://github.com/itshak/Daedalus/issues/60)** | [archive record](https://github.com/itshak/Daedalus/tree/main/openspec/changes/archive/2026-11-19-validate-live-authentication) |
 
-The archive folders are dated `2026-11-18` and `2026-11-19`. Archive
+The archive folders are dated `2026-11-18` through `2026-11-22`. Archive
 checkboxes reflect completed implementation and local validation, not owner
 real-game certification. The outstanding manual gates were transferred
 explicitly to [issue #60](https://github.com/itshak/Daedalus/issues/60),
