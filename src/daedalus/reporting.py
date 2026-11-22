@@ -6,13 +6,13 @@ known unsecured values, so a partially loaded city is never overrepresented.
 
 from __future__ import annotations
 
-from daedalus.account_display import account_display_name
-
 import csv
 import io
 import json
 import re
 from collections.abc import Mapping, Sequence
+
+from daedalus.account_display import account_display_name
 
 RESOURCES = ("wood", "wine", "marble", "glass", "sulfur")
 _COLUMNS = ("account", "city", "island", "world", *RESOURCES, "capacity", "captured_at", "incomplete")
