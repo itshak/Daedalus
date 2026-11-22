@@ -335,3 +335,71 @@ def test_gui_close_does_not_block_waiting_on_http_request(window, app):
     app.processEvents()
     assert not window.isVisible()
     window._worker = None
+
+def test_rejected_headless_handoff_gets_new_ticket_for_visible_browser(window, monkeypatch):
+    """The first server ticket is consumed and must not be replayed."""
+    calls, notices = [], []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append((action, kw)))
+    monkeypatch.setattr(window, "_notice", lambda *args: notices.append(args))
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._automatic_login_challenge = {
+        "account_id": "account-a", "world": "s53-ru", "ticket_id": "consumed-ticket",
+    }
+    window._worker = object()
+    window._on_failed(
+        "native_login_complete",
+        "Server did not verify the exact game account; login was not accepted",
+    )
+    assert window._automatic_login_force_visible
+    assert window._automatic_login_pending_visible_retry
+    assert window._automatic_login_failures == 0
+    assert window._automatic_login_current == "account-a"
+    assert "visible" in window.log_page.timeline.toPlainText().lower()
+    window._on_worker_finished()
+    assert calls == [("native_login_start", {"account_id": "account-a"})]
+    assert window._automatic_login_challenge is None
+    assert not window._automatic_login_pending_visible_retry
+
+
+def test_second_server_handoff_failure_stops_without_retry(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append(action))
+    monkeypatch.setattr(window, "_notice", lambda *args: None)
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._automatic_login_force_visible = True
+    window._on_failed("native_login_complete", "Backend task request was rejected")
+    assert window._automatic_login_failures == 1
+    assert not window._automatic_login_pending_visible_retry
+    assert not window._automatic_login_force_visible
+    window._on_worker_finished()
+    assert "native_login_start" not in calls
+
+
+def test_saved_cookie_receipt_does_not_claim_connected_worker(window, monkeypatch):
+    monkeypatch.setattr(window, "_notice", lambda *args: None)
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._on_completed(
+        "native_login_complete",
+        {"account_id": "account-a", "status": "world_cookie_bound"},
+    )
+    assert window._automatic_login_bound_sessions == 1
+    assert window._automatic_login_worker_recovered == 0
+    assert "worker not connected" in window.log_page.timeline.toPlainText().lower()
+    window._finish_automatic_logins()
+    assert "1 verified session(s) saved" in window.accounts_page.auto_login_status.text()
+    assert "0 worker(s) reconnected" in window.accounts_page.auto_login_status.text()
+    assert not window.accounts_page.auto_login_status.isHidden()
+
+
+def test_login_warning_is_actionable_and_secret_safe(window):
+    window.log_page.add_event(
+        "WARNING",
+        "Backend native_login_complete request failed (Backend task request was rejected)",
+    )
+    text = window.log_page.timeline.toPlainText()
+    assert "Server rejected game login" in text
+    assert "new ticket" in text
+    assert "Action needs attention" not in text
