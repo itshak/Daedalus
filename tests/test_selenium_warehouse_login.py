@@ -522,3 +522,49 @@ def test_visible_chrome_does_not_switch_tabs_on_every_poll(monkeypatch):
     )
     assert browser.switches == ["game"]
     assert len(polled) == 5
+
+def test_ephemeral_chromium_profile_uses_mock_keychain_only_on_mac(monkeypatch):
+    """Chrome Safe Storage must not prompt or read the user's normal profile."""
+    pytest.importorskip("selenium")
+    import os
+    from types import SimpleNamespace
+    from selenium import webdriver
+    from selenium.webdriver.chrome import options as chrome_options
+
+    class Options:
+        def __init__(self):
+            self.arguments = []
+
+        def add_argument(self, value):
+            self.arguments.append(value)
+
+    class Browser:
+        def __init__(self, options):
+            self.args = options.arguments
+            self.closed = False
+
+        def set_page_load_timeout(self, timeout):
+            assert timeout == 45
+
+        def quit(self):
+            self.closed = True
+
+    monkeypatch.setattr(chrome_options, "Options", Options)
+    monkeypatch.setattr(auth.sys, "platform", "darwin")
+    monkeypatch.setitem(sys.modules, "undetected_chromedriver", SimpleNamespace(
+        ChromeOptions=Options,
+        Chrome=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("synthetic uc failure")),
+    ))
+    monkeypatch.setattr(webdriver, "Chrome", lambda *, options: Browser(options))
+    driver = auth.create_chrome(headless=True)
+    profile = driver._daedalus_temporary_profile
+    try:
+        assert "--headless=new" in driver.args
+        assert "--use-mock-keychain" in driver.args
+        assert "--password-store=basic" in driver.args
+        assert f"--user-data-dir={profile}" in driver.args
+        assert os.path.isdir(profile)
+    finally:
+        auth._dispose_chrome(driver)
+    assert driver.closed
+    assert not os.path.exists(profile)
