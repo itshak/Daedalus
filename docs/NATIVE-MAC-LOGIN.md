@@ -4,6 +4,28 @@
 
 **The historical native Qt WebEngine instructions below describe only the advanced manual fallback.**
 
+### Interpreting a successful browser sign-in
+
+A Mac can restore a saved exact-world cookie and the server can independently
+verify and save it while the account's **Worker** column remains disconnected.
+This is not a false-positive Gameforge authentication: cookie verification and
+attaching a persistent IkaBot worker are two different operations. The desktop
+now explicitly reports **verified session saved, worker not connected** instead
+of implying all services are online. A successful dedicated-worker handoff
+instead reports **worker reconnected**. Check the **Worker** column before
+starting operations. No duplicate engine worker starts implicitly.
+
+When the server rejects an otherwise successful headless cookie handoff, the
+client burns that ticket, requests a **new** account-scoped one-time challenge
+and opens visible Chrome without replaying the rejected legacy cookie. This
+interactive recovery is attempted at most once per selected account; a second
+server rejection is terminal and surfaced to Activity. If the backend refuses
+the new challenge (for example, an active/uncertain worker), no browser is
+launched and the owner must reconcile the worker before retrying. Final
+sign-in counts remain visible on Accounts after the activity finishes. The
+Activity timeline uses reviewed, nonsecret stage and failure categories,
+while raw browser exceptions, passwords, cookies and API bodies stay hidden.
+
 For release preflight, use `daedalus doctor --smoke --deployment-check` on the Linux host. This reads no credential values or game pages and reports unresolved task receipts and evidence (not proof) of persistent keyring provisioning. See [owner-supervised Mac-first acceptance](LIVE-ACCEPTANCE.md) before restarting an existing worker.
 
 ## Automatic headless Gameforge sign-in (the prior warehouse-bot workflow)
