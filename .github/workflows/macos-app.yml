@@ -42,8 +42,28 @@ jobs:
             echo "Unexpected private runtime/configuration path in app" >&2
             exit 1
           fi
-      - name: Archive reproducible preview
-        run: ditto -c -k --sequesterRsrc --keepParent dist/Daedalus.app dist/Daedalus-macos-preview.zip
+      - name: Package preview with a local quarantine-clearing installer
+        run: |
+          bash -n "packaging/Install Daedalus.command"
+          mkdir -p dist/preview-package
+          ditto dist/Daedalus.app dist/preview-package/Daedalus.app
+          install -m 755 "packaging/Install Daedalus.command" "dist/preview-package/Install Daedalus.command"
+          ditto -c -k --sequesterRsrc dist/preview-package dist/Daedalus-macos-preview.zip
+      - name: Test installation from the archived download
+        run: |
+          mkdir -p "$RUNNER_TEMP/daedalus-preview-extract"
+          ditto -x -k dist/Daedalus-macos-preview.zip "$RUNNER_TEMP/daedalus-preview-extract"
+          test -f "$RUNNER_TEMP/daedalus-preview-extract/Daedalus.app/Contents/MacOS/Daedalus"
+          test -f "$RUNNER_TEMP/daedalus-preview-extract/Install Daedalus.command"
+          xattr -w com.apple.quarantine '0081;00000000;GitHubActions;' "$RUNNER_TEMP/daedalus-preview-extract/Daedalus.app"
+          DAEDALUS_INSTALL_ROOT="$RUNNER_TEMP/daedalus-preview-install" \
+            bash "$RUNNER_TEMP/daedalus-preview-extract/Install Daedalus.command"
+          test -f "$RUNNER_TEMP/daedalus-preview-install/Daedalus.app/Contents/MacOS/Daedalus"
+          codesign --verify --deep --strict "$RUNNER_TEMP/daedalus-preview-install/Daedalus.app"
+          if xattr -lr "$RUNNER_TEMP/daedalus-preview-install/Daedalus.app" | grep -q 'com.apple.quarantine:'; then
+            echo "Installer failed to clear the app-specific quarantine flag" >&2
+            exit 1
+          fi
       - name: Upload CI preview, not a public release
         uses: actions/upload-artifact@v4
         with:
