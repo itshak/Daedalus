@@ -351,4 +351,6 @@ backup MUST NOT invalidate an independently verified game session.
 Mac Keychain vault key
 - **WHEN** the user starts headless Selenium login
 - **THEN** the Mac decrypts in memory without sending plaintext credentials
-to the Daedalus API and uses a visible browser only for detected CAPTCHA
+to the Daedalus API and opens a visible browser for CAPTCHA or for a failed
+headless attempt to allow user-directed login recovery; server attestation
+remains mandatory before any worker is promoted
