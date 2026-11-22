@@ -49,6 +49,26 @@ def window(app, monkeypatch):
     app.processEvents()
 
 
+def test_headless_and_visible_login_progress_appears_in_activity(window):
+    window._selenium_progress("helper_starting")
+    window._selenium_progress("starting_headless_browser")
+    window._selenium_progress("waiting_for_login_form")
+    window._selenium_progress("headless_login_failed")
+    window._selenium_progress("opening_visible_recovery")
+    timeline = window.log_page.timeline.toPlainText()
+    assert "Starting isolated login helper" in timeline
+    assert "Starting background Chrome" in timeline
+    assert "Waiting for the login form" in timeline
+    assert "Background login failed" in timeline
+    assert "Opening visible Chrome after login failure" in timeline
+    assert "Accounts" in timeline or "Background login failed" in timeline
+    assert window.accounts_page.auto_login_status.text().startswith("Opening Chrome")
+    # Unknown child stage text must never enter the activity or diagnostic log.
+    window._selenium_progress("my-password=synthetic-secret")
+    assert "synthetic-secret" not in window.log_page.timeline.toPlainText()
+    assert "synthetic-secret" not in window.log_page.log_view.toPlainText()
+
+
 def test_accounts_have_headless_single_all_selected_controls(window):
     page = window.accounts_page
     emitted = []
