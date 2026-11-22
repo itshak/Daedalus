@@ -428,3 +428,20 @@ def test_warehouse_dropdown_and_scope_show_bound_email_not_import_label(window, 
     finally:
         chooser.close()
         chooser.deleteLater()
+
+def test_visible_retry_waits_for_child_and_api_thread_shutdown(window, monkeypatch):
+    """HTTP failure can arrive before the old Selenium helper has exited."""
+    calls = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append((action, kw)))
+    monkeypatch.setattr(window, "_notice", lambda *args: None)
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._selenium_worker = SimpleNamespace(deleteLater=lambda: None)
+    window._worker = object()
+    window._on_failed("native_login_complete", "Backend task request was rejected")
+    window._on_worker_finished()
+    assert calls == []
+    assert window._automatic_login_pending_visible_retry
+    window._selenium_finished()
+    assert calls == [("native_login_start", {"account_id": "account-a"})]
+    assert not window._automatic_login_pending_visible_retry
