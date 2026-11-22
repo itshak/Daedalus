@@ -297,7 +297,7 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
         return cookie
     except (ManualChallengeRequired, SeleniumLoginUnavailable):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - sanitize arbitrary WebDriver failures
         # WebDriver exceptions may embed cookies, URLs and DOM values.
         # Report a sanitized category rather than the exception itself.
         from selenium.common.exceptions import TimeoutException
