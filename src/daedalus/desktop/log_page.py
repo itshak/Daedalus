@@ -27,6 +27,34 @@ _EVENTS = {
     "multi-account warehouse report updated": (
         "Combined warehouses refreshed", "Account warehouse results were combined."
     ),
+    "backend native_login_complete request failed": (
+        "Server rejected game login",
+        "The encrypted session was not accepted. Visible Chrome recovery is attempted once with a new ticket.",
+    ),
+    "backend native_login_start request failed": (
+        "Server could not prepare game login",
+        "The selected account or worker is not ready for a new login ticket. Review account ownership.",
+    ),
+    "backend native_login_cancel request failed": (
+        "Game login cancellation was rejected",
+        "The one-use handoff may have expired. Review the account before another attempt.",
+    ),
+    "server declined headless cookie handoff": (
+        "Visible browser recovery required",
+        "The saved headless session failed server verification. A new visible Chrome attempt is queued.",
+    ),
+    "isolated gameforge sign-in failed": (
+        "Gameforge sign-in unsuccessful",
+        "Chrome or Gameforge login could not finish. Review the sign-in stages and retry.",
+    ),
+    "isolated selenium login exceeded": (
+        "Gameforge sign-in timed out",
+        "Chrome was terminated after its watchdog deadline; retry or inspect Chrome installation.",
+    ),
+    "saved gameforge login unavailable": (
+        "Saved credentials unavailable",
+        "Enter the account's Gameforge credentials in the secure prompt.",
+    ),
     "managed tasks refreshed": ("Automations refreshed", "Running tasks and request history were checked."),
     "multi-account read-only managed task statuses refreshed": (
         "All-account status refreshed", "Read-only task status was checked across accounts."
@@ -78,7 +106,9 @@ _LOGIN_STAGES = {
     "keychain_save_failed": "Secure login backup could not be saved",
     "credentials_required": "Saved login unavailable; credentials required",
     "handoff_verifying": "Waiting for independent server verification",
-    "handoff_verified": "Game session verified by server",
+    "handoff_verified": "Game session verified; worker reconnected",
+    "handoff_saved": "Game session verified and saved; worker not connected",
+    "server_rejected_headless": "Server rejected headless session; visible retry queued",
     "handoff_failed": "Game session could not be verified",
     "sign_in_cancelled": "Sign-in cancelled",
     "sign_in_finished": "Sign-in attempt finished",
@@ -90,6 +120,7 @@ def _login_stage_severity(stage: str) -> str:
         "headless_login_failed", "helper_exited_early", "helper_protocol_error",
         "keychain_unavailable", "keychain_save_failed", "login_form_timeout",
         "browser_navigation_error", "manual_login_required", "credentials_required",
+        "server_rejected_headless",
     }:
         return "Warning"
     if stage in {"visible_login_failed", "helper_start_failed", "handoff_failed"}:
@@ -167,7 +198,14 @@ class LogPage(QWidget):
         severity = _login_stage_severity(stage)
         self._events.append((
             datetime.now().strftime("%H:%M:%S"), severity, "Accounts", title,
-            "Local browser authentication; final session verification is performed by the backend.",
+            {
+                "handoff_saved": "Server verified this cookie and stored it securely. No game worker was attached; the account may still be marked Not connected.",
+                "handoff_verified": "The authoritative server verified the session and reconnected its existing worker.",
+                "handoff_failed": "Session verification or handoff failed; this is not a connected account.",
+                "server_rejected_headless": "The consumed login ticket cannot be reused. A new ticket and visible Chrome recovery are required.",
+                "saved_session_restored": "A local world cookie was restored. This is not yet an authenticated server worker.",
+                "sign_in_finished": "The current sign-in batch ended. Check the Accounts Worker column and the result message for actual connectivity.",
+            }.get(stage, "Local browser step; server verification and worker attachment are separate."),
         ))
         if len(self._events) > 250:
             del self._events[:-250]
@@ -181,7 +219,7 @@ class LogPage(QWidget):
             title, detail = _EVENTS[known]
         elif level in {"WARNING", "ERROR", "CRITICAL"}:
             title, detail = (
-                ("Action needs attention", "Open the relevant screen to review the current state.")
+                ("Desktop warning", "Open Advanced diagnostics for the reviewed, nonsecret warning category.")
                 if level == "WARNING" else
                 ("Request failed", "Check the connection or retry a read-only refresh.")
             )
