@@ -6,6 +6,8 @@ known unsecured values, so a partially loaded city is never overrepresented.
 
 from __future__ import annotations
 
+from daedalus.account_display import account_display_name
+
 import csv
 import io
 import json
@@ -43,7 +45,7 @@ def rows_for_warehouse(
             and re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", raw_island)
         ) else None
         row: dict[str, object] = {
-            "account": account.get("label") or account.get("player") or account.get("id") or "",
+            "account": account_display_name(account),
             "city": city.get("city_name") or "",
             "island": island,
             "world": account.get("world") or "",
