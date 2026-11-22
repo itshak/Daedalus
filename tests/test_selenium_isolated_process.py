@@ -126,10 +126,12 @@ time.sleep(90)
     try:
         worker.start()
         deadline = time.monotonic() + 4
-        while time.monotonic() < deadline and not stages:
+        while time.monotonic() < deadline and "headless_login" not in stages:
             app.processEvents()
             time.sleep(0.01)
-        assert stages == ["headless_login"], "Synthetic subprocess never started"
+        assert "helper_starting" in stages
+        assert "helper_running" in stages
+        assert "headless_login" in stages, "Synthetic subprocess never started"
         start = time.monotonic()
         worker.cancel()
         assert worker.wait(2500), "Cancellation must not wait for WebDriver's timeout"

@@ -980,6 +980,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_automatic_login_busy(
             True, f"Starting headless Chrome for {len(self._automatic_login_queue)} accounts…"
         )
+        self.log_page.add_login_stage("sign_in_requested")
+        logger.info("Automatic sign-in queued for %d accounts", len(self._automatic_login_queue))
         self._advance_automatic_login()
 
     def _advance_automatic_login(self) -> None:
@@ -997,7 +999,9 @@ class MainWindow(FluentWindow):
             # helper resolves saved logins and launches Chrome in a killable
             # child process, after a one-time backend handoff is prepared.
             self._automatic_login_current = aid
-            logger.info("Beginning isolated login for account %s", aid)
+            # Do not emit account IDs in activity/technical logs.
+            logger.info("Preparing next isolated account sign-in")
+            self.log_page.add_login_stage("backend_handoff_requested")
             self._automatic_login_credentials = None
             self._automatic_login_email = None
             self._automatic_login_save_credentials = False
@@ -1024,6 +1028,9 @@ class MainWindow(FluentWindow):
         self._automatic_login_sealed_vault = None
         self._automatic_login_needs_credentials = False
         self._automatic_login_challenge = None
+        self.log_page.add_login_stage("sign_in_cancelled" if cancelled else "sign_in_finished")
+        logger.info("Automatic sign-in cohort finished: %d verified, %d unavailable",
+                    succeeded, failures)
         self.accounts_page.set_automatic_login_busy(
             False,
             f"Automatic sign-in {'cancelled' if cancelled else 'finished'}: "
@@ -1046,6 +1053,7 @@ class MainWindow(FluentWindow):
         if not self._automatic_login_active:
             return
         self._automatic_login_cancelled = True
+        logger.info("Cancelling isolated Selenium login")
         self._automatic_login_queue.clear()
         self._automatic_login_report = None
         self.accounts_page.set_automatic_login_busy(
@@ -1060,6 +1068,8 @@ class MainWindow(FluentWindow):
 
     def _selenium_timeout(self) -> None:
         if self._selenium_worker is not None and self._selenium_worker.isRunning():
+            logger.warning("Isolated Selenium login exceeded the watchdog deadline")
+            self.log_page.add_login_stage("handoff_failed")
             self._notice(
                 "Automatic sign-in timed out",
                 "The isolated Chrome process exceeded its time limit and was terminated.",
@@ -1083,6 +1093,7 @@ class MainWindow(FluentWindow):
             remember=self._automatic_login_save_credentials,
         )
         self._selenium_worker = worker
+        logger.info("Starting isolated Selenium helper")
         worker.stage_changed.connect(self._selenium_progress)
         worker.credentials_resolved.connect(self._selenium_credentials_resolved)
         worker.credentials_required.connect(self._selenium_credentials_required)
@@ -1108,6 +1119,8 @@ class MainWindow(FluentWindow):
 
     def _selenium_credentials_required(self) -> None:
         self._automatic_login_needs_credentials = True
+        self.log_page.add_login_stage("credentials_required")
+        logger.warning("Saved Gameforge login unavailable; prompting for credentials")
 
     def _selenium_vault_ready(self, vault: dict[str, object]) -> None:
         if not self._automatic_login_cancelled:
@@ -1138,24 +1151,55 @@ class MainWindow(FluentWindow):
 
     def _selenium_progress(self, stage: str) -> None:
         descriptions = {
+            "helper_starting": "Starting the background login helper…",
+            "helper_running": "Login helper running; checking account credentials…",
+            "starting_headless_browser": "Starting Chrome in the background…",
+            "checking_saved_session": "Checking for a reusable world session…",
+            "saved_session_restored": "World session restored; verifying with backend…",
+            "opening_lobby": "Opening the Gameforge lobby…",
+            "lobby_loaded": "Gameforge lobby opened…",
+            "waiting_for_login_form": "Waiting for the Gameforge sign-in form…",
+            "login_submitted": "Login submitted. Waiting for Gameforge…",
+            "lobby_session_active": "Lobby session exists; opening the selected world…",
+            "waiting_for_world": "Waiting for the exact selected game world…",
+            "play_clicked": "Gameforge Play clicked; opening the world…",
+            "world_ready": "Game world opened. Checking session security…",
+            "world_cookie_ready": "Secure world session found. Waiting for server verification…",
+            "headless_login_failed": "Background login failed; switching to visible Chrome…",
+            "opening_visible_recovery": (
+                "Opening Chrome so you can complete or correct Gameforge login…"
+            ),
+            "opening_visible_browser": "Visible Chrome starting. Complete login if needed…",
+            "manual_login_required": (
+                "Complete the Gameforge login in the visible Chrome window."
+            ),
+            "login_form_timeout": "Gameforge login form timed out; trying visible recovery…",
+            "browser_navigation_error": "Gameforge navigation failed; trying visible recovery…",
+            "visible_login_failed": "Visible browser recovery did not complete.",
+            "helper_protocol_error": "Login helper returned an invalid response.",
+            "helper_exited_early": "Login helper exited before authentication completed.",
+            "helper_start_failed": "Login helper could not start.",
             "headless_login": "Logging in automatically in headless Chrome…",
             "resolving_saved_login": "Looking for saved credentials in macOS Keychain…",
             "launching_chrome": "Starting isolated headless Chrome browser…",
             "opening_visible_captcha": (
-                "A CAPTCHA was detected. Opening visible Chrome only for that challenge…"
+                "A CAPTCHA was detected; opening visible Chrome for manual completion…"
             ),
             "captcha_required": (
                 "CAPTCHA needs you: complete the challenge in visible Chrome. "
                 "Selenium continues automatically afterward."
             ),
             "captcha_resolved": "CAPTCHA solved. Selenium is opening the selected game world…",
-            "visible_captcha_login": "Continuing the headless attempt in temporary visible Chrome…",
+            "visible_captcha_login": "Continuing in visible Chrome…",
             "keychain_unavailable": "Saved login unavailable. Enter credentials manually if prompted.",
             "keychain_save_failed": "Chrome signed in; encrypted login backup is unavailable until Keychain unlocks.",
         }
         message = descriptions.get(stage)
         if message:
+            # Fixed stage codes only: never forward raw browser exceptions,
+            # credentials, account IDs or URLs into the GUI log stream.
             logger.info("Gameforge sign-in stage: %s", stage)
+            self.log_page.add_login_stage(stage)
             self.accounts_page.set_automatic_login_busy(True, message)
         if stage == "captcha_required":
             self._notice("Gameforge CAPTCHA", "Complete it in the visible Chrome window; no password entry needed.")
@@ -1185,8 +1229,10 @@ class MainWindow(FluentWindow):
             self._notice("Gameforge session invalid", "World cookie was rejected before transmission.")
             self._cancel_selenium_handoff(challenge)
             return
+        self.log_page.add_login_stage("handoff_verifying")
+        logger.info("Gameforge world session obtained; verifying player on server")
         self.accounts_page.set_automatic_login_busy(
-            True, "Headless sign-in complete. Waiting for independent server player verification…"
+            True, "Browser sign-in complete. Waiting for independent server player verification…"
         )
         payload: dict[str, object] = {
             "ticket_id": challenge["ticket_id"], "envelope": envelope,
@@ -1198,6 +1244,7 @@ class MainWindow(FluentWindow):
         self._request("native_login_complete", account_id=aid, task_payload=payload)
 
     def _selenium_failure(self, reason: str) -> None:
+        self.log_page.add_login_stage("handoff_failed")
         logger.warning("Isolated Gameforge sign-in failed: %s", reason)
         self._notice("Automatic sign-in unsuccessful", reason)
         if self._automatic_login_challenge is not None:
@@ -1838,6 +1885,12 @@ class MainWindow(FluentWindow):
             demo = bool(health.get("synthetic_demo") is True)
             self.connection_page.set_connected(True, demo=demo)
             self.home_page.set_connected(True, demo=demo)
+            logger.info("Connected to Daedalus API")
+            InfoBar.success(
+                "Connected to Daedalus",
+                "Secure connection verified. You can now open Overview or Accounts.",
+                parent=self, position=InfoBarPosition.TOP_RIGHT,
+            )
             browser_capability = payload.get("native_browser_login") or {}
             self.accounts_page.set_native_browser_login_enabled(
                 not demo and browser_capability.get("enabled") is True
@@ -1994,6 +2047,7 @@ class MainWindow(FluentWindow):
         elif action == "native_login_start":
             assert isinstance(payload, dict)
             self._pending_native_login_challenge = payload
+            self.log_page.add_login_stage("backend_handoff_ready")
             logger.info("One-time Mac browser login prepared; no game action started")
         elif action == "native_login_complete":
             assert isinstance(payload, dict)
@@ -2013,6 +2067,8 @@ class MainWindow(FluentWindow):
                         "did not complete. Unlock Mac Keychain before next sign-in.",
                     )
                 self._automatic_login_successes += 1
+                self.log_page.add_login_stage("handoff_verified")
+                logger.info("Gameforge login independently verified by backend")
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
             if payload.get("status") == "worker_recovered_verified":
@@ -2239,6 +2295,7 @@ class MainWindow(FluentWindow):
             self._pending_native_login_challenge = None
         if (action in {"native_login_start", "native_login_complete", "native_login_cancel"}
                 and self._automatic_login_active and self._automatic_login_current):
+            self.log_page.add_login_stage("handoff_failed")
             self._automatic_login_failures += 1
             self._reset_automatic_attempt()
             self._automatic_login_pending_advance = True
@@ -2352,8 +2409,12 @@ class MainWindow(FluentWindow):
             if self.client is None:
                 self.connection_page.set_connection_error(error)
             else:
-                # A failed reconnect must not hide an existing authorized session.
+                # A failed reconnect must not hide an existing authorized session,
+                # but the user must not confuse it with successful new credentials.
                 self.connection_page.set_connected(True)
+                self.connection_page.status_label.setText(
+                    "New connection failed. The previously verified backend remains connected."
+                )
         logger.warning("Backend %s request failed", action)
         if action not in {"assistance_pending", "task_preflight", "task_cities",
                           "task_buildings", "task_construction_preview", "task_workshop",

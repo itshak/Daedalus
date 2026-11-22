@@ -37,6 +37,66 @@ _EVENTS = {
 }
 
 
+# Only reviewed, nonsecret stages emitted by the isolated browser helper are
+# eligible for display. Do not display arbitrary subprocess diagnostics.
+_LOGIN_STAGES = {
+    "sign_in_requested": "Sign-in requested",
+    "backend_handoff_requested": "Preparing secure server handoff",
+    "backend_handoff_ready": "Secure server handoff prepared",
+    "helper_starting": "Starting isolated login helper",
+    "helper_running": "Isolated login helper started",
+    "resolving_saved_login": "Checking saved Gameforge credentials",
+    "keychain_unavailable": "Mac Keychain unavailable",
+    "launching_chrome": "Launching Chrome",
+    "starting_headless_browser": "Starting background Chrome",
+    "checking_saved_session": "Checking saved world session",
+    "saved_session_restored": "Saved world session restored",
+    "headless_login": "Trying background Gameforge login",
+    "opening_lobby": "Opening Gameforge lobby",
+    "lobby_loaded": "Gameforge lobby loaded",
+    "waiting_for_login_form": "Waiting for the login form",
+    "login_submitted": "Gameforge login form submitted",
+    "lobby_session_active": "Existing lobby session found",
+    "waiting_for_world": "Waiting for the selected game world",
+    "play_clicked": "Opening selected game world",
+    "world_ready": "Selected game world opened",
+    "world_cookie_ready": "World session obtained; awaiting server verification",
+    "headless_login_failed": "Background login failed",
+    "opening_visible_captcha": "CAPTCHA detected; opening visible Chrome",
+    "opening_visible_recovery": "Opening visible Chrome after login failure",
+    "opening_visible_browser": "Starting visible Chrome",
+    "visible_captcha_login": "Continuing in visible Chrome",
+    "captcha_required": "CAPTCHA requires manual completion",
+    "captcha_resolved": "CAPTCHA completed",
+    "manual_login_required": "Manual sign-in needed in visible Chrome",
+    "login_form_timeout": "Gameforge login form timed out",
+    "browser_navigation_error": "Chrome could not navigate the login page",
+    "visible_login_failed": "Visible login recovery failed",
+    "helper_protocol_error": "Login helper returned invalid data",
+    "helper_exited_early": "Login helper stopped unexpectedly",
+    "helper_start_failed": "Isolated login helper could not start",
+    "keychain_save_failed": "Secure login backup could not be saved",
+    "credentials_required": "Saved login unavailable; credentials required",
+    "handoff_verifying": "Waiting for independent server verification",
+    "handoff_verified": "Game session verified by server",
+    "handoff_failed": "Game session could not be verified",
+    "sign_in_cancelled": "Sign-in cancelled",
+    "sign_in_finished": "Sign-in attempt finished",
+}
+
+
+def _login_stage_severity(stage: str) -> str:
+    if stage in {
+        "headless_login_failed", "helper_exited_early", "helper_protocol_error",
+        "keychain_unavailable", "keychain_save_failed", "login_form_timeout",
+        "browser_navigation_error", "manual_login_required", "credentials_required",
+    }:
+        return "Warning"
+    if stage in {"visible_login_failed", "helper_start_failed", "handoff_failed"}:
+        return "Error"
+    return "Information"
+
+
 class LogPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -98,6 +158,20 @@ class LogPage(QWidget):
         self.diagnostics_button.setText(
             "Hide advanced diagnostics" if show else "Show advanced diagnostics"
         )
+
+    def add_login_stage(self, stage: str) -> None:
+        """Append one account sign-in step without storing secret-bearing input."""
+        title = _LOGIN_STAGES.get(stage)
+        if title is None:
+            return
+        severity = _login_stage_severity(stage)
+        self._events.append((
+            datetime.now().strftime("%H:%M:%S"), severity, "Accounts", title,
+            "Local browser authentication; final session verification is performed by the backend.",
+        ))
+        if len(self._events) > 250:
+            del self._events[:-250]
+        self._render_events()
 
     def add_event(self, level: str, message: str) -> None:
         """Accept only reviewed generic client events, never arbitrary payloads."""

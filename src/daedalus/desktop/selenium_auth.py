@@ -1,8 +1,8 @@
 """Headless-first Selenium login, adapted from itshak/ikabot warehouse bot.
 
 Uses the legacy lobby selectors and play-button workflow. Headless Chrome is
-the default. An actual CAPTCHA alone triggers a visible Chrome retry; Selenium
-never solves a challenge. Only the exact, secure world cookie is returned for
+the default. A failed headless login gets one bounded visible Chrome retry,
+where a human can solve CAPTCHA or correct credentials. Selenium never solves a challenge. Only the exact, secure world cookie is returned for
 the established encrypted server handoff and independent player verification.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ class SeleniumLoginUnavailable(RuntimeError):
 
 
 class ManualChallengeRequired(SeleniumLoginUnavailable):
-    """Visible user challenge detected; only this triggers windowed Chrome."""
+    """Visible user challenge detected; restart with windowed Chrome."""
 
 
 @dataclass(frozen=True)
@@ -160,6 +160,7 @@ def _await_world(driver, world_host: str, *, deadline: float,
 
     lobby_handle = driver.current_window_handle
     play_clicked = False
+    notify("waiting_for_world")
     while time.monotonic() < deadline:
         if cancelled():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
@@ -179,10 +180,11 @@ def _await_world(driver, world_host: str, *, deadline: float,
                     driver, deadline=deadline, notify=notify, cancelled=cancelled,
                 )
             if _world_ready(driver, world_host):
+                notify("world_ready")
                 return
         try:
             driver.switch_to.window(lobby_handle)
-            if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH):
+            if driver.find_elements(By.XPATH, LOGIN_ERROR_XPATH) and headless:
                 raise SeleniumLoginUnavailable("Gameforge rejected the saved credentials")
             buttons = driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH)
             if buttons and not play_clicked:
@@ -194,6 +196,7 @@ def _await_world(driver, world_host: str, *, deadline: float,
                         item.click()
                 buttons[0].click()
                 play_clicked = True
+                notify("play_clicked")
         except SeleniumLoginUnavailable:
             raise
         except Exception:  # noqa: BLE001 - game may be navigating between tabs
@@ -253,12 +256,15 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
     try:
         if cancelled():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
+        notify("opening_lobby")
         driver.get(LOBBY_URL)
+        notify("lobby_loaded")
         if challenge_present(driver):
             if headless:
                 raise ManualChallengeRequired("Gameforge CAPTCHA needs human input")
             _wait_challenge(driver, deadline=deadline, notify=notify, cancelled=cancelled)
         if not driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH):
+            notify("waiting_for_login_form")
             tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
             if tabs and _visible(tabs[0]):
                 tabs[0].click()
@@ -271,6 +277,9 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
             password_field.clear()
             password_field.send_keys(credentials.password)
             submit.click()
+            notify("login_submitted")
+        else:
+            notify("lobby_session_active")
         _await_world(driver, world_host, deadline=deadline,
                      headless=headless, notify=notify, cancelled=cancelled)
         matches = [
@@ -283,13 +292,24 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
             raise SeleniumLoginUnavailable("The expected secure world cookie is missing")
         from daedalus.saved_session_recovery import _validated_world_cookie
 
-        return _validated_world_cookie(matches[0].get("value"))
+        cookie = _validated_world_cookie(matches[0].get("value"))
+        notify("world_cookie_ready")
+        return cookie
     except (ManualChallengeRequired, SeleniumLoginUnavailable):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - sanitize arbitrary WebDriver failures
+        # WebDriver exceptions may embed cookies, URLs and DOM values.
+        # Report a sanitized category rather than the exception itself.
+        from selenium.common.exceptions import TimeoutException
+        if isinstance(exc, TimeoutException):
+            notify("login_form_timeout")
+            raise SeleniumLoginUnavailable(
+                "Gameforge login form did not become usable in time"
+            ) from None
+        notify("browser_navigation_error")
         raise SeleniumLoginUnavailable(
-            "Automatic login failed; check your saved credentials and Gameforge page"
-        ) from exc
+            "Chrome could not complete the Gameforge login page"
+        ) from None
 
 
 def login_world(
@@ -298,7 +318,11 @@ def login_world(
     notify: Callable[[str], None] | None = None, timeout_seconds: float = 240,
     cancelled: Callable[[], bool] | None = None,
 ) -> str:
-    """Headless first; visible login only on detected CAPTCHA, never on timeout."""
+    """Try headless first; give failures a bounded visible-browser recovery.
+
+    The headless deadline reserves time for the visible fallback if a page
+    silently hangs. Only the exact world-host cookie can complete a login.
+    """
     if not WORLD.fullmatch(world):
         raise SeleniumLoginUnavailable("Invalid selected world")
     if not 30 <= timeout_seconds <= 540:
@@ -306,36 +330,80 @@ def login_world(
     report = notify or (lambda _stage: None)
     stop_requested = cancelled or (lambda: False)
     deadline = time.monotonic() + timeout_seconds
+    headless_deadline = min(
+        deadline, time.monotonic() + max(15, min(90, timeout_seconds * 0.4))
+    )
     host = f"{world.casefold()}.ikariam.gameforge.com"
+
     for headless in (True, False):
         if stop_requested():
             raise SeleniumLoginUnavailable("Automatic login cancelled")
+        if time.monotonic() >= deadline:
+            raise SeleniumLoginUnavailable("Login timed out before browser recovery")
         driver = None
+        report("starting_headless_browser" if headless else "opening_visible_browser")
         try:
             driver = driver_factory(headless)
             if headless:
                 from daedalus.desktop.selenium_credentials import legacy_saved_session
 
+                report("checking_saved_session")
                 previous = legacy_saved_session(credentials.email, world)
                 if previous and not stop_requested():
                     restored = _restore_legacy_session(
-                        driver, previous, host, deadline=deadline
+                        driver, previous, host, deadline=headless_deadline
                     )
                     if restored is not None:
                         report("saved_session_restored")
                         return restored
-            return _login_once(
-                driver, credentials, host, headless=headless,
-                deadline=deadline, notify=report, cancelled=stop_requested,
-            )
-        except ManualChallengeRequired:
-            if not headless:
-                raise SeleniumLoginUnavailable(
-                    "The CAPTCHA was not completed in visible Chrome"
-                ) from None
-            report("opening_visible_captcha")
+            try:
+                return _login_once(
+                    driver, credentials, host, headless=headless,
+                    deadline=headless_deadline if headless else deadline,
+                    notify=report, cancelled=stop_requested,
+                )
+            except ManualChallengeRequired:
+                if not headless:
+                    raise SeleniumLoginUnavailable(
+                        "The CAPTCHA was not completed in visible Chrome"
+                    ) from None
+                report("headless_login_failed")
+                report("opening_visible_captcha")
+            except SeleniumLoginUnavailable:
+                if headless:
+                    report("headless_login_failed")
+                    report("opening_visible_recovery")
+                else:
+                    if stop_requested():
+                        raise SeleniumLoginUnavailable("Automatic login cancelled") from None
+                    # Visible Chrome remains open so a human can correct a
+                    # rejected password or changed login form and click Play.
+                    report("manual_login_required")
+                    _await_world(
+                        driver, host, deadline=deadline, headless=False,
+                        notify=report, cancelled=stop_requested,
+                    )
+                    matches = [
+                        c for c in driver.get_cookies()
+                        if c.get("name") == "ikariam"
+                        and str(c.get("domain") or "").lstrip(".").casefold() == host
+                        and c.get("secure") is True
+                    ]
+                    if len(matches) != 1:
+                        raise SeleniumLoginUnavailable(
+                            "The expected secure world cookie is missing"
+                        ) from None
+                    from daedalus.saved_session_recovery import _validated_world_cookie
+
+                    cookie = _validated_world_cookie(matches[0].get("value"))
+                    report("world_cookie_ready")
+                    return cookie
         except SeleniumLoginUnavailable:
-            raise
+            if not headless:
+                report("visible_login_failed")
+                raise
+            report("headless_login_failed")
+            report("opening_visible_recovery")
         finally:
             if driver is not None:
                 try:

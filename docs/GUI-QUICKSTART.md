@@ -6,9 +6,9 @@ The native application controls an authenticated Daedalus backend. Its Mac Selen
 
 1. On your Mac, launch Daedalus and open **Connection**. Enter the private controller's **HTTPS address** provided by your backend administrator, such as `https://your-daedalus-server.example`. The server may use Cloudflare Tunnel, another trusted HTTPS gateway, or an existing private network to expose a stable hostname, but it must require valid TLS and the backend's own API authorization.
 2. Paste the **Daedalus API access token** once. This is **not** the Gameforge `gf-token-production` or any Ikariam password; do not substitute those credentials.
-3. Leave **Save token securely in Keychain and reconnect on startup** checked (the default), then click the main **Connect** button. After the authenticated handshake succeeds, the app stores the bearer token **only in the OS Keychain**, and the validated server URL in a private preferences file. No token is written to plaintext configuration.
+3. Leave **Save token securely in Keychain and reconnect on startup** checked (the default), then click the main **Connect** button. After the authenticated handshake succeeds, the app displays a **Fluent success notification** and a persistent Connected status. The token field then shows masked dots and a **saved in Keychain** hint instead of becoming visually empty; the dots are only a placeholder, never the actual secret. The bearer is stored **only in the OS Keychain**, and the validated server URL in private preferences. No token is written to plaintext configuration or the GUI widget.
 4. Next time, Daedalus automatically reconnects to that previously approved HTTPS server using the saved Keychain token. The **Reconnect saved server** button is also available. If the Keychain is locked or the server cannot be reached, unlock or troubleshoot it normally; the game does not start any new task on reconnect.
-5. **Forget saved access** deletes the private URL preference and the corresponding keychain credential. If you change HTTPS server addresses, enter the token again: Daedalus deliberately does **not** forward credentials from one origin to another.
+5. **Forget saved access** deletes the private URL preference and corresponding Keychain credential. A one-time connection shows a masked **active for this session** hint instead. If you change HTTPS server addresses, enter the token again: Daedalus deliberately does **not** forward credentials from one origin to another. A failed handshake shows a clear safe error and never displays the connected-success notification.
 
 An existing local backend can still be reached through `http://127.0.0.1:8765` for testing; only loopback HTTP or trusted HTTPS is permitted. The optional SSH fallback and synthetic demo are under **Show advanced connection options**, not part of normal use. The app never disables TLS verification or silently converts a saved SSH connection into an HTTPS credential. A public hostname without backend authentication is **not** a supported deployment.
 
@@ -22,10 +22,11 @@ This is adapted from the original local warehouse bot in
 world session when available, otherwise enter Gameforge lobby using stored
 email/password, select the game's play/world entry, and detect the exact-world
 authenticated city UI. Selenium starts with **headless Chrome**. A visible
-Chrome window is opened **only when an actual CAPTCHA is detected**, so the user
-can solve it; Selenium resumes navigation itself. A wrong password, missing
-browser, timeout or world mismatch does *not* open a random visible browser.
-CAPTCHA is never solved or bypassed by software.
+Chrome window is opened when a CAPTCHA is detected **or headless sign-in fails**.
+The visible window lets you finish the CAPTCHA, correct a rejected password or
+complete a changed Gameforge login form. Selenium continues checking the selected
+world automatically. Missing credentials and cancelled sessions do not open a
+browser without consent. CAPTCHA is never solved or bypassed by software.
 
 In Daedalus **Accounts**, select **Sign in automatically (headless)**, **Sign in
 all accounts**, or **Choose sign-in accounts…**. The **Warehouses → All accounts**
@@ -120,7 +121,8 @@ The GitHub Actions macOS build produces an ad-hoc signed preview app. Updating b
 - The helper tries this Mac's previously saved credential, then the account's
   client-sealed login vault, then an exact local legacy warehouse alias. If none
   is available, the GUI asks for credentials. Headless Chrome is the default;
-  visible Chrome is opened only when an actual CAPTCHA is detected.
+  one visible Chrome retry opens for CAPTCHA or a failed headless login,
+  so you can manually finish authentication within the login deadline.
 - **Cancel sign-in**, **Cmd+Q**, or closing the window terminates the isolated
   helper's process group, including its ChromeDriver and Chrome children.
   There is also a 5.5-minute watchdog for stuck attempts. Cancellation does

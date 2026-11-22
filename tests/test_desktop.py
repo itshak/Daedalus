@@ -53,6 +53,11 @@ def test_connection_token_is_masked_and_not_persisted(qt_app):
     page.token_input.setText("x" * 48)
     page.set_connected(True)
     assert page.token_input.text() == ""
+    assert "active for this session" in page.token_input.placeholderText()
+    page.set_token_saved(True)
+    assert "••••••" in page.token_input.placeholderText()
+    assert "saved in Keychain" in page.token_input.placeholderText()
+    assert page.token_input.text() == ""
     assert "Connected" in page.status_label.text()
     page.close()
 
@@ -198,6 +203,10 @@ def test_saved_connection_is_opt_in_and_never_written_to_text_inputs(qt_app, mon
 
     fake = FakeClient()
     monkeypatch.setattr(module, "remember_connection", lambda *args: stored.append(args))
+    notices = []
+    monkeypatch.setattr(module.InfoBar, "success", lambda title, message, **kw: (
+        notices.append((title, message))
+    ))
     try:
         window._pending_client = fake
         window._pending_preferences = (url, token)
@@ -205,7 +214,32 @@ def test_saved_connection_is_opt_in_and_never_written_to_text_inputs(qt_app, mon
         assert window.client is fake
         assert stored == [(url, token)]
         assert window.connection_page.token_input.text() == ""
+        assert "saved in Keychain" in window.connection_page.token_input.placeholderText()
         assert token not in window.connection_page.status_label.text()
+        assert token not in window.connection_page.token_input.placeholderText()
+        assert notices == [(
+            "Connected to Daedalus",
+            "Secure connection verified. You can now open Overview or Accounts.",
+        )]
+    finally:
+        window.close()
+
+
+def test_failed_new_connection_discloses_old_session_remains(qt_app, monkeypatch):
+    window = MainWindow()
+
+    class ExistingClient:
+        def close(self):
+            pass
+
+    window.client = ExistingClient()
+    window.connection_page.set_connected(True)
+    monkeypatch.setattr(window, "_notice", lambda *_args: None)
+    try:
+        window._on_failed("connect", "401 unauthorized")
+        assert "New connection failed" in window.connection_page.status_label.text()
+        assert "previously verified backend" in window.connection_page.status_label.text()
+        assert window.connection_page.overview_button.isEnabled()
     finally:
         window.close()
 
