@@ -1046,7 +1046,6 @@ class MainWindow(FluentWindow):
         self._finish_automatic_logins()
 
     def _finish_automatic_logins(self) -> None:
-        succeeded = self._automatic_login_successes
         failures = self._automatic_login_failures
         cancelled = self._automatic_login_cancelled
         self._automatic_login_active = False
