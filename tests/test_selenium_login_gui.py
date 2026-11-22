@@ -404,3 +404,27 @@ def test_login_warning_is_actionable_and_secret_safe(window):
     assert "Server rejected game login" in text
     assert "new ticket" in text
     assert "Action needs attention" not in text
+
+def test_warehouse_dropdown_and_scope_show_bound_email_not_import_label(window, app):
+    from daedalus.desktop.account_scope import AccountSelectionDialog
+
+    imported = {
+        "id": "account-a", "world": "s53-ru", "player": "Xiaomi",
+        "label": "Imported IkaBot identity 01", "email": "first@example.invalid",
+        "enabled": True, "session_status": "not_connected",
+    }
+    fallback = {
+        "id": "account-b", "world": "s53-ru", "player": "Omega",
+        "label": "Imported IkaBot identity 02", "enabled": True,
+        "session_status": "not_connected",
+    }
+    window._show_accounts([imported, fallback])
+    assert window.warehouses_page.account_combo.itemText(0) == "first@example.invalid"
+    assert window.warehouses_page.account_combo.itemText(1) == "Omega"
+    chooser = AccountSelectionDialog([imported, fallback], ["account-a"], window)
+    try:
+        assert chooser.checkboxes["account-a"].text().startswith("first@example.invalid")
+        assert chooser.checkboxes["account-b"].text().startswith("Omega")
+    finally:
+        chooser.close()
+        chooser.deleteLater()
