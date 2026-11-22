@@ -202,6 +202,8 @@ class ConnectionPage(QWidget):
         layout.addWidget(BodyLabel("API access token"))
         self.token_input = LineEdit()
         self.token_input.setEchoMode(QLineEdit.Password)
+        self._token_saved = False
+        self._connected = False
         self.token_input.setPlaceholderText("Paste your API token once")
         self.token_input.setAccessibleName("Daedalus API access token")
         layout.addWidget(self.token_input)
@@ -291,10 +293,29 @@ class ConnectionPage(QWidget):
         )
 
     def set_token_saved(self, saved: bool) -> None:
+        self._token_saved = saved
         self.keychain_status.setText(
             "API access saved in Keychain" if saved else ""
         )
         self.keychain_status.setVisible(saved)
+        self._update_token_hint()
+
+    def _update_token_hint(self) -> None:
+        """Show a masked *hint*, never retain the bearer in a Qt input field."""
+        if self._connected and self._token_saved:
+            hint = "••••••••••••••••  (saved in Keychain)"
+        elif self._connected:
+            hint = "••••••••••••••••  (active for this session)"
+        elif self._token_saved:
+            hint = "••••••••••••••••  (saved; reconnect to use)"
+        else:
+            hint = "Paste your API token once"
+        self.token_input.setPlaceholderText(hint)
+        self.token_input.setAccessibleDescription(
+            "Token is configured; leave blank to reuse saved secure access"
+            if self._token_saved else
+            "Enter a token to connect or replace the current token"
+        )
 
     def _connect(self) -> None:
         self.connect_requested.emit(self.url_input.text().strip(), self.token_input.text())
@@ -317,6 +338,8 @@ class ConnectionPage(QWidget):
 
     def set_connection_error(self, reason: str) -> None:
         """Classify safe failures; never display arbitrary backend response bodies."""
+        self._connected = False
+        self._update_token_hint()
         failure = reason.casefold()
         if any(word in failure for word in ("certificate", "tls", "ssl", "trust")):
             message = "Certificate not trusted. Check your server certificate; do not bypass TLS."
@@ -334,6 +357,7 @@ class ConnectionPage(QWidget):
         self.overview_button.setEnabled(False)
 
     def set_connected(self, connected: bool, *, demo: bool = False) -> None:
+        self._connected = connected
         self.overview_button.setEnabled(connected)
         self.status_label.setText(
             "SYNTHETIC DEMO connected — no real game accounts or sessions"
@@ -342,7 +366,10 @@ class ConnectionPage(QWidget):
             if connected else "Not connected. Enter a secure backend address to begin."
         )
         if connected:
+            # QLineEdit itself must not retain a copy of the bearer. The
+            # masked placeholder tells the operator access is configured.
             self.token_input.clear()
+        self._update_token_hint()
 
 
 class AccountsPage(QWidget):
