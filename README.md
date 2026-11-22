@@ -75,7 +75,7 @@ The redesigned interface places **Overview**, **Accounts**, **Warehouses**, **Au
 For a detailed synthetic walkthrough, print instructions, account selection and known UI/production restrictions, see the [macOS Fluent UI preview guide](docs/MAC-UI-GUIDE.md).
 For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
 
-**Mac .app preview:** On a Mac, install `.[desktop,macos-build]` and run `python packaging/build_macos_app.py --output-dir dist --adhoc-sign` to create `dist/Daedalus.app` without installing it. The CI build uploads an ad-hoc signed preview archive; it is **not notarized**. Details: [macOS packaging](docs/MACOS-BUILD.md).
+**Mac .app preview:** On a Mac, install `.[desktop,macos-build]` and run `python packaging/build_macos_app.py --output-dir dist --adhoc-sign` to create `dist/Daedalus.app` without installing it. The CI build uploads an ad-hoc signed preview archive, including an **Install Daedalus.command** script: after extracting both ZIPs, run `bash "Install Daedalus.command"` to verify the app, install it in `~/Applications`, and clear app-specific quarantine without opening Privacy & Security settings. This **is not Apple notarization**; see [macOS packaging and installer instructions](docs/MACOS-BUILD.md).
 
 ## Synthetic Mac desktop demo (no live game session)
 
