@@ -2,9 +2,10 @@
 # Install the locally downloaded, ad-hoc-signed Daedalus preview without
 # changing system-wide Gatekeeper settings or opening Privacy & Security.
 #
-# Run from the extracted Daedalus-macos-preview.zip:
-#   bash "Install Daedalus.command"
-# Finder may also open this file in Terminal, depending on macOS policy.
+# Run from the mounted DMG (or extracted legacy ZIP):
+#   bash "/Volumes/Daedalus/Install Daedalus.command"
+# Finder may open this .command in Terminal, depending on macOS policy.
+# This is an explicit user action, not automatic DMG execution.
 set -euo pipefail
 
 fail() {
@@ -22,7 +23,7 @@ fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_app="$script_dir/Daedalus.app"
-[[ -d "$source_app" ]] || fail "Daedalus.app is missing beside this installer. Extract the inner preview ZIP first."
+[[ -d "$source_app" ]] || fail "Daedalus.app is missing beside this installer. Run it from the mounted DMG or extracted preview ZIP."
 [[ -f "$source_app/Contents/MacOS/Daedalus" ]] || fail "Incomplete app bundle."
 
 expected_id="io.github.itshak.daedalus"
