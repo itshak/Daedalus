@@ -68,6 +68,23 @@ from daedalus.native_browser_handoff import (
 logger = logging.getLogger("daedalus.desktop")
 
 
+def _safe_api_failure(reason: str) -> str:
+    """Allow reviewed client errors in diagnostics, never arbitrary API bodies."""
+    permitted = {
+        "Cannot connect to Daedalus backend",
+        "Backend task request was rejected",
+        "Backend returned invalid task JSON",
+        "Backend returned invalid task receipt",
+        "Browser login did not receive a verified server receipt",
+        "Backend native browser challenge is malformed",
+        "A Gameforge email is required for first-time account binding",
+        "This worker is busy or has an uncertain task; reconcile it before login",
+        "Running or uncertain tasks must be reconciled before login",
+        "This backend has not enabled native browser login",
+    }
+    return reason if reason in permitted else "request failed (unreviewed detail suppressed)"
+
+
 def _known_ikabot_workers(client: object) -> list[str] | None:
     """Unknown must not be confused with the absence of an IkaBot worker."""
     try:
