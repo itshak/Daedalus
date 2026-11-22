@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
+import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -78,7 +81,12 @@ class GameforgeCredentials:
 
 
 def create_chrome(headless: bool):
-    """Legacy Chrome driver selection and headless flags with plain fallback."""
+    """Use only an isolated Selenium profile, never the user's real Chrome.
+
+    On macOS, Chromium's separate "Safe Storage" Keychain prompt is disabled
+    for this disposable profile only. The actual Gameforge login vault still
+    uses real OS Keychain access and is never put in the browser profile.
+    """
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
@@ -90,25 +98,58 @@ def create_chrome(headless: bool):
         options.add_argument("--window-size=1920,1080")
     for arg in CHROME_FLAGS:
         options.add_argument(arg)
+    profile = None
+    if sys.platform == "darwin":
+        # Chromium test-only keychain switch is safe here ONLY because each
+        # browser gets a fresh private profile that we erase on exit. Never
+        # use it to read someone's normal Chrome profile or saved passwords.
+        profile = tempfile.mkdtemp(prefix="daedalus-selenium-")
+        options.add_argument(f"--user-data-dir={profile}")
+        options.add_argument("--use-mock-keychain")
+        options.add_argument("--password-store=basic")
+        options.add_argument("--disable-sync")
     try:
-        import undetected_chromedriver as uc
-
-        opts = uc.ChromeOptions()
-        for arg in options.arguments:
-            opts.add_argument(arg)
-        driver = uc.Chrome(options=opts, use_subprocess=False)
-    except Exception:  # noqa: BLE001 - optional legacy Chrome driver may fail in many ways
         try:
-            driver = webdriver.Chrome(options=options)
-        except Exception as exc:
-            raise SeleniumLoginUnavailable(
-                "Google Chrome or a compatible ChromeDriver could not start"
-            ) from exc
+            import undetected_chromedriver as uc
+
+            opts = uc.ChromeOptions()
+            for arg in options.arguments:
+                opts.add_argument(arg)
+            driver = uc.Chrome(options=opts, use_subprocess=False)
+        except Exception:  # noqa: BLE001 - optional Chrome driver fallback
+            try:
+                driver = webdriver.Chrome(options=options)
+            except Exception as exc:
+                raise SeleniumLoginUnavailable(
+                    "Google Chrome or a compatible ChromeDriver could not start"
+                ) from exc
+    except BaseException:
+        if profile is not None:
+            shutil.rmtree(profile, ignore_errors=True)
+        raise
+    if profile is not None:
+        driver._daedalus_temporary_profile = profile
     try:
         driver.set_page_load_timeout(45)
     except Exception:  # noqa: BLE001 - best-effort Selenium timeout setting
         log.debug("Chrome does not support page load timeout configuration")
     return driver
+
+
+def _dispose_chrome(driver) -> None:
+    """Quit the child browser and securely discard only our own temp profile."""
+    profile = getattr(driver, "_daedalus_temporary_profile", None)
+    try:
+        driver.quit()
+    except Exception:  # noqa: BLE001 - driver may already have exited
+        log.warning("Selenium Chrome cleanup did not complete")
+    finally:
+        if (isinstance(profile, str)
+                and profile.startswith(str(tempfile.gettempdir()) + "/daedalus-selenium-")):
+            try:
+                shutil.rmtree(profile)
+            except OSError:
+                log.warning("Temporary Selenium profile cleanup was incomplete")
 
 
 def _visible(element) -> bool:
@@ -369,10 +410,7 @@ def restore_saved_world_without_keychain(
         return None
     finally:
         if driver is not None:
-            try:
-                driver.quit()
-            except Exception:  # noqa: BLE001 - webdriver cleanup is best effort
-                log.warning("Saved world Chrome cleanup did not complete")
+            _dispose_chrome(driver)
 
 
 def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
@@ -536,8 +574,5 @@ def login_world(
             report("opening_visible_recovery")
         finally:
             if driver is not None:
-                try:
-                    driver.quit()
-                except Exception:  # noqa: BLE001 - driver may already have exited
-                    log.warning("Selenium Chrome cleanup did not complete")
+                _dispose_chrome(driver)
     raise SeleniumLoginUnavailable("Login session expired")
