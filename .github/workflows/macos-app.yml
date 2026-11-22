@@ -93,3 +93,68 @@ jobs:
           path: dist/Daedalus-macos-preview.zip
           if-no-files-found: error
           retention-days: 7
+
+  # Actions artifacts are always downloaded as a ZIP. A GitHub Release asset
+  # instead serves the verified .dmg itself, without wrapping it in another ZIP.
+  # Keep write privileges completely out of pull-request build jobs.
+  publish-direct-dmg:
+    name: Publish directly downloadable macOS DMG
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Retrieve verified DMG from the successful macOS build
+        uses: actions/download-artifact@v4
+        with:
+          name: Daedalus-macos-dmg
+          path: release-assets
+
+      - name: Verify DMG exists and publish its checksum
+        shell: bash
+        run: |
+          test -s release-assets/Daedalus-macos-preview.dmg
+          cd release-assets
+          sha256sum Daedalus-macos-preview.dmg > Daedalus-macos-preview.dmg.sha256
+
+      - name: Publish direct GitHub prerelease assets (no ZIP wrapper)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="desktop-preview-${SOURCE_SHA:0:12}"
+          cat > release-notes.md <<'EOF'
+          Unnotarized macOS development preview. The .dmg is a **direct release
+          download**, not an Actions artifact inside a ZIP.
+
+          **Important:** This build is ad-hoc signed and not notarized by Apple.
+          A direct DMG does not remove macOS Gatekeeper first-launch prompts.
+          Avoid disabling Gatekeeper; Apple Developer ID signing and notarization
+          are needed for ordinary first-launch distribution.
+
+          Install: download the DMG, double-click it, and drag Daedalus.app to
+          Applications. For the exact build and source, see below.
+          EOF
+          printf '\nSource commit: `%s`\n' "$SOURCE_SHA" >> release-notes.md
+          if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/Daedalus-macos-preview.dmg \
+              release-assets/Daedalus-macos-preview.dmg.sha256 --clobber --repo "$REPO"
+            gh release edit "$tag" --notes-file release-notes.md --repo "$REPO"
+          else
+            gh release create "$tag" \
+              release-assets/Daedalus-macos-preview.dmg \
+              release-assets/Daedalus-macos-preview.dmg.sha256 \
+              --repo "$REPO" --target "$SOURCE_SHA" --prerelease \
+              --title "Daedalus Desktop Preview ${SOURCE_SHA:0:12}" \
+              --notes-file release-notes.md
+          fi
+          url="$(gh release view "$tag" --repo "$REPO" --json assets \
+            --jq '.assets[] | select(.name == "Daedalus-macos-preview.dmg") | .url')"
+          test -n "$url"
+          echo "Direct DMG: $url"
+          printf '### Direct macOS DMG\n\n[Download the .dmg directly](%s)\n' \
+            "$url" >> "$GITHUB_STEP_SUMMARY"
