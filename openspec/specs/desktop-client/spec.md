@@ -93,6 +93,35 @@ Gatekeeper workaround.
 - **THEN** documentation explains that unnotarized apps may still require
   macOS first-launch approval, independently of the download container
 
+### Requirement: BlindBase-compatible macOS preview installation
+
+The Daedalus preview disk image SHALL reproduce BlindBase's HFS+ disk-image
+layout, including an Applications shortcut and first-run documentation for
+app-specific quarantine removal. To reduce manual work without claiming
+automatic Gatekeeper bypass, the DMG SHALL additionally include an explicit
+user-operated, signature-checking installer that copies Daedalus into the
+user's Applications directory and removes `com.apple.quarantine` only from
+that verified copy. CI SHALL exercise this flow with synthetic quarantine and
+check the integrity of the mounted DMG.
+
+#### Scenario: Operator chooses BlindBase's drag-and-drop installation
+- **WHEN** the operator opens a downloaded DMG
+- **THEN** the mounted volume shows Daedalus.app, an Applications shortcut,
+  and a readme documenting the exact `xattr -cr` first-install step
+- **AND** the DMG performs no automatic execution
+
+#### Scenario: Operator uses the explicit installer
+- **GIVEN** a correctly signed preview of the expected Daedalus bundle
+- **WHEN** the operator runs the included installer from the mounted DMG
+- **THEN** the app is copied into the user's Applications directory
+- **AND** only that copy's quarantine flag is removed after verification
+- **AND** no machine-wide Gatekeeper setting is changed
+
+#### Scenario: Packaged app fails integrity verification
+- **WHEN** the included installer encounters a bundle with invalid signing
+  or an unexpected bundle identity
+- **THEN** it refuses the installation and does not clear quarantine
+
 ### Requirement: Native desktop can inspect attached engine sessions without account secrets
 The desktop SHALL show whether configured accounts match authenticated existing IkaBot sessions, obtained only after an explicit user request, without exposing engine authentication credentials or account emails.
 

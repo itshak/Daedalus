@@ -42,7 +42,7 @@ jobs:
             echo "Unexpected private runtime/configuration path in app" >&2
             exit 1
           fi
-      - name: Package preview with a local quarantine-clearing installer
+      - name: Package legacy ZIP with quarantine-clearing installer
         run: |
           bash -n "packaging/Install Daedalus.command"
           mkdir -p dist/preview-package
@@ -64,7 +64,7 @@ jobs:
             echo "Installer failed to clear the app-specific quarantine flag" >&2
             exit 1
           fi
-      - name: Build BlindBase-style drag-and-drop DMG
+      - name: Build BlindBase HFS+ DMG with verified installer and first-run guidance
         run: python packaging/build_macos_dmg.py --app dist/Daedalus.app --output dist/Daedalus-macos-preview.dmg
       - name: Verify mounted DMG contents and app integrity
         run: |
@@ -74,8 +74,26 @@ jobs:
           test -f "$mount_dir/Daedalus.app/Contents/MacOS/Daedalus"
           test -L "$mount_dir/Applications"
           test "$(readlink "$mount_dir/Applications")" = /Applications
-          test ! -e "$mount_dir/Install Daedalus.command"
+          test -x "$mount_dir/Install Daedalus.command"
+          test -f "$mount_dir/readme_first.txt"
+          grep -F 'xattr -cr /Applications/Daedalus.app' "$mount_dir/readme_first.txt"
+          bash -n "$mount_dir/Install Daedalus.command"
           codesign --verify --deep --strict "$mount_dir/Daedalus.app"
+          # Real quarantined-app behavior can only be validated on the Mac
+          # receiving the download. Simulate Finder's extended attribute here
+          # and run the exact user-initiated helper shipped inside the DMG.
+          quarantine_stage="$RUNNER_TEMP/daedalus-dmg-quarantine-source"
+          mkdir -p "$quarantine_stage"
+          ditto "$mount_dir/Daedalus.app" "$quarantine_stage/Daedalus.app"
+          cp "$mount_dir/Install Daedalus.command" "$quarantine_stage/Install Daedalus.command"
+          xattr -w com.apple.quarantine '0081;00000000;GitHubActions;' "$quarantine_stage/Daedalus.app"
+          DAEDALUS_INSTALL_ROOT="$RUNNER_TEMP/daedalus-dmg-install-test" \
+            bash "$quarantine_stage/Install Daedalus.command"
+          codesign --verify --deep --strict "$RUNNER_TEMP/daedalus-dmg-install-test/Daedalus.app"
+          if xattr -lr "$RUNNER_TEMP/daedalus-dmg-install-test/Daedalus.app" | grep -q 'com.apple.quarantine:'; then
+            echo "DMG installer failed to clear app-specific quarantine" >&2
+            exit 1
+          fi
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mount_dir/Daedalus.app/Contents/Info.plist")" = io.github.itshak.daedalus
           hdiutil detach "$mount_dir"
           trap - EXIT
@@ -136,8 +154,12 @@ jobs:
           Avoid disabling Gatekeeper; Apple Developer ID signing and notarization
           are needed for ordinary first-launch distribution.
 
-          Install: download the DMG, double-click it, and drag Daedalus.app to
-          Applications. For the exact build and source, see below.
+          Install: download the DMG and open it. Like BlindBase, the DMG
+          includes readme_first.txt with the xattr command required if macOS
+          quarantines a drag-and-drop first install. You may alternatively
+          explicitly run Install Daedalus.command to verify, copy, and clear
+          quarantine for your own ~/Applications installation. The DMG never
+          auto-runs commands. For the exact build and source, see below.
           EOF
           printf '\nSource commit: `%s`\n' "$SOURCE_SHA" >> release-notes.md
           if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
