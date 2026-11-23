@@ -40,7 +40,14 @@ from qfluentwidgets import (
 from daedalus.account_display import account_display_name
 from daedalus.desktop.design_system import PageHeading, StatusPanel
 from daedalus.desktop.widgets import OpaqueCardWidget, ScrollTableWidget
-from daedalus.reporting import RESOURCES, report_csv, report_json, report_txt, rows_for_warehouse
+from daedalus.reporting import (
+    RESOURCES,
+    report_csv,
+    report_json,
+    report_txt,
+    report_txt_islands,
+    rows_for_warehouse,
+)
 
 
 def _table(headers: list[str]) -> ScrollTableWidget:
@@ -1734,7 +1741,8 @@ class WarehousesPage(QWidget):
             document = QTextDocument(self)
             document.setDefaultFont(QFont("Menlo", 10))
             document.setPlainText(
-                report_txt(self._rows, group_by_island=self.group_island.isChecked())
+                report_txt_islands(self._rows) if self.group_island.isChecked()
+                else report_txt(self._rows, group_by_island=False)
             )
             printer = QPrinter(QPrinter.HighResolution)
             preview = QPrintPreviewDialog(printer, self)
@@ -1752,7 +1760,7 @@ class WarehousesPage(QWidget):
         QGuiApplication.clipboard().setText(report_csv(self._rows))
 
     def _copy_islands(self) -> None:
-        QGuiApplication.clipboard().setText(report_txt(self._rows, group_by_island=True))
+        QGuiApplication.clipboard().setText(report_txt_islands(self._rows))
 
     def _save(self, format_name: str) -> None:
         if format_name not in {"csv", "json", "txt"}:
@@ -1766,7 +1774,8 @@ class WarehousesPage(QWidget):
         output = (
             report_csv(self._rows) if format_name == "csv"
             else report_json(self._rows) if format_name == "json"
-            else report_txt(self._rows, group_by_island=self.group_island.isChecked())
+            else (report_txt_islands(self._rows) if self.group_island.isChecked()
+                  else report_txt(self._rows, group_by_island=False))
         )
         with open(filename, "w", encoding="utf-8", newline="") as handle:
             handle.write(output)
