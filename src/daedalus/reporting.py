@@ -48,6 +48,10 @@ def rows_for_warehouse(
             "account": account_display_name(account),
             "city": city.get("city_name") or "",
             "island": island,
+            "island_resource": city.get("island_resource") if (
+                isinstance(city.get("island_resource"), str)
+                and city["island_resource"] in {"wood", "wine", "marble", "glass", "sulfur"}
+            ) else "",
             "world": account.get("world") or "",
             **values,
             "capacity": capacity if isinstance(capacity, int) and not isinstance(capacity, bool) and capacity >= 0 else None,
@@ -68,7 +72,13 @@ def report_csv(rows: Sequence[Mapping[str, object]]) -> str:
 
 
 def report_json(rows: Sequence[Mapping[str, object]]) -> str:
-    return json.dumps(list(rows), ensure_ascii=False, indent=2)
+    # Island tradegood is a presentation-only metadata field newly carried
+    # through IPC. Do not silently change the existing machine-readable JSON
+    # export schema for consumers that depend on its old field set.
+    return json.dumps(
+        [{key: value for key, value in row.items() if key != "island_resource"} for row in rows],
+        ensure_ascii=False, indent=2,
+    )
 
 
 def report_txt(rows: Sequence[Mapping[str, object]], *, group_by_island: bool = True) -> str:
@@ -104,3 +114,83 @@ def report_txt(rows: Sequence[Mapping[str, object]], *, group_by_island: bool = 
             f"capacity: {capacity if capacity is not None else '—'}"
         )
     return "\n".join(lines).rstrip() + "\n"
+
+
+# Exact report-layout contract from the owner's original private
+# itshak/ikabot src/ikabot/report.py::format_text_islands (2026-11).
+# These presentation-only labels/order are kept separate from typed resources
+# and the machine-readable CSV/JSON interfaces.
+_LEGACY_RESOURCE_LABELS = {
+    "wood": "Лес",
+    "wine": "Вино",
+    "marble": "Мрам",
+    "glass": "Хруст",
+    "sulfur": "Сера",
+}
+_LEGACY_ISLAND_ORDER = ("marble", "wine", "glass", "sulfur")
+
+
+def _legacy_coordinate_order(coords: str) -> tuple[int, int]:
+    try:
+        x, y = coords.split(":")
+        return int(x), int(y)
+    except (TypeError, ValueError):
+        return 10**9, 10**9
+
+
+def _legacy_island_order(
+    item: tuple[tuple[str, str], list[Mapping[str, object]]],
+) -> tuple[int, int, int]:
+    (coords, resource), _cities = item
+    try:
+        rank = _LEGACY_ISLAND_ORDER.index(resource)
+    except ValueError:
+        rank = len(_LEGACY_ISLAND_ORDER)
+    return rank, *_legacy_coordinate_order(coords)
+
+
+def report_txt_islands(rows: Sequence[Mapping[str, object]]) -> str:
+    """Byte-for-byte legacy 'Copy by island' layout for complete warehouse rows.
+
+    The private original groups (coords or city name, island_resource), orders
+    islands marble/wine/crystal/sulfur then numeric coordinates, and orders
+    their cities by total unsecured goods descending (stable on ties).
+    There are no account or world headings. Each city has five Russian
+    resource lines, comma-grouped amounts, tabs and exact separators.
+
+    The newer data pipeline preserves unknown amounts as None rather than
+    silently manufacturing a zero. The one deliberate safety exception to
+    old text formatting is representing a missing number as '—'.
+    """
+    islands: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for row in rows:
+        coords = str(row.get("island") or row.get("city") or "")
+        resource = str(row.get("island_resource") or "")
+        islands.setdefault((coords, resource), []).append(row)
+
+    def amount(value: object) -> str:
+        return f"{value:,}" if type(value) is int and value >= 0 else "—"
+
+    def total(row: Mapping[str, object]) -> int:
+        return sum(
+            value for name in RESOURCES
+            if type(value := row.get(name)) is int and value >= 0
+        )
+
+    lines: list[str] = []
+    for (coords, resource), cities in sorted(islands.items(), key=_legacy_island_order):
+        label = (
+            f"{coords} ({_LEGACY_RESOURCE_LABELS.get(resource, resource)})"
+            if resource else coords
+        )
+        lines.append(f"===== {label} =====")
+        lines.append("")
+        for city in sorted(cities, key=total, reverse=True):
+            lines.append(f"{city.get('city') or ''} ({amount(city.get('capacity'))})")
+            lines.append("============")
+            lines.extend(
+                f"{_LEGACY_RESOURCE_LABELS[name]}:\t{amount(city.get(name))}"
+                for name in RESOURCES
+            )
+            lines.append("")
+    return "\n".join(lines)

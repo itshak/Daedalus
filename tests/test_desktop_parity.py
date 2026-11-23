@@ -77,7 +77,8 @@ def test_native_multi_account_warehouse_export_explicit_partial_failures(qt_app)
         assert calls == [["alpha"]]
         page.set_batch_snapshots([
             {"account_id": "alpha", "cities": [
-                {"city_name": "Athens", "island": "12:34", "resources": {
+                {"city_name": "Athens", "island": "12:34",
+                 "island_resource": "wine", "resources": {
                     "unsecured": {"wood": 220000, "wine": 0}
                 }}
             ]},
@@ -92,7 +93,11 @@ def test_native_multi_account_warehouse_export_explicit_partial_failures(qt_app)
         assert "unavailable" in page.status_label.text()
         page._copy_islands()
         clipboard = QGuiApplication.clipboard().text()
-        assert "World s1-en | Island 12:34" in clipboard
+        assert clipboard.startswith("===== 12:34 (Вино) =====\n\nAthens (—)\n============\n")
+        assert "Лес:\t220,000" in clipboard
+        assert "Вино:\t0" in clipboard
+        assert "World s1-en" not in clipboard
+        assert "North" not in clipboard
         assert "South" not in clipboard
         page.clear_reports()
         assert not page.copy_button.isEnabled()

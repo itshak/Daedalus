@@ -52,6 +52,11 @@ _CLI_FLAGS = (
 _BATCH_ENTRY_KEYS = ("task", "config", "email", "world", "server", "player")
 # the game's order of the resources (a city's "tradegood" index)
 _TRADEGOODS = ("wood", "wine", "marble", "crystal", "sulfur")
+# Match the original author's private IkaBot warehouse GUI tradegood mapping.
+# Ikariam reports 1=wine, 2=marble, 3=crystal, 4=sulfur, 5=wood.
+_ISLAND_RESOURCE_BY_TRADEGOOD = {
+    "1": "wine", "2": "marble", "3": "glass", "4": "sulfur", "5": "wood",
+}
 _MAX_IPC_MSG_BYTES = 16 * 1024 * 1024
 
 
@@ -1510,6 +1515,12 @@ class IPCServer:
                 "unsecured": unsecured,
                 "capacity": capacity,
                 "island": island,
+                # Legacy "Copy by island" groups by the island-produced good.
+                # Read it from the same authenticated city inventory; do not
+                # issue a second game request or echo arbitrary raw metadata.
+                "island_resource": _ISLAND_RESOURCE_BY_TRADEGOOD.get(
+                    str(cities[raw_city_id].get("tradegood")), ""
+                ),
             })
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "cities": results}

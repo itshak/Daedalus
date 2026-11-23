@@ -141,7 +141,7 @@ def test_existing_only_warehouse_uses_real_game_session_and_redacts_html():
          '<span id="js_plunderable_wine">17,254</span>'
          '<span id="js_capacity_wood">1,000,000</span></html>'),
     ]
-    cities = {42: {"name": "Athens", "coords": "[1:2]", "tradegood": 0}}
+    cities = {42: {"name": "Athens", "coords": "[1:2]", "tradegood": 2}}
     server = IPCServer(default_session=session)
     with (
         patch("ikabot.helpers.ipc.Session.from_saved", side_effect=AssertionError("login!")),
@@ -154,6 +154,7 @@ def test_existing_only_warehouse_uses_real_game_session_and_redacts_html():
     assert resp["cities"][0]["unsecured"] == {"wood": "2,970,123", "wine": "17,254"}
     assert resp["cities"][0]["capacity"] == "1,000,000"
     assert resp["cities"][0]["island"] == "1:2"
+    assert resp["cities"][0]["island_resource"] == "marble"
     assert "private-session-token" not in str(resp)
     assert "actionRequest" not in str(resp)
     assert "email" not in str(resp)

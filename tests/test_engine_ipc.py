@@ -126,7 +126,7 @@ def fake_worker(tmp_path, responder=None):
         if msg["action"] == "warehouse_snapshots_existing":
             return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "cities": [
                 {"city_id": 42, "city_name": "Athens", "unsecured": {
-                     "wood": "2,970,123", "wine": "0", "glass": "1.2K"}, "capacity": "1,000,000", "island": "8:20"}
+                     "wood": "2,970,123", "wine": "0", "glass": "1.2K"}, "capacity": "1,000,000", "island": "8:20", "island_resource": "marble"}
             ]}
         return {"status": "ok", "pid": os.getpid()}
 
@@ -273,6 +273,7 @@ def test_warehouse_resources_end_to_end_over_real_ipc_socket(tmp_path):
         assert snapshot.resources.unsecured["marble"] is None
         assert snapshot.resources.capacity == 1_000_000
         assert snapshot.island == "8:20"
+        assert snapshot.island_resource == "marble"
         assert [r["action"] for r in requests] == [
             "list_sessions", "warehouse_snapshots_existing"
         ]
@@ -337,6 +338,30 @@ def test_warehouse_ipc_rejects_arbitrary_island_strings(tmp_path):
     with (
         fake_worker(tmp_path, responder=reply) as (client, _, _),
         pytest.raises(EngineIPCUnavailable, match="island"),
+    ):
+        client.warehouses(ALPHA)
+
+
+@pytest.mark.parametrize("resource", ["secret-value", ["wine"], {"name": "wine"}, 2])
+def test_warehouse_ipc_rejects_untrusted_island_resource(tmp_path, resource):
+    def reply(request):
+        if request["action"] == "list_sessions":
+            return {
+                "status": "ok",
+                "sessions": [{"world": ALPHA.world, "player": ALPHA.player}],
+            }
+        return {
+            "status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+            "cities": [{
+                "city_id": 42, "city_name": "Athens", "island": "1:2",
+                "island_resource": resource,
+                "unsecured": {"wood": "1"}, "capacity": "1,000",
+            }],
+        }
+
+    with (
+        fake_worker(tmp_path, responder=reply) as (client, _, _),
+        pytest.raises(EngineIPCUnavailable, match="island resource"),
     ):
         client.warehouses(ALPHA)
 
