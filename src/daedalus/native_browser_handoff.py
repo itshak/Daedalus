@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from daedalus.account_sessions import AccountSessionCoordinator
+from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
 from daedalus.accounts import Account
 from daedalus.auth_assistance import AssistanceConflict
 from daedalus.saved_session_recovery import (
@@ -194,6 +195,12 @@ class NativeBrowserHandoff:
                 raise NativeHandoffUnavailable("A native login is already pending for this account")
             if len(self._pending) >= 8:
                 raise NativeHandoffUnavailable("Too many pending browser logins")
+            preflight = getattr(self.cookie_workers, "world_reachable", None)
+            if callable(preflight) and not preflight(account.world, refresh=True):
+                # Do not launch repeated Chrome sign-ins when the worker host
+                # cannot reach the exact game world. The saved-cookie retry
+                # daemon will reconnect after a transient outage.
+                raise NativeHandoffUnavailable(_UPSTREAM_UNREACHABLE)
             recovery_ticket = None
             if self.worker is not None and self.worker.account.id == account_id:
                 try:
@@ -284,6 +291,12 @@ class NativeBrowserHandoff:
                 raise NativeHandoffUnavailable(
                     "Encrypted session is invalid or belongs to a different account"
                 ) from exc
+            # Even if Chrome completed while the host route was working,
+            # reject an outage before changing the protected binding. The
+            # one-time ticket is already burned; no replay is permitted.
+            preflight = getattr(self.cookie_workers, "world_reachable", None)
+            if callable(preflight) and not preflight(account.world, refresh=True):
+                raise NativeHandoffUnavailable(_UPSTREAM_UNREACHABLE)
             # Avoid leaking any cookie or email to logs, responses or errors.
             new_email_binding = False
             try:
