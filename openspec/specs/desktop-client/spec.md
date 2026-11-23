@@ -526,6 +526,13 @@ bound to HTTPS backend origin, account ID and world.
 - **AND** neither the timeline nor technical diagnostics SHALL display plaintext
   passwords, secure cookies or unreviewed Gameforge/API response details
 
+#### Scenario: Connected columns update immediately after verified browser receipt
+
+- **WHEN** a browser handoff receives a server receipt confirming the exact account's new or recovered authenticated IPC worker
+- **THEN** the Accounts Session and Worker columns for that identity SHALL become checked immediately, without waiting for all other accounts in the sign-in queue
+- **AND** a subsequent authoritative backend refresh SHALL replace the optimistic presentation if the worker has since exited
+- **AND** a cookie-bound-only receipt SHALL NOT mark either column connected
+
 #### Scenario: Fluent notices are persistent and stack
 
 - **WHEN** multiple login, backend, or automation notifications are emitted
