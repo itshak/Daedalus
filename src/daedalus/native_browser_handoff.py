@@ -326,7 +326,7 @@ class NativeBrowserHandoff:
                         # the server-side OS-keyring cookie is used, and a
                         # separate IkaBot IPC player probe must pass first.
                         self.cookie_workers.start(account)
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - preserve saved cookie; sanitize failure
                         import logging
                         logging.getLogger("daedalus.native_handoff").warning(
                             "Verified world cookie saved but the game worker could not start"
