@@ -342,6 +342,30 @@ def test_warehouse_ipc_rejects_arbitrary_island_strings(tmp_path):
         client.warehouses(ALPHA)
 
 
+@pytest.mark.parametrize("resource", ["secret-value", ["wine"], {"name": "wine"}, 2])
+def test_warehouse_ipc_rejects_untrusted_island_resource(tmp_path, resource):
+    def reply(request):
+        if request["action"] == "list_sessions":
+            return {
+                "status": "ok",
+                "sessions": [{"world": ALPHA.world, "player": ALPHA.player}],
+            }
+        return {
+            "status": "ok", "world": ALPHA.world, "username": ALPHA.player,
+            "cities": [{
+                "city_id": 42, "city_name": "Athens", "island": "1:2",
+                "island_resource": resource,
+                "unsecured": {"wood": "1"}, "capacity": "1,000",
+            }],
+        }
+
+    with (
+        fake_worker(tmp_path, responder=reply) as (client, _, _),
+        pytest.raises(EngineIPCUnavailable, match="island resource"),
+    ):
+        client.warehouses(ALPHA)
+
+
 def test_active_validation_is_fixed_scope_and_nonsecret(tmp_path):
     def responder(msg):
         if msg["action"] == "list_sessions":
