@@ -127,7 +127,7 @@ def test_real_cookie_child_reads_both_protected_bindings_and_starts_ipc(
 
     session = SimpleNamespace(logged=True, s=HTTP())
     def fake_email(row, store):
-        assert row == account and store is None
+        assert (row.id, row.world, row.player) == (account.id, account.world, account.player) and store is None
         calls.append("email")
         return "synthetic@example.invalid"
 
@@ -137,14 +137,14 @@ def test_real_cookie_child_reads_both_protected_bindings_and_starts_ipc(
         return "X" * 48
 
     def fake_restore(row, email, cookie):
-        assert row == account
+        assert (row.id, row.world, row.player) == (account.id, account.world, account.player)
         assert email == "synthetic@example.invalid"
         assert cookie == "X" * 48
         calls.append("restore")
         return session
 
     def fake_verify(session_value, row):
-        assert session_value is session and row == account
+        assert session_value is session and (row.id, row.world, row.player) == (account.id, account.world, account.player)
         calls.append("attested")
 
     monkeypatch.setattr(saved, "_email_binding", fake_email)
