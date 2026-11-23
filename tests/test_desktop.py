@@ -225,6 +225,39 @@ def test_saved_connection_is_opt_in_and_never_written_to_text_inputs(qt_app, mon
         window.close()
 
 
+def test_island_copy_preserves_original_stable_order_even_when_table_resorts(qt_app):
+    page = WarehousesPage()
+    page.set_accounts([
+        {"id": "a", "label": "Zulu", "world": "s53-ru"},
+        {"id": "b", "label": "Alpha", "world": "s53-ru"},
+    ])
+    try:
+        page.set_batch_snapshots([
+            {"account_id": "a", "cities": [{
+                "city_name": "Zulu city", "island": "1:2", "island_resource": "wine",
+                "resources": {"unsecured": {"wood": 10}, "capacity": 100},
+            }]},
+            {"account_id": "b", "cities": [{
+                "city_name": "Alpha city", "island": "1:2", "island_resource": "wine",
+                "resources": {"unsecured": {"wood": 10}, "capacity": 100},
+            }]},
+        ])
+        page.group_island.setChecked(True)
+        assert page.table.item(0, 0).text() == "Alpha city"
+        page._copy_islands()
+        copied = qt_app.clipboard().text()
+        assert copied.count("===== 1:2 (Вино) =====") == 1
+        # The original exporter uses a stable descending-total sort, so
+        # equal totals preserve report order, not visual table sort order.
+        assert copied.index("Zulu city") < copied.index("Alpha city")
+    finally:
+        page.close()
+        page.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()
+
+
 def test_failed_new_connection_discloses_old_session_remains(qt_app, monkeypatch):
     window = MainWindow()
 
