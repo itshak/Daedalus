@@ -951,6 +951,11 @@ class ExistingIPCClient:
                 or not re.fullmatch(r"[0-9]{1,3}:[0-9]{1,3}", island)
             ):
                 raise EngineIPCUnavailable("Invalid island coordinates in warehouse snapshot")
+            island_resource = row.get("island_resource")
+            if island_resource is not None and island_resource not in {
+                "", "wood", "wine", "marble", "glass", "sulfur",
+            }:
+                raise EngineIPCUnavailable("Invalid island resource in warehouse snapshot")
             snapshots.append(CityWarehouseSnapshot(
                 account_id=account.id,
                 city_id=city_id,
@@ -958,6 +963,7 @@ class ExistingIPCClient:
                 captured_at=datetime.now(UTC).isoformat(),
                 resources=WarehouseResources(unsecured=values, capacity=capacity),
                 island=island,
+                island_resource=island_resource or None,
             ))
         return snapshots
 
