@@ -498,6 +498,15 @@ bound to HTTPS backend origin, account ID and world.
 - **AND** a second server rejection, cancellation or inability to issue a fresh
   challenge SHALL terminate recovery without claiming success or launching game tasks
 
+#### Scenario: Verified world cookie starts an independently checked worker
+
+- **GIVEN** an explicitly approved Mac browser login with an exact server-verified world/player cookie and enabled cookie-only worker startup
+- **WHEN** the backend stores the account-bound cookie in its OS keyring
+- **THEN** it SHALL launch an isolated, account-scoped IkaBot child with no cookie, password or lobby token on its command line or environment
+- **AND** the child SHALL independently revalidate world/player and expose its protected IPC before the backend reports an authenticated session or connected worker
+- **AND** the client SHALL refresh authoritative Session and Worker columns and enable actual warehouse reporting only after verified worker attachment
+- **AND** old task processes SHALL NOT be replayed by browser sign-in
+
 #### Scenario: Verified world cookie is saved without an attached worker
 
 - **WHEN** independent server verification returns a cookie-bound receipt but no
@@ -505,7 +514,7 @@ bound to HTTPS backend origin, account ID and world.
 - **THEN** the desktop SHALL explicitly report "session verified and saved; worker
   not connected" instead of calling the account authenticated
 - **AND** the final per-cohort outcome SHALL remain visible after sign-in completes,
-  distinguishing saved sessions from reconnected workers
+  distinguishing saved sessions from independently connected workers
 - **AND** the account's authoritative session/worker status SHALL remain unchanged
   until the server actually attaches and validates the game worker
 
@@ -517,10 +526,15 @@ bound to HTTPS backend origin, account ID and world.
 - **AND** neither the timeline nor technical diagnostics SHALL display plaintext
   passwords, secure cookies or unreviewed Gameforge/API response details
 
+#### Scenario: Fluent notices are persistent and stack
+
+- **WHEN** multiple login, backend, or automation notifications are emitted
+- **THEN** Fluent notifications SHALL stack in the top right, remain independently closable, and persist at least one minute instead of disappearing after the default short timeout
+
 #### Scenario: Registration tab must never receive saved credentials
 
 - **WHEN** the Gameforge lobby presents sign-in and registration tabs
-- **THEN** Selenium SHALL select the sign-in tab based on its identity and
+- **THEN** Selenium SHALL wait for asynchronously loaded tabs and select the sign-in tab by accessible identity or, with exactly two peers, by excluding the uniquely identified registration tab, and
   SHALL type only into one visible login form, never the form selected by
   blind tab index or a registration submit button
 - **AND** when it cannot distinguish the form, it SHALL fail closed and offer
