@@ -306,6 +306,22 @@ def main(argv: list[str] | None = None) -> int:
         except (AccountConfigError, SavedSessionUnavailable) as exc:
             parser.error(str(exc))
     elif args.command == "serve":
+        if args.enable_native_browser_login:
+            # The daemon otherwise exposes only Uvicorn startup lines. Log
+            # reviewed worker lifecycle categories without upstream request
+            # bodies, secret values, passwords, cookie strings, or game URLs.
+            import logging
+
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter(
+                "Daedalus worker %(levelname)s [%(name)s]: %(message)s"
+            ))
+            for name in ("daedalus.browser_cookie_workers", "daedalus.native_handoff"):
+                worker_logger = logging.getLogger(name)
+                if not worker_logger.handlers:
+                    worker_logger.addHandler(handler)
+                worker_logger.setLevel(logging.INFO)
+                worker_logger.propagate = False
         if args.host not in {"127.0.0.1", "::1"}:
             parser.error("Only loopback binding is supported; use authenticated HTTPS for remote access")
         if args.enable_native_browser_login:
