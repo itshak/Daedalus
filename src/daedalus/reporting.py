@@ -48,6 +48,9 @@ def rows_for_warehouse(
             "account": account_display_name(account),
             "city": city.get("city_name") or "",
             "island": island,
+            "island_resource": city.get("island_resource") if city.get("island_resource") in {
+                "wood", "wine", "marble", "glass", "sulfur",
+            } else "",
             "world": account.get("world") or "",
             **values,
             "capacity": capacity if isinstance(capacity, int) and not isinstance(capacity, bool) and capacity >= 0 else None,
