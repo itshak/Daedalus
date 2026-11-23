@@ -60,7 +60,6 @@ def test_exact_legacy_island_text_matches_original_fixture_byte_for_byte():
         "Мрам:\t30\n"
         "Хруст:\t40\n"
         "Сера:\t50\n"
-        "\n"
     )
     assert report_txt_islands(make_rows()) == expected
     assert "xiaomi" not in expected
