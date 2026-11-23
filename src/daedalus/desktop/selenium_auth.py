@@ -347,8 +347,6 @@ def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
     """
     from selenium.webdriver.common.by import By
 
-    if _visible_sign_in_form(driver):
-        return
     tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
     if not tabs:
         # Newer Gameforge layouts may use role=tab instead of <li>.
