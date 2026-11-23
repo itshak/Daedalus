@@ -2143,6 +2143,9 @@ class MainWindow(FluentWindow):
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
             if payload.get("status") in {"worker_recovered_verified", "worker_started_verified"}:
+                account_id = payload.get("account_id")
+                if isinstance(account_id, str):
+                    self._show_verified_worker_immediately(account_id)
                 self._success_notice(
                     "Game worker connected",
                     "Server independently verified the exact player and attached "
@@ -2323,6 +2326,24 @@ class MainWindow(FluentWindow):
             account_id = payload.get("account_id")
             if isinstance(account_id, str):
                 self._pending_task_refresh = account_id
+
+    def _show_verified_worker_immediately(self, account_id: str) -> None:
+        """Render green Session/Worker as soon as authoritative IPC has attested.
+
+        The encrypted handoff receipt is returned only after the server probes
+        its worker's current world/player. Avoid waiting for a full sign-in
+        cohort to finish, while the subsequent backend refresh remains truth.
+        """
+        visible = [dict(row) for row in self.accounts_page._accounts]
+        if not any(row.get("id") == account_id for row in visible):
+            return
+        for row in visible:
+            if row.get("id") == account_id:
+                row["session_status"] = "authenticated"
+        self._show_accounts(visible)
+        attached = set(self.accounts_page._connected_ids or ())
+        attached.add(account_id)
+        self.accounts_page.set_connected_ids(sorted(attached))
 
     def _show_accounts(self, data: object) -> None:
         assert isinstance(data, list)

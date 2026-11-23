@@ -459,6 +459,12 @@ def test_verified_cookie_worker_receipt_is_not_confused_with_cookie_only(window,
     assert window._automatic_login_worker_recovered == 1
     assert window._automatic_login_bound_sessions == 0
     assert notices and notices[-1][0] == "Game worker connected"
+    # Do not wait until the entire sign-in-all queue finishes. A verified
+    # server receipt must turn both real-state columns green right away.
+    assert window.accounts_page.account_record("account-a")["session_status"] == "authenticated"
+    assert "account-a" in window.accounts_page._connected_ids
+    assert window.accounts_page.table.item(0, 4).text() == "✓"
+    assert window.accounts_page.table.item(0, 5).text() == "✓"
 
 
 def test_account_refresh_rechecks_live_worker_status(window):

@@ -249,3 +249,15 @@ def test_combined_native_login_and_owned_worker_cli_wiring_is_safe(tmp_path, mon
     ])
     assert result == 0
     assert events == ["leased", "native_login_opt_in_enabled", "closed"]
+
+
+def test_restore_native_workers_requires_explicit_read_only_network_consent(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        main([
+            "serve", "--enable-native-browser-login", "--restore-saved-native-workers",
+            "--accounts-file", "/synthetic/private.toml",
+        ])
+    assert exc.value.code == 2
+    assert "--confirm-read-only-network" in capsys.readouterr().err

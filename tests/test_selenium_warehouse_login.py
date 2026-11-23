@@ -465,6 +465,46 @@ def test_login_tab_accessible_dom_text_overrides_hidden_selenium_text():
     assert stages == ["sign_in_tab_selected"]
 
 
+def test_current_gameforge_react_tabs_use_non_div_root_and_exact_event_key():
+    pytest.importorskip("selenium")
+
+    assert "//div[@id='loginRegisterTabs']" not in auth.LOGIN_TAB_XPATH
+    assert "@role='tab'" in auth.LOGIN_TAB_XPATH
+
+    class ReactTab:
+        text = ""
+
+        def __init__(self, key):
+            self.key = key
+            self.clicked = False
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, name):
+            attributes = {
+                "id": f"loginRegisterTabs-tab-{self.key}",
+                "aria-controls": f"loginRegisterTabs-tabpane-{self.key}",
+                "data-rb-event-key": self.key,
+                "class": "loginRegisterTab",
+            }
+            return attributes.get(name)
+
+        def click(self):
+            self.clicked = True
+
+    login, register = ReactTab("login"), ReactTab("register")
+    class Browser:
+        def find_elements(self, _by, selector):
+            assert selector == auth.LOGIN_TAB_XPATH
+            return [login, register]
+
+    events = []
+    auth._select_sign_in_tab(Browser(), events.append)
+    assert login.clicked and not register.clicked
+    assert events == ["sign_in_tab_selected"]
+
+
 def test_unknown_sign_in_tab_does_not_type_into_registration():
     pytest.importorskip("selenium")
 

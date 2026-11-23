@@ -36,8 +36,8 @@ def main() -> int:
             verify_restored_identity,
         )
 
-        email = _email_binding(account)
-        cookie = _world_cookie_binding(account)
+        email = _email_binding(account, None)
+        cookie = _world_cookie_binding(account, None)
         if cookie is None:
             return 3
         session = _real_restore(account, email, cookie)

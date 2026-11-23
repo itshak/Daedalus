@@ -1459,6 +1459,59 @@ class Session:
         self.setSessionData(sessionData)
         return token
 
+    def _daedalus_cookie_only_get(
+        self, url="", params=None, *, noIndex=False, noQuery=False,
+        fullResponse=False, **kwargs
+    ):
+        """Never re-login, exit the worker, or follow redirects for a cookie worker.
+
+        The old IkaBot get() calls __checkCookie and may launch a Gameforge
+        login or sys.exit(1) when PHPSESSID differs from saved metadata.
+        Those side effects are invalid for a server-verified, cookie-only
+        Daedalus child. Use the existing authenticated HTTPS world session
+        directly, with bounded requests and an exact same-world origin.
+        """
+        if (
+            not isinstance(url, str) or len(url) > 2048
+            or any(ch in url for ch in "\r\n\x00")
+            or url.startswith(("http:", "https:", "//"))
+            or kwargs
+        ):
+            raise ValueError("Unsupported cookie-only world request")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ValueError("Invalid cookie-only world query")
+        target = self.urlBase.replace("index.php", "") + url if noIndex else self.urlBase + url
+        if noQuery:
+            target = target.replace("?", "")
+        requested = urllib.parse.urlsplit(target)
+        if (
+            requested.scheme != "https" or requested.hostname != self.host
+            or requested.port not in (None, 443)
+            or requested.path not in ("/", "/index.php")
+            or requested.username or requested.password or requested.fragment
+        ):
+            raise ValueError("Cookie-only world request left the verified game origin")
+        try:
+            response = self.s.get(
+                target, params=params, allow_redirects=False,
+                verify=True, timeout=12,
+            )
+            arrived = urllib.parse.urlsplit(str(response.url))
+            if (
+                response.status_code != 200
+                or arrived.scheme != "https" or arrived.hostname != self.host
+                or arrived.path not in ("/", "/index.php")
+                or response.history or len(response.content) > 2_000_000
+                or self.__isExpired(response.text)
+                or self.__isSessionRotated(response.text, response=response)
+            ):
+                raise RuntimeError("Cookie-only world session is no longer available")
+            return response if fullResponse else response.text
+        except requests.exceptions.RequestException:
+            raise RuntimeError("Cookie-only world request could not be verified") from None
+
     def get(
         self, url='', params={}, ignoreExpire=False, noIndex=False, fullResponse=False, noQuery=False, **kwargs
     ):
@@ -1481,6 +1534,11 @@ class Session:
         html : str
             response from the server
         """
+        if getattr(self, "_daedalus_cookies_only", False):
+            return self._daedalus_cookie_only_get(
+                url, params, noIndex=noIndex, noQuery=noQuery,
+                fullResponse=fullResponse, **kwargs,
+            )
         self.__checkCookie()
         self.__update_proxy()
         self.__useWarmConnections(url, params)
@@ -1948,6 +2006,9 @@ class Session:
             return False
 
         def _finalize():
+            # A cookie-only Daedalus worker is NEVER permitted to perform
+            # IkaBot's implicit lobby relogin or hard sys.exit on a read GET.
+            self._daedalus_cookies_only = bool(cookies_only)
             self.logged = True
             self.dev_api_host = self.host
             self.dev_url_base = self.urlBase
