@@ -17,7 +17,12 @@ import time
 from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
 from daedalus.accounts import Account
 from daedalus.engine_ipc import ControlledIPCClient, EngineIPCUnavailable
-from daedalus.recovery_runtime import ManagedAccountWorker, RecoveryWorkerError, RecoveryWorkers, RoutedAccountIPC
+from daedalus.recovery_runtime import (
+    ManagedAccountWorker,
+    RecoveryWorkerError,
+    RecoveryWorkers,
+    RoutedAccountIPC,
+)
 
 logger = logging.getLogger("daedalus.browser_cookie_workers")
 
@@ -108,7 +113,7 @@ class BrowserCookieWorkers:
                             pass
                     time.sleep(0.2)
                 raise RecoveryWorkerError("Verified cookie worker did not become ready")
-            except Exception:
+            except Exception:  # noqa: BLE001 - sanitized worker process boundary
                 logger.warning("Cookie-only worker startup failed without attaching a session")
                 raise RecoveryWorkerError("Cookie-only worker startup failed") from None
             finally:
