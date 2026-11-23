@@ -303,6 +303,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "serve":
         if args.host not in {"127.0.0.1", "::1"}:
             parser.error("Only loopback binding is supported; use authenticated HTTPS for remote access")
+        if args.enable_native_browser_login:
+            # A native login is not complete until its independently verified
+            # cookie-only IkaBot worker is reachable over account-scoped IPC.
+            # This enables read-only attachment, never task dispatch.
+            args.connect_existing_ipc = True
         try:
             from daedalus.account_editor import AccountEditUnavailable
             from daedalus.account_sessions import AccountSessionCoordinator, SessionBusyError
@@ -366,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
             broker = None
             monitor = None
             worker = None
+            cookie_workers = None
             if args.connect_existing_ipc:
                 from daedalus.engine_ipc import ControlledIPCClient, ExistingIPCClient
 
@@ -374,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.enable_task_control
                     else ExistingIPCClient(args.ipc_descriptor)
                 )
-                if args.enable_auto_recovery:
+                if args.enable_auto_recovery or args.enable_native_browser_login:
                     from daedalus.recovery_runtime import RoutedAccountIPC
                     ipc = RoutedAccountIPC(ipc)
             if (args.enable_task_control or args.restore_saved_account
@@ -422,10 +428,12 @@ def main(argv: list[str] | None = None) -> int:
             native_handoff = None
             if args.enable_native_browser_login:
                 from daedalus.native_browser_handoff import NativeBrowserHandoff
+                from daedalus.browser_cookie_workers import BrowserCookieWorkers
 
+                cookie_workers = BrowserCookieWorkers(owner, ipc)
                 native_handoff = NativeBrowserHandoff(
                     configured, owner, monitor=monitor if worker is not None else None,
-                    dedicated_worker=worker,
+                    dedicated_worker=worker, cookie_workers=cookie_workers,
                 )
             if args.enable_auto_recovery:
                 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkers
@@ -443,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
                 enable_account_editing=args.enable_account_editing,
                 assistance_broker=broker, recovery_monitor=monitor,
                 saved_worker=worker, native_browser_handoff=native_handoff,
+                browser_cookie_workers=cookie_workers,
                 recovery_store=recovery_store if args.enable_task_control else None,
                 recovery_credentials=recovery_credentials,
                 recovery_supervisor=recovery_supervisor,
@@ -452,6 +461,8 @@ def main(argv: list[str] | None = None) -> int:
             AccountConfigError, AccountEditUnavailable, SessionBusyError,
             SavedWorkerUnavailable, TaskUnavailable, ValueError, ImportError,
         ) as exc:
+            if cookie_workers is not None:
+                cookie_workers.close()
             if worker is not None:
                 worker.close()
             if task_controller is not None:
@@ -466,6 +477,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             # Stop the engine-owned IPC before releasing the shared identity
             # lease. Otherwise a competing owner could start during shutdown.
+            if cookie_workers is not None:
+                cookie_workers.close()
             if worker is not None:
                 worker.close()
             if task_controller is not None:
