@@ -78,3 +78,23 @@ Daedalus-original code is GPL-3.0-only. The proprietary author-owned legacy GUI 
 ## Headless CI
 
 The normal Python tests run without optional Qt dependencies; UI tests skip when those are absent. The dedicated macOS GitHub Actions workflow installs `daedalus[desktop,dev]` and uses `QT_QPA_PLATFORM=cocoa` for native Fluent window tests. The macOS frameless window needs a real NSWindow; forcing the offscreen plugin crashes the native window implementation. Linux smoke tests use `QT_QPA_PLATFORM=offscreen` instead.
+
+
+## Exact legacy warehouse island export (2026-11-23)
+
+The original owner-controlled private GUI's `src/ikabot/report.py`
+`format_text_islands()` is the reference format for Daedalus's desktop
+**Copy by island**, **Save TXT** (with By island selected), and grouped
+print preview. Islands are ordered marble → wine → crystal → sulfur,
+then numerically by coordinates. Cities are sorted by their combined
+unsecured stock descending, account names are omitted, headings use
+`===== 98:9 (Вино) =====`, city headers use
+`Название (3,947,218)`, separators are `============` and each of the
+five Russian-labeled resource lines uses a literal tab and comma grouping.
+Trailing blank lines are intentional. The engine passes the island tradegood
+from its already-authenticated city list, without additional game traffic.
+
+Regression tests include golden complete-string output based on the original
+private GUI's nonsecret synthetic fixture. Daedalus retains `—` for an
+unknown amount rather than inventing a zero, and leaves CSV/JSON unchanged.
+No private login settings, session cookies or account secrets are imported.
