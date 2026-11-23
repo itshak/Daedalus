@@ -178,8 +178,8 @@ def test_real_cookie_child_reads_both_protected_bindings_and_starts_ipc(
 def test_saved_native_worker_startup_restores_each_account_only_when_bound(
     monkeypatch, tmp_path,
 ):
-    from daedalus import browser_cookie_workers as workers_module
     import daedalus.saved_session_recovery as saved
+    from daedalus import browser_cookie_workers as workers_module
 
     accounts = [
         Account("alpha", "s301-en", "Alice", "Alice", True),
