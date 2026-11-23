@@ -302,6 +302,23 @@ When a user explicitly approves Mac browser sign-in or warehouse loading and the
 - **WHEN** the child exits or its identity probe fails
 - **THEN** the API reports saved cookie but no worker, and releases the lease only after confirming child shutdown
 
+### Requirement: Previously verified native game cookies restore on explicit server startup
+
+Daedalus SHALL allow an operator to opt in to cookie-only restoration of
+previously verified, protected game-world bindings at server startup, with
+explicit read-only network confirmation. Each identity SHALL receive its own
+IPC process and exclusive host-local session lease, and SHALL only show
+`authenticated` after a fresh exact world/player attestation. An unavailable,
+expired or conflicting saved credential SHALL leave that account disconnected,
+without preventing recovery attempts for other saved identities. Restoration
+SHALL NOT use a Gameforge lobby loginLink or replay game jobs.
+
+#### Scenario: Ten configured accounts have individually verified saved cookies
+
+- **WHEN** the server starts with native saved-cookie restoration and read-only network consent
+- **THEN** it SHALL attempt isolated cookie-only attestation for each eligible account and report only successful workers as authenticated
+- **AND** a failed child SHALL not consume or invalidate another account's saved cookie or block subsequent restorations
+
 ### Requirement: Dedicated-worker recovery rejects active or uncertain work
 
 The backend MUST refuse native browser recovery of a dedicated worker with running, stopping, dispatching, or unconfirmed operations. It MAY pause an idle worker under its existing exclusive identity lease, and MUST keep the lease on failed or uncertain rebind without starting a competing worker.
