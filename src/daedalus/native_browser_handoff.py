@@ -143,6 +143,7 @@ class NativeBrowserHandoff:
         self, accounts: list[Account], coordinator: AccountSessionCoordinator, *,
         monitor: ExistingSessionRecoveryMonitor | None = None,
         dedicated_worker: object | None = None,
+        cookie_workers: object | None = None,
         credential_store: CredentialStore | None = None,
         restore: Callable | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -164,6 +165,7 @@ class NativeBrowserHandoff:
         self.owner = coordinator
         self.monitor = monitor
         self.worker = dedicated_worker
+        self.cookie_workers = cookie_workers
         self.credentials = credential_store
         self.restore = restore
         self.clock = clock
@@ -184,6 +186,10 @@ class NativeBrowserHandoff:
             raise NativeHandoffUnavailable("An enabled exact game account is required")
         with self._lock:
             self._cleanup()
+            if self.cookie_workers is not None:
+                # A crashed child must not leave stale X/X dashboard state or
+                # block an explicitly requested retry indefinitely.
+                self.cookie_workers.reap()
             if any(p.account.id == account_id for p in self._pending.values()):
                 raise NativeHandoffUnavailable("A native login is already pending for this account")
             if len(self._pending) >= 8:
@@ -314,6 +320,22 @@ class NativeBrowserHandoff:
                     account, self.owner, cookie, confirmed=True,
                     credential_store=self.credentials, **kwargs,
                 )
+                if self.cookie_workers is not None:
+                    try:
+                        # Browser login already supplied explicit consent. Only
+                        # the server-side OS-keyring cookie is used, and a
+                        # separate IkaBot IPC player probe must pass first.
+                        self.cookie_workers.start(account)
+                    except Exception:
+                        import logging
+                        logging.getLogger("daedalus.native_handoff").warning(
+                            "Verified world cookie saved but the game worker could not start"
+                        )
+                        return {
+                            "account_id": account_id, "status": result["status"],
+                            "worker_status": "start_failed",
+                        }
+                    return {"account_id": account_id, "status": "worker_started_verified"}
                 return {"account_id": account_id, "status": result["status"]}
             except Exception as exc:
                 if new_email_binding:
