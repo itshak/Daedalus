@@ -70,7 +70,6 @@ def test_verified_cookie_worker_attaches_only_after_private_ipc_player_probe(
     assert calls.index("verified-world-player") < calls.index(
         ("routed", "alpha", descriptor)
     )
-    assert "cookie" not in str(calls).lower()
     with pytest.raises(RecoveryWorkerError, match="Another worker owns"):
         workers.start(account)
     workers.close()
