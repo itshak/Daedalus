@@ -27,11 +27,14 @@ def main() -> int:
             id=data["id"], world=data["world"], player=data["player"],
             label="Verified cookie worker", enabled=True,
         )
+        from ikabot.helpers.ipc import start_dedicated_ipc_server, stop_ipc_server
+
         from daedalus.saved_session_recovery import (
-            _email_binding, _real_restore, _world_cookie_binding,
+            _email_binding,
+            _real_restore,
+            _world_cookie_binding,
             verify_restored_identity,
         )
-        from ikabot.helpers.ipc import start_dedicated_ipc_server, stop_ipc_server
 
         email = _email_binding(account)
         cookie = _world_cookie_binding(account)
@@ -46,21 +49,21 @@ def main() -> int:
             time.sleep(1)
     except (KeyboardInterrupt, SystemExit):
         return 0
-    except Exception:
+    except Exception:  # noqa: BLE001 - sanitize all upstream browser exceptions
         # Never print upstream exceptions: they may contain private game URLs.
         return 1
     finally:
         if server is not None:
             try:
                 stop_ipc_server()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - no secret-bearing logs in child
                 pass
         if session is not None:
             http = getattr(session, "s", None)
             if callable(getattr(http, "close", None)):
                 try:
                     http.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 - best-effort isolated cleanup
                     pass
 
 
