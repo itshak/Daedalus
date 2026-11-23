@@ -319,7 +319,24 @@ SHALL NOT use a Gameforge lobby loginLink or replay game jobs.
 - **THEN** it SHALL attempt isolated cookie-only attestation for each eligible account and report only successful workers as authenticated
 - **AND** a failed child SHALL not consume or invalidate another account's saved cookie or block subsequent restorations
 
-### Requirement: Dedicated-worker recovery rejects active or uncertain work
+### Requirement: Cookie-only data reads must not reauthenticate or kill IPC ownership
+
+A cookie-only IkaBot session restored from an explicitly verified saved world
+cookie SHALL use bounded, TLS-verified, exact-world-origin GET requests for
+read-only city and warehouse retrieval. It MUST NOT invoke the legacy session's
+implicit lobby login, request a loginLink, follow a world-to-lobby redirect or
+exit the worker process when its saved PHP session differs. An invalid or
+expired response SHALL produce a sanitized unavailable state while the daemon
+retains and reconciles its authoritative worker ownership. Ordinary non-cookie
+sessions SHALL retain their original IkaBot behavior.
+
+#### Scenario: Reading cities or warehouses after cookie-only restoration
+
+- **WHEN** the authorized client reads city data through an already authenticated cookie-only IPC worker
+- **THEN** the game request SHALL use the existing world cookie without refreshing the lobby, and a verified reply SHALL not terminate the worker
+- **AND** a server error, redirect or expiration SHALL fail closed without leaking cookie values or triggering a new Gameforge login
+
+
 
 The backend MUST refuse native browser recovery of a dedicated worker with running, stopping, dispatching, or unconfirmed operations. It MAY pause an idle worker under its existing exclusive identity lease, and MUST keep the lease on failed or uncertain rebind without starting a competing worker.
 
