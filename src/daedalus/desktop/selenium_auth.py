@@ -371,12 +371,18 @@ def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
                 tab.get_attribute("data-tab"),
                 tab.get_attribute("data-target"),
                 tab.get_attribute("href"),
-                tab.get_attribute("id"),
-                tab.get_attribute("class"),
             )
         ).casefold()
-        is_registration = any(label in description for label in _REGISTER_LABELS)
-        is_sign_in = any(label in description for label in _SIGN_IN_LABELS)
+        # Generic parent classes such as loginRegisterTab contain BOTH words,
+        # and must not be classified as registration or sign-in evidence.
+        tag_id = str(tab.get_attribute("id") or "").casefold()
+        classes = set(str(tab.get_attribute("class") or "").casefold().split())
+        is_registration = (any(label in description for label in _REGISTER_LABELS)
+                           or tag_id in {"registertab", "registrationtab"}
+                           or bool(classes & {"register", "registration", "register-tab"}))
+        is_sign_in = (any(label in description for label in _SIGN_IN_LABELS)
+                      or tag_id in {"logintab", "signintab"}
+                      or bool(classes & {"login", "sign-in", "login-tab"}))
         candidates.append((tab, is_registration, is_sign_in))
     sign_in = [tab for tab, register, login in candidates if login and not register]
     if len(sign_in) == 1:
