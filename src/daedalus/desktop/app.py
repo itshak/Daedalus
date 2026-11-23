@@ -294,7 +294,7 @@ class APIWorker(QThread):
                     self.account_id, str(self.task_payload["ticket_id"]), confirmed=True,
                 )
             elif self.action == "connected_accounts":
-                result = self.client.connected_accounts()
+                result = _known_ikabot_workers(self.client)
             elif self.action == "capabilities":
                 result = self.client.capabilities()
             elif self.action == "task_cities" and self.account_id:
@@ -911,7 +911,7 @@ class MainWindow(FluentWindow):
     def _view_home_warehouses(self, account_id: str) -> None:
         self._select_working_account(account_id)
         self.switchTo(self.warehouses_page)
-        self._request("warehouses", account_id=account_id)
+        self._request_warehouse_scope("warehouses", [account_id])
 
     def _view_all_warehouses(self) -> None:
         self.switchTo(self.warehouses_page)
@@ -1070,9 +1070,9 @@ class MainWindow(FluentWindow):
             False,
             f"Automatic sign-in {'cancelled' if cancelled else 'finished'}: "
             f"{self._automatic_login_bound_sessions} verified session(s) saved, "
-            f"{self._automatic_login_worker_recovered} worker(s) reconnected, "
-            f"{failures} unavailable. A saved session does not attach a game worker; "
-            "check the Worker column before attempting game operations.",
+            f"{self._automatic_login_worker_recovered} worker(s) connected, "
+            f"{failures} unavailable. Only verified, attached workers can "
+            "supply live warehouse data.",
         )
         report, self._automatic_login_report = self._automatic_login_report, None
         if report is not None and not cancelled:
@@ -1951,10 +1951,9 @@ class MainWindow(FluentWindow):
             self.connection_page.set_connected(True, demo=demo)
             self.home_page.set_connected(True, demo=demo)
             logger.info("Connected to Daedalus API")
-            InfoBar.success(
+            self._success_notice(
                 "Connected to Daedalus",
                 "Secure connection verified. You can now open Overview or Accounts.",
-                parent=self, position=InfoBarPosition.TOP_RIGHT,
             )
             browser_capability = payload.get("native_browser_login") or {}
             self.accounts_page.set_native_browser_login_enabled(
@@ -2025,7 +2024,8 @@ class MainWindow(FluentWindow):
         elif action == "accounts":
             self._show_accounts(payload)
             logger.info("Accounts refreshed")
-            self._recovery_followup = ("recovery_index", "")
+            # Session and worker presence require separate authoritative reads.
+            self._recovery_followup = ("connected_accounts", "")
         elif action == "recovery_index":
             assert isinstance(payload, dict)
             self.accounts_page.set_recovery_status(payload)
@@ -2132,7 +2132,7 @@ class MainWindow(FluentWindow):
                         "did not complete. Unlock Mac Keychain before next sign-in.",
                     )
                 self._automatic_login_successes += 1
-                if payload.get("status") == "worker_recovered_verified":
+                if payload.get("status") in {"worker_recovered_verified", "worker_started_verified"}:
                     self._automatic_login_worker_recovered += 1
                     self.log_page.add_login_stage("handoff_verified")
                     logger.info("Gameforge session verified; existing worker reconnected")
@@ -2142,17 +2142,18 @@ class MainWindow(FluentWindow):
                     logger.info("Gameforge session verified and saved; no worker connected")
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
-            if payload.get("status") == "worker_recovered_verified":
-                self._notice(
-                    "Game session verified",
-                    "The backend independently verified the selected player and "
-                    "rebound the idle worker. No old task was restarted.",
+            if payload.get("status") in {"worker_recovered_verified", "worker_started_verified"}:
+                self._success_notice(
+                    "Game worker connected",
+                    "Server independently verified the exact player and attached "
+                    "an authenticated IkaBot worker. Warehouse reports are available.",
                 )
             else:
                 self._notice(
-                    "Game session verified and saved",
-                    "The server stored a verified world session in its OS keyring. "
-                    "Start or attach a dedicated worker before running tasks.",
+                    "Game session saved; worker unavailable",
+                    "The server verified and saved the cookie, but could not attach "
+                    "a game worker. Warehouse reports are not yet available. "
+                    "Check backend startup and Activity diagnostics.",
                 )
             # The cohort queue must advance before refreshing account status:
             # a refresh launched here consumes the only APIWorker slot and
@@ -2200,9 +2201,10 @@ class MainWindow(FluentWindow):
             )
             self._recovery_followup = ("accounts", "")
         elif action == "connected_accounts":
-            assert isinstance(payload, list)
+            assert payload is None or isinstance(payload, list)
             self.accounts_page.set_connected_ids(payload)
             logger.info("IkaBot existing-session status refreshed")
+            self._recovery_followup = ("recovery_index", "")
         elif action == "capabilities":
             self._show_capabilities(payload)
             logger.info("Operations inventory refreshed")
@@ -2298,10 +2300,9 @@ class MainWindow(FluentWindow):
                 )
             else:
                 count = len(payload.get("submitted", []))
-                InfoBar.success(
+                self._success_notice(
                     "Automation requests received",
                     f"Received {count} account-scoped receipts; review their status.",
-                    parent=self, position=InfoBarPosition.TOP_RIGHT,
                 )
         elif action == "task_list":
             assert isinstance(payload, dict)
@@ -2600,8 +2601,17 @@ class MainWindow(FluentWindow):
             self._run_next_preflight()
 
     def _notice(self, title: str, message: str) -> None:
+        # Fluent InfoBarManager stacks TOP_RIGHT notifications automatically.
+        # Default 2-second auto-dismiss made important errors unreadable.
         InfoBar.warning(
-            title, message, parent=self, position=InfoBarPosition.TOP_RIGHT
+            title, message, parent=self, position=InfoBarPosition.TOP_RIGHT,
+            duration=120_000, isClosable=True,
+        )
+
+    def _success_notice(self, title: str, message: str) -> None:
+        InfoBar.success(
+            title, message, parent=self, position=InfoBarPosition.TOP_RIGHT,
+            duration=120_000, isClosable=True,
         )
 
     def abort_browser_login(self) -> None:
