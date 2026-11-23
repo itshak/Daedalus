@@ -34,7 +34,9 @@ CAPTCHA_FRAMES = (
     "iframe[src*='hcaptcha']", "iframe[src*='recaptcha']",
     "iframe[src*='challenges.cloudflare.com']",
 )
-LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']//li"
+# Gameforge's current React-Bootstrap Tabs owns this ID on a Nav element,
+# commonly <ul>, not <div>. Match the semantic tab link itself.
+LOGIN_TAB_XPATH = "//*[@id='loginRegisterTabs']//*[@role='tab']"
 _SIGN_IN_LABELS = ("войти", "вход", "авторизация", "логин", "login", "log in",
                    "sign in", "anmelden", "se connecter", "iniciar sesión",
                    "acceder", "entrar")
@@ -339,49 +341,62 @@ def _restore_legacy_session(driver, saved: tuple[str, list[dict[str, object]]],
 
 
 def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
-    """Select Gameforge sign-in by semantics, never registration/default index.
+    """Activate Gameforge's real login tab, never its registration panel.
 
-    The active registration panel often hides the sign-in label from Selenium's
-    .text property. Inspect accessible attributes and DOM text; with exactly
-    two tabs, the non-registration peer is also unambiguous.
+    Current Gameforge bundles render React-Bootstrap Tabs using the IDs
+    loginRegisterTabs, loginTab and registerTab. loginRegisterTabs is often
+    a <ul> instead of the <div> expected by the original XPath. Tab/panel
+    IDs can also embed the shared string "loginRegister", which must not
+    be mistaken for a registration label on the sign-in tab.
     """
     from selenium.webdriver.common.by import By
 
     tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
     if not tabs:
-        # Newer Gameforge layouts may use role=tab instead of <li>.
-        tabs = driver.find_elements(
-            By.CSS_SELECTOR, "#loginRegisterTabs [role='tab']"
-        )
+        tabs = driver.find_elements(By.CSS_SELECTOR, "#loginRegisterTabs [role='tab']")
     if not tabs:
-        # A later form wait may handle direct-login layouts without tabs.
-        return
+        tabs = driver.find_elements(By.CSS_SELECTOR, "#loginRegisterTabs li")
+    if not tabs:
+        # Direct-login layouts can have a visible form without any tab control.
+        if _visible_sign_in_form(driver):
+            return
+        notify("sign_in_tab_not_found")
+        raise SeleniumLoginUnavailable("Gameforge sign-in tab not available")
+
     candidates = []
     for tab in tabs:
         if not _visible(tab):
             continue
-        description = " ".join(
+        # Only localized visible/accessibility strings carry fuzzy labels.
+        # Never apply "register" substring matching to shared component IDs.
+        visible_label = " ".join(
             str(value or "") for value in (
-                tab.text,
-                tab.get_attribute("aria-label"),
-                tab.get_attribute("title"),
-                tab.get_attribute("textContent"),
-                tab.get_attribute("data-tab"),
-                tab.get_attribute("data-target"),
-                tab.get_attribute("href"),
+                tab.text, tab.get_attribute("aria-label"),
+                tab.get_attribute("title"), tab.get_attribute("textContent"),
             )
         ).casefold()
-        # Generic parent classes such as loginRegisterTab contain BOTH words,
-        # and must not be classified as registration or sign-in evidence.
-        tag_id = str(tab.get_attribute("id") or "").casefold()
+        login_label = any(label in visible_label for label in _SIGN_IN_LABELS)
+        register_label = any(label in visible_label for label in _REGISTER_LABELS)
+        event_key = str(tab.get_attribute("data-rb-event-key") or "").casefold()
+        control = str(tab.get_attribute("aria-controls") or "").casefold()
+        href = str(tab.get_attribute("href") or "").split("#")[-1].casefold()
+        tab_id = str(tab.get_attribute("id") or "").casefold()
         classes = set(str(tab.get_attribute("class") or "").casefold().split())
-        is_registration = (any(label in description for label in _REGISTER_LABELS)
-                           or tag_id in {"registertab", "registrationtab"}
-                           or bool(classes & {"register", "registration", "register-tab"}))
-        is_sign_in = (any(label in description for label in _SIGN_IN_LABELS)
-                      or tag_id in {"logintab", "signintab"}
-                      or bool(classes & {"login", "sign-in", "login-tab"}))
-        candidates.append((tab, is_registration, is_sign_in))
+        # Match exact event keys or the trailing component segment. These
+        # identify "login" even if the tab is localized or has no .text.
+        login_target = (
+            event_key == "login"
+            or any(value.endswith(("login-tab", "-tab-login", "logintab", "tabpane-login"))
+                   for value in (control, href, tab_id))
+            or bool(classes & {"login-tab", "sign-in"})
+        )
+        register_target = (
+            event_key == "register"
+            or any(value.endswith(("register-tab", "-tab-register", "registertab", "tabpane-register"))
+                   for value in (control, href, tab_id))
+            or bool(classes & {"register-tab", "registration"})
+        )
+        candidates.append((tab, register_label or register_target, login_label or login_target))
     sign_in = [tab for tab, register, login in candidates if login and not register]
     if len(sign_in) == 1:
         sign_in[0].click()
@@ -389,7 +404,6 @@ def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
         return
     if (len(candidates) == 2
             and sum(bool(register) for _, register, _ in candidates) == 1):
-        # This is NOT an index guess: exactly one peer is labelled Register.
         other = [tab for tab, register, _ in candidates if not register]
         if len(other) == 1:
             other[0].click()
@@ -494,6 +508,7 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
                 _visible_sign_in_form(page)
                 or page.find_elements(By.XPATH, LOGIN_TAB_XPATH)
                 or page.find_elements(By.CSS_SELECTOR, "#loginRegisterTabs [role='tab']")
+                or page.find_elements(By.CSS_SELECTOR, "#loginRegisterTabs li")
             ))
             _select_sign_in_tab(driver, notify)
             email_field, password_field, submit = wait.until(_visible_sign_in_form)
