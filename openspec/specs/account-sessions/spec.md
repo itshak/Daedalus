@@ -288,6 +288,20 @@ The client SHALL allow a human to sign in to official Gameforge pages using a te
 - **WHEN** game-world verification fails or the envelope is expired or replayed
 - **THEN** the old verified cookie and authoritative worker lease remain protected; no task is started
 
+### Requirement: Explicit Mac handoff can attach a cookie-only worker for live reports
+
+When a user explicitly approves Mac browser sign-in or warehouse loading and the exact world/player cookie has passed independent backend verification, the authoritative daemon SHALL be able to start a separate cookie-only IkaBot child for that account under an exclusive host-local identity lease. The child SHALL retrieve the world cookie from the protected server credential store, not from a plaintext API response or process argument, and SHALL provide private IPC only after a fresh independent player attestation. A worker launch failure SHALL retain the verified saved cookie but SHALL NOT mark the account authenticated, claim an attached IPC worker, or replay prior tasks. Each account SHALL have an isolated IPC descriptor and owned process lifetime.
+
+#### Scenario: Browser login creates a reportable account without a preexisting worker
+
+- **WHEN** an approved, independently verified Mac handoff is completed on a worker-capable backend
+- **THEN** the dedicated child verifies exact world/player and attaches IPC before the account becomes authenticated and available to warehouse reporting
+
+#### Scenario: Worker startup cannot attest the game session
+
+- **WHEN** the child exits or its identity probe fails
+- **THEN** the API reports saved cookie but no worker, and releases the lease only after confirming child shutdown
+
 ### Requirement: Dedicated-worker recovery rejects active or uncertain work
 
 The backend MUST refuse native browser recovery of a dedicated worker with running, stopping, dispatching, or unconfirmed operations. It MAY pause an idle worker under its existing exclusive identity lease, and MUST keep the lease on failed or uncertain rebind without starting a competing worker.
