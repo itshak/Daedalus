@@ -132,7 +132,7 @@ def test_real_cookie_child_reads_both_protected_bindings_and_starts_ipc(
         return "synthetic@example.invalid"
 
     def fake_cookie(row, store):
-        assert row == account and store is None
+        assert (row.id, row.world, row.player) == (account.id, account.world, account.player) and store is None
         calls.append("cookie")
         return "X" * 48
 
