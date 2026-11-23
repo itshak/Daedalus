@@ -112,6 +112,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Opt in to one-time encrypted Mac browser login with server verification",
     )
     serve.add_argument(
+        "--restore-saved-native-workers", action="store_true",
+        help="At server startup, independently revalidate previously approved world cookies "
+             "as isolated workers; requires --confirm-read-only-network",
+    )
+    serve.add_argument(
         "--enable-account-editing", action="store_true",
         help="Opt in to protected metadata-only account editing (not task control)",
     )
@@ -352,6 +357,14 @@ def main(argv: list[str] | None = None) -> int:
                 not args.accounts_file or args.demo or args.enable_account_editing
             ):
                 parser.error("Native Mac browser login needs fixed accounts, not demo/editor")
+            if args.restore_saved_native_workers and (
+                not args.enable_native_browser_login or not args.confirm_read_only_network
+                or args.restore_saved_account
+            ):
+                parser.error(
+                    "Saved native worker restore requires --enable-native-browser-login "
+                    "and --confirm-read-only-network, without a second dedicated worker"
+                )
             if args.restore_saved_account and (
                 args.ipc_descriptor or args.enable_account_editing or args.demo
             ):
@@ -363,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
                 or args.enable_task_control or args.task_ledger or args.enable_account_editing
                 or args.monitor_existing_sessions or args.restore_saved_account
                 or args.enable_native_browser_login or args.enable_auto_recovery
+                or args.restore_saved_native_workers
             ):
                 parser.error("--demo cannot access real accounts, IPC, task controls or editing")
             ipc = None
@@ -435,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
                     configured, owner, monitor=monitor if worker is not None else None,
                     dedicated_worker=worker, cookie_workers=cookie_workers,
                 )
+                if args.restore_saved_native_workers:
+                    cookie_workers.restore_saved(configured, confirmed=True)
             if args.enable_auto_recovery:
                 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkers
 
