@@ -108,6 +108,58 @@ def test_ephemeral_mac_handoff_verifies_exact_game_identity_and_stores_cookie_in
     ).status_code == 409  # single-use challenge
 
 
+def test_mac_handoff_starts_verified_worker_and_updates_live_session(env):
+    from daedalus.account_sessions import SessionPhase
+
+    class Workers:
+        def __init__(self):
+            self.started = []
+            self.lease = None
+
+        def reap(self):
+            pass
+
+        def start(self, account):
+            # A fresh lease is possible ONLY if the encrypted cookie was
+            # independently verified and the temporary binding lease released.
+            self.lease = env.owner.acquire(account.id)
+            self.lease.transition(SessionPhase.AUTHENTICATED)
+            self.started.append(account.id)
+
+    workers = Workers()
+    env.broker.cookie_workers = workers
+    bind_saved_email(env.account, EMAIL, credential_store=env.keys)
+    challenge = _begin(env)
+    response, _ = _complete(env, challenge)
+    assert response.status_code == 200
+    assert response.json() == {
+        "account_id": "alpha", "status": "worker_started_verified",
+    }
+    assert workers.started == ["alpha"]
+    assert env.owner.status("alpha") == "authenticated"
+    workers.lease.close()
+
+
+def test_worker_start_failure_keeps_verified_cookie_but_not_connected(env):
+    class FailedWorkers:
+        def reap(self):
+            pass
+
+        def start(self, account):
+            raise RuntimeError("Synthetic IPC child unavailable")
+
+    env.broker.cookie_workers = FailedWorkers()
+    bind_saved_email(env.account, EMAIL, credential_store=env.keys)
+    response, _ = _complete(env, _begin(env))
+    assert response.status_code == 200
+    assert response.json() == {
+        "account_id": "alpha", "status": "world_cookie_bound",
+        "worker_status": "start_failed",
+    }
+    assert env.owner.status("alpha") == "not_connected"
+    assert env.keys.get_password(_COOKIE_SERVICE, _account_key(env.account)) == COOKIE
+
+
 def test_first_login_email_is_encrypted_and_never_logged_or_returned(env):
     challenge = _begin(env)
     before, _ = _complete(env, challenge)
