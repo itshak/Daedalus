@@ -391,7 +391,7 @@ def test_saved_cookie_receipt_does_not_claim_connected_worker(window, monkeypatc
     assert "worker not connected" in window.log_page.timeline.toPlainText().lower()
     window._finish_automatic_logins()
     assert "1 verified session(s) saved" in window.accounts_page.auto_login_status.text()
-    assert "0 worker(s) reconnected" in window.accounts_page.auto_login_status.text()
+    assert "0 worker(s) connected" in window.accounts_page.auto_login_status.text()
     assert not window.accounts_page.auto_login_status.isHidden()
 
 
