@@ -85,6 +85,7 @@ def _safe_api_failure(reason: str) -> str:
         "Gameforge email differs from the existing account binding",
         "Another worker owns this game account",
         "Browser handoff is expired or already consumed",
+        "Game world is unreachable from the Daedalus server; saved sessions will retry when connectivity recovers",
     }
     return reason if reason in permitted else "request failed (unreviewed detail suppressed)"
 
@@ -2390,7 +2391,8 @@ class MainWindow(FluentWindow):
                 and self._automatic_login_active and self._automatic_login_current):
             self.log_page.add_login_stage("handoff_failed")
             if (action == "native_login_complete" and not self._automatic_login_force_visible
-                    and not self._automatic_login_cancelled):
+                    and not self._automatic_login_cancelled
+                    and error != "Game world is unreachable from the Daedalus server; saved sessions will retry when connectivity recovers"):
                 # The first one-use server ticket is already consumed. Never
                 # replay its envelope: request a fresh ticket *after* this API
                 # worker finishes, and force the next child to open visible Chrome.
@@ -2498,8 +2500,10 @@ class MainWindow(FluentWindow):
                 self._pending_task_refresh = account_id
         if action in {"warehouses", "warehouses_batch", "warehouses_all"}:
             self.warehouses_page.status_label.setText(
-                "Warehouse refresh failed. The earlier report, if shown, is stale. "
-                "Check your account sessions and try again."
+                "Warehouse refresh unavailable: no independently authenticated "
+                "game workers. If the game world is unreachable from the server, "
+                "saved sessions will be retried automatically. "
+                "Any earlier report is stale."
             )
         if action in {"connect", "ssh_connect"}:
             self._pending_ssh_destination = None
@@ -2539,6 +2543,7 @@ class MainWindow(FluentWindow):
                     "Gameforge email differs from the existing account binding",
                     "Another worker owns this game account",
                     "Browser handoff is expired or already consumed",
+                    "Game world is unreachable from the Daedalus server; saved sessions will retry when connectivity recovers",
                 } else None
                 self._notice(
                     "Mac browser recovery unavailable",
