@@ -198,9 +198,105 @@ def test_saved_native_worker_startup_restores_each_account_only_when_bound(
         saved, "_world_cookie_binding",
         lambda row, store: "X" * 48 if row.id == "alpha" else None,
     )
+    monkeypatch.setattr(workers, "world_reachable", lambda world: True)
     monkeypatch.setattr(workers, "start", lambda row: invoked.append(row.id))
     with pytest.raises(ValueError, match="consent"):
         workers.restore_saved(accounts, confirmed=False)
     outcome = workers.restore_saved(accounts, confirmed=True)
     assert invoked == ["alpha"]
     assert outcome == {"connected": 1, "missing_binding": 1, "unavailable": 0}
+
+
+def test_unreachable_world_does_not_spawn_children_or_lose_verified_binding(
+    monkeypatch, tmp_path, account_owner,
+):
+    import daedalus.saved_session_recovery as saved
+
+    account, owner = account_owner
+    workers = BrowserCookieWorkers(owner, SimpleNamespace())
+    monkeypatch.setattr(saved, "_email_binding", lambda row, store: "synthetic@example.invalid")
+    monkeypatch.setattr(saved, "_world_cookie_binding", lambda row, store: "X" * 48)
+    monkeypatch.setattr(workers, "world_reachable", lambda world: False)
+    monkeypatch.setattr(workers, "start", lambda row: pytest.fail("Worker must not spawn offline"))
+    result = workers.restore_saved([account], confirmed=True)
+    assert result == {"connected": 0, "missing_binding": 0, "unavailable": 1}
+    assert owner.status(account.id) == "not_connected"
+
+
+def test_canonical_world_preflight_has_short_negative_cache(monkeypatch, account_owner):
+    from daedalus import browser_cookie_workers as module
+
+    _, owner = account_owner
+    workers = BrowserCookieWorkers(owner, SimpleNamespace())
+    attempts = []
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    def connect(address, timeout):
+        attempts.append((address, timeout))
+        if len(attempts) == 1:
+            raise TimeoutError
+        return Socket()
+
+    monkeypatch.setattr(module.socket, "create_connection", connect)
+    assert not workers.world_reachable("s301-en")
+    assert not workers.world_reachable("s301-en")  # no extra TCP attempt
+    assert len(attempts) == 1
+    assert workers.world_reachable("s301-en", refresh=True)
+    assert workers.world_reachable("s301-en")
+    assert len(attempts) == 2
+    assert not workers.world_reachable("not-a-world")
+    assert len(attempts) == 2
+    assert attempts[0] == (("s301-en.ikariam.gameforge.com", 443), 3.0)
+
+
+def test_saved_worker_auto_retries_after_transient_outage_without_task_replay(
+    monkeypatch, tmp_path, account_owner,
+):
+    import threading
+    import daedalus.saved_session_recovery as saved
+    from daedalus.account_sessions import SessionPhase
+
+    account, owner = account_owner
+    workers = BrowserCookieWorkers(owner, SimpleNamespace())
+    monkeypatch.setattr(saved, "_email_binding", lambda row, store: "synthetic@example.invalid")
+    monkeypatch.setattr(saved, "_world_cookie_binding", lambda row, store: "X" * 48)
+    available = threading.Event()
+    connected = threading.Event()
+    probes = []
+    leases = []
+
+    def online(_world):
+        probes.append("world_checked")
+        return available.is_set()
+
+    def attach(row):
+        lease = owner.acquire(row.id)
+        lease.transition(SessionPhase.AUTHENTICATED)
+        leases.append(lease)
+        connected.set()
+
+    monkeypatch.setattr(workers, "world_reachable", online)
+    monkeypatch.setattr(workers, "start", attach)
+    try:
+        with pytest.raises(ValueError, match="consent"):
+            workers.start_auto_restore([account], confirmed=False)
+        workers.start_auto_restore([account], confirmed=True, retry_seconds=0.05)
+        # Wait for actual first connectivity check before opening the route.
+        deadline = __import__("time").monotonic() + 2
+        while not probes and __import__("time").monotonic() < deadline:
+            __import__("time").sleep(0.01)
+        assert probes and not connected.is_set()
+        available.set()
+        assert connected.wait(2), "Saved cookie should reattach after route recovers"
+        assert owner.status(account.id) == "authenticated"
+        assert len(leases) == 1
+    finally:
+        workers.close()
+        for lease in leases:
+            lease.close()
+    assert not workers._retry_thread.is_alive()
