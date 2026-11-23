@@ -258,6 +258,7 @@ def test_saved_worker_auto_retries_after_transient_outage_without_task_replay(
     monkeypatch, tmp_path, account_owner,
 ):
     import threading
+
     import daedalus.saved_session_recovery as saved
     from daedalus.account_sessions import SessionPhase
 
