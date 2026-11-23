@@ -5,7 +5,11 @@ tests/test_report.py fixture. Deliberately assert the complete string, not
 only presence of headers: tabs, commas, blank lines and final newline matter.
 """
 
-from daedalus.reporting import report_txt_islands, rows_for_warehouse
+import csv
+import io
+import json
+
+from daedalus.reporting import report_csv, report_json, report_txt_islands, rows_for_warehouse
 
 
 def make_rows():
@@ -116,3 +120,15 @@ def test_missing_amount_is_not_falsely_exported_as_zero_and_empty_is_empty():
     assert "Лес:\t0\n" in text
     assert "Вино:\t—\n" in text
     assert "Private account" not in text
+
+
+def test_new_island_metadata_does_not_break_existing_csv_json_export_schema():
+    rows = make_rows()
+    # The island resource is needed for exact island headings, but must not
+    # quietly introduce an extra key into existing machine-readable exports.
+    parsed_json = json.loads(report_json(rows))
+    assert "island_resource" not in parsed_json[0]
+    parsed_csv = list(csv.DictReader(io.StringIO(report_csv(rows))))
+    assert "island_resource" not in parsed_csv[0]
+    assert parsed_csv[0]["wood"] == "146483"
+    assert "===== 98:9 (Вино) =====" in report_txt_islands(rows)
