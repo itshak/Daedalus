@@ -254,9 +254,9 @@ def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch
     page.set_snapshots("alpha", [
         {"city_name": "Unknown Isle", "island": None,
          "resources": {"unsecured": {"wine": 0}}},
-        {"city_name": "Athens", "island": "1:2",
+        {"city_name": "Athens", "island": "1:2", "island_resource": "wine",
          "resources": {"unsecured": {"wood": 300_000, "wine": 0}}},
-        {"city_name": "Ephesus", "island": "1:2",
+        {"city_name": "Ephesus", "island": "1:2", "island_resource": "wine",
          "resources": {"unsecured": {"wood": 10_000, "wine": None}}},
     ])
     try:
@@ -271,8 +271,12 @@ def test_warehouse_island_grouping_and_text_export(qt_app, tmp_path, monkeypatch
         )
         page._save("txt")
         content = path.read_text(encoding="utf-8")
-        assert content.count("Island 1:2") == 1
-        assert "wine: 0" in content and "wine: —" in content
+        assert content.count("===== 1:2 (Вино) =====") == 1
+        assert "Вино:\t0" in content and "Вино:\t—" in content
+        assert "Daedalus warehouse report" not in content
+        assert "Primary" not in content
+        page._copy_islands()
+        assert qt_app.clipboard().text() == content
         page.only_220k.setChecked(True)
         assert page.table.rowCount() == 1
         assert page.table.item(0, 0).text() == "Athens"
