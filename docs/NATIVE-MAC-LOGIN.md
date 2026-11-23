@@ -57,7 +57,18 @@ The earlier cookie worker had a bug: its child called required credential-store
 functions without their second argument. That prevented every worker from
 starting despite verified cookies being stored. A regression now exercises the
 real child entrypoint rather than mocking only process creation. The server
-should log only sanitized worker exit codes and aggregate restore counts.
+logs sanitized worker exit codes and aggregate restore counts.
+
+A separate live bug was found after fixing that crash: upstream IkaBot's
+ordinary `Session.get()` can invoke implicit lobby reauthentication or
+`sys.exit()` when the saved PHP session differs. This terminated the actual
+game worker on its first Cities/Warehouses request. A verified cookie-only
+session now uses bounded HTTPS GETs to the exact approved game origin, rejects
+expired/redirected sessions, never calls implicit login, and leaves the worker
+alive when a read cannot be verified. On an authorized test account, the
+fixed path independently authenticated one worker and returned nine real city
+records and nine warehouse records. Those are an owner-specific smoke result,
+not proof that every configured account is currently connected.
 
 Desktop Accounts immediately shows the verified Session and Worker indicators
 upon the backend's independently attested IPC worker receipt; it then refreshes
