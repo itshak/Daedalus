@@ -445,3 +445,60 @@ def test_visible_retry_waits_for_child_and_api_thread_shutdown(window, monkeypat
     window._selenium_finished()
     assert calls == [("native_login_start", {"account_id": "account-a"})]
     assert not window._automatic_login_pending_visible_retry
+
+
+def test_verified_cookie_worker_receipt_is_not_confused_with_cookie_only(window, monkeypatch):
+    notices = []
+    monkeypatch.setattr(window, "_success_notice", lambda *args: notices.append(args))
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._on_completed("native_login_complete", {
+        "account_id": "account-a", "status": "worker_started_verified",
+    })
+    assert window._automatic_login_successes == 1
+    assert window._automatic_login_worker_recovered == 1
+    assert window._automatic_login_bound_sessions == 0
+    assert notices and notices[-1][0] == "Game worker connected"
+
+
+def test_account_refresh_rechecks_live_worker_status(window):
+    records = [{
+        "id": "account-a", "world": "s53-ru", "player": "Xiaomi",
+        "label": "Alpha", "enabled": True, "session_status": "authenticated",
+    }]
+    window._on_completed("accounts", records)
+    assert window._recovery_followup == ("connected_accounts", "")
+    window._on_completed("connected_accounts", ["account-a"])
+    assert window.accounts_page._connected_ids == {"account-a"}
+    assert window._recovery_followup == ("recovery_index", "")
+
+
+def test_home_warehouse_button_uses_same_automatic_login_path(window, monkeypatch):
+    scopes = []
+    monkeypatch.setattr(
+        window, "_request_warehouse_scope",
+        lambda action, ids: scopes.append((action, ids)),
+    )
+    window._view_home_warehouses("account-a")
+    assert scopes == [("warehouses", ["account-a"])]
+
+
+def test_fluent_notifications_stack_with_long_closable_lifetime(window, monkeypatch):
+    import daedalus.desktop.app as desktop
+
+    calls = []
+    monkeypatch.setattr(
+        desktop.InfoBar, "warning",
+        lambda title, message, **kwargs: calls.append(("warning", kwargs)),
+    )
+    monkeypatch.setattr(
+        desktop.InfoBar, "success",
+        lambda title, message, **kwargs: calls.append(("success", kwargs)),
+    )
+    window._notice("First warning", "Details")
+    window._notice("Second warning", "More details")
+    window._success_notice("Connected", "Ready")
+    assert [kind for kind, _ in calls] == ["warning", "warning", "success"]
+    assert all(args["duration"] >= 60_000 for _, args in calls)
+    assert all(args["isClosable"] is True for _, args in calls)
+    assert all(args["position"] == desktop.InfoBarPosition.TOP_RIGHT for _, args in calls)
