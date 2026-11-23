@@ -27,7 +27,7 @@ from daedalus.recovery_runtime import (
 )
 
 logger = logging.getLogger("daedalus.browser_cookie_workers")
-_WORLD = re.compile(r"s[0-9]{1,6}-[a-z]{2,4}\\Z")
+_WORLD = re.compile(r"s[0-9]{1,6}-[a-z]{2,4}\Z")
 _UPSTREAM_UNREACHABLE = (
     "Game world is unreachable from the Daedalus server; "
     "saved sessions will retry when connectivity recovers"
