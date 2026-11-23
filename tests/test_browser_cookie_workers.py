@@ -173,3 +173,34 @@ def test_real_cookie_child_reads_both_protected_bindings_and_starts_ipc(
         "email", "cookie", "restore", "attested", "ipc_started",
         "ipc_stopped", "http_closed",
     ]
+
+
+def test_saved_native_worker_startup_restores_each_account_only_when_bound(
+    monkeypatch, tmp_path,
+):
+    from daedalus import browser_cookie_workers as workers_module
+    import daedalus.saved_session_recovery as saved
+
+    accounts = [
+        Account("alpha", "s301-en", "Alice", "Alice", True),
+        Account("beta", "s301-en", "Bob", "Bob", True),
+        Account("gamma", "s301-en", "Carol", "Carol", False),
+    ]
+    owner = AccountSessionCoordinator(accounts, state_dir=tmp_path / "locks")
+    router = SimpleNamespace()
+    workers = workers_module.BrowserCookieWorkers(owner, router)
+    invoked = []
+    monkeypatch.setattr(
+        saved, "_email_binding",
+        lambda row, store: "synthetic@example.invalid",
+    )
+    monkeypatch.setattr(
+        saved, "_world_cookie_binding",
+        lambda row, store: "X" * 48 if row.id == "alpha" else None,
+    )
+    monkeypatch.setattr(workers, "start", lambda row: invoked.append(row.id))
+    with pytest.raises(ValueError, match="consent"):
+        workers.restore_saved(accounts, confirmed=False)
+    outcome = workers.restore_saved(accounts, confirmed=True)
+    assert invoked == ["alpha"]
+    assert outcome == {"connected": 1, "missing_binding": 1, "unavailable": 0}
