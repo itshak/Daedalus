@@ -25,9 +25,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from daedalus.account_sessions import AccountSessionCoordinator
-from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
 from daedalus.accounts import Account
 from daedalus.auth_assistance import AssistanceConflict
+from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
 from daedalus.saved_session_recovery import (
     CredentialStore,
     SavedSessionUnavailable,
