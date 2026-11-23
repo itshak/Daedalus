@@ -39,6 +39,33 @@ notarized distribution remain the supported way to retain code identity
 across releases; the application must not bypass OS approval for persistent
 credentials.
 
+### Server-side saved-cookie restart and actual Accounts status
+
+The backend now supports **explicit read-only restoration of previously approved
+native browser sessions** at daemon startup. Enable both
+`--restore-saved-native-workers` and `--confirm-read-only-network` alongside
+`--enable-native-browser-login` and a fixed `--accounts-file`. This attempts
+one independent cookie-only IkaBot IPC worker per existing protected account
+binding. Each worker must independently validate the exact game world/player
+before Session or Worker can become connected. No lobby login, CAPTCHA,
+password transfer or previous game task is replayed. Missing/expired cookies
+remain disconnected, not reported successful. An existing independent worker
+is never overtaken. The operator can disable this startup behavior by removing
+the explicit restore flag.
+
+The earlier cookie worker had a bug: its child called required credential-store
+functions without their second argument. That prevented every worker from
+starting despite verified cookies being stored. A regression now exercises the
+real child entrypoint rather than mocking only process creation. The server
+should log only sanitized worker exit codes and aggregate restore counts.
+
+Desktop Accounts immediately shows the verified Session and Worker indicators
+upon the backend's independently attested IPC worker receipt; it then refreshes
+both state sources from the server. A verified cookie alone still does not
+make an account connected. The Gameforge registration-first sign-in tab is
+selected by the actual React-Bootstrap tab identity, not by assuming its
+container is a `div` or asking the user to switch manually.
+
 ### Interpreting a successful browser sign-in
 
 A Mac can restore a saved exact-world cookie and the server can independently
