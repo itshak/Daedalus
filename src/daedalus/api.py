@@ -70,6 +70,7 @@ def create_app(
     recovery_monitor: ExistingSessionRecoveryMonitor | None = None,
     saved_worker: SavedCookieWorker | None = None,
     native_browser_handoff: NativeBrowserHandoff | None = None,
+    browser_cookie_workers: object | None = None,
     recovery_store: RecoveryStore | None = None,
     recovery_credentials: RecoveryCredentials | None = None,
     recovery_supervisor: RecoverySupervisor | None = None,
@@ -85,6 +86,7 @@ def create_app(
         or task_controller is not None or enable_account_editing
         or assistance_broker is not None or recovery_monitor is not None
         or saved_worker is not None or native_browser_handoff is not None
+        or browser_cookie_workers is not None
         or recovery_store is not None or recovery_credentials is not None
         or recovery_supervisor is not None
     ):
@@ -141,6 +143,14 @@ def create_app(
         or enable_account_editing
     ):
         raise ValueError("Native browser handoff needs the exact fixed authoritative owner")
+    if browser_cookie_workers is not None and (
+        native_browser_handoff is None
+        or native_browser_handoff.cookie_workers is not browser_cookie_workers
+        or browser_cookie_workers.owner is not owner
+        or browser_cookie_workers.router is not ipc_client
+        or enable_account_editing
+    ):
+        raise ValueError("Cookie workers require the exact browser handoff and IPC owner")
     if recovery_supervisor is not None and (
         recovery_store is None or recovery_credentials is None
         or recovery_supervisor.store is not recovery_store
@@ -165,6 +175,8 @@ def create_app(
         finally:
             if recovery_supervisor is not None:
                 recovery_supervisor.stop()
+            if browser_cookie_workers is not None:
+                browser_cookie_workers.close()
             if recovery_monitor is not None:
                 recovery_monitor.stop()
             if task_controller is not None:
@@ -177,7 +189,10 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
-        lifespan=monitor_lifespan if recovery_monitor is not None else None,
+        lifespan=monitor_lifespan if (
+            recovery_monitor is not None or recovery_supervisor is not None
+            or browser_cookie_workers is not None
+        ) else None,
     )
 
     @app.middleware("http")
@@ -209,6 +224,8 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health() -> dict[str, object]:
+        if browser_cookie_workers is not None:
+            browser_cookie_workers.reap()
         return {
             "service": "daedalus",
             "version": __version__,
@@ -520,6 +537,8 @@ def create_app(
 
     @app.get("/api/v1/accounts", dependencies=[Depends(authorized)])
     def accounts() -> dict[str, object]:
+        if browser_cookie_workers is not None:
+            browser_cookie_workers.reap()
         entries = []
         for account in configured_accounts:
             entry = account.to_dict()
@@ -559,6 +578,8 @@ def create_app(
 
     @app.get("/api/v1/engine/connected-accounts", dependencies=[Depends(authorized)])
     def connected_accounts() -> dict[str, object]:
+        if browser_cookie_workers is not None:
+            browser_cookie_workers.reap()
         if ipc_client is None:
             raise HTTPException(status_code=503, detail="Existing IPC attachment is disabled")
         try:

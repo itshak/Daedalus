@@ -35,7 +35,7 @@ CAPTCHA_FRAMES = (
     "iframe[src*='challenges.cloudflare.com']",
 )
 LOGIN_TAB_XPATH = "//div[@id='loginRegisterTabs']//li"
-_SIGN_IN_LABELS = ("войти", "вход", "авторизация", "login", "log in",
+_SIGN_IN_LABELS = ("войти", "вход", "авторизация", "логин", "login", "log in",
                    "sign in", "anmelden", "se connecter", "iniciar sesión",
                    "acceder", "entrar")
 _REGISTER_LABELS = ("регистрация", "зарегистр", "register", "sign up", "sign-up",
@@ -339,27 +339,60 @@ def _restore_legacy_session(driver, saved: tuple[str, list[dict[str, object]]],
 
 
 def _select_sign_in_tab(driver, notify: Callable[[str], None]) -> None:
-    """Never use the first tab blindly: it can be Registration on Gameforge."""
+    """Select Gameforge sign-in by semantics, never registration/default index.
+
+    The active registration panel often hides the sign-in label from Selenium's
+    .text property. Inspect accessible attributes and DOM text; with exactly
+    two tabs, the non-registration peer is also unambiguous.
+    """
     from selenium.webdriver.common.by import By
 
     tabs = driver.find_elements(By.XPATH, LOGIN_TAB_XPATH)
     if not tabs:
-        # A direct login form on a newer Gameforge page needs no tab switch.
+        # Newer Gameforge layouts may use role=tab instead of <li>.
+        tabs = driver.find_elements(
+            By.CSS_SELECTOR, "#loginRegisterTabs [role='tab']"
+        )
+    if not tabs:
+        # A later form wait may handle direct-login layouts without tabs.
         return
+    candidates = []
     for tab in tabs:
         if not _visible(tab):
             continue
-        # Some translations place the label in aria-label or title instead of
-        # visible text. Do not infer sign-in from an unrecognized tab index.
         description = " ".join(
             str(value or "") for value in (
-                tab.text, tab.get_attribute("aria-label"), tab.get_attribute("title")
+                tab.text,
+                tab.get_attribute("aria-label"),
+                tab.get_attribute("title"),
+                tab.get_attribute("textContent"),
+                tab.get_attribute("data-tab"),
+                tab.get_attribute("data-target"),
+                tab.get_attribute("href"),
             )
         ).casefold()
-        if any(label in description for label in _REGISTER_LABELS):
-            continue
-        if any(label in description for label in _SIGN_IN_LABELS):
-            tab.click()
+        # Generic parent classes such as loginRegisterTab contain BOTH words,
+        # and must not be classified as registration or sign-in evidence.
+        tag_id = str(tab.get_attribute("id") or "").casefold()
+        classes = set(str(tab.get_attribute("class") or "").casefold().split())
+        is_registration = (any(label in description for label in _REGISTER_LABELS)
+                           or tag_id in {"registertab", "registrationtab"}
+                           or bool(classes & {"register", "registration", "register-tab"}))
+        is_sign_in = (any(label in description for label in _SIGN_IN_LABELS)
+                      or tag_id in {"logintab", "signintab"}
+                      or bool(classes & {"login", "sign-in", "login-tab"}))
+        candidates.append((tab, is_registration, is_sign_in))
+    sign_in = [tab for tab, register, login in candidates if login and not register]
+    if len(sign_in) == 1:
+        sign_in[0].click()
+        notify("sign_in_tab_selected")
+        return
+    if (len(candidates) == 2
+            and sum(bool(register) for _, register, _ in candidates) == 1):
+        # This is NOT an index guess: exactly one peer is labelled Register.
+        other = [tab for tab, register, _ in candidates if not register]
+        if len(other) == 1:
+            other[0].click()
             notify("sign_in_tab_selected")
             return
     notify("sign_in_tab_not_found")
@@ -453,8 +486,16 @@ def _login_once(driver, credentials: GameforgeCredentials, world_host: str, *,
             _wait_challenge(driver, deadline=deadline, notify=notify, cancelled=cancelled)
         if not driver.find_elements(By.XPATH, PLAY_BUTTON_XPATH):
             notify("waiting_for_login_form")
-            _select_sign_in_tab(driver, notify)
             wait = WebDriverWait(driver, max(1.0, min(12.0, deadline - time.monotonic())))
+            # Gameforge initializes tabs asynchronously after the lobby URL
+            # loads. Waiting for the actual tab/form prevents a silent no-op
+            # when Registration is the first painted panel.
+            wait.until(lambda page: (
+                _visible_sign_in_form(page)
+                or page.find_elements(By.XPATH, LOGIN_TAB_XPATH)
+                or page.find_elements(By.CSS_SELECTOR, "#loginRegisterTabs [role='tab']")
+            ))
+            _select_sign_in_tab(driver, notify)
             email_field, password_field, submit = wait.until(_visible_sign_in_form)
             email_field.clear()
             email_field.send_keys(credentials.email)

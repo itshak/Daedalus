@@ -26,9 +26,11 @@ Daedalus distinguishes **two** independent Keychain operations:
 Chrome's visibility is also bounded: after the lobby Play click, Selenium
 follows the game window without switching back to the lobby every poll,
 and secondary windows are inspected at a lower frequency before Play. If
-Gameforge changes its registration/login layout, Selenium matches the
-explicit **Sign in** tab and a visible sign-in form; it must not select the
-first tab blindly or submit a password to the registration form.
+Gameforge changes its registration/login layout, Selenium waits for the
+asynchronously rendered tab, uses its accessible text/attributes and, for a
+two-tab control, can identify **Sign in** as the sole non-registration tab.
+It must not select the first tab blindly or submit a password to the
+registration form.
 
 **Limit:** Apple Keychain's consent rules are controlled by macOS, not by
 Selenium. An ad-hoc-signed preview cannot guarantee that "Always Allow"
@@ -40,13 +42,19 @@ credentials.
 ### Interpreting a successful browser sign-in
 
 A Mac can restore a saved exact-world cookie and the server can independently
-verify and save it while the account's **Worker** column remains disconnected.
-This is not a false-positive Gameforge authentication: cookie verification and
-attaching a persistent IkaBot worker are two different operations. The desktop
-now explicitly reports **verified session saved, worker not connected** instead
-of implying all services are online. A successful dedicated-worker handoff
-instead reports **worker reconnected**. Check the **Worker** column before
-starting operations. No duplicate engine worker starts implicitly.
+verify and save it. When the backend enables native Mac login, Daedalus also
+starts an **isolated, cookie-only IkaBot worker** from the server's protected
+binding; the child independently attests exact world/player over its private
+IPC before either **Session** or **Worker** is shown connected. This action is
+part of the operator's explicit Sign in / Load warehouses request: no loginLink,
+password transfer, CAPTCHA bypass or background task replay is involved.
+Multiple accounts have separate leased IPC children, with ownership checks.
+If that second step fails, the cookie remains safely saved, but the desktop
+shows **worker unavailable** and must never claim warehouse access. Older
+backend versions still return a cookie-only receipt and require deployment
+before worker connection becomes available. The Accounts refresh rechecks both
+session and actual IPC worker attachment. Fluent notifications stack and stay
+readable for two minutes unless closed manually.
 
 When the server rejects an otherwise successful headless cookie handoff, the
 client burns that ticket, requests a **new** account-scoped one-time challenge
@@ -143,7 +151,7 @@ The fixed-account Linux backend must be started by its administrator with:
 --enable-native-browser-login
 ```
 
-For an existing saved IkaBot identity with no active worker, only `--accounts-file` and `--enable-native-browser-login` are needed, with the server optional dependencies installed. **A completely new Gameforge/IkaBot identity without an existing compatible saved IkaBot record is not yet provisioned by this flow**: the underlying cookie-only IkaBot engine still requires an existing account association. Do not represent synthetic first-time email-binding tests as proof of full new-IkaBot-account enrollment. After a verified first-time Mac login, the operator must explicitly start/attach one dedicated worker in a controlled rollout. No new daemon, Gameforge lobby login, Mac SSH tunnel or VNC session is needed for the browser experience. Keep the backend bound to loopback behind an authenticated HTTPS ingress; see [REMOTE-HTTPS.md](REMOTE-HTTPS.md). `daedalus[server]` includes cryptography and OS keyring dependencies; the native `.app` includes Qt WebEngine and its subprocess. Use a protected Linux keyring or the [machine-bound systemd encrypted credential store](PERSISTENT-CREDENTIALS.md) for a headless daemon; a controlled service restart has passed on `aiserver`, while whole-host reboot still needs owner acceptance.
+For an existing saved IkaBot identity with no active worker, `--accounts-file` and `--enable-native-browser-login` enable the explicit Mac sign-in path; native login also enables the server's account-scoped read-only IPC router. The backend must have its server and maintained IkaBot engine dependencies installed, and a server-side protected keyring available to its daemon. The newly verified cookie now boots an independent dedicated account worker after an explicit Mac sign-in, without requiring a second manual worker-start command. If the worker cannot start, the client reports this failure instead of presenting a false successful warehouse login. **A completely new Gameforge/IkaBot identity without an existing compatible saved IkaBot record is not yet certified in the real game**; synthetic first-time binding tests are insufficient evidence. No new daemon, Gameforge lobby login, Mac SSH tunnel or VNC session is needed for the browser experience. Keep the backend bound to loopback behind an authenticated HTTPS ingress; see [REMOTE-HTTPS.md](REMOTE-HTTPS.md). `daedalus[server]` includes cryptography and OS keyring dependencies; the native `.app` includes Qt WebEngine and its subprocess. Use a protected Linux keyring or the [machine-bound systemd encrypted credential store](PERSISTENT-CREDENTIALS.md) for a headless daemon; a controlled service restart has passed on `aiserver`, while whole-host reboot still needs owner acceptance.
 
 **A running dedicated backend must be restarted to apply the opt-in flag and new code.** That restart can invalidate its lease/session and is **not** safe during an active task or uncertain request. Do not restart the current Monjo owner until its preexisting unconfirmed task request has been investigated and the operator has approved a controlled window. A source-code merge alone does not enable the new GUI button on an older live server.
 
