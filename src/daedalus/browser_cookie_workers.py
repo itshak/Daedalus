@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import socket
 import subprocess
 import sys
 import threading
@@ -25,6 +27,11 @@ from daedalus.recovery_runtime import (
 )
 
 logger = logging.getLogger("daedalus.browser_cookie_workers")
+_WORLD = re.compile(r"s[0-9]{1,6}-[a-z]{2,4}\\Z")
+_UPSTREAM_UNREACHABLE = (
+    "Game world is unreachable from the Daedalus server; "
+    "saved sessions will retry when connectivity recovers"
+)
 
 
 class BrowserCookieWorkers:
@@ -37,6 +44,85 @@ class BrowserCookieWorkers:
         self.launch_timeout = launch_timeout
         self._workers: dict[str, ManagedAccountWorker] = {}
         self._mutex = threading.RLock()
+        self._connectivity: dict[str, tuple[float, bool]] = {}
+        self._retry_stop = threading.Event()
+        self._retry_thread: threading.Thread | None = None
+        self._retry_interval = 300.0
+
+    def world_reachable(self, world: str, *, refresh: bool = False) -> bool:
+        """Bounded TCP-only upstream preflight, not an identity attestation.
+
+        A world host must be derived solely from a validated configured world
+        name. HTTPS certificate/player/cookie validation still belongs to the
+        authenticated IkaBot session. Negative checks expire quickly so the
+        recovery loop can recover automatically after a temporary outage.
+        """
+        if not isinstance(world, str) or _WORLD.fullmatch(world) is None:
+            return False
+        now = time.monotonic()
+        with self._mutex:
+            cached = self._connectivity.get(world)
+            if not refresh and cached and now - cached[0] < 30:
+                return cached[1]
+        reachable = False
+        try:
+            with socket.create_connection(
+                (f"{world}.ikariam.gameforge.com", 443), timeout=3.0,
+            ):
+                reachable = True
+        except (OSError, ValueError):
+            pass
+        with self._mutex:
+            self._connectivity[world] = (time.monotonic(), reachable)
+        return reachable
+
+    def start_auto_restore(
+        self, accounts: list[Account], *, confirmed: bool, retry_seconds: float = 300,
+    ) -> None:
+        """Retry read-only, previously consented cookies without re-login/tasks.
+
+        This work runs outside Uvicorn startup, so network failure never blocks
+        the API. Retry is opt-in through the existing restore-saved-workers CLI
+        flag and never uses a browser, a password, or a background game task.
+        """
+        if confirmed is not True:
+            raise ValueError("Explicit read-only restore consent required")
+        if not self.owner.matches_accounts(accounts):
+            raise ValueError("Saved worker retry accounts do not match the owner")
+        if retry_seconds <= 0:
+            raise ValueError("Retry interval must be positive")
+        with self._mutex:
+            if self._retry_thread is not None:
+                raise ValueError("Saved-cookie recovery retry already running")
+            self._retry_interval = retry_seconds
+            self._retry_stop.clear()
+            self._retry_thread = threading.Thread(
+                target=self._auto_restore_loop, args=(tuple(accounts),),
+                name="daedalus-saved-cookie-restore", daemon=True,
+            )
+            self._retry_thread.start()
+
+    def _auto_restore_loop(self, accounts: tuple[Account, ...]) -> None:
+        while not self._retry_stop.is_set():
+            try:
+                self.restore_saved(list(accounts), confirmed=True)
+            except Exception:  # noqa: BLE001 - sanitized daemon boundary
+                logger.warning("Scheduled saved-cookie recovery pass could not finish")
+            if self._retry_stop.wait(self._retry_interval):
+                break
+
+    def recovery_status(self) -> dict[str, object]:
+        """Public-safe state for a health diagnostic; no account/world names."""
+        with self._mutex:
+            enabled = self._retry_thread is not None
+            unavailable = sum(
+                not ok for checked, ok in self._connectivity.values()
+                if time.monotonic() - checked < self._retry_interval + 30
+            )
+            return {
+                "enabled": enabled, "retry_seconds": int(self._retry_interval),
+                "unreachable_worlds": unavailable,
+            }
 
     def reap(self) -> None:
         """Release a dead child so a later explicit login can retry."""
@@ -149,8 +235,15 @@ class BrowserCookieWorkers:
         )
 
         report = {"connected": 0, "missing_binding": 0, "unavailable": 0}
+        warned_worlds: set[str] = set()
         for account in accounts:
+            if self._retry_stop.is_set() and self._retry_thread is not None:
+                break
             if not account.enabled:
+                continue
+            self.reap()
+            if self.owner.status(account.id) == SessionPhase.AUTHENTICATED.value:
+                report["connected"] += 1
                 continue
             try:
                 _email_binding(account, None)
@@ -159,6 +252,14 @@ class BrowserCookieWorkers:
                     continue
             except SavedSessionUnavailable:
                 report["missing_binding"] += 1
+                continue
+            if not self.world_reachable(account.world):
+                report["unavailable"] += 1
+                if account.world not in warned_worlds:
+                    logger.warning(
+                        "Game world unreachable from backend; saved-cookie retry deferred"
+                    )
+                    warned_worlds.add(account.world)
                 continue
             try:
                 self.start(account)
@@ -172,6 +273,12 @@ class BrowserCookieWorkers:
         return report
 
     def close(self) -> None:
+        self._retry_stop.set()
+        thread = self._retry_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=self.launch_timeout + 5)
+            if thread.is_alive():
+                raise RecoveryWorkerError("Scheduled cookie restore is still shutting down")
         with self._mutex:
             for aid, worker in list(self._workers.items()):
                 try:
