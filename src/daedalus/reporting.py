@@ -72,7 +72,13 @@ def report_csv(rows: Sequence[Mapping[str, object]]) -> str:
 
 
 def report_json(rows: Sequence[Mapping[str, object]]) -> str:
-    return json.dumps(list(rows), ensure_ascii=False, indent=2)
+    # Island tradegood is a presentation-only metadata field newly carried
+    # through IPC. Do not silently change the existing machine-readable JSON
+    # export schema for consumers that depend on its old field set.
+    return json.dumps(
+        [{key: value for key, value in row.items() if key != "island_resource"} for row in rows],
+        ensure_ascii=False, indent=2,
+    )
 
 
 def report_txt(rows: Sequence[Mapping[str, object]], *, group_by_island: bool = True) -> str:
