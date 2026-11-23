@@ -407,6 +407,64 @@ def test_sign_in_tab_is_selected_by_semantics_not_registration_index():
     assert events == ["sign_in_tab_selected"]
 
 
+def test_registration_default_with_unlabelled_peer_switches_to_login():
+    pytest.importorskip("selenium")
+
+    class Tab:
+        def __init__(self, text):
+            self.text = text
+            self.clicked = False
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, name):
+            return "loginRegisterTab" if name == "class" else None
+
+        def click(self):
+            self.clicked = True
+
+    register, login = Tab("Регистрация"), Tab("")
+    class Browser:
+        def find_elements(self, _by, selector):
+            assert selector == auth.LOGIN_TAB_XPATH
+            return [register, login]
+
+    stages = []
+    auth._select_sign_in_tab(Browser(), stages.append)
+    assert login.clicked and not register.clicked
+    assert stages == ["sign_in_tab_selected"]
+
+
+def test_login_tab_accessible_dom_text_overrides_hidden_selenium_text():
+    pytest.importorskip("selenium")
+
+    class Tab:
+        def __init__(self, dom_text):
+            self.text = ""
+            self.dom_text = dom_text
+            self.clicked = False
+
+        def is_displayed(self):
+            return True
+
+        def get_attribute(self, name):
+            return self.dom_text if name == "textContent" else None
+
+        def click(self):
+            self.clicked = True
+
+    register, login = Tab("Регистрация"), Tab("Вход")
+    class Browser:
+        def find_elements(self, *_args):
+            return [register, login]
+
+    stages = []
+    auth._select_sign_in_tab(Browser(), stages.append)
+    assert login.clicked and not register.clicked
+    assert stages == ["sign_in_tab_selected"]
+
+
 def test_unknown_sign_in_tab_does_not_type_into_registration():
     pytest.importorskip("selenium")
 
