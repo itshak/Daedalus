@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 
-from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
+from daedalus.account_sessions import AccountSessionCoordinator, SessionBusyError, SessionPhase
 from daedalus.accounts import Account
 from daedalus.engine_ipc import ControlledIPCClient, EngineIPCUnavailable
 from daedalus.recovery_runtime import (
@@ -96,7 +96,11 @@ class BrowserCookieWorkers:
                 candidate = ControlledIPCClient(descriptor)
                 deadline = time.monotonic() + self.launch_timeout
                 while time.monotonic() < deadline:
-                    if child.poll() is not None:
+                    exit_code = child.poll()
+                    if exit_code is not None:
+                        # Only a fixed numeric exit code, never stderr or a
+                        # game URL/cookie from the isolated engine process.
+                        logger.warning("Cookie-only IPC child exited before attestation: code=%d", exit_code)
                         break
                     if descriptor.exists():
                         try:
@@ -158,7 +162,7 @@ class BrowserCookieWorkers:
                 continue
             try:
                 self.start(account)
-            except (RecoveryWorkerError, OSError, ValueError):
+            except (RecoveryWorkerError, SessionBusyError, OSError, ValueError):
                 report["unavailable"] += 1
                 logger.warning("Previously verified cookie could not restore a worker")
             else:
