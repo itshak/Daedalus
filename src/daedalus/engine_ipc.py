@@ -952,9 +952,10 @@ class ExistingIPCClient:
             ):
                 raise EngineIPCUnavailable("Invalid island coordinates in warehouse snapshot")
             island_resource = row.get("island_resource")
-            if island_resource is not None and island_resource not in {
-                "", "wood", "wine", "marble", "glass", "sulfur",
-            }:
+            if island_resource is not None and (
+                not isinstance(island_resource, str)
+                or island_resource not in {"", "wood", "wine", "marble", "glass", "sulfur"}
+            ):
                 raise EngineIPCUnavailable("Invalid island resource in warehouse snapshot")
             snapshots.append(CityWarehouseSnapshot(
                 account_id=account.id,
