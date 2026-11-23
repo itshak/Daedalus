@@ -427,8 +427,8 @@ def main(argv: list[str] | None = None) -> int:
                     monitor.attach_dedicated_worker(worker)
             native_handoff = None
             if args.enable_native_browser_login:
-                from daedalus.native_browser_handoff import NativeBrowserHandoff
                 from daedalus.browser_cookie_workers import BrowserCookieWorkers
+                from daedalus.native_browser_handoff import NativeBrowserHandoff
 
                 cookie_workers = BrowserCookieWorkers(owner, ipc)
                 native_handoff = NativeBrowserHandoff(
