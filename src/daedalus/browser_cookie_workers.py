@@ -129,6 +129,44 @@ class BrowserCookieWorkers:
                             raise RecoveryWorkerError("Cookie worker cleanup is uncertain") from None
                     lease.close()
 
+    def restore_saved(self, accounts: list[Account], *, confirmed: bool) -> dict[str, int]:
+        """Opt-in, read-only startup recovery of previously verified world cookies.
+
+        No browser login, lobby token, task replay, or plaintext cookie
+        transport occurs. Each account gets an independent fresh IPC/player
+        attestation before becoming authenticated.
+        """
+        if confirmed is not True:
+            raise ValueError("Explicit read-only restore consent required")
+        from daedalus.saved_session_recovery import (
+            SavedSessionUnavailable,
+            _email_binding,
+            _world_cookie_binding,
+        )
+
+        report = {"connected": 0, "missing_binding": 0, "unavailable": 0}
+        for account in accounts:
+            if not account.enabled:
+                continue
+            try:
+                _email_binding(account, None)
+                if _world_cookie_binding(account, None) is None:
+                    report["missing_binding"] += 1
+                    continue
+            except SavedSessionUnavailable:
+                report["missing_binding"] += 1
+                continue
+            try:
+                self.start(account)
+            except (RecoveryWorkerError, OSError, ValueError):
+                report["unavailable"] += 1
+                logger.warning("Previously verified cookie could not restore a worker")
+            else:
+                report["connected"] += 1
+        logger.info("Saved-cookie restore completed: %s connected, %s missing, %s unavailable",
+                    report["connected"], report["missing_binding"], report["unavailable"])
+        return report
+
     def close(self) -> None:
         with self._mutex:
             for aid, worker in list(self._workers.items()):
