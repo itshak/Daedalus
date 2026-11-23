@@ -1453,6 +1453,7 @@ class WarehousesPage(QWidget):
         self._selected_account: dict[str, object] = {}
         self._snapshots: list[dict[str, object]] = []
         self._rows: list[dict[str, object]] = []
+        self._source_rows: list[dict[str, object]] = []
         self._included_ids: list[str] = []
         self._reports: list[tuple[str, list[dict[str, object]]]] = []
         self._failed_accounts: list[str] = []
@@ -1623,6 +1624,7 @@ class WarehousesPage(QWidget):
         self._reports = []
         self._failed_accounts = []
         self._rows = []
+        self._source_rows = []
         self._snapshots = []
         self._selected_account = {}
         self.table.setRowCount(0)
@@ -1676,13 +1678,17 @@ class WarehousesPage(QWidget):
         self._render()
 
     def _render(self, *_args: object) -> None:
-        self._rows = [
+        # Preserve account/report order for byte-for-byte legacy exports.
+        # The visual table can be resorted, but equal-total cities in the
+        # original exporter keep their input order (Python stable sort).
+        self._source_rows = [
             row for account_id, snapshots in self._reports
             for row in rows_for_warehouse(
                 self._accounts.get(account_id, {"id": account_id}), snapshots,
                 only_220k=self.only_220k.isChecked(),
             )
         ]
+        self._rows = list(self._source_rows)
         if self.group_island.isChecked():
             self._rows.sort(key=lambda row: (
                 str(row.get("world") or ""),
@@ -1741,7 +1747,7 @@ class WarehousesPage(QWidget):
             document = QTextDocument(self)
             document.setDefaultFont(QFont("Menlo", 10))
             document.setPlainText(
-                report_txt_islands(self._rows) if self.group_island.isChecked()
+                report_txt_islands(self._source_rows) if self.group_island.isChecked()
                 else report_txt(self._rows, group_by_island=False)
             )
             printer = QPrinter(QPrinter.HighResolution)
@@ -1760,7 +1766,7 @@ class WarehousesPage(QWidget):
         QGuiApplication.clipboard().setText(report_csv(self._rows))
 
     def _copy_islands(self) -> None:
-        QGuiApplication.clipboard().setText(report_txt_islands(self._rows))
+        QGuiApplication.clipboard().setText(report_txt_islands(self._source_rows))
 
     def _save(self, format_name: str) -> None:
         if format_name not in {"csv", "json", "txt"}:
@@ -1774,7 +1780,7 @@ class WarehousesPage(QWidget):
         output = (
             report_csv(self._rows) if format_name == "csv"
             else report_json(self._rows) if format_name == "json"
-            else (report_txt_islands(self._rows) if self.group_island.isChecked()
+            else (report_txt_islands(self._source_rows) if self.group_island.isChecked()
                   else report_txt(self._rows, group_by_island=False))
         )
         with open(filename, "w", encoding="utf-8", newline="") as handle:
