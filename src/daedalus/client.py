@@ -480,6 +480,7 @@ class DaedalusClient:
         if (reply.get("account_id") != account_id
                 or reply.get("status") not in {
                     "world_cookie_bound", "worker_recovered_verified",
+                    "worker_started_verified",
                 }):
             raise APIConnectionError("Browser login did not receive a verified server receipt")
         return reply
