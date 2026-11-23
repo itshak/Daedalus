@@ -465,8 +465,9 @@ def main(argv: list[str] | None = None) -> int:
                     configured, owner, monitor=monitor if worker is not None else None,
                     dedicated_worker=worker, cookie_workers=cookie_workers,
                 )
-                if args.restore_saved_native_workers:
-                    cookie_workers.restore_saved(configured, confirmed=True)
+                # Defer bounded saved-cookie verification to a daemon thread.
+                # A game-world outage must never block Uvicorn from starting.
+                # The explicit flag below opts into read-only automatic retries.
             if args.enable_auto_recovery:
                 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkers
 
@@ -489,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
                 recovery_supervisor=recovery_supervisor,
                 demo_mode=args.demo,
             )
+            if args.restore_saved_native_workers:
+                cookie_workers.start_auto_restore(configured, confirmed=True)
         except (
             AccountConfigError, AccountEditUnavailable, SessionBusyError,
             SavedWorkerUnavailable, TaskUnavailable, ValueError, ImportError,

@@ -438,3 +438,61 @@ def test_native_login_survives_monitor_without_restored_worker(tmp_path):
         assert owner.status("alpha") == "not_connected"
     finally:
         controller.close()
+
+
+def test_world_outage_rejects_login_before_launching_chrome_or_issuing_ticket(env):
+    from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
+
+    class Offline:
+        def reap(self):
+            return None
+
+        def world_reachable(self, world, *, refresh=False):
+            assert world == "s301-en" and refresh is True
+            return False
+
+    env.broker.cookie_workers = Offline()
+    response = env.api.post(
+        "/api/v1/accounts/alpha/browser-login/start",
+        json={"confirmed": True}, headers=_auth(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == _UPSTREAM_UNREACHABLE
+    assert env.broker._pending == {}
+    assert env.seen == []
+    assert env.owner.status("alpha") == "not_connected"
+
+
+def test_game_world_drop_during_browser_login_does_not_overwrite_previous_cookie(env):
+    from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
+
+    class Intermittent:
+        connected = True
+
+        def reap(self):
+            return None
+
+        def world_reachable(self, world, *, refresh=False):
+            assert world == "s301-en"
+            return self.connected
+
+    worker = Intermittent()
+    env.broker.cookie_workers = worker
+    bind_saved_email(env.account, EMAIL, credential_store=env.keys)
+    previous_cookie = "P" * 48
+    env.keys.set_password(_COOKIE_SERVICE, _account_key(env.account), previous_cookie)
+    challenge = _begin(env)
+    worker.connected = False
+    response, envelope = _complete(env, challenge)
+    assert response.status_code == 409
+    assert response.json()["detail"] == _UPSTREAM_UNREACHABLE
+    assert env.keys.get_password(_COOKIE_SERVICE, _account_key(env.account)) == previous_cookie
+    assert env.seen == []
+    assert env.owner.status("alpha") == "not_connected"
+    # A world failure still burns the one-time challenge, never replay it.
+    response = env.api.post(
+        f"/api/v1/accounts/alpha/browser-login/{challenge['ticket_id']}/complete",
+        json=envelope, headers=_auth(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Browser handoff is expired or already consumed"

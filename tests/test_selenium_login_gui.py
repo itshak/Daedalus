@@ -362,6 +362,24 @@ def test_rejected_headless_handoff_gets_new_ticket_for_visible_browser(window, m
     assert not window._automatic_login_pending_visible_retry
 
 
+def test_upstream_world_outage_never_forces_visible_chrome_retry(window, monkeypatch):
+    from daedalus.browser_cookie_workers import _UPSTREAM_UNREACHABLE
+
+    calls = []
+    notices = []
+    monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append(action))
+    monkeypatch.setattr(window, "_notice", lambda title, message: notices.append((title, message)))
+    window._automatic_login_active = True
+    window._automatic_login_current = "account-a"
+    window._automatic_login_challenge = {"ticket_id": "synthetic"}
+    window._on_failed("native_login_complete", _UPSTREAM_UNREACHABLE)
+    assert window._automatic_login_failures == 1
+    assert not window._automatic_login_pending_visible_retry
+    assert not window._automatic_login_force_visible
+    assert "native_login_start" not in calls
+    assert any("world is unreachable" in message.lower() for _, message in notices)
+
+
 def test_second_server_handoff_failure_stops_without_retry(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window, "_request", lambda action, **kw: calls.append(action))

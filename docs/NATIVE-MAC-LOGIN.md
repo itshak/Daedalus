@@ -209,3 +209,35 @@ For an existing saved IkaBot identity with no active worker, `--accounts-file` a
 - [ ] Confirm a single newly approved reversible task, monitor/stop it, and observe game-side effects exactly once.
 - [ ] Restart in a controlled window and verify protected server keyring availability, client Keychain auto-reconnect, and no VNC/SSH requirement.
 - [ ] Review sanitized evidence and explicitly authorize or refuse production cutover. **Do not mark production-ready from CI alone.**
+
+## Temporary game-world network outages (2026-11-24)
+
+A successful local Chrome sign-in only obtains a world cookie. The server
+must separately reach that exact Gameforge world over HTTPS, verify the
+configured player and start a private IkaBot worker. A reachable Gameforge
+lobby does **not** prove that the world host is reachable from the server.
+
+With the existing explicit
+`--restore-saved-native-workers --confirm-read-only-network` flags,
+the daemon now starts read-only saved-cookie recovery asynchronously and
+retries disconnected accounts every five minutes. This prevents one
+unreachable world from delaying the API or losing an opportunity to
+reattach after connectivity returns. A bounded, cached TCP/443 preflight
+skips spawning workers when the exact world host cannot be reached.
+An unsuccessful pass never marks an account connected, deletes saved
+cookies, performs another lobby login, or replays game tasks.
+
+The native browser handoff also checks the server's world connectivity
+*before* issuing a one-time browser ticket, and again before binding a
+received cookie. If unreachable, macOS displays a specific nonsecret
+error instead of cycling through headless and visible Chrome. Existing
+protected credentials and the last independently verified cookie remain
+untouched. The public `/api/v1/health` adds a sanitized
+`saved_worker_retry` summary (enabled, retry cadence and unreachable
+world count) without exposing player identities or secrets.
+
+The server cannot force connectivity to an unreachable Gameforge host.
+If a world remains inaccessible **from the server**, warehouse reads
+remain unavailable until network reachability and independent player
+verification succeed. Do not bypass the world's HTTPS identity or
+assume the saved cookie itself is invalid merely because TCP timed out.

@@ -234,6 +234,14 @@ def create_app(
                 "task_control_opt_in" if task_controller is not None else "read_only"
             ),
             "synthetic_demo": demo_mode,
+            # Nonsecret visibility into read-only saved-cookie restoration.
+            # No account identity, world hostname, token or cookie is exposed.
+            "saved_worker_retry": (
+                browser_cookie_workers.recovery_status()
+                if browser_cookie_workers is not None
+                and callable(getattr(browser_cookie_workers, "recovery_status", None))
+                else {"enabled": False}
+            ),
             "authenticated_workers": sum(
                 owner.status(account.id) == SessionPhase.AUTHENTICATED.value
                 for account in configured_accounts

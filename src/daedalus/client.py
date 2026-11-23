@@ -108,6 +108,7 @@ class DaedalusClient:
                     "Gameforge email differs from the existing account binding",
                     "Another worker owns this game account",
                     "Browser handoff is expired or already consumed",
+                    "Game world is unreachable from the Daedalus server; saved sessions will retry when connectivity recovers",
                 }
                 if (response.status_code == 409 and detail in safe_409) or (
                     response.status_code == 422 and detail ==

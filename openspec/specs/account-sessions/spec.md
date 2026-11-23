@@ -402,3 +402,40 @@ Mac Keychain vault key
 to the Daedalus API and opens a visible browser for CAPTCHA or for a failed
 headless attempt to allow user-directed login recovery; server attestation
 remains mandatory before any worker is promoted
+
+### Requirement: Reconnect previously verified native saved-cookie workers after transient backend game-world outages
+
+When the operator enables read-only native saved-worker restoration, the daemon
+SHALL run the restoration outside of synchronous API startup and SHALL retry
+disconnected, previously verified accounts on a bounded five-minute cadence.
+The retry SHALL use only the existing protected world cookie and bound email
+with fresh IPC world/player attestation, without opening Gameforge lobby,
+replacing a valid live worker, replaying tasks, or falsely reporting connected.
+
+#### Scenario: Game-world HTTPS route unavailable at server start
+
+- **GIVEN** a configured account with a previously verified protected world cookie
+- **WHEN** the daemon starts but TCP/443 to the exact configured world host times out
+- **THEN** its API starts normally with zero unverified workers
+- **AND** it does not spawn a futile cookie IPC child for that world
+- **AND** read-only recovery remains scheduled without disturbing saved bindings
+
+#### Scenario: Route becomes available later
+
+- **WHEN** a later bounded connectivity check succeeds
+- **THEN** the saved-cookie worker independently attests world/player through its private IPC channel before appearing connected
+- **AND** there is no task replay, credential login or manual daemon restart
+
+### Requirement: Native browser handoff reports backend world connectivity failures before Chrome sign-in
+
+The backend SHALL check its own route to the configured game world before
+issuing a native browser ticket and before saving a browser-handoff cookie.
+A failed bounded preflight SHALL produce a reviewed, nonsecret error, shall
+not consume login credentials or overwrite the previous verified world
+cookie, and the macOS UI SHALL not force a visible Selenium retry in response.
+
+#### Scenario: Browser can see world but backend cannot
+
+- **WHEN** local Chrome obtains a valid world page while the backend cannot connect to that game's world server
+- **THEN** the backend declines verification without marking the account connected
+- **AND** macOS displays the server-side connectivity problem, not a misleading local password/CAPTCHA failure
