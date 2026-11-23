@@ -71,3 +71,40 @@ The desktop SHALL support ordering cities by island and exporting readable group
 - **GIVEN** a known island has multiple cities and at least one missing resource quantity
 - **WHEN** the user enables island grouping and saves TXT
 - **THEN** the cities are grouped by island, missing values display as unknown, and numeric zero remains zero
+
+
+### Requirement: Exact original IkaBot "Copy by island" layout
+
+The desktop SHALL reproduce the original author's private `itshak/ikabot`
+`src/ikabot/report.py::format_text_islands` output (including Russian
+resource names, grouping, ordering, separators, whitespace, tabs, commas
+and trailing newline) for **Copy by island**, and for Save TXT / print
+when **By island** is selected. Machine-readable CSV and JSON are unaffected.
+
+The legacy layout groups all selected account cities by `(island coordinates,
+island resource)`, omits account/world headings, orders resource categories
+marble → wine → crystal → sulfur → other, sorts coordinates numerically,
+and sorts cities within each island by the descending sum of unsecured goods.
+Every island section uses `===== coordinates (Ресурс) =====`, blank line,
+city `Название (capacity)`, `============`, then five tab-separated
+resource lines `Лес`, `Вино`, `Мрам`, `Хруст`, `Сера` with comma-grouped
+numbers. The existing 220K filter SHALL apply before grouping.
+
+The engine SHALL provide the sanitized island tradegood from the already
+authenticated city inventory so island labels and grouping are correct;
+the IPC adapter SHALL whitelist allowed resource identifiers. A missing
+numeric field SHALL remain unknown (`—`) rather than be falsely printed as
+zero; for complete city snapshots, text must match the original exactly.
+
+#### Scenario: Multi-account island clipboard is byte-for-byte legacy compatible
+
+- **GIVEN** two or more connected accounts with cities on the same coordinates and tradegood
+- **WHEN** the user selects **Copy by island**
+- **THEN** the copied text SHALL have one island header, no account headings, original tab and blank-line layout, numeric comma separators, and descending city order
+- **AND** copied text ends with the same trailing newline as the legacy exporter
+
+#### Scenario: 220K filtering and print/save island mode
+
+- **WHEN** the 220K filter and By island options are enabled
+- **THEN** below-threshold cities SHALL be excluded before grouping, and Save TXT and the print preview SHALL use the same legacy island output as the clipboard
+- **AND** CSV and JSON exports SHALL preserve their existing machine-readable representation
