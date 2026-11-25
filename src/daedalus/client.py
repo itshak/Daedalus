@@ -365,6 +365,14 @@ class DaedalusClient:
     def health(self) -> dict[str, object]:
         return self._read("health")
 
+    def release_status(self) -> dict[str, object]:
+        from daedalus.release_catalog import validate_release_status
+
+        try:
+            return validate_release_status(self._read("release-status"))
+        except ValueError:
+            raise APIConnectionError("Invalid release metadata") from None
+
     def accounts(self) -> list[dict[str, object]]:
         data = self._read("accounts").get("accounts")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):

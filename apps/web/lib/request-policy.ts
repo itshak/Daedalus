@@ -10,6 +10,7 @@ const safeNumber = /^[1-9][0-9]{0,11}$/;
 export function allowedRequest(method: string, parts: string[], params: URLSearchParams): boolean {
   if (parts.some(part => !safePart.test(part))) return false;
   if (method === "GET") {
+    if (parts.join("/") === "release-status") return params.size===0;
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "administrative-status") return params.size===0;

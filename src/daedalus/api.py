@@ -263,6 +263,12 @@ def create_app(
             ),
         }
 
+    @app.get("/api/v1/release-status", dependencies=[Depends(authorized)])
+    def available_release() -> dict[str, object]:
+        from daedalus.release_catalog import release_status
+
+        return release_status(offline=demo_mode)
+
     @app.get("/api/v1/login-vaults", dependencies=[Depends(authorized)])
     def login_vaults() -> dict[str, object]:
         """Return opaque ciphertext only; the decryption key stays on the Mac."""

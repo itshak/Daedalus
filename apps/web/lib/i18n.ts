@@ -2,6 +2,18 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Published previews are not notarized. Verify the checksum before installation. Controller updates and rollback use the reviewed host release workflow, not a remote shell.": "Предварительные версии не нотарифицированы Apple. Проверьте контрольную сумму перед установкой. Обновление и откат контроллера выполняются через проверенный процесс выпуска на сервере, а не через удалённую оболочку.",
+  "Public preview unavailable or no verified catalog entry": "Опубликованная версия недоступна или отсутствует подтверждённая запись",
+  "SHA-256 checksum": "Контрольная сумма SHA-256",
+  "Download Mac DMG": "Скачать DMG для Mac",
+  "Release notes": "Описание выпуска",
+  "Published preview": "Опубликованная версия",
+  "Controller build revision": "Ревизия сборки контроллера",
+  "Controller version": "Версия контроллера",
+  "Release metadata unavailable": "Данные о выпуске недоступны",
+  "Check published Mac preview": "Проверить версию для Mac",
+  "Check published Mac previews without changing the backend.": "Проверить опубликованные версии для Mac без изменения сервера.",
+  "Releases and diagnostics": "Версии и диагностика",
   "Modeled final delivery (seconds)": "Расчёт последней доставки (секунды)",
   "Model assumes an exclusive fleet, symmetric return travel, unchanged loading and storage, and no extra waits. No combined multi-route ETA.": "Расчёт предполагает свободный флот, одинаковое время обратного пути, неизменную погрузку и вместимость без дополнительных ожиданий. Общий срок нескольких маршрутов не рассчитывается.",
   "Model assumes an exclusive fleet and unchanged route conditions. Manual recovery only.": "Расчёт предполагает свободный флот и неизменные условия маршрута. Только ручное восстановление.",

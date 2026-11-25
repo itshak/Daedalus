@@ -90,11 +90,14 @@
       "live_accepted": false
     },
     "checkForUpdate": {
-      "desktop": "pending",
-      "web": "protected_local",
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
       "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "consolidateResources": {
@@ -140,11 +143,14 @@
       "live_accepted": false
     },
     "developer": {
-      "desktop": "pending",
-      "web": "protected_local",
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
       "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "distributeResources": {
@@ -436,11 +442,14 @@
       "live_accepted": false
     },
     "update": {
-      "desktop": "pending",
-      "web": "protected_local",
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
       "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "updateDiscordData": {
@@ -501,11 +510,14 @@
       "live_accepted": false
     },
     "webServer": {
-      "desktop": "pending",
-      "web": "protected_local",
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
       "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     }
   }

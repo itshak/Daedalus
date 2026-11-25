@@ -178,6 +178,8 @@ class APIWorker(QThread):
                     ),
                     "connected_accounts": _known_ikabot_workers(self.client),
                 }
+            elif self.action == "release_status":
+                result = self.client.release_status()
             elif self.action == "accounts":
                 result = self.client.accounts()
             elif self.action == "notification_settings" and self.account_id and self.task_payload:
@@ -734,6 +736,7 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.release_status_requested.connect(lambda: self._request("release_status"))
         self.appearance_page.notification_settings_requested.connect(
             lambda aid, provider, settings: self._request("notification_settings", account_id=aid,
                 task_payload={"provider": provider, "settings": settings})
@@ -2172,6 +2175,8 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "release_status":
+            self.appearance_page.set_release_status(payload)
         elif action == "notification_settings":
             assert isinstance(payload, dict)
             self.appearance_page.set_notification_result(payload)
@@ -2600,6 +2605,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "release_status":
+            self.appearance_page.set_release_unavailable()
         if action == "notification_settings":
             aid = getattr(self._worker, "account_id", None)
             if isinstance(aid, str):

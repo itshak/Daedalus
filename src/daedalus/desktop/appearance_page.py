@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -30,6 +31,7 @@ class AppearancePage(QWidget):
     report_all_requested = Signal()
     administrative_status_requested = Signal(str)
     notification_settings_requested = Signal(str, str, object)
+    release_status_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -81,6 +83,30 @@ class AppearancePage(QWidget):
         self.connection_button = PushButton("Manage secure connection…")
         self.connection_button.clicked.connect(self.connection_settings_requested.emit)
         layout.addWidget(self.connection_button)
+        layout.addWidget(SubtitleLabel("Releases and diagnostics"))
+        from daedalus import __version__
+        from daedalus.release_catalog import build_revision
+
+        self.release_note = CaptionLabel(
+            f"Desktop version {__version__} · build {build_revision() or 'unknown'}")
+        self.release_note.setWordWrap(True)
+        layout.addWidget(self.release_note)
+        self.release_check = PushButton("Check published Mac preview")
+        self.release_check.clicked.connect(self.release_status_requested.emit)
+        layout.addWidget(self.release_check)
+        self.release_result = BodyLabel()
+        self.release_result.setWordWrap(True)
+        layout.addWidget(self.release_result)
+        self.release_download = PushButton("Open reviewed release and checksum")
+        self.release_download.setEnabled(False)
+        self.release_download.clicked.connect(self._open_release)
+        layout.addWidget(self.release_download)
+        self._release_url = None
+        release_warning = CaptionLabel(
+            "Published previews are not notarized. Verify the checksum before installation. "
+            "Controller updates and rollback use the reviewed host release workflow, not a remote shell.")
+        release_warning.setWordWrap(True)
+        layout.addWidget(release_warning)
         layout.addWidget(SubtitleLabel("Protected administration"))
         self.admin_account = ComboBox()
         self.admin_account.setAccessibleName("Administrative status account")
@@ -143,6 +169,40 @@ class AppearancePage(QWidget):
         self.theme_combo.currentIndexChanged.connect(self._changed)
         self.only_220k.stateChanged.connect(self._changed)
         self.group_island.stateChanged.connect(self._changed)
+
+    def _open_release(self):
+        if self._release_url:
+            QDesktopServices.openUrl(QUrl(self._release_url))
+
+    def set_release_status(self, data):
+        from daedalus.release_catalog import build_revision, validate_release_status
+
+        self._release_url = None
+        self.release_download.setEnabled(False)
+        try:
+            result = validate_release_status(data)
+        except ValueError:
+            self.release_result.setText("Release metadata unavailable")
+            return
+        current = result["controller_revision"] or "unknown"
+        lines = [f"Controller {result['controller_version']} · build {current}"]
+        preview = result["preview"]
+        if preview:
+            local = build_revision()
+            comparison = ("Matches installed desktop build" if local and local.startswith(preview["revision_prefix"])
+                          else "Different build available; review before installation" if local
+                          else "Installed desktop build revision unknown")
+            lines.extend([f"Published preview: {preview['tag']} · {preview['published_at']}", comparison])
+            self._release_url = preview["release_url"]
+            self.release_download.setEnabled(True)
+        else:
+            lines.append("Public preview unavailable or no verified catalog entry")
+        self.release_result.setText("\n".join(lines))
+
+    def set_release_unavailable(self):
+        self._release_url = None
+        self.release_download.setEnabled(False)
+        self.release_result.setText("Release metadata unavailable. Reconnect and check again.")
 
     def set_admin_accounts(self, accounts: list[dict[str, object]]) -> None:
         from daedalus.account_display import account_player_name

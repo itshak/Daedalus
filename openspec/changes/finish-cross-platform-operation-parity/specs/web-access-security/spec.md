@@ -10,3 +10,15 @@ Desktop and web SHALL permit explicit worker-global Telegram and Discord default
 #### Scenario: Provider test is rejected or uncertain
 - **WHEN** the fixed provider test fails or its outcome is uncertain
 - **THEN** the existing configuration is retained and no automatic retry occurs
+
+
+### Requirement: Protected release discovery and diagnostic projection
+Desktop and web SHALL expose current controller version, build revision when available, and published project Mac previews with exact release and checksum references. The catalog SHALL be explicitly requested, bounded, read-only and restricted to the fixed public project repository. Synthetic demo MUST remain offline. Clients MUST NOT interpret a preview or checksum link as verified notarization or release acceptance, and MUST NOT expose raw developer cookies, arbitrary commands or unauthenticated game proxy services.
+
+#### Scenario: Untrusted release metadata
+- **WHEN** a preview is missing the expected project assets or has a foreign download destination
+- **THEN** no download link for that preview is offered
+
+#### Scenario: An operator checks for an update
+- **WHEN** the operator requests release discovery
+- **THEN** the system displays validated metadata without modifying the controller, desktop or game session

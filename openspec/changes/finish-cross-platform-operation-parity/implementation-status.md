@@ -54,3 +54,10 @@ Read-only view parameter reference: https://github.com/emelinhares/ikariam-build
 ## November 26: proxy deferral, modeled route delivery and exact cargo safety
 
 The owner explicitly deferred proxy configuration. Nonsecret proxy status is retained; no new proxy writes are implemented. For a single owned-city route with the whole fleet free, sufficient verified storage and a complete first-load timing observation, the engine uses its existing transport calculator to estimate the final partial load and sequential full-fleet round trips. Both clients validate the model, show the conditional duration and distinguish it from an actual arrival guarantee. Shared fleet availability and dynamic port/storage conditions prevent a guaranteed multi-route completion time. A fresh source observation immediately before cargo reservation/POST prevents recording omitted or depleted stock. Focused transport, construction and fixed-transfer checks: 27 passed. No real game activity.
+
+
+## Reviewed release discovery and diagnostics
+
+Both Settings interfaces offer explicit read-only release lookup through a fixed public GitHub catalog endpoint. Only published preview tags with both expected uploaded project assets are returned; both clients validate exact link destinations. The worker/backend and packaged desktop build expose only a validated revision when available. No arbitrary URL, shell, cookie, environment dump, or automatic update is exposed. The existing authenticated controller is the remote service equivalent; legacy raw game-service start/stop and controlled production rollout/rollback are not claimed accepted. The Mac release remains unnotarized and the checksum is provided for user verification, not asserted verified locally.
+
+Focused release/packaging/desktop/registry tests: 26 passed. Web suite: 55 passed. TypeScript, Ruff passed.

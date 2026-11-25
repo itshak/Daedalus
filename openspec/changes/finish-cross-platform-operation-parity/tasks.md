@@ -40,3 +40,5 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Record proxy configuration deferral without falsely asserting implementation.
 - [x] Provide a bounded full-route sequential delivery model for a single fully supplied owned-city route with the entire fleet available; validate its arithmetic independently and label its assumptions in both clients.
 - [x] Recheck source identity and exact cargo stock before reservation and mutation; do not record missing cargo as delivered.
+
+- [x] Expose authenticated public release lookup, exact Mac DMG and checksum references, installed build revision when stamped, and safe developer/connection diagnostics; never execute an update command from either client.
