@@ -135,9 +135,9 @@ def test_automation_bulk_start_requires_approval_and_exact_accounts(app, monkeyp
         assert task == "alertAttacks"
         assert config == {"minutes": 20}
         assert len(confirmation_text) == 1
-        assert "Town 0 · s1-en (account account-0)" in confirmation_text[0]
-        assert "Town 2 · s1-en (account account-2)" in confirmation_text[0]
-        assert "Town 1" not in confirmation_text[0]
+        assert "Player 0 · s1-en (account account-0)" in confirmation_text[0]
+        assert "Player 2 · s1-en (account account-2)" in confirmation_text[0]
+        assert "Player 1" not in confirmation_text[0]
     finally:
         _dispose(page, app)
 

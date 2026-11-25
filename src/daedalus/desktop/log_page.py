@@ -55,6 +55,9 @@ _EVENTS = {
         "Saved credentials unavailable",
         "Enter the account's Gameforge credentials in the secure prompt.",
     ),
+    "backend task_start request failed": (
+        "Action needs attention", "Review Activity before retrying the automation."
+    ),
     "managed tasks refreshed": ("Automations refreshed", "Running tasks and request history were checked."),
     "multi-account read-only managed task statuses refreshed": (
         "All-account status refreshed", "Read-only task status was checked across accounts."
