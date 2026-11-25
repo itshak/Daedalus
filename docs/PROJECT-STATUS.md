@@ -4,7 +4,7 @@ Last reviewed: **2026-11-22** (limited field smoke; acceptance still open). The 
 
 ## Cross-platform native automation parity (active)
 
-The `complete-cross-platform-automation-parity` change is **ACTIVE and PARTIALLY IMPLEMENTED**. See PR #97 and its [implementation status](../openspec/changes/complete-cross-platform-automation-parity/implementation-status.md). Existing desktop forms are retained; raw configuration editors and imports are removed, and web editors now cover the reviewed background-task subset. The one-time donation operation now has reviewed engine, desktop and web adapters. Cross-platform full parity, remaining interactive adapters, live acceptance and deployment remain open.
+The `complete-cross-platform-automation-parity` implemented baseline is **ARCHIVED in PR #97**, with [implementation evidence](../openspec/changes/archive/2026-11-25-complete-cross-platform-automation-parity/implementation-status.md) and updated canonical specifications. The [active successor](../openspec/changes/finish-cross-platform-operation-parity/proposal.md) retains all outstanding option parity, protected administrative configuration, verification and rollout requirements. This is not full parity, live acceptance, or production approval; required CI and merge remain release gates.
 
 ## Automatic recovery implementation (active OpenSpec; approval pending)
 

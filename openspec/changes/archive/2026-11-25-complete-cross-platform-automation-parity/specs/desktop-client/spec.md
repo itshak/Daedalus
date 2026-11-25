@@ -38,7 +38,7 @@ The desktop MUST NOT launch using unreviewed native form inputs and MUST retain 
 ## ADDED Requirements
 
 ### Requirement: Desktop cross-platform operation parity
-The desktop SHALL provide the same supported operation contracts and field semantics as the web, including game player names and current/selected/all account scopes, using native Fluent controls and independent per-account plans. The complete registry and parity matrix SHALL be the coverage gate; secure local-only functionality SHALL remain available through reviewed local workflows.
+The desktop SHALL use player-first names, native Fluent controls and reviewed contracts for its supported workflows. Supported batch workflows SHALL use independent account-specific plans. The coverage manifest SHALL distinguish partial or unavailable operations; protected local workflows MUST NOT expose raw remote execution.
 
 #### Scenario: Operator configures transport
 - **WHEN** authenticated cities are loaded for the selected account

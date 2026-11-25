@@ -137,9 +137,7 @@ The native warehouse view SHALL display real typed snapshots from an existing au
 - **THEN** the desktop displays a sanitized unavailable error and does not fabricate a resource report
 
 ### Requirement: Native GUI task controls require confirmation
-The desktop SHALL offer a Tasks interface with a configured account, a built-in
-background task selector, dedicated native configuration controls, and explicit
-operator confirmation before sending a mutating request.
+The desktop SHALL offer a Tasks interface with a configured account, a built-in background task selector, dedicated native controls, and explicit operator confirmation before sending a mutating request. Editable JSON, raw-plan imports and manual engine configuration overrides MUST NOT be exposed.
 
 #### Scenario: Operator selects task start
 - **WHEN** the operator chooses a task for a particular world/player
@@ -164,7 +162,7 @@ before stopping a selected running task.
 - **THEN** the backend requests termination only of that tracked task
 
 ### Requirement: Native task creation requires user confirmation
-The Fluent GUI SHALL provide a discoverable Tasks page with task-specific native fields, and MUST require an explicit authorization checkbox and confirmation dialog before sending a game task request.
+The Fluent GUI SHALL provide discoverable operation-specific native editors and MUST require an explicit authorization checkbox and confirmation dialog before sending a game task request.
 
 #### Scenario: User does not confirm
 - **WHEN** the user opens Tasks but leaves confirmation unchecked
@@ -216,24 +214,24 @@ The desktop SHALL expose an explicit reconnect action for an in-memory or saved 
 - **THEN** the saved URL and matching keyring secret are deleted where available
 
 ### Requirement: Parameter-aware native task configuration
-The desktop SHALL render per-task parameter controls derived from validated built-in engine capability metadata, including required status and primitive typing when safely identifiable.
+The desktop SHALL render task-specific native controls derived from reviewed domain schemas and authenticated game data. Opaque engine payloads MUST NOT be user inputs.
 
 #### Scenario: A task has an optional numeric parameter
-- **GIVEN** the engine registry reports alertAttacks.minutes as an integer with a literal default
-- **WHEN** the user selects alertAttacks in the native Tasks page
-- **THEN** the GUI shows an integer field and can construct a JSON config with that value
+- **GIVEN** the registered alert polling interval has a verified numeric default
+- **WHEN** the operator selects the alert
+- **THEN** the GUI shows an appropriately bounded numeric field
 
 #### Scenario: A complex task has nested parameters
-- **GIVEN** the engine registry cannot infer a parameter type from a public signature
-- **WHEN** the user selects that task
-- **THEN** the GUI provides a dedicated native editor backed by verified game data; if unavailable it disables launch and explains the limitation, without exposing serialized inputs
+- **WHEN** the operator selects the action
+- **THEN** the GUI offers dedicated domain selectors and editors, or an explicit unavailable state until the editor is implemented
+- **AND** no JSON fallback is offered
 
 ### Requirement: Explicit form review before task dispatch
-The desktop MUST NOT launch a task using unreviewed form inputs, and must retain checkbox, confirmation dialog and backend validation for every game-state-changing request.
+The desktop MUST NOT launch using unreviewed native form inputs and MUST retain explicit checkbox, confirmation dialog and backend validation for every game-state-changing task request.
 
 #### Scenario: A parameter form has edits that have not been applied
-- **WHEN** the user clicks Start task after editing form fields without reviewing the new configuration
-- **THEN** the desktop refuses to emit the start action until the draft is reviewed
+- **WHEN** any input, account, or preview changes after review
+- **THEN** the desktop invalidates prior approval and requires a fresh review
 
 ### Requirement: Native account metadata editor
 The desktop SHALL let the user create, rename, enable, disable and remove account metadata using the protected local/remote API, without storing Gameforge login credentials.
@@ -639,7 +637,6 @@ backup of previously saved Mac logins.
 - **THEN** the email and the Russian flag with S58 appear along with clear
   check/X/unknown status indicators
 
-
 ### Requirement: Native-only automation settings
 The desktop SHALL expose actual account-owned cities by name in origin and destination selectors, including route tables, and use native resource amount, building, unit, schedule and policy controls for supported operations. Internal serialized API payloads MUST NOT be displayed as editable settings or importable configuration. Operations without complete required native controls SHALL be clearly marked unavailable and blocked from single-account and batch launch until their dedicated editor is implemented.
 
@@ -652,3 +649,15 @@ The desktop SHALL expose actual account-owned cities by name in origin and desti
 - **WHEN** the operator selects a task without a complete native editor
 - **THEN** a clear availability explanation is shown and launch is disabled for every account scope
 - **AND** there is no configuration code editor or raw plan import override.
+
+### Requirement: Desktop cross-platform operation parity
+The desktop SHALL use player-first names, native Fluent controls and reviewed contracts for its supported workflows. Supported batch workflows SHALL use independent account-specific plans. The coverage manifest SHALL distinguish partial or unavailable operations; protected local workflows MUST NOT expose raw remote execution.
+
+#### Scenario: Operator configures transport
+- **WHEN** authenticated cities are loaded for the selected account
+- **THEN** actual city names appear in source and destination dropdowns, resource amounts in numeric controls, and valid fleet and schedule options in native controls
+- **AND** the reviewed payload uses underlying verified IDs without exposing them as manual inputs
+
+#### Scenario: Account changes after selecting a city
+- **WHEN** the operator changes account
+- **THEN** old options, draft and approval are invalidated and only the new account's data is selectable
