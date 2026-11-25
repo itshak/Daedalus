@@ -389,34 +389,12 @@ def test_tavern_manager_native_hour_spinner_allows_explicit_one_time_run(app):
         _dispose(page, app)
 
 
-def test_import_prepared_config_is_bounded_and_never_starts_task(
-    app, monkeypatch, tmp_path,
-):
-    from PySide6.QtWidgets import QFileDialog
-
-    import daedalus.desktop.task_page as module
-
-    path = tmp_path / "prepared.json"
-    path.write_text('{"run_hours": 3}', encoding="utf-8")
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName",
-        lambda *_a, **_kw: (str(path), "JSON files (*.json)"),
-    )
-    monkeypatch.setattr(module.QMessageBox, "information", lambda *_a, **_kw: None)
+def test_automation_has_no_raw_plan_import(app):
     page = TasksPage()
     try:
-        page.set_accounts(accounts())
-        page.set_capabilities([{
-            "name": "tavernManager", "kind": "background_task",
-            "config_fields": [{"name": "run_hours", "type": "json", "required": True}],
-        }], enabled=True)
-        launches = []
-        page.launch_requested.connect(lambda *args: launches.append(args))
-        page._import_advanced_config()
-        assert page._advanced_visible
-        assert '"run_hours": 3' in page.config_editor.toPlainText()
-        assert not launches
-        assert not page.confirm_box.isChecked()
+        assert not hasattr(page, "import_config_button")
+        assert not hasattr(page, "_import_advanced_config")
+        assert not hasattr(page, "config_editor")
     finally:
         _dispose(page, app)
 
