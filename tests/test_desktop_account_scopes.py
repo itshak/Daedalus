@@ -389,34 +389,12 @@ def test_tavern_manager_native_hour_spinner_allows_explicit_one_time_run(app):
         _dispose(page, app)
 
 
-def test_import_prepared_config_is_bounded_and_never_starts_task(
-    app, monkeypatch, tmp_path,
-):
-    from PySide6.QtWidgets import QFileDialog
-
-    import daedalus.desktop.task_page as module
-
-    path = tmp_path / "prepared.json"
-    path.write_text('{"run_hours": 3}', encoding="utf-8")
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName",
-        lambda *_a, **_kw: (str(path), "JSON files (*.json)"),
-    )
-    monkeypatch.setattr(module.QMessageBox, "information", lambda *_a, **_kw: None)
+def test_automation_has_no_raw_plan_import(app):
     page = TasksPage()
     try:
-        page.set_accounts(accounts())
-        page.set_capabilities([{
-            "name": "tavernManager", "kind": "background_task",
-            "config_fields": [{"name": "run_hours", "type": "json", "required": True}],
-        }], enabled=True)
-        launches = []
-        page.launch_requested.connect(lambda *args: launches.append(args))
-        page._import_advanced_config()
-        assert page._advanced_visible
-        assert '"run_hours": 3' in page.config_editor.toPlainText()
-        assert not launches
-        assert not page.confirm_box.isChecked()
+        assert not hasattr(page, "import_config_button")
+        assert not hasattr(page, "_import_advanced_config")
+        assert not hasattr(page, "config_editor")
     finally:
         _dispose(page, app)
 
@@ -830,5 +808,37 @@ def test_connection_progress_and_errors_never_echo_backend_secrets(app):
         assert page.connect_button.isEnabled()
         page.set_connection_error("certificate verify failed")
         assert "Certificate not trusted" in page.status_label.text()
+    finally:
+        _dispose(page, app)
+
+
+def test_automation_uses_player_names_across_account_scopes(app):
+    from daedalus.account_display import account_player_name, account_player_names
+
+    rows = [
+        {"id": "one", "label": "Imported IkaBot identity 01", "player": "Monjo",
+         "world": "s58-ru", "enabled": True, "email": "example@example.org"},
+        {"id": "two", "label": "Imported IkaBot identity 02", "player": "Ais",
+         "world": "s58-ru", "enabled": True},
+    ]
+    assert account_player_names(rows) == {"one": "Monjo", "two": "Ais"}
+    assert account_player_name({"id": "unknown", "player": "Imported IkaBot identity 03",
+                                "label": "Imported IkaBot identity 03"}) == "unknown"
+    duplicates = account_player_names(rows + [dict(rows[0], id="three")])
+    assert duplicates["one"] != duplicates["three"]
+    assert duplicates["one"].startswith("Monjo")
+    page = TasksPage()
+    try:
+        page.set_accounts(rows)
+        page.select_account("two")
+        for combo in (page.account_combo, page.running_account_combo, page.history_account_combo):
+            assert combo.currentText() == "Ais"
+        page.set_accounts(list(reversed(rows)))
+        assert page.selected_account_id() == "two"
+        assert page.account_combo.currentText() == "Ais"
+        page.set_batch_status([{"account_id": row["id"], "engine_tasks": [], "requests": []}
+                               for row in rows])
+        assert page.multi_table.item(0, 0).text() == "Monjo"
+        assert page.multi_table.item(1, 0).text() == "Ais"
     finally:
         _dispose(page, app)

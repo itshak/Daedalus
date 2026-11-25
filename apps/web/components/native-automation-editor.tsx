@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "./language-provider";
 import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, scopedCities, readyPreflight, validNativeConfig } from "@/lib/native-task-contract";
@@ -49,11 +50,13 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   const [locked,setLocked]=useState(false);
   const [message,setMessage]=useState("");
   const inFlight=useRef(false);
+  const mounted=useRef(false);
   const prefix="accounts/"+encodeURIComponent(account);
   const cityTask=task!=="alertAttacks" && task!=="alertLowWine";
   useEffect(()=>{
     let alive=true;
-    if (!account || !enabled) {setLoading(false);return;}
+    mounted.current=true;
+    if (!account || !enabled) {setLoading(false);return ()=>{mounted.current=false;};}
     Promise.all([
       api(prefix+"/tasks/preflight?task="+encodeURIComponent(task)),
       cityTask ? api(prefix+"/cities") : Promise.resolve(null)
@@ -62,7 +65,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
       setReady(readyPreflight(p,account,task));
       if (cityTask) setCities(scopedCities(c,account));
     }).catch(()=>{if(alive)setLoadError(true);}).finally(()=>{if(alive)setLoading(false);});
-    return ()=>{alive=false;};
+    return ()=>{alive=false;mounted.current=false;};
   },[account,enabled,prefix,task,cityTask]);
   const byId=new Map(cities.map(c=>[c.id,c.name+(c.coords?" · "+c.coords:"")]));
   const actual=(id:number)=>byId.has(id);
@@ -115,19 +118,20 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   </fieldset>;
   const fleetSelect=<label className="field"><span>{t("Fleet")}</span><select value={freighters?"freighters":"trade"} onChange={e=>{edit();setFreighters(e.target.value==="freighters");}}><option value="trade">{t("Trade ships")}</option><option value="freighters">{t("Freighters")}</option></select></label>;
   const amountsFields=(values:number[],change:(i:number,v:number)=>void)=>MATERIALS.map((m,i)=>
-    <div key={m} className="native-resource-row">{numeric(materialName(m),values[i],v=>change(i,v),0,MAX_AMOUNT)}</div>);
+    <div key={m} className="native-resource-row"><Image src={`/ikariam-resources/${m==="crystal"?"glass":m}.webp`} alt="" width={25} height={20} unoptimized/>{numeric(materialName(m),values[i],v=>change(i,v),0,MAX_AMOUNT)}</div>);
   const changeRoute=(key:number,update:Partial<Route>)=>setRoutes(old=>old.map(r=>r.key===key?{...r,...update}:r));
   const launch=async()=>{
     if (!canLaunch || !review || inFlight.current)return;
     inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);setMessage("");
     try {
       const current=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
+      if(!mounted.current)return;
       if(!readyPreflight(current,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
       const result=await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
       const receipt=result as {status?:unknown};
-      setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
-    } catch {setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
-    finally {setBusy(false);inFlight.current=false;}
+      if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
+    } catch {if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
+    finally {if(mounted.current)setBusy(false);inFlight.current=false;}
   };
   return <section className="native-automation-editor">
     {loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:loadError||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
@@ -143,7 +147,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
           {amountsFields(r.resources,(j,v)=>changeRoute(r.key,{resources:r.resources.map((x,k)=>j===k?v:x)}))}
           <button type="button" className="secondary-button" disabled={routes.length===1} onClick={()=>{edit();setRoutes(old=>old.filter(x=>x.key!==r.key));}}>{t("Remove route")}</button>
         </fieldset>)}
-        <button type="button" className="secondary-button" disabled={routes.length>=20} onClick={()=>{edit();setRoutes(old=>[...old,route(nextRoute.current++)]);}}>{t("Add route")}</button>{fleetSelect}
+        <button type="button" className="secondary-button" disabled={routes.length>=20} onClick={()=>{edit();const key=nextRoute.current++;setRoutes(old=>[...old,route(key)]);}}>{t("Add route")}</button>{fleetSelect}
       </>}
       {task==="distributeResources"&&<>
         <label className="field"><span>{t("Resource")}</span><select value={material} onChange={e=>{edit();setMaterial(e.target.value);if(e.target.value==="wood")setPolicy("even");}}>{MATERIALS.map(m=><option key={m} value={m}>{materialName(m)}</option>)}</select></label>

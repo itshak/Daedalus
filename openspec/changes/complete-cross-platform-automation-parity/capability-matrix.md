@@ -55,6 +55,10 @@ Legend: D = desktop dedicated editor exists but full acceptance/gaps remain; E =
 | checkForUpdate | M | M | Auxiliary release check, version comparison and approved update workflow |
 | show_proxy | M | M | Auxiliary masked proxy status and connectivity, never expose credentials |
 
+## Implementation progress — first vertical slice (not accepted)
+
+The implementation branch adds single-account web-native editors and strict BFF task schemas for sendResources, distributeResources, consolidateResources, resourceTransportManager, alertAttacks and alertLowWine. Their engine revalidation and durable request ledger already exist. These are partial, not complete: authoritative shipment preview/capacity/ETA, external cities, independent batch plans, shared versioned backend contracts, browser E2E and live acceptance remain open. The baseline table above is retained as historical evidence. PR #95 is integrated on this branch for desktop naming and native-only settings; it still needs native GUI validation.
+
 ## Evidence and gaps
 
 - Desktop has route matrix with source/destination ComboBoxes for own cities, actual resource quantities; external destinations and transport capacity/ETA remain incomplete. Construction already calculates self-funded preview; shortage sourcing and multi-account independent plans remain. Existing primitive/compound editors are reusable, not a reason to rewrite functioning code.

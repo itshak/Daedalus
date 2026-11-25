@@ -55,7 +55,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
         && integer(c.intervalInHours,1,336) && integer(c.shipType,1,3);
     case "resourceTransportManager": {
       if (typeof c.useFreighters !== "boolean" || !integer(c.interval_hours,0,720)
-        || !["none","start","all"].includes(String(c.notify))) return false;
+        || typeof c.notify !== "string" || !["none","start","all"].includes(c.notify)) return false;
       const common = ["mode","interval_hours","resource_config","useFreighters","notify"];
       if (c.mode === "consolidate")
         return exact(c,[...common,"origin_cities","destination_city","send_mode"])

@@ -8,8 +8,8 @@ This is the accessible index to the full [operation-specific design](../openspec
 
 - **Primary menu:** All | City & research | Resources & trade | Military & missions | Alerts & exploration | System & advanced.
 - **Account scope:** Current / Selected / All. Task-specific city IDs are never reused across accounts. Read-only statuses can include all configured accounts; execution uses explicitly approved account-specific plans.
-- **Card layout:** Left searchable action list, right contextual configuration. No duplicated Wine/Construction task buttons, no default JSON field wall.
-- **Task-specific affordances:** City picker, building upgrade table, route/resource matrix, academy experiment planner, tavern consumption controls, unit/recruitment table, active market offers, island target selector and time schedule fields. A small Advanced drawer can import previously prepared engine plans, with prominent provenance and validation.
+- **Card layout:** Left searchable action list, right contextual configuration. No duplicated Wine/Construction task buttons, no user-editable JSON anywhere.
+- **Task-specific affordances:** City picker, building upgrade table, route/resource matrix, academy experiment planner, tavern consumption controls, unit/recruitment table, active market offers, island target selector and time schedule fields. All supported settings are native widgets; unsupported plans cannot be imported or manually entered.
 - **Safety:** Display source and freshness of every game value. Distinguish unknown from zero, not connected from disabled, and known ready from game-server approved. No task starts merely by opening or editing a form. Preserve durable request IDs and unknown-outcome reconciliation.
 
 ## Feature-by-feature coverage
@@ -81,8 +81,19 @@ Use a synthetic/demo backend to verify grouping, empty states, account switching
 
 ## Remaining functional gaps / safe boundaries
 
-- Combat planners (`attackBarbarians`, `autoBarbarians`) still require an independently prepared, correctly scoped game plan. The ordinary form does **not** request JSON or suggest that an unverified army can attack; these operations remain expert-only until read-only troop/risk/ship previews and revalidation are implemented.
-- The `webServer` automation is administrative and retains an explicit expert setup/approval boundary; a secure native listener setup is not yet available.
+- Combat planners (`attackBarbarians`, `autoBarbarians`) still require an independently prepared, correctly scoped game plan. The ordinary form does **not** request JSON or suggest that an unverified army can attack; these operations are unavailable in the desktop until read-only troop/risk/ship previews and revalidation are implemented.
+- The `webServer` automation is administrative and requires a secure native listener setup before launch.
 - IkaBot's original interactive-only operations (single-building actions, production/scientist/priest controls, garrison dispatch, notifications, proxies, cookies, updater and developer tools) are **not** background tasks and cannot be safely launched through the task dispatcher. Native **read-only** army and movement inspection now use separate audited existing-session adapters, not the generic task dispatcher. Remaining mutating CLI operations require individually scoped reviewed controllers and dedicated screens.
 - Shipment capacity and external-island destination validation, donation project balances, academy eligibility refinements, daily reward eligibility, task preview TTL/fingerprint and multi-screen accessibility evidence are pending. They must not be presented as already supported.
 - All game-changing tasks require explicit per-account review, the backend/engine's existing task preflight, and reconciliation of uncertain outcomes. Demo/synthetic tests do not constitute user acceptance or live Ikariam validation.
+
+
+### Compact Automation workspace
+
+Automation account selectors, the multi-account chooser, status overview and launch review prefer the server-provided game player name. Missing names fall back to a configured nonsecret display identity; duplicate player names include world and account ID for clarity. IDs used for API dispatch are unchanged. The Accounts management table retains its email-oriented display convention.
+
+The Configure tab uses a single account toolbar, compact category tabs, a searchable action selector with optional gallery, and a dedicated Settings section. Status-only controls live in All accounts, with refresh-all and refresh-selected actions. The launch footer retains explicit approval, single-account and batch review actions, and explains batch restrictions. There is no raw JSON editor, import, or override. Account-specific plans still require independent validation.
+
+### Native-only configuration requirement
+
+The desktop never exposes serialized task payloads as editable settings. Use actual account-owned city dropdowns (including shipment origin and destination), multi-city selection, resource amount spinners, building and unit tables, schedules, and validated game-data choices. Serialization is exclusively an internal API concern. An action with missing required native controls is explicitly unavailable for single-account and batch launch; it must receive a dedicated game-data editor before being considered complete. This includes remaining barbarian combat planners. No external destination IDs may be entered manually; verified external-city lookup is a remaining implementation requirement.

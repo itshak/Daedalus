@@ -228,8 +228,7 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             assert page.start_button.isEnabled() is (kind == "wine")
             if kind == "wine":
                 page._form_inputs["threshold"].setText("1000")
-                page._build_config_from_form()
-                assert '"threshold": 1000' in page.config_editor.toPlainText()
+                assert page._form_config() == {"threshold": 1000}
             page.confirm_box.setChecked(True)
             page._start()
             if kind == "wine":

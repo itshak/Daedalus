@@ -17,6 +17,7 @@ test("resource policies and alerts are operation-specific",()=>{
   assert.equal(validNativeConfig("consolidateResources",{limits:[-1,-1,-1,-1,-1],sourceCityIds:[1],destinationCityId:2,intervalInHours:2,shipType:3}),false);
   const manager={mode:"consolidate",origin_cities:[1],destination_city:2,send_mode:"keep",resource_config:[0,null,null,null,null],interval_hours:0,useFreighters:false,notify:"none"};
   assert.equal(validNativeConfig("resourceTransportManager",manager),true);
+  assert.equal(validNativeConfig("resourceTransportManager",{...manager,notify:["none"]}),false);
   assert.equal(validNativeConfig("resourceTransportManager",{...manager,send_mode:"send"}),false);
   assert.equal(validNativeConfig("resourceTransportManager",{mode:"distribute",origin_city:1,destination_cities:[2],resource_config:[1,0,0,0,0],interval_hours:4,useFreighters:true,notify:"all"}),true);
   assert.equal(validNativeConfig("alertAttacks",{minutes:3}),true);

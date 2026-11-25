@@ -4,7 +4,7 @@ This is a display-only adapter. Actual task names, availability, allowed
 parameter keys, and execution remain defined by the backend/engine. In
 particular, adapters never generate game city identifiers or send requests.
 Only explicitly source-documented primitive fields may refine an AST "json"
-type into a native control; everything unknown keeps its advanced fallback.
+type into a native control; unknown required structures block desktop launch.
 The reference engine source retains upstream MIT attribution in engine/.
 """
 
@@ -155,7 +155,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("resourceTransportManager", "island"): {
         "type": "hidden_derived",
-        "help": "External destination islands need a separately verified lookup and are expert-only.",
+        "help": "External destination islands need a separately verified lookup; currently unavailable.",
     },
     ("resourceTransportManager", "interval_hours"): {
         "type": "integer", "minimum": 0, "maximum": 720,
@@ -388,7 +388,7 @@ def task_explanation(task_name: str) -> str:
     return TASK_DESCRIPTIONS.get(
         task_name,
         "Review the registered engine parameters. Complex tasks may require an "
-        "existing prepared configuration.",
+        "dedicated native editor before starting.",
     )
 
 
@@ -400,7 +400,7 @@ def expert_configuration_needed(fields: list[dict[str, object]]) -> bool:
     )
 
 
-# Intentionally allow-listed primitive display values. Advanced free-form values
+# Intentionally allow-listed primitive display values. Internal structured values
 # may contain private game data; do not echo them into dialogs or logs.
 _SUMMARY_SAFE_SCALARS = frozenset({
     "minutes", "hours", "run_hours", "auto_transfer", "transfer_amount",
