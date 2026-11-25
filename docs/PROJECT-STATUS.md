@@ -1,10 +1,10 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-22** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
+Last reviewed: **2026-11-25** (offline implementation review; live acceptance still open). The public repository's default branch is `main`.
 
 ## Cross-platform native automation parity (active)
 
-The `complete-cross-platform-automation-parity` implemented baseline is **ARCHIVED in PR #97**, with [implementation evidence](../openspec/changes/archive/2026-11-25-complete-cross-platform-automation-parity/implementation-status.md) and updated canonical specifications. The [active successor](../openspec/changes/finish-cross-platform-operation-parity/proposal.md) retains all outstanding option parity, protected administrative configuration, verification and rollout requirements. This is not full parity, live acceptance, or production approval; required CI and merge remain release gates.
+The `complete-cross-platform-automation-parity` implemented baseline is **ARCHIVED in PR #97**, with [implementation evidence](../openspec/changes/archive/2026-11-25-complete-cross-platform-automation-parity/implementation-status.md) and updated canonical specifications. The active successor `finish-cross-platform-operation-parity` ([proposal](../openspec/changes/finish-cross-platform-operation-parity/proposal.md)) retains all outstanding option parity, protected administrative configuration, verification and rollout requirements. This is not full parity, live acceptance, or production approval; required CI and merge remain release gates.
 
 ## Automatic recovery implementation (active OpenSpec; approval pending)
 
@@ -71,6 +71,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
+| `complete-cross-platform-automation-parity` | Reviewed native workflow baseline; unfinished original requirements retained in the active successor; no live acceptance | [#97](https://github.com/itshak/Daedalus/pull/97) |
 | `observable-selenium-login-and-connection` | Visible Chrome recovery after headless failure, sanitized live Activity stages and Fluent backend-success/masked-token feedback | [#85](https://github.com/itshak/Daedalus/pull/85) |
 | `persistent-login-identity-status` | Encrypted Mac-bound server login backups, protected email identities, Russian world flags and accessible account/session/worker status indicators | Pending PR for this change |
 | `bootstrap-public-monorepo` | Clean open-source package, CI, OpenSpec, license and security boundaries | [Initial foundation](https://github.com/itshak/Daedalus/commits/main/) |
@@ -103,7 +104,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 | `persist-headless-credentials` | Host-encrypted persistent credential collection, receipt reconciliation and service restart/startup-order regression | [#59](https://github.com/itshak/Daedalus/pull/59) |
 | `validate-live-authentication` | Offline/field-preflight implementation archived; **unperformed owner-only acceptance is still open in [issue #60](https://github.com/itshak/Daedalus/issues/60)** | [archive record](https://github.com/itshak/Daedalus/tree/main/openspec/changes/archive/2026-11-19-validate-live-authentication) |
 
-The archive folders are dated `2026-11-18` through `2026-11-22`. Archive
+The archive folders are dated `2026-11-18` through `2026-11-25`. Archive
 checkboxes reflect completed implementation and local validation, not owner
 real-game certification. The outstanding manual gates were transferred
 explicitly to [issue #60](https://github.com/itshak/Daedalus/issues/60),

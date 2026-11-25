@@ -146,6 +146,7 @@ class TasksPage(QWidget):
     worker_preview_requested = Signal(str, str, object, str)
     layout_preview_requested = Signal(str, object, str)
     station_preview_requested = Signal(str, object, str)
+    training_preview_requested = Signal(str, object, str)
     grind_preview_requested = Signal(str, object, str)
     attack_inventory_requested = Signal(str, int, str)
     attack_preview_requested = Signal(str, object, str)
@@ -942,7 +943,7 @@ class TasksPage(QWidget):
                 self.build_options_requested.emit(account, cities[index-1]["id"], self._city_review_nonce)
                 return
         try:
-            draft = self._form_config()
+            draft = self._form_inputs['city'].reviewed_draft() if task == 'trainArmy' else self._form_config()
             if task in WORKER_TASKS:
                 validated_worker_draft(task, {k: v for k, v in draft.items() if k != "city_id"})
         except ValueError as exc:
@@ -966,6 +967,9 @@ class TasksPage(QWidget):
         elif task == "autoBarbarians":
             self.building_note.setText("Reading village level, unit requirements and ships…")
             self.grind_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "trainArmy":
+            self.building_note.setText("Checking actual recruitable units and cost in every selected city…")
+            self.training_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "stationArmy":
             self.building_note.setText("Checking actual available units and transport capacity…")
             self.station_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -1155,6 +1159,38 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Automatic attack preview unavailable. Check the village and try again.")
+            self._invalidate_review()
+
+    def set_training_preview(self, result: dict[str, object], nonce: str) -> None:
+        from daedalus.training_contract import RESOURCES, validate_training_review
+
+        if (self.selected_task_name() != "trainArmy" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_inputs["city"].reviewed_draft()
+            validate_training_review(self.selected_account_id(), draft, result)
+        except (ValueError, TypeError, KeyError, IndexError):
+            self.set_training_unavailable(nonce)
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        lines = [f"{result['cycles']} cycle(s); {len(result['rounds'])} ordered round(s)."]
+        for row in result["cities"]:
+            lines.append(row["city_name"] + (" — ready" if row["ready"] else " — insufficient initial stock"))
+            for index, group in enumerate(row["rounds"], 1):
+                lines.append(f"Round {index}: " + ", ".join(f"{u['local_name']} × {u['cantidad']:,}" for u in group))
+            lines.append("Total commitment: " + ", ".join(f"{k} {v:g}" for k,v in zip(RESOURCES,row["total_costs"]) if v))
+        lines.append("Later rounds stop if costs, resources, city or queue observations change. Manual recovery only.")
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_training_unavailable(self, nonce):
+        if self.selected_task_name() == "trainArmy" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Recruitment preview unavailable. Check selected cities, buildings and units.")
             self._invalidate_review()
 
     def set_station_preview(self, result: dict[str, object], nonce: str) -> None:
@@ -2067,6 +2103,7 @@ class TasksPage(QWidget):
             "Preview vacation activation…" if name == "vacationMode" else
             "Load troops / preview attack…" if name == "attackBarbarians" else
             "Preview automatic attacks…" if name == "autoBarbarians" else
+            "Preview recruitment rounds…" if name == "trainArmy" else
             "Preview deployment…" if name == "stationArmy" else
             "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
@@ -2735,7 +2772,7 @@ class TasksPage(QWidget):
             if task in CITY_REVIEW_TASKS:
                 if self._city_review_plan is None or time.monotonic() >= self._city_review_expires:
                     raise ValueError("Operation preview expired; prepare a new preview")
-                draft = self._form_config()
+                draft = self._form_inputs["city"].reviewed_draft() if task == "trainArmy" else self._form_config()
                 if any(self._city_review_plan.get(key) != value for key, value in draft.items()):
                     raise ValueError("Operation settings changed; prepare a new preview")
                 config = {"preview_id": self._city_review_plan["preview_id"]}
@@ -2773,7 +2810,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy'} | WORKER_TASKS else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy'} | WORKER_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

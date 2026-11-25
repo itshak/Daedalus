@@ -325,6 +325,8 @@ class APIWorker(QThread):
                 draft = self.task_payload["draft"]
                 result = self.client.grind_preview(self.account_id, draft["city_id"],
                                                    {k: v for k, v in draft.items() if k != "city_id"})
+            elif self.action == "task_training_preview" and self.account_id and self.task_payload:
+                result = self.client.training_preview(self.account_id, self.task_payload["draft"])
             elif self.action == "task_station_preview" and self.account_id and self.task_payload:
                 draft = self.task_payload["draft"]
                 result = self.client.station_preview(self.account_id, draft["city_id"],
@@ -871,6 +873,10 @@ class MainWindow(FluentWindow):
             )
             view.grind_preview_requested.connect(
                 lambda aid, draft, nonce: self._request("task_grind_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.training_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_training_preview", account_id=aid,
                     task_payload={"draft": draft, "nonce": nonce})
             )
             view.station_preview_requested.connect(
@@ -2420,6 +2426,10 @@ class MainWindow(FluentWindow):
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
                 self.tasks_page.set_grind_preview(payload, request["nonce"])
+        elif action == "task_training_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(payload, dict) and isinstance(request, dict):
+                self.tasks_page.set_training_preview(payload, request["nonce"])
         elif action == "task_station_preview":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2687,6 +2697,10 @@ class MainWindow(FluentWindow):
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
                 self.tasks_page.set_grind_unavailable(request["nonce"])
+        if action == "task_training_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_training_unavailable(request["nonce"])
         if action == "task_station_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

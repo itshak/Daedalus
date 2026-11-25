@@ -1,3 +1,4 @@
+import {validTrainingDraft} from "@/lib/training-contract";
 import {REVIEW_START_ROUTES} from "@/lib/generated-operation-contract";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -57,6 +58,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "construction-plan" && !buildingTargets.safeParse(value).success)
       return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) === "training-plan" && !validTrainingDraft(value,Number(parts[3])))
+      return NextResponse.json({error:"Invalid recruitment draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "worker-plan") {
       const item=value as {task?:unknown;draft?:unknown}|null;
       if(!item || typeof item!=="object" || Object.keys(item).length!==2 || !validWorkerDraft(item.task,item.draft))

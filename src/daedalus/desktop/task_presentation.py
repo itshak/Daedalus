@@ -43,7 +43,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "sellResources": "Offer resources for sale using validated market criteria.",
     "sendResources": "Send resources along prepared, approved routes.",
     "tavernManager": "Balance tavern wine consumption in all cities, or a selected subset.",
-    "trainArmy": "Execute a reviewed army-training plan for one city.",
+    "trainArmy": "Review recruitment rounds and repetitions across selected owned cities.",
     "UpgradeUnits": "Upgrade military units using a prepared plan.",
     "webServer": "Run the engine web service only with an explicitly reviewed configuration.",
 }
@@ -81,6 +81,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("trainArmy", "countRepeat"): {"type": "hidden_derived"},
     ("trainArmy", "cityTrainings"): {"type": "hidden_derived"},
     ("trainArmy", "units"): {"type": "hidden_derived"},
+    ("trainArmy", "reviewed_jobs"): {"type": "hidden_derived"},
     ("UpgradeUnits", "jobs"): {
         "type": "workshop_jobs", "label": "Workshop upgrade plan",
         "help": "Choose a real city, then available unit and ship upgrades from its IkaBot workshop.",

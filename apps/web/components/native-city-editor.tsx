@@ -12,7 +12,6 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   const {t}=useLanguage();
   const [cities,setCities]=useState<City[]>([]);
   const [city,setCity]=useState(0);
-  const [troops,setTroops]=useState(true);
   const [resource,setResource]=useState(0);
   const [side,setSide]=useState(task==="buyResources"?"buy":"sell_to_offers");
   const [snapshot,setSnapshot]=useState<Row|null>(null);
@@ -42,21 +41,19 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   useEffect(()=>{
     let live=true;
     if(city&&enabled){
-      const path=task==="trainArmy"?"trainable-units?train_troops="+troops:task==="UpgradeUnits"?"workshop-upgrades":"market-quotes?side="+side+"&resource_type="+resource;
+      const path=task==="UpgradeUnits"?"workshop-upgrades":"market-quotes?side="+side+"&resource_type="+resource;
       api(prefix+"/cities/"+city+"/"+path).then(v=>{
         if(!live)return;
         if(!record(v)||v.account_id!==account||v.city_id!==city||v.synthetic_demo===true||
-          (task==="trainArmy"&&v.train_troops!==troops)||
           ((task==="buyResources"||task==="sellResources")&&(v.side!==side||v.resource_type!==resource))){setError(true);return;}
         setSnapshot(v);
         if(side==="create_offer"&&typeof v.price_min==="number")setPrice(v.price_min);
       }).catch(()=>{if(live)setError(true);});
     }
     return ()=>{live=false;};
-  },[account,city,enabled,prefix,task,troops,resource,side]);
+  },[account,city,enabled,prefix,task,resource,side]);
   const invalidate=()=>{setReview(null);setApproved(false);};
   const changeScope=()=>{invalidate();setSnapshot(null);setSelected([]);setQuantities({});setError(false);};
-  const unitRows=Array.isArray(snapshot?.units)?snapshot.units.filter(record):[];
   const upgrades=Array.isArray(snapshot?.upgrades)?snapshot.upgrades.filter(record):[];
   const offers=Array.isArray(snapshot?.offers)?snapshot.offers:[];
   const material=(i:number)=>t(i===3?"Glass":MATERIALS[i][0].toUpperCase()+MATERIALS[i].slice(1));
@@ -64,14 +61,7 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   const name=cities.find(c=>c.id===city)?.name??"";
   const upgradeKey=(r:Row)=>String(r.unit_id)+":"+String(r.upgrade_type);
   let config:Row={},summary="",scoped=!!snapshot&&cities.some(c=>c.id===city);
-  if(task==="trainArmy"){
-    const chosen=unitRows.filter(r=>quantities[String(r.unit_type_id)]>0);
-    const costs=[...MATERIALS,"citizens"].map(key=>chosen.reduce((n,r)=>n+Number(record(r.costs)?r.costs[key]??0:0)*quantities[String(r.unit_type_id)],0));
-    const stock=Array.isArray(snapshot?.available)?[...snapshot.available,snapshot.free_citizens]:[];
-    scoped=scoped&&!!cityRow&&stock.length===6&&costs.every((n,i)=>Number.isFinite(n)&&n<=Number(stock[i]));
-    config={city:cityRow,tranings:[chosen.map(r=>({unit_type_id:r.unit_type_id,cantidad:quantities[String(r.unit_type_id)]}))],trainTroops:troops,replicate:"n",countRepeat:0,cityTrainings:[],units:[]};
-    summary=name+"\n"+chosen.map(r=>String(r.local_name)+": "+quantities[String(r.unit_type_id)]).join("\n")+"\n"+costs.map((n,i)=>(i===5?t("Citizens"):material(i))+": "+n).join("; ");
-  }else if(task==="UpgradeUnits"){
+  if(task==="UpgradeUnits"){
     const chosen=upgrades.filter(r=>Object.hasOwn(quantities,upgradeKey(r)));
     scoped=scoped&&chosen.every(r=>quantities[upgradeKey(r)]>Number(r.current_level)&&quantities[upgradeKey(r)]<=Number(r.max_level));
     config={jobs:[{city_id:city,upgrades:chosen.map(r=>({unitId:r.unit_id,upgradeType:r.upgrade_type,target:quantities[upgradeKey(r)]}))}]};
@@ -110,7 +100,6 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
     {error&&<p role="alert">{t("Current inventory unavailable")}</p>}
     <fieldset disabled={disabled}><legend>{t("Settings")}</legend>
       <label className="field"><span>{t("City")}</span><select value={city||""} onChange={e=>{changeScope();setCity(Number(e.target.value));}}><option value="">{t("Choose a city")}</option>{cities.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-      {task==="trainArmy"&&<><label className="field"><span>{t("Recruit")}</span><select value={troops?"troops":"ships"} onChange={e=>{changeScope();setTroops(e.target.value==="troops");}}><option value="troops">{t("Land units")}</option><option value="ships">{t("Warships")}</option></select></label>{snapshot&&<p>{t("Free citizens")}: {String(snapshot.free_citizens)}</p>}{unitRows.map(r=><fieldset key={String(r.unit_type_id)}><legend>{String(r.local_name)}</legend><p>{record(r.costs)&&Object.entries(r.costs).filter(([,v])=>Number(v)>0).map(([k,v])=>k+" "+v).join(" · ")}</p>{numeric(t("Quantity"),quantities[String(r.unit_type_id)]??0,v=>setQuantities(old=>({...old,[String(r.unit_type_id)]:v})),0,100000)}</fieldset>)}</>}
       {task==="UpgradeUnits"&&upgrades.map(r=>{const key=upgradeKey(r),current=Number(r.current_level),max=Number(r.max_level);return <fieldset key={key}><legend>{String(r.name)} · {String(r.description)}</legend><label className="check-label"><input type="checkbox" checked={Object.hasOwn(quantities,key)} disabled={current>=max} onChange={e=>{invalidate();setQuantities(old=>{const next={...old};if(e.target.checked)next[key]=current+1;else delete next[key];return next;});}}/>{t("Level")} {current}</label>{Object.hasOwn(quantities,key)&&numeric(t("Target level"),quantities[key],v=>setQuantities(old=>({...old,[key]:v})),current+1,max)}</fieldset>;})}
       {(task==="buyResources"||task==="sellResources")&&<><label className="field"><span>{t("Resource")}</span><select value={resource} onChange={e=>{changeScope();setResource(Number(e.target.value));}}>{MATERIALS.map((m,i)=><option key={m} value={i}>{material(i)}</option>)}</select></label>{task==="sellResources"&&<label className="field"><span>{t("Market action")}</span><select value={side} onChange={e=>{changeScope();setSide(e.target.value);}}><option value="sell_to_offers">{t("Sell to available offers")}</option><option value="create_offer">{t("Create a market offer")}</option></select></label>}
       {side==="create_offer"?snapshot&&<p>{t("Market capacity")}: {String(snapshot.sell_market_capacity)} · {t("Currently on sale")}: {String(snapshot.currently_on_sale)}</p>:offers.map((o,i)=><label key={i} className="check-label"><input type="checkbox" checked={selected.includes(i)} onChange={e=>{invalidate();setSelected(old=>e.target.checked?[...old,i]:old.filter(x=>x!==i));}}/>{Array.isArray(o)?o.slice(0,4).join(" · "):record(o)?[o.ciudadDestino,o.jugadorAComprar,o.amountAvailable,o.precio].join(" · "):"—"}</label>)}

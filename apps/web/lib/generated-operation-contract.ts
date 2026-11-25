@@ -2,7 +2,7 @@
 export const OPERATION_CONTRACT_VERSION = 1 as const;
 export const MAX_REVIEW_BATCH = 32 as const;
 export const PREVIEW_ID_PATTERN = "[A-Za-z0-9_-]{43}" as const;
-export const NATIVE_TASKS = ["activateMiracle", "activateShrine", "alertAttacks", "alertLowWine", "autoPirate", "buyResources", "consolidateResources", "distributeResources", "donationBot", "dumpWorld", "loginDaily", "research", "resourceTransportManager", "searchForIslandSpaces", "sellResources", "sendResources", "tavernManager", "testDiscordBot", "testTelegramBot", "trainArmy", "UpgradeUnits"] as const;
+export const NATIVE_TASKS = ["activateMiracle", "activateShrine", "alertAttacks", "alertLowWine", "autoPirate", "buyResources", "consolidateResources", "distributeResources", "donationBot", "dumpWorld", "loginDaily", "research", "resourceTransportManager", "searchForIslandSpaces", "sellResources", "sendResources", "tavernManager", "testDiscordBot", "testTelegramBot", "UpgradeUnits"] as const;
 export const REVIEW_ENDPOINTS = {
   "attackBarbarians": "attack-start",
   "autoBarbarians": "grind-start",
@@ -15,6 +15,7 @@ export const REVIEW_ENDPOINTS = {
   "reorganizeCityBuildings": "layout-start",
   "sendResources": "shipment-start",
   "stationArmy": "station-start",
+  "trainArmy": "training-start",
   "vacationMode": "vacation-start"
 } as const;
 export const REVIEW_START_ROUTES = [...new Set(Object.values(REVIEW_ENDPOINTS))] as readonly string[];

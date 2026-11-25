@@ -1851,7 +1851,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

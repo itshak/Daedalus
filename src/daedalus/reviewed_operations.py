@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"trainArmy", "donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:

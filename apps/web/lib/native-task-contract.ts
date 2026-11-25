@@ -3,7 +3,7 @@ import {NATIVE_TASKS} from "./generated-operation-contract.ts";
 export {NATIVE_TASKS};
 export type NativeTask = typeof NATIVE_TASKS[number];
 export const DOMAIN_TASKS = ["loginDaily","research","tavernManager","activateMiracle","activateShrine","donationBot","autoPirate","searchForIslandSpaces","dumpWorld"] as const;
-export const CITY_TASKS = ["trainArmy","UpgradeUnits","buyResources","sellResources"] as const;
+export const CITY_TASKS = ["UpgradeUnits","buyResources","sellResources"] as const;
 export type CityTask = typeof CITY_TASKS[number];
 export function isCityTask(task:unknown):task is CityTask {
   return (CITY_TASKS as readonly unknown[]).includes(task);
@@ -48,14 +48,6 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
     case "testTelegramBot":
     case "testDiscordBot":
       return exact(c,[]);
-    case "trainArmy":
-      return exact(c,["city","tranings","trainTroops","replicate","countRepeat","cityTrainings","units"])
-        && obj(c.city)&&exact(c.city,["id","pos","cityName"])&&numericId(c.city.id)&&typeof c.city.pos==="string"&&/^\d{1,2}$/.test(c.city.pos)&&Number(c.city.pos)<=80&&boundedText(c.city.cityName)
-        && typeof c.trainTroops==="boolean"&&c.replicate==="n"&&c.countRepeat===0
-        && Array.isArray(c.cityTrainings)&&c.cityTrainings.length===0&&Array.isArray(c.units)&&c.units.length===0
-        && Array.isArray(c.tranings)&&c.tranings.length===1&&Array.isArray(c.tranings[0])&&c.tranings[0].length>0&&c.tranings[0].length<=50
-        && c.tranings[0].every(x=>obj(x)&&exact(x,["unit_type_id","cantidad"])&&integer(x.unit_type_id,1,9999999)&&integer(x.cantidad,1,100000))
-        && new Set(c.tranings[0].map(x=>x.unit_type_id)).size===c.tranings[0].length;
     case "UpgradeUnits":
       return exact(c,["jobs"])&&Array.isArray(c.jobs)&&c.jobs.length===1&&obj(c.jobs[0])&&exact(c.jobs[0],["city_id","upgrades"])
         &&city(c.jobs[0].city_id)&&Array.isArray(c.jobs[0].upgrades)&&c.jobs[0].upgrades.length>0&&c.jobs[0].upgrades.length<=50
@@ -201,7 +193,7 @@ export function scopedCities(value: unknown, account: string): City[] {
   }
   return result;
 }
-export function readyPreflight(value:unknown,account:string,task:NativeTask|"donate"|"reorganizeCityBuildings"|"constructBuilding"|"stationArmy"|"autoBarbarians"|"attackBarbarians"|"vacationMode"|WorkerTask):boolean {
+export function readyPreflight(value:unknown,account:string,task:NativeTask|"trainArmy"|"donate"|"reorganizeCityBuildings"|"constructBuilding"|"stationArmy"|"autoBarbarians"|"attackBarbarians"|"vacationMode"|WorkerTask):boolean {
   return obj(value) && value.account_id===account && value.task===task && value.ready===true
     && value.unresolved_request===false;
 }

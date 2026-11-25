@@ -980,3 +980,31 @@ def test_recurring_external_destination_editor(page):
     editor.x.setValue(51)
     with pytest.raises(ValueError):
         editor.to_config()
+
+
+def test_reviewed_recruitment_widget_rounds_and_selected_cities(app):
+    editor = TrainableUnitsEditor()
+    try:
+        editor.set_cities(CITIES)
+        editor.city_picker.setCurrentIndex(1)
+        editor.set_trainables(TRAINABLE)
+        editor.table.cellWidget(0, 2).setValue(4)
+        editor.add_round.click()
+        editor.table.cellWidget(1, 2).setValue(2)
+        editor.additional.item(0).setCheckState(Qt.Checked)
+        editor.cycles.setValue(2)
+        draft = editor.reviewed_draft()
+        assert draft == {"city_ids": [101, 102], "train_troops": True, "cycles": 2,
+                         "rounds": [[{"unit_type_id": 301, "cantidad": 4}],
+                                    [{"unit_type_id": 302, "cantidad": 2}]]}
+        editor.round_picker.setCurrentIndex(0)
+        assert editor.table.cellWidget(0, 2).value() == 4
+        assert editor.table.cellWidget(1, 2).value() == 0
+        editor.remove_round.click()
+        assert editor.reviewed_draft()["rounds"] == [[{"unit_type_id": 302, "cantidad": 2}]]
+        editor.mode.setCurrentIndex(1)
+        with pytest.raises(ValueError):
+            editor.reviewed_draft()
+    finally:
+        editor.close()
+        editor.deleteLater()

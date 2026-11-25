@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -684,6 +686,37 @@ class TrainableUnitsEditor(QWidget):
         self.city_picker.currentIndexChanged.connect(self._reset_selection)
         selector.addWidget(self.city_picker, 1)
         layout.addLayout(selector)
+        layout.addWidget(QLabel("Additional owned cities"))
+        self.additional = QListWidget()
+        self.additional.setMaximumHeight(100)
+        self.additional.setAccessibleName("Additional recruitment cities")
+        self.additional.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.additional)
+        options = QHBoxLayout()
+        all_button = PushButton("Select all cities")
+        all_button.clicked.connect(self._all_cities)
+        options.addWidget(all_button)
+        options.addWidget(QLabel("Total cycles"))
+        self.cycles = _amount(minimum=1, value=1, label="Training repetitions including first cycle")
+        self.cycles.setMaximum(10)
+        self.cycles.valueChanged.connect(self.changed.emit)
+        options.addWidget(self.cycles)
+        layout.addLayout(options)
+        self._rounds = []
+        self.round_picker = ComboBox()
+        self.round_picker.setAccessibleName("Training round")
+        self.round_picker.addItem("Round 1")
+        self._round_index = 0
+        self.round_picker.currentIndexChanged.connect(self._switch_round)
+        rounds = QHBoxLayout()
+        rounds.addWidget(self.round_picker)
+        self.add_round = PushButton("Add round")
+        self.remove_round = PushButton("Remove round")
+        self.add_round.clicked.connect(self._add_round)
+        self.remove_round.clicked.connect(self._remove_round)
+        rounds.addWidget(self.add_round)
+        rounds.addWidget(self.remove_round)
+        layout.addLayout(rounds)
         self.table = _table(("Unit", "Real per-unit costs", "Quantity"))
         self.table.setMinimumHeight(240)
         self.table.setAccessibleName("Available recruitable units and quantities")
@@ -699,6 +732,8 @@ class TrainableUnitsEditor(QWidget):
         self.set_cities([])
 
     def set_cities(self, cities: list[dict[str, object]]) -> None:
+        self._cities = list(cities)
+        self._reset_rounds()
         self._selected = None
         self._loaded = None
         self._snapshot = None
@@ -713,10 +748,85 @@ class TrainableUnitsEditor(QWidget):
                     f"{text} ({coords})" if coords else text, userData=city["id"]
                 )
             self.city_picker.setCurrentIndex(0)
+        self._populate_additional()
         self.description.setText("Choose a city with barracks or a shipyard.")
         self.changed.emit()
 
+    def _populate_additional(self):
+        with QSignalBlocker(self.additional):
+            self.additional.clear()
+            for city in self._cities:
+                if city["id"] == self.city_picker.currentData():
+                    continue
+                item = QListWidgetItem(str(city["name"]))
+                item.setData(Qt.UserRole, city["id"])
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.additional.addItem(item)
+
+    def _all_cities(self):
+        for i in range(self.additional.count()):
+            self.additional.item(i).setCheckState(Qt.Checked if i < 31 else Qt.Unchecked)
+
+    def _reset_rounds(self):
+        self._rounds = [{}]
+        self._round_index = 0
+        with QSignalBlocker(self.round_picker):
+            self.round_picker.clear()
+            self.round_picker.addItem("Round 1")
+            self.round_picker.setCurrentIndex(0)
+        self.remove_round.setEnabled(False)
+        self.add_round.setEnabled(False)
+
+    def _save_round(self):
+        if not self._snapshot:
+            return
+        self._rounds[self._round_index] = {
+            u["unit_type_id"]: self.table.cellWidget(i, 2).value()
+            for i, u in enumerate(self._snapshot["units"])}
+
+    def _load_round(self):
+        if not self._snapshot:
+            return
+        for i, unit in enumerate(self._snapshot["units"]):
+            field = self.table.cellWidget(i, 2)
+            with QSignalBlocker(field):
+                field.setValue(self._rounds[self._round_index].get(unit["unit_type_id"], 0))
+        self.changed.emit()
+
+    def _switch_round(self, index):
+        if 0 <= index < len(self._rounds):
+            self._save_round()
+            self._round_index = index
+            self._load_round()
+
+    def _add_round(self):
+        if not self._snapshot or len(self._rounds) >= 10:
+            return
+        self._save_round()
+        self._rounds.append({})
+        self.round_picker.addItem(f"Round {len(self._rounds)}")
+        self.round_picker.setCurrentIndex(len(self._rounds)-1)
+        self.add_round.setEnabled(len(self._rounds)<10)
+        self.remove_round.setEnabled(True)
+
+    def _remove_round(self):
+        if len(self._rounds) <= 1:
+            return
+        self._rounds.pop(self._round_index)
+        self._round_index = min(self._round_index, len(self._rounds)-1)
+        with QSignalBlocker(self.round_picker):
+            self.round_picker.clear()
+            for i in range(len(self._rounds)):
+                self.round_picker.addItem(f"Round {i+1}")
+            self.round_picker.setCurrentIndex(self._round_index)
+        self._load_round()
+        self.remove_round.setEnabled(len(self._rounds)>1)
+        self.add_round.setEnabled(True)
+
     def _reset_selection(self, *_args: object) -> None:
+        self._reset_rounds()
+        self._populate_additional()
         self._loaded = None
         self._snapshot = None
         self.table.setRowCount(0)
@@ -739,6 +849,8 @@ class TrainableUnitsEditor(QWidget):
         if not isinstance(units, list):
             return
         self._snapshot = snapshot
+        self._reset_rounds()
+        self.add_round.setEnabled(True)
         self._loaded = self._selected
         self.table.setRowCount(len(units))
         for row, unit in enumerate(units):
@@ -767,6 +879,7 @@ class TrainableUnitsEditor(QWidget):
     def set_unavailable(self, city_id: int, train_troops: bool) -> None:
         if self._selected != (city_id, train_troops):
             return
+        self._reset_rounds()
         self._loaded = None
         self._snapshot = None
         self.table.setRowCount(0)
@@ -775,6 +888,19 @@ class TrainableUnitsEditor(QWidget):
             "Check the game session, barracks or shipyard."
         )
         self.changed.emit()
+
+    def reviewed_draft(self):
+        from daedalus.training_contract import training_draft
+
+        if self._snapshot is None or self._loaded != self._selected:
+            raise ValueError("Choose a city and load its actual recruitable units")
+        self._save_round()
+        rounds = [[{"unit_type_id": uid, "cantidad": count}
+                   for uid, count in group.items() if count] for group in self._rounds]
+        return training_draft({"city_ids": [self._selected[0], *[
+            self.additional.item(i).data(Qt.UserRole) for i in range(self.additional.count())
+            if self.additional.item(i).checkState() == Qt.Checked]],
+            "train_troops": self._selected[1], "rounds": rounds, "cycles": self.cycles.value()})
 
     def to_config(self) -> dict[str, object]:
         if self._snapshot is None or self._loaded != self._selected:

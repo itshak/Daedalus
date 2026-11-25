@@ -30,3 +30,11 @@ Worker assignment SHALL support selected owned cities and both production projec
 #### Scenario: A worker assignment changes after approval
 - **WHEN** the city, project or observed slider state differs from the reviewed plan
 - **THEN** execution stops before submitting that changed assignment and remaining assignments are not retried automatically
+
+
+### Requirement: Reviewed recruitment rounds and repetitions
+The controller SHALL expose bounded ordered recruitment rounds and repeat cycles across selected owned cities. Each reviewed plan SHALL contain actual per-city unit identities and costs and SHALL require an account-scoped launch ticket. The worker SHALL revalidate the reviewed data and current resources before submitting each round once.
+
+#### Scenario: A later training round is uncertain
+- **WHEN** a submitted round cannot be observed in the training queue or the reviewed inventory changes
+- **THEN** later rounds stop and are not automatically replayed

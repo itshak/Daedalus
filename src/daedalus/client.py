@@ -926,6 +926,19 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid workshop options")
         return data
 
+    def training_preview(self, account_id: str, draft: dict[str, object]) -> dict[str, object]:
+        from daedalus.training_contract import training_draft, validate_training_review
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = training_draft(draft)
+        data = self._write(f"accounts/{account_id}/cities/{clean['city_ids'][0]}/training-plan", clean)
+        try:
+            validate_training_review(account_id, clean, data)
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            raise APIConnectionError("Invalid recruitment review") from exc
+        return data
+
     def trainable_units(
         self, account_id: str, city_id: int, *, train_troops: bool,
     ) -> dict[str, object]:

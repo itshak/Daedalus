@@ -2,6 +2,19 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Recruitment task started. Verify training queues.": "Задание найма запущено. Проверьте очереди обучения.",
+  "Recruitment preview unavailable.": "План найма недоступен.",
+  "Later rounds stop if stock, costs or training queue changes. Manual recovery only.": "Следующие раунды прекращаются при изменении запасов, стоимости или очереди. Только ручное восстановление.",
+  "Insufficient initial stock": "Недостаточно начальных ресурсов",
+  "First round affordable": "Ресурсов на первый раунд достаточно",
+  "Total commitment": "Общие затраты",
+  "Preview recruitment rounds": "Проверить план найма",
+  "Remove round": "Удалить раунд",
+  "Add round": "Добавить раунд",
+  "Round": "Раунд",
+  "Total cycles": "Всего циклов",
+  "Additional owned cities": "Дополнительные свои города",
+  "Recruitment plan": "План найма",
   "Both resource projects": "Оба ресурсных объекта",
   "Additional owned cities (optional)": "Дополнительные свои города (необязательно)",
   "Shared transport capacity; dispatch stops if a route changes.": "Общая вместимость транспорта; при изменении маршрута отправка прекращается.",

@@ -7,6 +7,7 @@ from uuid import uuid4
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 REVIEW_ENDPOINTS = {
+    "trainArmy": "training-start",
     "constructionList": "construction-start",
     "sendResources": "shipment-start",
     "donate": "donation-start",

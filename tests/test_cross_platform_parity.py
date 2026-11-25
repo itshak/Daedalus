@@ -31,7 +31,12 @@ def test_versioned_coverage_manifest_matches_source_and_committed_matrix():
             "*-complete-cross-platform-automation-parity"
         ))
     manifest = coverage_manifest()
-    assert json.loads((change / "capability-matrix.json").read_text()) == manifest
+    successor = root / "openspec/changes/finish-cross-platform-operation-parity/capability-matrix.json"
+    if successor.exists():
+        matrix = successor
+    else:
+        matrix = change / "capability-matrix.json"
+    assert json.loads(matrix.read_text()) == manifest
     assert set(manifest["operations"]) == {item.name for item in inspect_engine()} | AUXILIARY_OPERATIONS
     for operation in manifest["operations"].values():
         assert operation["live_accepted"] is False

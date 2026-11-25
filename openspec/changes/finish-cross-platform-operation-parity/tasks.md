@@ -22,3 +22,6 @@
 - [x] Add reviewed all-owned-city and combined ground/fleet deployment choices to both native clients; verify exact route coverage, shared ship capacity, stale-state halt and manual-only recovery.
 
 - [x] Add selected owned-city worker assignments and both production projects, authoritative per-project targets, preview validation and stale-state halt.
+
+- [x] Implement ordered native recruitment rounds, cycles and selected-city review tickets, bounded costs, queue observation and non-retried worker submission.
+- [x] Correct CI archive inventory reporting and platform-independent IPC path assertion.

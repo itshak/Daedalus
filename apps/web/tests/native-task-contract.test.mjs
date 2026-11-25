@@ -71,10 +71,11 @@ test("military and trade forms accept reviewed inventory shapes and bounded quan
   const quote={ciudadDestino:"Other",jugadorAComprar:"Trader",amountAvailable:5,tipo:"Wood",precio:4,destinationCityId:"2",cityId:"1",position:"2",type:"1",resource:"resource"};
   const buy={city,offers:[quote],amount_to_buy:5};
   const sell={mode:"create_offer",amount_to_sell:5,price:4,resource_type:0,sell_market_capacity:10,city};
-  for(const [task,c] of [["trainArmy",train],["UpgradeUnits",upgrade],["buyResources",buy],["sellResources",sell]]){
+  for(const [task,c] of [["UpgradeUnits",upgrade],["buyResources",buy],["sellResources",sell]]){
     assert.equal(validNativeConfig(task,c),true,task);
     assert.equal(validNativeConfig(task,{...c,extra:"no"}),false,task);
   }
+  assert.equal(validNativeConfig("trainArmy",train),false);
   assert.equal(validNativeConfig("trainArmy",{...train,replicate:"y"}),false);
   assert.equal(validNativeConfig("buyResources",{...buy,amount_to_buy:6}),false);
   assert.equal(validNativeConfig("sellResources",{...sell,price:0}),false);
