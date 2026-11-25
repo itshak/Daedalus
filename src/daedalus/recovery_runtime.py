@@ -44,7 +44,7 @@ _ACCOUNT_METHODS = frozenset({
     "station_preview", "build_options", "build_preview", "layout_preview",
     "worker_preview", "donation_preview", "island_destinations", "shipment_preview",
     "market_quotes", "academies", "taverns", "miracles",
-    "shrine_status", "pirate_fortresses", "military_overview",
+    "shrine_status", "pirate_fortresses", "military_overview", "administrative_status",
     "ship_movements", "warehouses", "preflight_task",
     "start_managed_task", "list_managed_tasks", "stop_managed_task",
 })

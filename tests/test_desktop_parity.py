@@ -293,3 +293,32 @@ def test_native_navigation_uses_one_contextual_automation_workspace(qt_app, monk
         assert page.task_table.rowCount() == 1
     finally:
         _dispose(window, qt_app)
+
+
+def test_protected_admin_settings_scope(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
+
+    page = AppearancePage()
+    try:
+        page.set_admin_accounts([
+            {"id": "a", "player": "Player A", "world": "s1-en", "enabled": True},
+            {"id": "b", "player": "Player B", "world": "s2-en", "enabled": True},
+            {"id": "c", "player": "Disabled", "world": "s3-en", "enabled": False},
+        ])
+        assert page.admin_account.count() == 3
+        page.admin_account.setCurrentIndex(1)
+        calls = []
+        page.administrative_status_requested.connect(calls.append)
+        page._request_admin_status()
+        assert calls == ["a"]
+        settings = {"telegram": "configured", "discord": "not_configured",
+                    "proxy_enabled": True, "proxy_protocol": "socks5", "proxy_port": 9050,
+                    "proxy_auth": True, "challenge_provider": "default", "registered_extensions": 1}
+        page.set_admin_status({"account_id": "b", "settings": settings})
+        assert not page.admin_rows.text()
+        page.set_admin_status({"account_id": "a", "settings": settings})
+        assert "Telegram: configured" in page.admin_rows.text()
+        page.admin_account.setCurrentIndex(2)
+        assert not page.admin_rows.text()
+    finally:
+        _dispose(page, qt_app)

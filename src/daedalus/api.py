@@ -1150,6 +1150,28 @@ def create_app(
                 status_code=503, detail="Authenticated wonder inventory unavailable"
             ) from exc
 
+    @app.get("/api/v1/accounts/{account_id}/administrative-status",
+             dependencies=[Depends(authorized)])
+    def administrative_status(account_id: str) -> dict[str, object]:
+        """No provider keys, endpoints, cookie data or custom module paths."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Administrative status unavailable")
+        try:
+            from daedalus.admin_status import validate_admin_status
+
+            response = ipc_client.administrative_status(account)
+            if response.get("account_id") != account_id:
+                raise ValueError("Account changed")
+            return {"account_id": account_id,
+                    "settings": validate_admin_status(response.get("settings"))}
+        except (ValueError, EngineIPCUnavailable):
+            raise HTTPException(status_code=503, detail="Administrative status unavailable") from None
+
     @app.get(
         "/api/v1/accounts/{account_id}/shrine-status",
         dependencies=[Depends(authorized)],

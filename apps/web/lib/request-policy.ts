@@ -10,6 +10,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
   if (method === "GET") {
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
+    if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "administrative-status") return params.size===0;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "activity")
       return [...params.keys()].every(k=>["before","limit","status"].includes(k)&&params.getAll(k).length===1)
         && (!params.has("before")||(/^[1-9][0-9]{0,15}$/.test(params.get("before")??"")&&Number.isSafeInteger(Number(params.get("before")))))

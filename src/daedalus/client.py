@@ -1065,6 +1065,20 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid wonder inventory")
         return result
 
+    def administrative_status(self, account_id: str) -> dict[str, object]:
+        from daedalus.admin_status import validate_admin_status
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        result = self._read(f"accounts/{account_id}/administrative-status")
+        try:
+            if result.get("account_id") != account_id:
+                raise ValueError("Account changed")
+            return {"account_id": account_id,
+                    "settings": validate_admin_status(result.get("settings"))}
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid administrative status") from exc
+
     def shrine_status(self, account_id: str) -> dict[str, object]:
         """Read actual Olympus shrine, preserving unknown favour as unknown."""
         if not _ACCOUNT_ID.fullmatch(account_id):

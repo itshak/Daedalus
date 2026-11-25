@@ -180,6 +180,8 @@ class APIWorker(QThread):
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "administrative_status" and self.account_id:
+                result = self.client.administrative_status(self.account_id)
             elif self.action == "recovery_index":
                 result = self.client.recovery_index()
             elif self.action == "recovery_import" and self.account_id:
@@ -722,6 +724,9 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.administrative_status_requested.connect(
+            lambda aid: self._request("administrative_status", account_id=aid)
+        )
         self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
         self.appearance_page.connection_settings_requested.connect(
             lambda: self.switchTo(self.connection_page)
@@ -2144,6 +2149,9 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "administrative_status":
+            assert isinstance(payload, dict)
+            self.appearance_page.set_admin_status(payload)
         elif action == "recovery_index":
             assert isinstance(payload, dict)
             self.accounts_page.set_recovery_status(payload)
@@ -2536,6 +2544,7 @@ class MainWindow(FluentWindow):
             if not account.get("email") and account.get("id") in cached_emails:
                 account["email"] = cached_emails[account["id"]]
         self.accounts_page.set_accounts(visible)
+        self.appearance_page.set_admin_accounts(visible)
         self.warehouses_page.set_accounts(visible)
         self.military_page.set_accounts(visible)
         self.log_page.set_accounts(visible)
@@ -2561,6 +2570,10 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "administrative_status":
+            aid = getattr(self._worker, "account_id", None)
+            if isinstance(aid, str):
+                self.appearance_page.set_admin_unavailable(aid)
         # Never reuse a recovery refresh across a failed or changed backend.
         self._recovery_followup = None
         if action == "native_login_start":

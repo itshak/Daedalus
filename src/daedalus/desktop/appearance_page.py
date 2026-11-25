@@ -20,6 +20,7 @@ class AppearancePage(QWidget):
     connection_settings_requested = Signal()
     report_accounts_requested = Signal()
     report_all_requested = Signal()
+    administrative_status_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -71,10 +72,93 @@ class AppearancePage(QWidget):
         self.connection_button = PushButton("Manage secure connection…")
         self.connection_button.clicked.connect(self.connection_settings_requested.emit)
         layout.addWidget(self.connection_button)
+        layout.addWidget(SubtitleLabel("Protected administration"))
+        self.admin_account = ComboBox()
+        self.admin_account.setAccessibleName("Administrative status account")
+        self.admin_refresh = PushButton("Read protected settings status")
+        self.admin_refresh.setEnabled(False)
+        self.admin_refresh.clicked.connect(self._request_admin_status)
+        self.admin_account.currentIndexChanged.connect(self._admin_selection_changed)
+        layout.addWidget(self.admin_account)
+        layout.addWidget(self.admin_refresh)
+        self.admin_note = CaptionLabel("Select an enabled account. No credentials will be displayed.")
+        self.admin_note.setWordWrap(True)
+        layout.addWidget(self.admin_note)
+        self.admin_rows = BodyLabel()
+        self.admin_rows.setWordWrap(True)
+        layout.addWidget(self.admin_rows)
+        boundary = CaptionLabel(
+            "Notification credentials, proxy configuration, challenge handling and custom extensions "
+            "are managed on the authenticated worker host. The raw engine web service, developer "
+            "cookie dump and unverified update commands are not exposed. Use Daedalus for remote control "
+            "and the reviewed release workflow for updates.")
+        boundary.setWordWrap(True)
+        layout.addWidget(boundary)
         layout.addStretch(1)
         self.theme_combo.currentIndexChanged.connect(self._changed)
         self.only_220k.stateChanged.connect(self._changed)
         self.group_island.stateChanged.connect(self._changed)
+
+    def set_admin_accounts(self, accounts: list[dict[str, object]]) -> None:
+        from daedalus.account_display import account_player_name
+
+        current = self.admin_account.currentData()
+        self.admin_account.blockSignals(True)
+        try:
+            self.admin_account.clear()
+            self.admin_account.addItem("Choose an account", userData=None)
+            for row in accounts:
+                if row.get("enabled") is True and isinstance(row.get("id"), str):
+                    self.admin_account.addItem(
+                        f"{account_player_name(row)} · {row.get('world') or ''}", userData=row["id"])
+            for index in range(self.admin_account.count()):
+                if self.admin_account.itemData(index) == current:
+                    self.admin_account.setCurrentIndex(index)
+                    break
+        finally:
+            self.admin_account.blockSignals(False)
+        self._admin_selection_changed()
+
+    def _admin_selection_changed(self, *_args) -> None:
+        self.admin_rows.clear()
+        self.admin_note.setText("Select an enabled account and refresh. No credentials will be displayed.")
+        self.admin_refresh.setEnabled(isinstance(self.admin_account.currentData(), str))
+
+    def _request_admin_status(self) -> None:
+        account = self.admin_account.currentData()
+        if isinstance(account, str):
+            self.admin_rows.clear()
+            self.admin_note.setText("Reading protected settings…")
+            self.administrative_status_requested.emit(account)
+
+    def set_admin_unavailable(self, account_id: str) -> None:
+        if self.admin_account.currentData() == account_id:
+            self.admin_rows.clear()
+            self.admin_note.setText("Protected settings unavailable for this account.")
+
+    def set_admin_status(self, data: dict[str, object]) -> None:
+        from daedalus.admin_status import validate_admin_status
+
+        if data.get("account_id") != self.admin_account.currentData():
+            return
+        try:
+            value = validate_admin_status(data.get("settings"))
+        except ValueError:
+            self.set_admin_unavailable(str(data.get("account_id")))
+            return
+        proxy = "Disabled"
+        if value["proxy_enabled"]:
+            proxy = (f"Enabled · {value['proxy_protocol'] or 'Unknown protocol'} · "
+                     f"port {value['proxy_port'] or 'unknown'} · authentication "
+                     + ("unknown" if value["proxy_auth"] is None else
+                        "configured" if value["proxy_auth"] else "not configured"))
+        count = value["registered_extensions"]
+        self.admin_note.setText("Observed saved configuration; connectivity has not been tested.")
+        self.admin_rows.setText(
+            f"Telegram: {value['telegram'].replace('_', ' ')}\n"
+            f"Discord: {value['discord'].replace('_', ' ')}\n"
+            f"Proxy: {proxy}\nChallenge provider: {value['challenge_provider']}\n"
+            f"Registered custom extensions: {count if count is not None else 'Unknown'}")
 
     def set_report_scope(self, total: int, selected: int) -> None:
         """Display the local per-backend scope; no account/session mutations."""

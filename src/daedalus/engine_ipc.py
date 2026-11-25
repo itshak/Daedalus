@@ -54,7 +54,7 @@ _ALLOWED = frozenset({
     "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
-    "list_miracles_existing", "shrine_status_existing",
+    "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
     "list_pirate_fortresses_existing",
     "military_overview_existing", "ship_movements_existing",
 })
@@ -169,7 +169,7 @@ class ExistingIPCClient:
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
-            "list_miracles_existing", "shrine_status_existing",
+            "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
             "list_pirate_fortresses_existing",
     "military_overview_existing", "ship_movements_existing",
         } and account is None:
@@ -1018,6 +1018,15 @@ class ExistingIPCClient:
                 "available": enabled, "available_in_seconds": seconds,
             })
         return {"account_id": account.id, "miracles": result}
+
+    def administrative_status(self, account: Account) -> dict[str, object]:
+        from daedalus.admin_status import scoped_admin_status
+
+        data = self.request("administrative_status_existing", account=account)
+        try:
+            return scoped_admin_status(account, data)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid account-scoped administrative status") from exc
 
     def shrine_status(self, account: Account) -> dict[str, object]:
         """Verified account-local Shrine of Olympus, never a guessed favour balance."""

@@ -2,6 +2,20 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Notification credentials, proxy settings, challenge handling and custom extensions must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.": "Учётные данные уведомлений, прокси, проверки и расширения настраиваются на узле авторизованного рабочего процесса. Браузер не предоставляет прямой доступ к игровому серверу, cookie разработчика или непроверенным командам обновления.",
+  "unsupported": "Не поддерживается",
+  "not configured": "Не настроено",
+  "configured": "Настроено",
+  "Registered custom extensions": "Зарегистрированные расширения",
+  "Challenge provider": "Провайдер проверки",
+  "Proxy authentication": "Аутентификация прокси",
+  "Proxy port": "Порт прокси",
+  "Proxy protocol": "Протокол прокси",
+  "Observed saved configuration; connectivity has not been tested.": "Сохранённые настройки; соединение не проверено.",
+  "Protected settings unavailable for this account.": "Защищённые настройки аккаунта недоступны.",
+  "Read protected settings status": "Проверить защищённые настройки",
+  "Read observed settings without displaying credentials.": "Просмотр настроек без раскрытия учётных данных.",
+  "Protected administration": "Защищённое администрирование",
   "Batch check unavailable. Inspect Activity before preparing new reviews.": "Проверка очереди недоступна. Проверьте активность перед подготовкой новых планов.",
   "Inspect Activity before retrying any operation.": "Проверьте активность перед повтором операции.",
   "A review has expired. Remove it and prepare a new preview.": "Срок действия плана истёк. Удалите его и подготовьте новый.",

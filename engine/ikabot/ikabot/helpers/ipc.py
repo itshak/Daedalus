@@ -820,6 +820,12 @@ class IPCServer:
                     return self._list_taverns_existing(request)
                 if action == "list_miracles_existing":
                     return self._list_miracles_existing(request)
+                if action == "administrative_status_existing":
+                    from ikabot.helpers.nativeAdminStatus import administrative_status
+
+                    session = self._existing_session(request)
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, "settings": administrative_status(session)}
                 if action == "shrine_status_existing":
                     return self._shrine_status_existing(request)
                 if action == "list_pirate_fortresses_existing":
