@@ -134,3 +134,11 @@ test("shipment capacity preview binds account, exact cargo and fleet arithmetic"
   assert.throws(()=>scopedShipmentPlan({...result,routes:[{...result.routes[0],minimum_loads:1}]},"a",config));
   assert.throws(()=>scopedShipmentPlan({...result,preview_id:null},"a",config));
 });
+
+test("notification tests allow no custom payload or credentials",()=>{
+  for(const task of ["testTelegramBot","testDiscordBot"]){
+    assert.equal(validNativeConfig(task,{}),true);
+    assert.equal(validNativeConfig(task,{message:"arbitrary"}),false);
+    assert.equal(validNativeConfig(task,{token:"arbitrary"}),false);
+  }
+});

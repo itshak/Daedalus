@@ -1321,8 +1321,13 @@ class ControlledIPCClient(ExistingIPCClient):
                 or status not in {"running", "finished", "stopping", "stopped"}
             ):
                 raise EngineIPCUnavailable("Invalid engine task state")
+            outcome = item.get("outcome")
+            if outcome is not None and (task not in {"testTelegramBot", "testDiscordBot"}
+                    or status != "finished" or outcome not in {"accepted", "failed_or_uncertain"}):
+                raise EngineIPCUnavailable("Invalid notification result")
             cleaned.append({"task_id": task_id, "task": task, "status": status,
-                            "pid": item.get("pid"), "started_at": item.get("started_at")})
+                            "pid": item.get("pid"), "started_at": item.get("started_at"),
+                            **({"outcome": outcome} if outcome is not None else {})})
         return cleaned
 
     def stop_managed_task(self, account: Account, task_id: str) -> dict[str, object]:

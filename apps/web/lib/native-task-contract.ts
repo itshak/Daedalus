@@ -2,7 +2,7 @@
 export const NATIVE_TASKS = ["sendResources", "distributeResources", "consolidateResources",
   "resourceTransportManager", "alertAttacks", "alertLowWine", "loginDaily", "research",
   "tavernManager", "activateMiracle", "activateShrine", "donationBot", "autoPirate",
-  "searchForIslandSpaces", "dumpWorld", "trainArmy", "UpgradeUnits", "buyResources", "sellResources"] as const;
+  "searchForIslandSpaces", "dumpWorld", "trainArmy", "UpgradeUnits", "buyResources", "sellResources", "testTelegramBot", "testDiscordBot"] as const;
 export type NativeTask = typeof NATIVE_TASKS[number];
 export const DOMAIN_TASKS = ["loginDaily","research","tavernManager","activateMiracle","activateShrine","donationBot","autoPirate","searchForIslandSpaces","dumpWorld"] as const;
 export const CITY_TASKS = ["trainArmy","UpgradeUnits","buyResources","sellResources"] as const;
@@ -47,6 +47,9 @@ export function isNativeTask(task: unknown): task is NativeTask {
 export function validNativeConfig(task: unknown, c: unknown): boolean {
   if (!isNativeTask(task) || !obj(c)) return false;
   switch (task) {
+    case "testTelegramBot":
+    case "testDiscordBot":
+      return exact(c,[]);
     case "trainArmy":
       return exact(c,["city","tranings","trainTroops","replicate","countRepeat","cityTrainings","units"])
         && obj(c.city)&&exact(c.city,["id","pos","cityName"])&&numericId(c.city.id)&&typeof c.city.pos==="string"&&/^\d{1,2}$/.test(c.city.pos)&&Number(c.city.pos)<=80&&boundedText(c.city.cityName)

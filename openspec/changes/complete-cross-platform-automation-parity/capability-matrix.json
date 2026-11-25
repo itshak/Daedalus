@@ -382,19 +382,23 @@
       "live_accepted": false
     },
     "testDiscordBot": {
-      "desktop": "pending",
-      "web": "protected_local",
-      "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "testTelegramBot": {
-      "desktop": "pending",
-      "web": "protected_local",
-      "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "trainArmy": {

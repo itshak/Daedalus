@@ -59,7 +59,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const inFlight=useRef(false);
   const mounted=useRef(false);
   const prefix="accounts/"+encodeURIComponent(account);
-  const cityTask=task!=="alertAttacks" && task!=="alertLowWine";
+  const notificationTest=task==="testTelegramBot"||task==="testDiscordBot";
+  const cityTask=task!=="alertAttacks" && task!=="alertLowWine" && !notificationTest;
   useEffect(()=>{
     let alive=true;
     mounted.current=true;
@@ -85,7 +86,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const fleetName=freighters?t("Freighters"):t("Trade ships");
   const names=multiple.map(cityName).join(", ");
   let config:Config={};let summary="";let scoped=true;
-  if(task==="alertAttacks"){config={minutes};summary=t("Check for attacks every")+" "+minutes+" "+t("minutes");}
+  if(notificationTest){config={};summary=t("Send one fixed test message to the configured notification provider.");}
+  else if(task==="alertAttacks"){config={minutes};summary=t("Check for attacks every")+" "+minutes+" "+t("minutes");}
   else if(task==="alertLowWine"){config={hours,auto_transfer:autoTransfer,transfer_amount:autoTransfer?transferAmount:0};
     summary=t("Warn when wine has less than")+" "+hours+" "+t("hours")+"; "+(autoTransfer?t("Automatic wine transfer")+": "+transferAmount:t("Notifications only"));}
   else if(task==="sendResources"){
@@ -190,6 +192,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     {cityTask&&task!=="sendResources"&&!loading&&cities.length<2&&<p role="alert">{t("At least two authenticated cities are required.")}</p>}
     <fieldset disabled={busy||locked||(batchTargets?!batchValid:loading||!enabled)||role==="viewer"}>
       <legend>{t("Settings")}</legend>
+      {notificationTest&&<p>{t("Send one fixed test message to the configured notification provider.")} {t("Credentials are shared by the login and are never displayed. Check Activity for acceptance.")}</p>}
       {task==="alertAttacks"&&numeric(t("Check for attacks every (minutes)"),minutes,setMinutes,3,1440)}
       {task==="alertLowWine"&&<>{numeric(t("Warn when wine has less than (hours)"),hours,setHours,1,720)}<label className="check-label"><input type="checkbox" checked={autoTransfer} onChange={e=>{edit();setAutoTransfer(e.target.checked);}}/>{t("Automatic wine transfer")}</label>{autoTransfer&&numeric(t("Wine to transfer"),transferAmount,setTransferAmount,1,MAX_AMOUNT)}</>}
       {task==="sendResources"&&<>
@@ -234,7 +237,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       </>}
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
-    <p className="subtle-message">{t(task==="sendResources"?"The engine checks current game data again at launch. Travel time is not yet verified.":"The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>
+    {!notificationTest&&<p className="subtle-message">{t(task==="sendResources"?"The engine checks current game data again at launch. Travel time is not yet verified.":"The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>}
     <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(task==="sendResources"?"Preview shipment capacity":"Review settings")}</button>
     {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{batchTargets&&<ul>{batchTargets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
       {shipment&&<><p>{t("Available ships")}: {shipment.available_ships.toLocaleString()}/{shipment.total_ships.toLocaleString()} · {t("Cargo per vessel")}: {shipment.capacity.toLocaleString()}</p>

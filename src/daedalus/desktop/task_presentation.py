@@ -36,6 +36,8 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "dumpWorld": "Export an allowed portion of the world map.",
     "loginDaily": "Perform the supported daily collection routine.",
     "research": "Run automatic academy experiments with a validated research configuration.",
+    "testTelegramBot": "Send one fixed test message to the configured Telegram bot and chat. Credentials are shared by the login; no credentials are shown.",
+    "testDiscordBot": "Send one fixed test message to the configured Discord webhook. Credentials are shared by the login; no credentials are shown.",
     "resourceTransportManager": "Manage validated resource transport routes and intervals.",
     "searchForIslandSpaces": "Monitor island availability using a reviewed search configuration.",
     "sellResources": "Offer resources for sale using validated market criteria.",

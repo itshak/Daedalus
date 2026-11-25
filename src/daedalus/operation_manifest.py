@@ -16,6 +16,7 @@ _BACKGROUND_NATIVE = frozenset({
     "distributeResources", "donationBot", "dumpWorld", "loginDaily", "research",
     "resourceTransportManager", "searchForIslandSpaces", "sellResources",
     "sendResources", "tavernManager", "trainArmy", "UpgradeUnits",
+    "testTelegramBot", "testDiscordBot",
 })
 _NATIVE = _BACKGROUND_NATIVE | CITY_REVIEW_TASKS
 _READ_VIEWS = {
@@ -27,7 +28,7 @@ _READ_VIEWS = {
 _LOCAL_BOUNDARIES = frozenset({
     "importExportCookie", "developer", "loadCustomModule", "update",
     "checkForUpdate", "webServer", "proxyConf", "decaptchaConf",
-    "updateTelegramData", "updateDiscordData", "testTelegramBot", "testDiscordBot",
+    "updateTelegramData", "updateDiscordData",
     "show_proxy",
 })
 _PENDING = frozenset()

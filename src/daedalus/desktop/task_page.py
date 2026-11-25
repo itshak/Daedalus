@@ -103,7 +103,7 @@ _TEMPLATE_TASKS = {
     "construction": {"constructionList", "research"},
 }
 _TASK_CATEGORIES = {
-    "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces"},
+    "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces", "testTelegramBot", "testDiscordBot"},
     "Resources & trade": {"buyResources", "sellResources", "sendResources",
                           "resourceTransportManager", "consolidateResources",
                           "distributeResources", "donationBot", "donate"},
@@ -2473,7 +2473,9 @@ class TasksPage(QWidget):
         )
         _populate(self.task_table, [
             [_friendly_task(str(task.get("task", ""))),
-             str(task.get("status", "unknown")).replace("_", " ").capitalize(),
+             str(task.get("status", "unknown")).replace("_", " ").capitalize() + (
+                 " · " + str(task["outcome"]).replace("_", " ") if task.get("outcome") in
+                 {"accepted", "failed_or_uncertain"} else ""),
              task.get("started_at") or "Not provided", "Selected account"]
             for task in tasks
         ])
@@ -2590,6 +2592,8 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
         params = self.building_note.text() if task in CITY_REVIEW_TASKS else configuration_summary(config)
+        if task in {"testTelegramBot", "testDiscordBot"}:
+            params = "Send one fixed test message to the existing configured provider. Check task Activity for acceptance."
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "

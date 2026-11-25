@@ -1664,6 +1664,9 @@ class IPCServer:
             rows.append({
                 "task_id": task_id, "task": entry["task"], "pid": entry["pid"],
                 "status": entry["status"], "started_at": entry["started_at"],
+                **({"outcome": "accepted" if proc.exitcode == 0 else "failed_or_uncertain"}
+                   if entry["task"] in {"testTelegramBot", "testDiscordBot"}
+                   and entry["status"] == "finished" and proc.exitcode is not None else {}),
             })
         return {"status": "ok", "tasks": rows, "world": request["world"],
                 "player": request["player"]}
@@ -1714,8 +1717,12 @@ class IPCServer:
             raise ValueError("Unknown built-in task")
         requires_notifications = canonical in {
             "alertAttacks", "alertLowWine", "searchForIslandSpaces",
+            "testTelegramBot", "testDiscordBot",
         }
-        if requires_notifications:
+        if canonical in {"testTelegramBot", "testDiscordBot"}:
+            from ikabot.helpers.botComm import native_notification_ready
+            ready = native_notification_ready(session, "telegram" if canonical == "testTelegramBot" else "discord")
+        elif requires_notifications:
             from ikabot.helpers.botComm import discordDataIsValid, telegramDataIsValid
 
             ready = bool(
@@ -1809,6 +1816,13 @@ class IPCServer:
                            and entry["task"] == "vacationMode" and entry["process"].is_alive()
                            for entry in self._daedalus_tasks.values())):
                 return {"status": "rejected", "reason": "invalid_configuration"}
+            if canonical_name in {"testTelegramBot", "testDiscordBot"} and any(
+                    entry["world"].casefold() == fingerprint[0]
+                    and entry["player"].casefold() == fingerprint[1]
+                    and entry["task"] == canonical_name
+                    and (entry["process"].is_alive() or time.time() - entry["started_at"] < 30)
+                    for entry in self._daedalus_tasks.values()):
+                return {"status": "rejected", "reason": "invalid_configuration"}
             if active_same_account >= 16:
                 raise ValueError("Account has reached the active task safety limit")
             if len(self._daedalus_tasks) >= 256:
@@ -1830,7 +1844,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

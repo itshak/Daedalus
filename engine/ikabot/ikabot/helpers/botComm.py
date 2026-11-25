@@ -349,3 +349,45 @@ def updateTelegramData(session, event=None, stdin_fd=None, predetermined_input=[
     if event is not None and stdin_fd is not None:
         event.set()  # give main process control before exiting
     return True
+
+def _native_notification_destination(session, provider):
+    """Private credentials never cross the authenticated worker boundary."""
+    shared = session.getSessionData().get("shared", {})
+    if provider == "telegram":
+        data = shared.get("telegram", {})
+        token, chat = data.get("botToken"), data.get("chatId")
+        if (not isinstance(token, str) or not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{20,128}", token)
+                or not isinstance(chat, str) or not re.fullmatch(r"-?[1-9][0-9]{0,19}", chat)):
+            raise ValueError("Telegram is not configured")
+        return ("https://api.telegram.org/bot" + token + "/sendMessage",
+                {"chat_id": chat, "text": "Daedalus notification test"})
+    if provider == "discord":
+        url = shared.get("discord", {}).get("webhookUrl")
+        # Legacy webhooks may be arbitrary URLs. The remote test adapter
+        # accepts only canonical Discord HTTPS endpoints, never redirects.
+        if not isinstance(url, str) or not re.fullmatch(
+                r"https://(?:discord[.]com|discordapp[.]com)/api/webhooks/[0-9]{1,25}/[A-Za-z0-9_-]{10,200}", url):
+            raise ValueError("Discord is not configured with a supported webhook")
+        return url, {"content": "Daedalus notification test"}
+    raise ValueError("Unsupported notification provider")
+
+
+def native_notification_ready(session, provider):
+    try:
+        _native_notification_destination(session, provider)
+        return True
+    except (TypeError, AttributeError, ValueError):
+        return False
+
+
+def native_notification_test(session, provider):
+    """Exactly one fixed-message POST, with no raw provider error or replay."""
+    try:
+        url, body = _native_notification_destination(session, provider)
+        reply = requests_post(url, json=body, timeout=10, allow_redirects=False)
+        accepted = (reply.status_code == 200 and reply.json().get("ok") is True
+                    if provider == "telegram" else reply.status_code in (200, 204))
+    except Exception:
+        raise RuntimeError("Notification test failed or outcome uncertain") from None
+    if not accepted:
+        raise RuntimeError("Notification test failed or outcome uncertain")
