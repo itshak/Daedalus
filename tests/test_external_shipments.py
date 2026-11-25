@@ -208,3 +208,41 @@ def test_recurring_external_route_checks_recipient_before_every_cargo(monkeypatc
         manager.prepare_resourceTransportManager(session, **config)
     with pytest.raises(ValueError):
         manager.prepare_resourceTransportManager(session, **{**config,"mode":"distribute"})
+
+
+def test_first_load_timing_requires_attested_view():
+    import json
+
+    from daedalus.reviewed_operations import validate_shipment_plan, validated_shipment_draft
+
+    session = Mock()
+    source = {"id": "1", "position": [{"building": "port", "position": 2}]}
+    markup = """<input name="currentCityId" value="1">
+    <input name="destinationCityId" value="2"><script>
+    {'transporterSpeed': 10, 'worldBonus': 1, 'governmentBonus': 1,
+    'poseidonEffect': 0, 'marineChartArchiveBonus': 1,
+    'minimumJourneyDuration': 5, 'distance': 2, 'fleetJourneyTime': 100,
+    'queueTime': 0, 'loadingSpeed': 10,}</script>"""
+    session.get.return_value = json.dumps([["changeView", {"html": markup}]])
+    timing = shipments._transport_timing(session, source, "2", 100, False)
+    assert timing == {"cargo": 100, "total_seconds": 30, "loading_seconds": 10,
+                      "travel_seconds": 20, "queue_seconds": 0}
+    session.get.assert_called_with(params={"view": "transport", "destinationCityId": "2",
+                                          "position": 2, "currentCityId": "1", "ajax": 1})
+    assert shipments._transport_timing(session, source, "2", 100, True)["travel_seconds"] == 400
+    assert shipments._transport_timing(session, source, "3", 100, False) is None
+    session.get.return_value = json.dumps([["changeView", markup.replace("'loadingSpeed': 10,", "'loadingSpeed': 0,")]])
+    assert shipments._transport_timing(session, source, "2", 100, False) is None
+    assert not session.post.called
+
+    draft = validated_shipment_draft({"routes": [{"from": 1, "to": 2, "resources": [100, 0, 0, 0, 0]}],
+                                      "useFreighters": False})
+    row = {**draft["routes"][0], "origin_name": "A", "destination_name": "B", "stock": [100]*5,
+           "destination_space": [100]*5, "first_load_limit": 100, "minimum_loads": 1,
+           "first_load_timing": timing}
+    plan = {"routes": [row], "capacity": 100, "available_ships": 1,
+            "total_ships": 1, "ready": True, "useFreighters": False}
+    assert validate_shipment_plan(draft, plan) == plan
+    row["first_load_timing"] = {**timing, "total_seconds": 31}
+    with pytest.raises(ValueError, match="timing"):
+        validate_shipment_plan(draft, plan)

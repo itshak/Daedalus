@@ -1,13 +1,15 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import re
+from html.parser import HTMLParser
 import traceback
 
 from ikabot.config import *
 from ikabot.helpers.botComm import *
 from ikabot.helpers.decorators import configurator, task
-from ikabot.helpers.getJson import getCity, getIsland
+from ikabot.helpers.getJson import getCity, getIsland, getTransportLoadingAndTravelTime
 from ikabot.helpers.gui import *
 from ikabot.helpers.pedirInfo import *
 from ikabot.helpers.planRoutes import executeRoutes
@@ -195,6 +197,71 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
     return result
 
 
+class _TransportIdentity(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.ids = {"currentCityId": set(), "destinationCityId": set()}
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "input" and attrs.get("name") in self.ids:
+            self.ids[attrs["name"]].add(attrs.get("value"))
+
+
+def _transport_timing(session, source, destination, cargo, freighters):
+    """Optional first-load estimate; never send a transport action."""
+    if not cargo:
+        return None
+    ports = [p["position"] for p in source.get("position", [])
+             if p.get("building") == "port" and not p.get("isBusy")
+             and type(p.get("position")) is int and 0 <= p["position"] <= 100]
+    if not ports:
+        return None
+    origin = str(source["id"])
+    try:
+        response = session.get(params={
+            "view": "transport", "destinationCityId": destination,
+            "position": ports[0], "currentCityId": origin, "ajax": 1,
+        })
+        data = json.loads(response)
+        # Accept only one transport view with a uniquely attested route.
+        views = []
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, list):
+                for item in value:
+                    yield from strings(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    yield from strings(item)
+        for entry in data:
+            if isinstance(entry, list) and entry and entry[0] == "changeView":
+                views.extend(v for v in strings(entry[1:]) if "'transporterSpeed':" in v)
+        if len(views) != 1:
+            return None
+        html = views[0]
+        parser = _TransportIdentity()
+        parser.feed(html)
+        if parser.ids != {"currentCityId": {origin}, "destinationCityId": {str(destination)}}:
+            return None
+        fields = ("transporterSpeed", "worldBonus", "governmentBonus", "poseidonEffect",
+                  "marineChartArchiveBonus", "minimumJourneyDuration", "distance",
+                  "fleetJourneyTime", "queueTime", "loadingSpeed")
+        if any(len(re.findall(r"'" + name + r"':", html)) != 1 for name in fields):
+            return None
+        total, loading, travel, queue = getTransportLoadingAndTravelTime(
+            html, totalResources=cargo, useFreighters=freighters)
+        if (any(type(n) is not int or not 0 <= n <= 365 * 86400
+                for n in (total, loading, travel, queue))
+                or travel <= 0 or total != loading + travel + queue):
+            return None
+        return {"cargo": cargo, "total_seconds": total, "loading_seconds": loading,
+                "travel_seconds": travel, "queue_seconds": queue}
+    except (ValueError, TypeError, AttributeError, KeyError, IndexError, ArithmeticError):
+        return None
+
+
 def preview_native_shipments(session, routes, useFreighters):
     """A read-only quote of current inventory, fleet and minimum load counts."""
     pedirInfo.ids_cache = None
@@ -248,6 +315,7 @@ def preview_native_shipments(session, routes, useFreighters):
                      "destination_name": name, "resources": item["resources"],
                      "stock": stock, "destination_space": space,
                      "first_load_limit": first,
+                     "first_load_timing": _transport_timing(session, source, destination, first, useFreighters),
                      "minimum_loads": (cargo + total * capacity - 1) // (total * capacity)
                      if total and capacity else None})
     return {"routes": rows, "useFreighters": useFreighters, "capacity": capacity,

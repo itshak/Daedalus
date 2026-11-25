@@ -1064,7 +1064,14 @@ class TasksPage(QWidget):
                          f"Origin stock: {stock}. "
                          f"First load ≤ {row['first_load_limit']:,}; minimum loads {loads}."
                          + (" Recipient storage unknown." if row["destination_space"] is None else ""))
-        lines.append("Individual route limits share the same fleet. Waiting and ETA are not predicted.")
+            timing = row.get("first_load_timing")
+            if timing:
+                lines.append(f"First-load estimate: {timing['total_seconds']:,} s "
+                             f"(queue {timing['queue_seconds']:,}, load {timing['loading_seconds']:,}, "
+                             f"travel {timing['travel_seconds']:,} s).")
+            else:
+                lines.append("First-load timing unavailable.")
+        lines.append("Route limits share one fleet; full multi-load ETA is not predicted.")
         if not result["ready"]:
             lines.append("No usable fleet; choose another fleet or acquire ships.")
         self.building_note.setText("\n".join(lines))
@@ -1486,9 +1493,14 @@ class TasksPage(QWidget):
                 for row in fleet["routes"]:
                     amounts = ", ".join(f"{name} {n:,}" for name,n in zip(names,row["resources"]) if n)
                     description += f"\n{row['origin_name']} → {row['destination_name']}: {amounts}; minimum loads {row['minimum_loads']}."
+                    timing = row.get("first_load_timing")
+                    if timing:
+                        description += f" First-load estimate: {timing['total_seconds']:,} s."
+                    else:
+                        description += " First-load timing unavailable."
             if any(observation["remaining"]):
                 description += "\nUncovered shortage: " + ", ".join(f"{n} {v:,}" for n,v in zip(names,observation["remaining"]) if v)
-            description += "\nTravel ETA unavailable. Manual recovery only."
+            description += "\nFull multi-load ETA unavailable. Manual recovery only."
             if not ready:
                 description += " Cannot start: choose more suppliers, check storage and fleet, or use self-funded construction."
         elif ready:

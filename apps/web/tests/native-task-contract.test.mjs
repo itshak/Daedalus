@@ -134,6 +134,12 @@ test("shipment capacity preview binds account, exact cargo and fleet arithmetic"
   assert.throws(()=>scopedShipmentPlan(result,"b",config));
   assert.throws(()=>scopedShipmentPlan({...result,routes:[{...result.routes[0],minimum_loads:1}]},"a",config));
   assert.throws(()=>scopedShipmentPlan({...result,preview_id:null},"a",config));
+  const timed={...result,routes:[{...result.routes[0],first_load_timing:{
+    cargo:50,total_seconds:30,loading_seconds:10,travel_seconds:20,queue_seconds:0}}]};
+  assert.equal(scopedShipmentPlan(timed,"a",config).routes[0].first_load_timing.total_seconds,30);
+  timed.routes[0].first_load_timing.total_seconds=31;
+  assert.throws(()=>scopedShipmentPlan(timed,"a",config));
+
 });
 
 test("notification tests allow no custom payload or credentials",()=>{

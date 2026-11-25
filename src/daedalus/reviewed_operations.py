@@ -516,7 +516,7 @@ def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, 
             or not isinstance(plan.get("routes"), list) or len(plan["routes"]) != len(draft["routes"])):
         raise ValueError("Invalid fleet observation")
     for requested, row in zip(draft["routes"], plan["routes"]):
-        if (not isinstance(row, dict) or set(row) != {"from", "to", "origin_name", "destination_name",
+        if (not isinstance(row, dict) or set(row) - {"first_load_timing"} != {"from", "to", "origin_name", "destination_name",
                 "resources", "stock", "destination_space", "first_load_limit", "minimum_loads"}
                 or any(row[k] != requested[k] for k in ("from", "to", "resources"))
                 or any(not isinstance(row[k], str) or not 0 < len(row[k]) <= 250
@@ -534,6 +534,16 @@ def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, 
         if (type(row["first_load_limit"]) is not int or row["first_load_limit"] != expected
                 or row["minimum_loads"] != loads):
             raise ValueError("Invalid shipment capacity calculation")
+        timing = row.get("first_load_timing")
+        if timing is not None:
+            seconds = ("total_seconds", "loading_seconds", "travel_seconds", "queue_seconds")
+            if (not isinstance(timing, dict) or set(timing) != {"cargo", *seconds}
+                    or type(timing["cargo"]) is not int or timing["cargo"] != expected or not expected
+                    or any(type(timing[k]) is not int or not 0 <= timing[k] <= 365 * 86400 for k in seconds)
+                    or timing["travel_seconds"] <= 0
+                    or timing["total_seconds"] != sum(timing[k] for k in seconds[1:])):
+                raise ValueError("Invalid first-load timing")
+
     totals = {}
     for row in plan["routes"]:
         previous, stock = totals.get(row["from"], ([0]*5, row["stock"]))

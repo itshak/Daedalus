@@ -281,8 +281,9 @@ export function mergeIslandCities(rows:LocatedExternalCity[],incoming:ExternalCi
   return {cities:[...keep,...incoming.map(r=>({...r,x,y}))],invalidated};
 }
 
+export type FirstLoadTiming = {cargo:number;total_seconds:number;loading_seconds:number;travel_seconds:number;queue_seconds:number};
 export type ShipmentObservation = {from:number;to:number;origin_name:string;destination_name:string;
-  resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null};
+  resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null;first_load_timing?:FirstLoadTiming|null};
 export type ShipmentPlan = {account_id:string;routes:ShipmentObservation[];useFreighters:boolean;
   capacity:number;available_ships:number;total_ships:number;ready:boolean;preview_id:string|null;expires_in:number|null};
 function shipmentObservation(value:unknown,account:string,config:unknown,requireTicket:boolean):ShipmentPlan {
@@ -306,6 +307,15 @@ function shipmentObservation(value:unknown,account:string,config:unknown,require
     const limit=Array.isArray(space)?row.resources.reduce((a,b,j)=>a+Math.min(b,space[j]),0):cargo;
     if(row.first_load_limit!==Math.min(cargo,free,limit)||row.minimum_loads!==(full?Math.ceil(cargo/full):null))
       throw new Error("Invalid shipment calculation");
+    const timing=row.first_load_timing;
+    if(timing!==undefined&&timing!==null){
+      if(!obj(timing)||Object.keys(timing).length!==5||!integer(timing.cargo,1,1e15)||timing.cargo!==row.first_load_limit||
+         !integer(timing.total_seconds,0,31536000)||!integer(timing.loading_seconds,0,31536000)||
+         !integer(timing.travel_seconds,1,31536000)||!integer(timing.queue_seconds,0,31536000)||
+         timing.total_seconds!==timing.loading_seconds+timing.travel_seconds+timing.queue_seconds)
+        throw new Error("Invalid first-load timing");
+    }
+
     const id=r.from as number,previous=stocks.get(id)??{stock:row.stock,sum:[0,0,0,0,0]};
     if(previous.stock.some((n,j)=>n!==(row.stock as number[])[j]))throw new Error("Stock changed");
     const sum=previous.sum.map((n,j)=>n+(row.resources as number[])[j]);

@@ -29,3 +29,5 @@
 - [x] Implement exact owned-city construction supply allocation, rounded amounts, fleet/storage review, supply-only and supply-then-build in both clients; stop on uncertain dispatch and verify actual stock before upgrading.
 
 - [x] Implement masked Telegram/Discord replacement and clearing of worker-global defaults with owner-only browser authorization, encrypted one-use worker tickets, fixed HTTPS test, private atomic persistence and redacted receipts.
+
+- [x] Add conditional game-parameter first-load timing to shipment and construction-supply reviews; fail closed on missing route identity or timing fields. Full multi-load timing and live verification remain open.
