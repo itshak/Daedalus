@@ -20,11 +20,13 @@ from daedalus.reviewed_operations import (
     validate_build_inventory,
     validate_grind_plan,
     validate_island_destinations,
+    validate_shipment_plan,
     validated_attack_draft,
     validated_build_draft,
     validated_coordinates,
     validated_grind_draft,
     validated_layout_draft,
+    validated_shipment_draft,
     validated_station_draft,
     validated_worker_draft,
 )
@@ -187,6 +189,10 @@ class DaedalusClient:
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
+        if task == "sendResources" and set(config) == {"preview_id"}:
+            return self._write(f"accounts/{account_id}/tasks/shipment-start", {
+                "preview_id": config["preview_id"], "request_id": request_id, "confirmed": confirmed,
+            })
         if task in WORKER_TASKS:
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
                 raise ValueError("Review the worker assignment first")
@@ -679,6 +685,23 @@ class DaedalusClient:
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
         return data
+
+    def shipment_preview(self, account_id: str, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_shipment_draft(draft)
+        result = self._write(f"accounts/{account_id}/shipment-plan", clean)
+        if result.get("account_id") != account_id:
+            raise APIConnectionError("Shipment scope mismatch")
+        try:
+            validate_shipment_plan(clean, result)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid shipment preview") from exc
+        if result["ready"] and (not isinstance(result.get("preview_id"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", result["preview_id"])
+                or type(result.get("expires_in")) is not int or not 1 <= result["expires_in"] <= 120):
+            raise APIConnectionError("Invalid shipment review")
+        return {**result, "draft": clean}
 
     def island_destinations(self, account_id: str, x: int, y: int) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):

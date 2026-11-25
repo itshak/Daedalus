@@ -69,7 +69,10 @@ from daedalus.desktop.task_presentation import (
     present_fields,
     task_explanation,
 )
-from daedalus.reviewed_operations import CITY_REVIEW_TASKS, WORKER_TASKS, validated_worker_draft
+from daedalus.reviewed_operations import CITY_REVIEW_TASKS as ENGINE_REVIEW_TASKS
+from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
+
+CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | {"sendResources"}
 
 # Fixed, reviewed display labels. Unknown built-ins get a readable fallback,
 # but dispatch always uses the engine's canonical original task name.
@@ -133,6 +136,7 @@ class TasksPage(QWidget):
     batch_launch_requested = Signal(object, str, object)
     cities_requested = Signal(str)
     island_destinations_requested = Signal(str, int, int, str)
+    shipment_preview_requested = Signal(str, object, str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
     donation_preview_requested = Signal(str, object, str)
@@ -920,6 +924,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "sendResources":
+            self.building_note.setText("Reading current fleet, stock and storage…")
+            self.shipment_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "vacationMode":
             self.building_note.setText("Checking account jobs and automatic recovery policy…")
             self.vacation_preview_requested.emit(account, draft["city_id"], self._city_review_nonce)
@@ -941,6 +948,45 @@ class TasksPage(QWidget):
         else:
             self.building_note.setText("Reading the actual island project and available wood…")
             self.donation_preview_requested.emit(account, draft, self._city_review_nonce)
+
+    def set_shipment_preview(self, result, nonce):
+        if (self.selected_task_name() != "sendResources" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if result.get("draft") != draft:
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = {**result, **draft} if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        lines = [f"{result['available_ships']:,}/{result['total_ships']:,} "
+                 + ("freighters" if draft["useFreighters"] else "trade ships")
+                 + f" available; {result['capacity']:,} cargo per vessel."]
+        for row in result["routes"]:
+            cargo = ", ".join(f"{n} {v:,}" for n,v in zip(
+                ("wood", "wine", "marble", "crystal", "sulfur"), row["resources"]) if v)
+            loads = row["minimum_loads"] if row["minimum_loads"] is not None else "unavailable"
+            stock = ", ".join(f"{n} {v:,}" for n,v,w in zip(
+                ("wood", "wine", "marble", "crystal", "sulfur"), row["stock"], row["resources"]) if w)
+            lines.append(f"{row['origin_name']} → {row['destination_name']}: {cargo}. "
+                         f"Origin stock: {stock}. "
+                         f"First load ≤ {row['first_load_limit']:,}; minimum loads {loads}."
+                         + (" Recipient storage unknown." if row["destination_space"] is None else ""))
+        lines.append("Individual route limits share the same fleet. Waiting and ETA are not predicted.")
+        if not result["ready"]:
+            lines.append("No usable fleet; choose another fleet or acquire ships.")
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_shipment_unavailable(self, nonce):
+        if self.selected_task_name() == "sendResources" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Shipment preview unavailable. Check stock, recipients and fleet.")
+            self._invalidate_review()
 
     def set_donation_preview(self, result: dict[str, object], nonce: str) -> None:
         if (self.selected_task_name() != "donate" or nonce != self._city_review_nonce
@@ -1887,6 +1933,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview shipment capacity…" if name == "sendResources" else
             "Preview vacation activation…" if name == "vacationMode" else
             "Load troops / preview attack…" if name == "attackBarbarians" else
             "Preview automatic attacks…" if name == "autoBarbarians" else
@@ -2543,14 +2590,11 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
         params = self.building_note.text() if task in CITY_REVIEW_TASKS else configuration_summary(config)
-        if task == "sendResources" and isinstance(self._form_inputs.get("routes"), ShipmentRoutesEditor):
-            params = self._form_inputs["routes"].summary() + (
-                "\nFreighters" if config.get("useFreighters") else "\nTrade ships")
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params[:600]}\n\n"
+            f"Settings: {params[:6000] if task == 'sendResources' else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

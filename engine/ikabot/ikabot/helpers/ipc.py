@@ -772,6 +772,12 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action == "preview_shipments_existing":
+                    from ikabot.function.sendResources import preview_native_shipments
+                    session = self._existing_session(request)
+                    plan = preview_native_shipments(session, request.get("routes"), request.get("useFreighters"))
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, "plan": plan}
                 if action == "island_destinations_existing":
                     from ikabot.function.sendResources import native_island_destinations
                     session = self._existing_session(request)
@@ -1824,7 +1830,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

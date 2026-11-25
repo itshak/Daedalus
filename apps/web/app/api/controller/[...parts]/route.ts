@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
-import { validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
+import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -60,6 +60,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "shipment-plan" && !validNativeConfig("sendResources",value))
+      return NextResponse.json({error:"Invalid shipment draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "vacation-plan" && !z.object({}).strict().safeParse(value).success)
       return NextResponse.json({error:"Invalid vacation review"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "attack-plan") {
@@ -78,7 +80,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","shipment-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
       return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });

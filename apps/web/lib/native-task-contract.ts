@@ -273,3 +273,39 @@ export function scopedExternalCities(value:unknown,account:string,x:number,y:num
     throw new Error("Invalid island inventory");
   return value.cities as ExternalCity[];
 }
+
+export type ShipmentObservation = {from:number;to:number;origin_name:string;destination_name:string;
+  resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null};
+export type ShipmentPlan = {account_id:string;routes:ShipmentObservation[];useFreighters:boolean;
+  capacity:number;available_ships:number;total_ships:number;ready:boolean;preview_id:string|null;expires_in:number|null};
+export function scopedShipmentPlan(value:unknown,account:string,config:unknown):ShipmentPlan {
+  if (!validNativeConfig("sendResources",config)||!obj(config)||!obj(value)||value.account_id!==account||
+      value.useFreighters!==config.useFreighters||!integer(value.capacity,0,1e8)||!integer(value.total_ships,0,1e8)||
+      !integer(value.available_ships,0,value.total_ships)||value.ready!==Boolean(value.capacity&&value.total_ships)||
+      !Array.isArray(value.routes)||!Array.isArray(config.routes)||value.routes.length!==config.routes.length)
+    throw new Error("Invalid shipment plan");
+  const full=value.capacity*value.total_ships,free=value.capacity*value.available_ships;
+  const quantities=(v:unknown):v is number[]=>Array.isArray(v)&&v.length===5&&v.every(n=>integer(n,0,1e15));
+  const stocks=new Map<number,{stock:number[];sum:number[]}>();
+  for(let i=0;i<value.routes.length;i++){
+    const row=value.routes[i],r=config.routes[i];
+    if(!obj(row)||row.from!==r.from||row.to!==r.to||!quantities(row.resources)||
+       row.resources.some((n,j)=>n!==r.resources[j])||!quantities(row.stock)||
+       (r.recipient===undefined?!quantities(row.destination_space):row.destination_space!==null)||
+       typeof row.origin_name!=="string"||!row.origin_name||row.origin_name.length>250||
+       typeof row.destination_name!=="string"||!row.destination_name||row.destination_name.length>250)
+      throw new Error("Invalid shipment route");
+    const cargo=row.resources.reduce((a,b)=>a+b,0),space=row.destination_space;
+    const limit=Array.isArray(space)?row.resources.reduce((a,b,j)=>a+Math.min(b,space[j]),0):cargo;
+    if(row.first_load_limit!==Math.min(cargo,free,limit)||row.minimum_loads!==(full?Math.ceil(cargo/full):null))
+      throw new Error("Invalid shipment calculation");
+    const id=r.from as number,previous=stocks.get(id)??{stock:row.stock,sum:[0,0,0,0,0]};
+    if(previous.stock.some((n,j)=>n!==(row.stock as number[])[j]))throw new Error("Stock changed");
+    const sum=previous.sum.map((n,j)=>n+(row.resources as number[])[j]);
+    if(sum.some((n,j)=>n>previous.stock[j]))throw new Error("Insufficient stock");
+    stocks.set(id,{stock:previous.stock,sum});
+  }
+  if(value.ready&&(typeof value.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(value.preview_id)||!integer(value.expires_in,1,120)))
+    throw new Error("Invalid shipment ticket");
+  return value as unknown as ShipmentPlan;
+}

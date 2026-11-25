@@ -109,3 +109,9 @@ test("external island lookup allows only two bounded coordinates",()=>{
   for(const q of ["x=0&y=60","x=101&y=60","x=50&y=60&raw=true","x=50&x=60","x=50"])
     assert.equal(allowedRequest("GET",path,params(q)),false);
 });
+
+test("shipment plan and ticket launch are allowlisted only for exact paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/shipment-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/shipment-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/shipment-plan".split("/"),params("raw=1")),false);
+});

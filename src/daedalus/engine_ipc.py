@@ -25,6 +25,7 @@ from daedalus.reviewed_operations import (
     validate_grind_plan,
     validate_island_destinations,
     validate_layout_plan,
+    validate_shipment_plan,
     validate_station_plan,
     validate_vacation_plan,
     validate_worker_plan,
@@ -33,6 +34,7 @@ from daedalus.reviewed_operations import (
     validated_coordinates,
     validated_grind_draft,
     validated_layout_draft,
+    validated_shipment_draft,
     validated_station_draft,
     validated_worker_draft,
 )
@@ -47,7 +49,7 @@ from daedalus.warehouse import (
 _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
-    "ping", "list_sessions", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing",
+    "ping", "list_sessions", "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
@@ -156,12 +158,13 @@ class ExistingIPCClient:
                 station_draft: dict[str, object] | None = None,
                 grind_draft: dict[str, object] | None = None,
                 attack_draft: dict[str, object] | None = None,
-                coordinates: tuple[int, int] | None = None) -> dict[str, Any]:
+                coordinates: tuple[int, int] | None = None,
+                shipment_draft: dict[str, object] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
-            "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
+            "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
@@ -249,8 +252,12 @@ class ExistingIPCClient:
             payload["x"], payload["y"] = validated_coordinates(*coordinates)
         elif coordinates is not None:
             raise ValueError("Unexpected island coordinates")
+        if action == "preview_shipments_existing":
+            payload.update(validated_shipment_draft(shipment_draft))
+        elif shipment_draft is not None:
+            raise ValueError("Unexpected shipment draft")
         return self._exchange(payload, read_timeout=60.0 if action in {
-            "island_destinations_existing",
+            "preview_shipments_existing", "island_destinations_existing",
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
             "list_build_options_existing", "preview_build_existing",
             "preview_layout_existing",
@@ -374,6 +381,21 @@ class ExistingIPCClient:
                 }
             )
         return result
+
+    def shipment_preview(self, account: Account, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_shipment_draft(draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if any(r["from"] not in owned or ((r["to"] in owned) == ("recipient" in r))
+               for r in clean["routes"]):
+            raise ValueError("Choose verified shipment cities")
+        data = self.request("preview_shipments_existing", account=account, shipment_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid shipment scope")
+        try:
+            return {"account_id": account.id, **validate_shipment_plan(clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid shipment preview") from exc
 
     def island_destinations(self, account: Account, x: int, y: int) -> dict[str, object]:
         validated_coordinates(x, y)

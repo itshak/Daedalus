@@ -355,3 +355,64 @@ def validate_island_destinations(x: int, y: int, result: object) -> list[dict[st
     if len(islands) > 1:
         raise ValueError("Mixed island inventory")
     return result["cities"]
+
+
+def validated_shipment_draft(draft: object) -> dict[str, object]:
+    if (not isinstance(draft, dict) or set(draft) != {"routes", "useFreighters"}
+            or type(draft["useFreighters"]) is not bool
+            or not isinstance(draft["routes"], list) or not 1 <= len(draft["routes"]) <= 20):
+        raise ValueError("Invalid shipment draft")
+    totals = {}
+    for route in draft["routes"]:
+        if (not isinstance(route, dict) or set(route) not in (
+                {"from", "to", "resources"}, {"from", "to", "resources", "island", "recipient"})
+                or any(type(route[k]) is not int or not 0 < route[k] < 10**12
+                       for k in set(route) - {"resources"})
+                or route["from"] == route["to"] or not isinstance(route["resources"], list)
+                or len(route["resources"]) != 5 or any(type(v) is not int or not 0 <= v <= 10**9
+                                                       for v in route["resources"])
+                or not any(route["resources"])):
+            raise ValueError("Invalid shipment route")
+        totals[route["from"]] = [a+b for a,b in zip(totals.get(route["from"], [0]*5), route["resources"])]
+        if any(v > 10**9 for v in totals[route["from"]]):
+            raise ValueError("Aggregate cargo exceeds the limit")
+    return draft
+
+
+def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, object]:
+    if (not isinstance(plan, dict) or plan.get("useFreighters") is not draft["useFreighters"]
+            or any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 10**8
+                   for k in ("capacity", "available_ships", "total_ships"))
+            or plan["available_ships"] > plan["total_ships"]
+            or plan.get("ready") is not bool(plan["capacity"] and plan["total_ships"])
+            or not isinstance(plan.get("routes"), list) or len(plan["routes"]) != len(draft["routes"])):
+        raise ValueError("Invalid fleet observation")
+    for requested, row in zip(draft["routes"], plan["routes"]):
+        if (not isinstance(row, dict) or set(row) != {"from", "to", "origin_name", "destination_name",
+                "resources", "stock", "destination_space", "first_load_limit", "minimum_loads"}
+                or any(row[k] != requested[k] for k in ("from", "to", "resources"))
+                or any(not isinstance(row[k], str) or not 0 < len(row[k]) <= 250
+                       for k in ("origin_name", "destination_name"))
+                or not _resources(row["stock"])
+                or ("recipient" in requested and row["destination_space"] is not None)
+                or ("recipient" not in requested and not _resources(row["destination_space"]))):
+            raise ValueError("Invalid shipment observation")
+        cargo = sum(row["resources"])
+        expected = min(cargo, plan["capacity"] * plan["available_ships"])
+        if row["destination_space"] is not None:
+            expected = min(expected, sum(min(a, b) for a, b in zip(row["resources"], row["destination_space"])))
+        full = plan["capacity"] * plan["total_ships"]
+        loads = (cargo+full-1)//full if full else None
+        if (type(row["first_load_limit"]) is not int or row["first_load_limit"] != expected
+                or row["minimum_loads"] != loads):
+            raise ValueError("Invalid shipment capacity calculation")
+    totals = {}
+    for row in plan["routes"]:
+        previous, stock = totals.get(row["from"], ([0]*5, row["stock"]))
+        if stock != row["stock"]:
+            raise ValueError("Stock changed during preview")
+        total = [a+b for a,b in zip(previous,row["resources"])]
+        if any(a>b for a,b in zip(total, stock)):
+            raise ValueError("Insufficient source stock")
+        totals[row["from"]] = (total, stock)
+    return {k:plan[k] for k in ("routes","useFreighters","capacity","available_ships","total_ships","ready")}

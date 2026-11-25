@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities} from "../lib/native-task-contract.ts";
+import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities,scopedShipmentPlan} from "../lib/native-task-contract.ts";
 test("fixed shipment: strict route shape, positive quantities, distinct cities, no unverified external/raw override",()=>{
   const route={from:1,to:2,resources:[5,0,0,0,0]};
   const config={routes:[route],useFreighters:false};
@@ -122,4 +122,15 @@ test("external city inventory and route identity must be scoped",()=>{
   assert.throws(()=>scopedExternalCities({...data,cities:[...data.cities,...data.cities]},"a",50,60));
   assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:7,resources:[1,0,0,0,0]}],useFreighters:false}),true);
   assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:0,resources:[1,0,0,0,0]}],useFreighters:false}),false);
+});
+
+test("shipment capacity preview binds account, exact cargo and fleet arithmetic",()=>{
+  const config={routes:[{from:1,to:2,resources:[450,0,0,0,0]}],useFreighters:false};
+  const result={account_id:"a",routes:[{from:1,to:2,origin_name:"A",destination_name:"B",resources:[450,0,0,0,0],
+    stock:[500,0,0,0,0],destination_space:[50,0,0,0,0],first_load_limit:50,minimum_loads:2}],
+    useFreighters:false,capacity:100,total_ships:3,available_ships:1,ready:true,preview_id:"a".repeat(43),expires_in:120};
+  assert.equal(scopedShipmentPlan(result,"a",config).routes[0].first_load_limit,50);
+  assert.throws(()=>scopedShipmentPlan(result,"b",config));
+  assert.throws(()=>scopedShipmentPlan({...result,routes:[{...result.routes[0],minimum_loads:1}]},"a",config));
+  assert.throws(()=>scopedShipmentPlan({...result,preview_id:null},"a",config));
 });

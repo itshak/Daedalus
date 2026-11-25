@@ -11,6 +11,8 @@ from ikabot.helpers.getJson import getCity, getIsland
 from ikabot.helpers.gui import *
 from ikabot.helpers.pedirInfo import *
 from ikabot.helpers.planRoutes import executeRoutes
+from ikabot.helpers.naval import getAvailableShips, getTotalShips, getAvailableFreighters, getTotalFreighters
+from ikabot.helpers import pedirInfo
 from ikabot.helpers.resources import *
 from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.taskConfig import asBool, asId, asInt, getCityById, requireOwnCity
@@ -130,6 +132,8 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
     """
     if not isinstance(routes, (list, tuple)) or not routes:
         raise ValueError('routes must be a list of {{"from": ..., "to": ..., "resources": [...]}}, got {!r}'.format(routes))
+    if any(isinstance(r, dict) and "recipient" in r for r in routes):
+        pedirInfo.ids_cache = None
     own_ids, _ = getIdsOfCities(session)
     checked = []
     asked = {}  # origin id -> amounts asked by all its routes
@@ -189,6 +193,66 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
     if transfer_id is not None:
         result["transfer_id"] = transfer_id
     return result
+
+
+def preview_native_shipments(session, routes, useFreighters):
+    """A read-only quote of current inventory, fleet and minimum load counts."""
+    pedirInfo.ids_cache = None
+    if type(useFreighters) is not bool or not isinstance(routes, list) or not 1 <= len(routes) <= 20:
+        raise ValueError("Invalid shipment plan")
+    own_ids, own_cities = getIdsOfCities(session)
+    owned = set(map(str, own_ids))
+    # The native surface must never accept an unverified foreign recipient.
+    for route in routes:
+        if str(route["to"]) not in owned and "recipient" not in route:
+            raise ValueError("Discover the external recipient first")
+    # Reuse the upstream validation of ownership, routes and aggregate stock.
+    checked = prepare_sendResources(session, routes, useFreighters)["routes"]
+    ship_capacity, freighter_capacity = getShipCapacity(session)
+    capacity = freighter_capacity if useFreighters else ship_capacity
+    free = getAvailableFreighters(session) if useFreighters else getAvailableShips(session)
+    total = getTotalFreighters(session) if useFreighters else getTotalShips(session)
+    if (type(capacity) is not int or not 0 <= capacity <= 10**8
+            or type(free) is not int or type(total) is not int or not 0 <= free <= total <= 10**8):
+        raise ValueError("Invalid fleet observation")
+    rows = []
+    for route, item in zip(routes, checked):
+        cargo = sum(item["resources"])
+        origin, destination = item["from"], item["to"]
+        source = getCityById(session, origin)
+        if str(source["id"]) != origin:
+            raise ValueError("Origin identity changed")
+        stock = source["availableResources"]
+        if len(stock) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in stock):
+            raise ValueError("Invalid source stock")
+        if destination in owned:
+            target = getCityById(session, destination)
+            if str(target["id"]) != destination:
+                raise ValueError("Destination identity changed")
+            space = target["freeSpaceForResources"]
+            if len(space) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in space):
+                raise ValueError("Invalid destination capacity")
+            name = decodeUnicodeEscape(own_cities[destination]["name"])[:120]
+        else:
+            island = get_island(session, item["island"], "Destination island")
+            _verify_recipient(session, item, island)
+            recipient = next(r for r in _eligible_destinations(session, island)
+                             if str(r["id"]) == destination)
+            name = f"{recipient['name']} — {recipient['owner']}"[:250]
+            space = None
+        first = min(cargo, free * capacity)
+        if space is not None:
+            first = min(first, sum(min(a, b) for a, b in zip(item["resources"], space)))
+        rows.append({"from": route["from"], "to": route["to"],
+                     "origin_name": decodeUnicodeEscape(own_cities[origin]["name"])[:120],
+                     "destination_name": name, "resources": item["resources"],
+                     "stock": stock, "destination_space": space,
+                     "first_load_limit": first,
+                     "minimum_loads": (cargo + total * capacity - 1) // (total * capacity)
+                     if total and capacity else None})
+    return {"routes": rows, "useFreighters": useFreighters, "capacity": capacity,
+            "available_ships": free, "total_ships": total,
+            "ready": bool(total and capacity)}
 
 
 @task("sendResources", prepare=prepare_sendResources)

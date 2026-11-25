@@ -38,7 +38,7 @@ ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PENDING |
 def operation_workflow(name: str) -> dict[str, object]:
     """Return explicitly reviewed coverage and execution policy for one name."""
     if name in _NATIVE:
-        review = ("ticket" if name in CITY_REVIEW_TASKS else
+        review = ("ticket" if name in CITY_REVIEW_TASKS or name == "sendResources" else
                   "engine_preview_web_ticket" if name == "constructionList" else "native_draft")
         return {
             "desktop": "native", "web": "native", "review": review,

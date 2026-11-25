@@ -333,7 +333,7 @@
     "sendResources": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
         "current"

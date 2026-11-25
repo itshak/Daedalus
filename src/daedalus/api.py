@@ -52,6 +52,7 @@ from daedalus.reviewed_operations import (
     validated_build_draft,
     validated_grind_draft,
     validated_layout_draft,
+    validated_shipment_draft,
     validated_station_draft,
     validated_worker_draft,
 )
@@ -638,6 +639,22 @@ def create_app(
         except (EngineIPCUnavailable, ValueError) as exc:
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
+
+    @app.post("/api/v1/accounts/{account_id}/shipment-plan", dependencies=[Depends(authorized)])
+    def shipment_plan(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        require_task_controller(account_id)
+        account = account_by_id[account_id]
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Shipment planner unavailable")
+        try:
+            draft = validated_shipment_draft(payload)
+            plan = ipc_client.shipment_preview(account, draft)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Shipment draft or stock rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Shipment preview unavailable") from exc
+        ticket = operation_previews.issue(account_id, "sendResources", draft) if plan["ready"] else None
+        return {**plan, "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None}
 
     @app.get("/api/v1/accounts/{account_id}/island-destinations", dependencies=[Depends(authorized)])
     def island_destinations(account_id: str, x: int, y: int) -> dict[str, object]:
@@ -1421,6 +1438,12 @@ def create_app(
     ) -> dict[str, object]:
         if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS:
             raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
+        if payload.get("task") == "sendResources":
+            config = payload.get("config")
+            routes = config.get("routes") if isinstance(config, dict) else None
+            if isinstance(routes, list) and any(isinstance(r, dict) and
+                    ("island" in r or "recipient" in r) for r in routes):
+                raise HTTPException(status_code=422, detail="Review external shipments first")
         return dispatch_account_task(account_id, payload)
 
     def dispatch_account_task(account_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -1460,6 +1483,10 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/shipment-start", dependencies=[Depends(authorized)])
+    def start_reviewed_shipment(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "sendResources", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/vacation-start",
               dependencies=[Depends(authorized)])

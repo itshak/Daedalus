@@ -892,3 +892,36 @@ def test_external_city_selection_rejects_stale_lookup_and_preserves_own_origins(
     with pytest.raises(ValueError):
         editor.to_config()
     editor.close()
+
+
+def test_shipment_requires_current_capacity_ticket(page, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    set_native(page, "sendResources", [field("routes", required=True), field("useFreighters", "boolean", default=False)])
+    page.set_preflight({"account_id": "alpha", "task": "sendResources", "ready": True, "reason": "none"})
+    editor = page._form_inputs["routes"]
+    editor.add_route()
+    editor.table.cellWidget(0,0).setCurrentIndex(1)
+    editor.table.cellWidget(0,1).setCurrentIndex(2)
+    editor.table.cellWidget(0,2).setValue(50)
+    calls = []
+    page.shipment_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert not page.start_button.isEnabled()
+    draft = calls[0][1]
+    result = {"account_id": "alpha", "draft": draft, "ready": True, "preview_id": "a"*43,
+              "expires_in": 120, "available_ships": 1, "total_ships": 2, "capacity": 100,
+              "routes": [{"origin_name": "Athens", "destination_name": "Sparta",
+                          "resources": [50,0,0,0,0], "stock": [100]*5,
+                          "first_load_limit": 50, "minimum_loads": 1,
+                          "destination_space": [100]*5}]}
+    page.set_shipment_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_shipment_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    launches = []
+    page.launch_requested.connect(lambda *args: launches.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launches[0][:3] == ("alpha", "sendResources", {"preview_id": "a"*43})

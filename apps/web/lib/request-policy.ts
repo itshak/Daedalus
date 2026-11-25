@@ -27,9 +27,10 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     if (parts.length === 3 && parts.join("/") === "recovery/policy/bulk") return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery"
       && ["pause","unpause","resume-now","import-saved-token"].includes(parts[3])) return true;
+    if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "shipment-plan") return params.size===0;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "tasks") return true;
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "cities" && safeNumber.test(parts[3]) && ["construction-plan","donation-plan","worker-plan","layout-plan","build-plan","station-plan","grind-plan","attack-plan","vacation-plan"].includes(parts[4]) && params.size === 0) return true;
-    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && ["construction-start","donation-start","worker-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start"].includes(parts[3]) && params.size === 0) return true;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && ["construction-start","donation-start","worker-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","shipment-start"].includes(parts[3]) && params.size === 0) return true;
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "tasks" && parts[4] === "stop") return true;
     if (parts.length === 6 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "requests" && parts[5] === "acknowledge") return true;
   }

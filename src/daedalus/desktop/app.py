@@ -299,6 +299,8 @@ class APIWorker(QThread):
                 result = _known_ikabot_workers(self.client)
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "task_shipment_preview" and self.account_id and self.task_payload:
+                result = self.client.shipment_preview(self.account_id, self.task_payload["draft"])
             elif self.action == "task_island_destinations" and self.account_id and self.task_payload:
                 result = self.client.island_destinations(self.account_id, self.task_payload["x"], self.task_payload["y"])
             elif self.action == "task_cities" and self.account_id:
@@ -823,6 +825,10 @@ class MainWindow(FluentWindow):
         )
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
+            view.shipment_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_shipment_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
             view.island_destinations_requested.connect(
                 lambda aid, x, y, nonce: self._request("task_island_destinations", account_id=aid,
                     task_payload={"x": x, "y": y, "nonce": nonce})
@@ -2320,6 +2326,11 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_result(account_id, action, payload)
+        elif action == "task_shipment_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_shipment_preview(payload, request["nonce"])
         elif action == "task_island_destinations":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2551,6 +2562,10 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_unavailable(account_id, action)
+        if action == "task_shipment_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_shipment_unavailable(request["nonce"])
         if action == "task_island_destinations":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
