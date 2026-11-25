@@ -423,3 +423,7 @@ def configuration_summary(config: dict[str, object]) -> str:
         else:
             items.append(f"{title}: configured")
     return ", ".join(items)[:600]
+
+
+# Only account-independent settings may be reused across account boundaries.
+BATCH_TASKS = frozenset({"alertAttacks", "alertLowWine"})

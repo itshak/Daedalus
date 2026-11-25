@@ -13,6 +13,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 
@@ -39,6 +40,7 @@ from daedalus.login_vault import (
     write_login_vault,
 )
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
+from daedalus.operation_previews import OperationPreviews, PreviewUnavailable
 from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentialsUnavailable
 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore
@@ -99,6 +101,7 @@ def create_app(
     else:
         configured_accounts = load_accounts(accounts_path)
     account_by_id = {account.id: account for account in configured_accounts}
+    operation_previews = OperationPreviews()
     owner = session_coordinator or AccountSessionCoordinator(configured_accounts)
     if not owner.matches_accounts(configured_accounts):
         raise ValueError("Session coordinator and configuration must contain the same accounts")
@@ -689,6 +692,39 @@ def create_app(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
 
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/construction-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def construction_plan(
+        account_id: str, city_id: int,
+        payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        """Return display data and a short-lived opaque review ticket, not a task payload."""
+        plan = preview_construction(account_id, city_id, payload)
+        config = plan.get("config")
+        if not isinstance(config, dict):
+            raise HTTPException(status_code=503, detail="Construction plan unavailable")
+        buildings = config.get("buildings")
+        if not isinstance(buildings, list) or not buildings:
+            raise HTTPException(status_code=503, detail="Construction targets unavailable")
+        ticket = None
+        if plan.get("ready") is True and task_controller is not None:
+            ticket = operation_previews.issue(account_id, "constructionList", config)
+        return {
+            "account_id": account_id, "city_id": city_id,
+            "city_name": config.get("city_name"),
+            "ready": plan.get("ready") is True,
+            "costs": plan.get("costs"), "available": plan.get("available"),
+            "missing": plan.get("missing"), "estimated_seconds": plan.get("estimated_seconds"),
+            "buildings": [
+                {"name": row["name"], "current_level": row["level"],
+                 "target_level": row["upgradeTo"], "position": row["position"]}
+                for row in buildings
+            ],
+            "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None,
+        }
+
     @app.get(
         "/api/v1/accounts/{account_id}/cities/{city_id}/workshop-upgrades",
         dependencies=[Depends(authorized)],
@@ -1136,6 +1172,37 @@ def create_app(
             raise HTTPException(status_code=503, detail="Existing authenticated task worker unavailable") from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/construction-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_construction(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        require_task_controller(account_id)
+        key, request_id = payload.get("preview_id"), payload.get("request_id")
+        if (
+            set(payload) != {"preview_id", "request_id", "confirmed"}
+            or payload.get("confirmed") is not True
+            or not isinstance(key, str) or len(key) != 43
+            or not isinstance(request_id, str)
+        ):
+            raise HTTPException(status_code=422, detail="Explicit construction review required")
+        try:
+            parsed = UUID(request_id)
+            if parsed.version != 4 or str(parsed) != request_id:
+                raise ValueError
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Valid request ID required") from exc
+        try:
+            config = operation_previews.claim(key, account_id, "constructionList", request_id)
+        except PreviewUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return start_account_task(account_id, {
+            "task": "constructionList", "config": config,
+            "request_id": request_id, "confirmed": True,
+        })
 
     @app.post(
         "/api/v1/accounts/{account_id}/tasks/{task_id}/stop",

@@ -54,6 +54,7 @@ from daedalus.desktop.ssh_tunnel import (
     validate_ssh_destination,
 )
 from daedalus.desktop.task_page import TasksPage
+from daedalus.desktop.task_presentation import BATCH_TASKS
 from daedalus.gui_preferences import (
     GuiPreferenceError,
     GuiPreferences,
@@ -421,8 +422,9 @@ class APIWorker(QThread):
                     or any(not isinstance(aid, str) for aid in ids)
                     or len(set(ids)) != len(ids)
                     or not isinstance(task, str) or not isinstance(config, dict)
+                    or task not in BATCH_TASKS
                 ):
-                    raise ValueError("Select up to 32 distinct authorized task accounts")
+                    raise ValueError("Select authorized accounts and an account-independent task")
                 # All preflights must succeed BEFORE the first game mutation.
                 blocked = []
                 for aid in ids:

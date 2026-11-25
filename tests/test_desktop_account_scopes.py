@@ -842,3 +842,16 @@ def test_automation_uses_player_names_across_account_scopes(app):
         assert page.multi_table.item(1, 0).text() == "Ais"
     finally:
         _dispose(page, app)
+
+
+def test_city_bound_bulk_plan_cannot_be_reused_for_other_accounts(app):
+    page = TasksPage()
+    try:
+        page.set_accounts(accounts(3))
+        page.set_capabilities([{"name": "sendResources", "kind": "background_task",
+                                "config_fields": []}], enabled=True)
+        page._bulk_account_ids = ["account-0", "account-1"]
+        page._update_bulk_buttons()
+        assert not page.start_selected_button.isEnabled()
+    finally:
+        page.deleteLater()

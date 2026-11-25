@@ -44,3 +44,9 @@ test('recovery routes allow only audited nonsecret controls', () => {
   assert.equal(allowedRequest('PUT', 'accounts/a/recovery/pause'.split('/'), params()), false);
   assert.equal(allowedRequest('GET', 'accounts/a/recovery/secret'.split('/'), params()), false);
 });
+
+test("construction uses reviewed tickets rather than a browser-supplied engine plan",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/construction-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/construction-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/construction-preview".split("/"),params()),false);
+});

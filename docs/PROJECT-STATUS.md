@@ -2,6 +2,10 @@
 
 Last reviewed: **2026-11-22** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
 
+## Cross-platform native automation parity (active)
+
+The `complete-cross-platform-automation-parity` change is **ACTIVE and PARTIALLY IMPLEMENTED**. See PR #97 and its [implementation status](../openspec/changes/complete-cross-platform-automation-parity/implementation-status.md). Existing desktop forms are retained; raw configuration editors and imports are removed, and web editors now cover the reviewed background-task subset. Cross-platform full parity, interactive adapters, live acceptance and deployment remain open.
+
 ## Automatic recovery implementation (active OpenSpec; approval pending)
 
 The `delayed-session-reconnect-and-task-restoration` change is **ACTIVE and PARTIALLY IMPLEMENTED**. It now includes a default-enabled per-account 300-second grace timer, a private versioned SQLite desired-job and idempotent resume journal, exact-account encrypted server-side Gameforge lobby-token import, an isolated IkaBot engine recovery supervisor automatically active when monitored task control is configured (explicit host opt-out available), a narrow verified safe-task allowlist, Mac and Next.js recovery controls and synthetic API/UI/session tests. Enabled accounts now default to recovery and safe-job resume ON unless an explicit disabled policy already exists; existing pauses, identity mismatch, protected-credential prerequisites and fresh world/player verification still gate any restart. The backend deployment and live Gameforge acceptance are independently checked.
@@ -33,8 +37,7 @@ The `native-automation-workflows` OpenSpec change is **ACTIVE and UNFINISHED**.
 It implements category tabs, actual authenticated city pickers, a bounded read-only
 IkaBot IPC/API for real owned-city building levels, a construction building table
 with draft upgrade targets, and safe rejection of cross-account city/plan reuse.
-Raw construction planner JSON is hidden from the normal UI, with expert import
-retained for previously prepared engine plans. Resource distribution has native
+Raw construction planner JSON and expert import are removed from the automation UI in the cross-platform implementation. Resource distribution has native
 resource/mode choices and source-backed participating-city multi-selection;
 research and tavern management have account-bound city subsets. Daily reward collection has native wine/wood/luxury city destinations and verified favour-task choices.
 

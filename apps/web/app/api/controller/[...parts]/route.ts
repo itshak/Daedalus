@@ -12,6 +12,7 @@ const buildingTargets = z.object({ upgrades: z.array(z.object({
   target_level: z.number().int().min(1).max(150)
 }).strict()).min(1).max(12) }).strict();
 
+const constructionStart = z.object({ preview_id: z.string().regex(/^[A-Za-z0-9_-]{43}$/), request_id: z.uuid(), confirmed: z.literal(true) }).strict();
 const confirmedOnly = z.object({ confirmed: z.literal(true) }).strict();
 const recoveryPolicy = z.object({
   confirmed: z.literal(true), enabled: z.boolean(), auto_resume: z.boolean(),
@@ -49,8 +50,10 @@ async function proxy(request: NextRequest, context: RouteContext) {
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
     if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
-    if (parts.at(-1) === "construction-preview" && !buildingTargets.safeParse(value).success)
+    if (parts.at(-1) === "construction-plan" && !buildingTargets.safeParse(value).success)
       return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) === "construction-start" && !constructionStart.safeParse(value).success)
+      return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });
     if (parts[0] === "recovery" && parts[1] === "policy" && parts[2] === "bulk" && !recoveryBulk.safeParse(value).success)

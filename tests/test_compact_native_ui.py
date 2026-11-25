@@ -85,7 +85,7 @@ def test_automation_gallery_is_optional_but_keeps_task_selection(app):
         assert page.task_combo.count() == 1
         page._toggle_gallery()
         assert page._gallery_open
-        assert page.browse_button.text() == "Hide automation gallery"
+        assert page.browse_button.text() == "Hide actions"
         assert not page.start_button.isEnabled()
     finally:
         page.close()

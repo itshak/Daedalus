@@ -61,6 +61,7 @@ from daedalus.desktop.native_controls import (
 )
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
+    BATCH_TASKS,
     configuration_summary,
     expert_configuration_needed,
     present_fields,
@@ -1118,8 +1119,7 @@ class TasksPage(QWidget):
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
         # One city's construction plan cannot be dispatched against other account IDs.
-        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources", "autoPirate"}:
+        if self.selected_task_name() not in BATCH_TASKS:
             can_start = False
         if expert_configuration_needed(
                 self._config_fields_by_task.get(self.selected_task_name() or "", [])):
@@ -1128,10 +1128,9 @@ class TasksPage(QWidget):
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
-        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources", "autoPirate"}:
+        if self.selected_task_name() not in BATCH_TASKS:
             self.bulk_note.setText(
-                "City-specific plans must be configured separately for each account."
+                "Account-specific plans must be configured separately for each account."
             )
         elif count > 32:
             self.bulk_note.setText(
@@ -1212,8 +1211,7 @@ class TasksPage(QWidget):
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
-                or self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                                 "buyResources", "sellResources", "autoPirate"}
+                or self.selected_task_name() not in BATCH_TASKS
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
                 or not self.selected_task_name()
@@ -1481,7 +1479,9 @@ class TasksPage(QWidget):
             f"Automation description: {_friendly_task(name)}" if name else
             "No matching automations"
         )
-        expert_needed = name != "constructionList" and expert_configuration_needed(fields)
+        expert_needed = name == "webServer" or (
+            name != "constructionList" and expert_configuration_needed(fields)
+        )
         self.expert_note.setVisible(expert_needed)
         if expert_needed:
             self.expert_note.setText(
@@ -2014,6 +2014,7 @@ class TasksPage(QWidget):
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
+            and self.selected_task_name() != "webServer"
             # A native editor must cover all required structured parameters.
             and (self.selected_task_name() == "constructionList"
                  or not expert_configuration_needed(

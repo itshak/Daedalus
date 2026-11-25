@@ -55,9 +55,9 @@ Legend: D = desktop dedicated editor exists but full acceptance/gaps remain; E =
 | checkForUpdate | M | M | Auxiliary release check, version comparison and approved update workflow |
 | show_proxy | M | M | Auxiliary masked proxy status and connectivity, never expose credentials |
 
-## Implementation progress — first vertical slice (not accepted)
+## Implementation progress — expanded background slice (not accepted)
 
-The implementation branch adds single-account web-native editors and strict BFF task schemas for sendResources, distributeResources, consolidateResources, resourceTransportManager, alertAttacks and alertLowWine. Their engine revalidation and durable request ledger already exist. These are partial, not complete: authoritative shipment preview/capacity/ETA, external cities, independent batch plans, shared versioned backend contracts, browser E2E and live acceptance remain open. The baseline table above is retained as historical evidence. PR #95 is integrated on this branch for desktop naming and native-only settings; it still needs native GUI validation.
+See [implementation-status.md](implementation-status.md) for current editors and local verification. The web now has 20 native background editors, including authoritative self-funded construction preview/launch, dynamic operation search and account-independent alert batches. The desktop player-first/native-only controls are integrated and tested offscreen. The baseline table above is intentionally retained as historical evidence rather than an acceptance claim. External cities, fleet capacity/ETA, full options, city-bound independent batches, interactive adapters, combat and web-service workflows remain open.
 
 ## Evidence and gaps
 

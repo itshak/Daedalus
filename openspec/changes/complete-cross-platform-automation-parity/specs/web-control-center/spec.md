@@ -1,3 +1,9 @@
+# Web Control Center
+
+## Purpose
+
+Provide full native web automation workflows with shared account-scoped operation contracts.
+
 ## ADDED Requirements
 
 ### Requirement: Web native operation parity

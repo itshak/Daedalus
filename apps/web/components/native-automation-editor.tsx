@@ -2,11 +2,11 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "./language-provider";
-import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, scopedCities, readyPreflight, validNativeConfig } from "@/lib/native-task-contract";
+import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, type BatchTarget, type BatchReceipt, launchAlertBatch, scopedCities, readyPreflight, validNativeConfig } from "@/lib/native-task-contract";
 
 type Config = Record<string,unknown>;
 type Route = {key:number; from:number; to:number; resources:number[]};
-type Props = {account:string; accountName:string; task:NativeTask; enabled:boolean; role:string};
+type Props = {account:string; accountName:string; task:NativeTask; enabled:boolean; role:string; batchTargets?:BatchTarget[]};
 const zeros = () => [0,0,0,0,0];
 const route = (key:number):Route => ({key,from:0,to:0,resources:zeros()});
 async function api(path:string, body?:unknown):Promise<unknown> {
@@ -17,7 +17,7 @@ async function api(path:string, body?:unknown):Promise<unknown> {
   return response.json();
 }
 
-export function NativeAutomationEditor({account,accountName,task,enabled,role}:Props) {
+export function NativeAutomationEditor({account,accountName,task,enabled,role,batchTargets}:Props) {
   // Parent keys this component by account, task and refresh revision. A stale response
   // cannot populate another account's form or retain its review.
   const {t}=useLanguage();
@@ -49,6 +49,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   const [busy,setBusy]=useState(false);
   const [locked,setLocked]=useState(false);
   const [message,setMessage]=useState("");
+  const [batchReceipts,setBatchReceipts]=useState<BatchReceipt[]>([]);
   const inFlight=useRef(false);
   const mounted=useRef(false);
   const prefix="accounts/"+encodeURIComponent(account);
@@ -103,7 +104,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   const valid=scoped&&validNativeConfig(task,config);
   const fingerprint=JSON.stringify(config);
   const reviewed=review!==null&&review.fingerprint===fingerprint;
-  const canReview=enabled&&role!=="viewer"&&ready&&!loading&&!loadError&&valid&&!locked&&!busy;
+  const batchValid=!!batchTargets&&batchTargets.length>=1&&batchTargets.length<=32&&batchTargets.every(a=>a.enabled);
+  const canReview=(batchTargets?batchValid:enabled&&ready&&!loading&&!loadError)&&role!=="viewer"&&valid&&!locked&&!busy;
   const canLaunch=canReview&&reviewed&&approved;
   const edit=()=>{setReview(null);setApproved(false);};
   const numeric=(label:string,value:number,onChange:(v:number)=>void,min:number,max:number)=>
@@ -124,6 +126,14 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
     if (!canLaunch || !review || inFlight.current)return;
     inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);setMessage("");
     try {
+      if(batchTargets&&(task==="alertAttacks"||task==="alertLowWine")){
+        const rows=await launchAlertBatch(task,review.config,batchTargets,
+          id=>api("accounts/"+encodeURIComponent(id)+"/tasks/preflight?task="+encodeURIComponent(task)),
+          (id,rid)=>api("accounts/"+encodeURIComponent(id)+"/tasks",{task,config:review.config,confirmed:true,request_id:rid}),
+          ()=>crypto.randomUUID(),()=>mounted.current);
+        if(mounted.current)setBatchReceipts(rows);
+        return;
+      }
       const current=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(current,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
@@ -134,9 +144,9 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
     finally {if(mounted.current)setBusy(false);inFlight.current=false;}
   };
   return <section className="native-automation-editor">
-    {loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:loadError||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
+    {batchTargets?<p>{batchValid?t("Each selected account is checked before any launch."):t("Select 1–32 enabled accounts.")}</p>:loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:loadError||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
     {cityTask&&!loading&&cities.length<2&&<p role="alert">{t("At least two authenticated cities are required.")}</p>}
-    <fieldset disabled={busy||locked||loading||!enabled||role==="viewer"}>
+    <fieldset disabled={busy||locked||(batchTargets?!batchValid:loading||!enabled)||role==="viewer"}>
       <legend>{t("Settings")}</legend>
       {task==="alertAttacks"&&numeric(t("Check for attacks every (minutes)"),minutes,setMinutes,3,1440)}
       {task==="alertLowWine"&&<>{numeric(t("Warn when wine has less than (hours)"),hours,setHours,1,720)}<label className="check-label"><input type="checkbox" checked={autoTransfer} onChange={e=>{edit();setAutoTransfer(e.target.checked);}}/>{t("Automatic wine transfer")}</label>{autoTransfer&&numeric(t("Wine to transfer"),transferAmount,setTransferAmount,1,MAX_AMOUNT)}</>}
@@ -174,9 +184,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
     <p className="subtle-message">{t("The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>
     <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>{setReview({config,summary,fingerprint});setApproved(false);}}>{t("Review settings")}</button>
-    {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
+    {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{batchTargets&&<ul>{batchTargets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
       <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
       <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button></section>}
+    {batchReceipts.length>0&&<section className="preview-panel"><h4>{t("Batch receipts")}</h4><ul>{batchReceipts.map(r=><li key={r.account}>{batchTargets?.find(a=>a.id===r.account)?.name??r.account} · {t(r.status)}</li>)}</ul><p>{t("Check Activity before starting any further task.")}</p></section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;
 }

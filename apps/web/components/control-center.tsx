@@ -6,7 +6,10 @@ import { formatNumber } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RecoveryPanel } from "./recovery-panel";
 import { NativeAutomationEditor } from "./native-automation-editor";
-import { isNativeTask, playerNames } from "@/lib/native-task-contract";
+import { ConstructionEditor } from "./construction-editor";
+import { NativeDomainEditor } from "./native-domain-editor";
+import { NativeCityEditor } from "./native-city-editor";
+import { isCityTask, isDomainTask, isNativeTask, playerNames } from "@/lib/native-task-contract";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, CheckCircle2, ChevronDown,
   ChevronRight, CircleAlert, CircleHelp, ClipboardList, CloudOff, Compass,
@@ -149,17 +152,26 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const [pendingAction, setPendingAction] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [automationGroup, setAutomationGroup] = useState("All");
+  const [automationQuery, setAutomationQuery] = useState("");
+  const operationGroups = useMemo(() => {
+    const registered = Array.isArray(capabilities?.operations)
+      ? (capabilities.operations as Result[]).map(o=>o.name).filter((n):n is string=>typeof n==="string" && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(n))
+      : null;
+    const groups = TASK_GROUPS.map(g=>({...g,tasks:registered ? g.tasks.filter(t=>registered.includes(t)) : g.tasks}));
+    if (registered) {
+      const known = new Set(groups.flatMap(g=>g.tasks));
+      const other = [...new Set(registered)].filter(t=>!known.has(t)).sort();
+      if(other.length)groups.push({name:"Other operations",icon:Settings2,tasks:other});
+    }
+    return groups.filter(g=>g.tasks.length);
+  },[capabilities]);
   const [chosenTask, setChosenTask] = useState("constructionList");
   const [automationAccount, setAutomationAccount] = useState("");
+  const [alertScope, setAlertScope] = useState<"one"|"selected"|"all">("one");
   const [cities, setCities] = useState<Record<string,unknown>[]>([]);
   const [selectedCity, setSelectedCity] = useState("");
-  const [buildings, setBuildings] = useState<Record<string,unknown>[]>([]);
-  const [buildingPosition, setBuildingPosition] = useState("");
-  const [targetLevel, setTargetLevel] = useState(1);
-  const [preview, setPreview] = useState<Result | null>(null);
   const [automationError, setAutomationError] = useState("");
   const [preflight, setPreflight] = useState<Result | null>(null);
-  const [automationBusy, setAutomationBusy] = useState(false);
   const [inventory, setInventory] = useState<Result | null>(null);
   const [inventoryBusy, setInventoryBusy] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
@@ -230,7 +242,7 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     if(page!=="automations")return;
     const id=automationAccount || scopeIds[0] || "";
     if(!automationAccount && id)setAutomationAccount(id);
-    setSelectedCity("");setCities([]);setPreview(null);setPreflight(null);setAutomationError("");
+    setSelectedCity("");setCities([]);setPreflight(null);setAutomationError("");
     if(!id)return;
     let live=true;
     Promise.allSettled([
@@ -245,14 +257,6 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     return ()=>{live=false};
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[page,chosenTask,automationAccount,reload]);
-
-  useEffect(()=>{
-    if(page!=="automations" || !selectedCity || !automationAccount || chosenTask!=="constructionList") {setBuildings([]);return;}
-    let live=true;setBuildingPosition("");setPreview(null);
-    controller<{buildings:Record<string,unknown>[]}>("accounts/"+encodeURIComponent(automationAccount)+"/cities/"+encodeURIComponent(selectedCity)+"/buildings")
-      .then(r=>{if(live)setBuildings(r.buildings??[])}).catch(()=>{if(live)setBuildings([])});
-    return ()=>{live=false};
-  },[page,selectedCity,automationAccount,chosenTask,reload]);
 
   useEffect(() => {
     const observation = INVENTORIES[chosenTask];
@@ -303,17 +307,6 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     catch(e) {setActionMessage(e instanceof Error ? e.message : "Outcome uncertain; do not repeat before reviewing Activity.");}
     finally {setPendingAction("");}
   };
-  const showPreview=async()=>{
-    if(!selectedCity||!buildingPosition||!automationAccount)return;
-    setAutomationBusy(true);setAutomationError("");setPreview(null);
-    try{
-      const p=await controller<Result>("accounts/"+encodeURIComponent(automationAccount)+"/cities/"+encodeURIComponent(selectedCity)+"/construction-preview",
-        {method:"POST",body:JSON.stringify({upgrades:[{position:Number(buildingPosition),target_level:targetLevel}]})});
-      setPreview(p);
-    }catch(e){setAutomationError(e instanceof Error?e.message:"Planner unavailable");}
-    finally {setAutomationBusy(false);}
-  };
-
   return <div className={"app-shell "+(theme==="dark"?"theme-dark":"theme-light")}>
     {sidebar && <button className="mobile-backdrop" aria-label={tr("Close navigation")} onClick={()=>setSidebar(false)}/>}
     <aside className={"sidebar "+(sidebar?"sidebar-open":"")}>
@@ -364,20 +357,19 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
         </div>}
         {page==="automations"&&<div className="content-stack">
           <div className="notice"><ShieldCheck size={18}/><span>{tr("Automation uses the existing game engine. Inspect authoritative city data and preflight before preparing a change. No task starts without a separate reviewed, account-specific confirmation.")}</span></div>
-          <div className="automation-layout"><section className="panel action-catalog"><div className="panel-heading"><div><h3>{tr("Operation library")}</h3><p>{tr("Search and select a workflow")}</p></div></div><div className="category-tabs"><button className={automationGroup==="All"?"active":""} onClick={()=>setAutomationGroup("All")}>{tr("All")}</button>{TASK_GROUPS.map(g=><button className={automationGroup===g.name?"active":""} onClick={()=>setAutomationGroup(g.name)} key={g.name}>{tr(g.name)}</button>)}</div><div className="action-list">{TASK_GROUPS.filter(g=>automationGroup==="All"||g.name===automationGroup).map(g=><div key={g.name}><div className="action-group-title"><g.icon size={15}/>{tr(g.name)}</div>{g.tasks.map(t=><button className={"action-card "+(chosenTask===t?"action-card-selected":"")} onClick={()=>setChosenTask(t)} key={t}><span><strong>{tr(readable(t))}</strong><small>{t==="constructionList"?tr("Real building preview"):isNativeTask(t)?tr("Native settings"):tr("Preflight / adapter status")}</small></span><ChevronRight size={16}/></button>)}</div>)}</div></section>
+          <div className="automation-layout"><section className="panel action-catalog"><div className="panel-heading"><div><h3>{tr("Operation library")}</h3><p>{tr("Search and select a workflow")}</p></div></div><label className="field"><span>{tr("Search operations")}</span><input value={automationQuery} onChange={e=>setAutomationQuery(e.target.value)} /></label><div className="category-tabs"><button className={automationGroup==="All"?"active":""} onClick={()=>setAutomationGroup("All")}>{tr("All")}</button>{operationGroups.map(g=><button className={automationGroup===g.name?"active":""} onClick={()=>setAutomationGroup(g.name)} key={g.name}>{tr(g.name)}</button>)}</div><div className="action-list">{operationGroups.filter(g=>automationGroup==="All"||g.name===automationGroup).map(g=><div key={g.name}><div className="action-group-title"><g.icon size={15}/>{tr(g.name)}</div>{g.tasks.filter(t=>(t+" "+tr(readable(t))).toLowerCase().includes(automationQuery.trim().toLowerCase())).map(t=><button className={"action-card "+(chosenTask===t?"action-card-selected":"")} onClick={()=>setChosenTask(t)} key={t}><span><strong>{tr(readable(t))}</strong><small>{t==="constructionList"?tr("Construction queue"):isNativeTask(t)?tr("Native settings"):tr("Preflight / adapter status")}</small></span><ChevronRight size={16}/></button>)}</div>)}</div></section>
             <section className="panel automation-detail"><div className="panel-heading"><div><div className="section-kicker">{tr("WORKFLOW INSPECTOR")}</div><h3>{tr(readable(chosenTask))}</h3><p>{tr("Live account-bound data and availability")}</p></div><Status ok={preflight?.ready===true} label={preflight?.ready===true?tr("Ready to review"):tr("Not approved")}/></div>
-              <div className="editor-body"><label className="field"><span>{tr("Account")}</span><select value={automationAccount} onChange={e=>setAutomationAccount(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{automationNames[a.id]} · {tr(accountWorld(a))}</option>)}</select></label>
+              <div className="editor-body">{(chosenTask==="alertAttacks"||chosenTask==="alertLowWine")&&<label className="field"><span>{tr("Launch scope")}</span><select value={alertScope} onChange={e=>setAlertScope(e.target.value as "one"|"selected"|"all")}><option value="one">{tr("One account")}</option><option value="selected">{tr("Selected accounts")}</option><option value="all">{tr("All accounts")}</option></select></label>}<label className="field"><span>{tr("Account")}</span><select value={automationAccount} onChange={e=>setAutomationAccount(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{automationNames[a.id]} · {tr(accountWorld(a))}</option>)}</select></label>
                 {preflight&&<div className="preflight-card"><div className="preflight-top"><span><ShieldCheck size={18}/> {tr("Authoritative preflight")}</span><Status ok={preflight.ready===true} label={preflight.ready===true?tr("Ready"):tr("Unavailable")}/></div><p>{typeof preflight.reason==="string"?preflight.reason:tr("The controller has checked prerequisites for this account and operation.")}</p>{preflight.unresolved_request===true&&<p className="warning-text">{tr("An earlier request is unresolved. Review Activity before any new operation.")}</p>}</div>}
-                {isNativeTask(chosenTask)?<NativeAutomationEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="constructionList"?<><div className="form-section-title">{tr("Choose a real city")}</div><label className="field"><span>{tr("City")}</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">{tr("Select an authenticated city")}</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??tr("City"))}</option>)}</select></label>{selectedCity&&<><div className="form-section-title">{tr("Buildings in this city")}</div><div className="building-list">{buildings.length?buildings.map((b,i)=><label key={i} className={"building-item "+(buildingPosition===String(b.position)?"building-chosen":"")}><input type="radio" name="building" checked={buildingPosition===String(b.position)} onChange={()=>{setBuildingPosition(String(b.position??""));setTargetLevel(Number(b.level??0)+1);setPreview(null);}}/><span><strong>{String(b.name??b.building??b.type??tr("Building"))}</strong><small>{tr("Position")} {String(b.position??"—")}</small></span><span className="level-pill">{tr("Level")} {String(b.level??"—")}</span></label>):<Empty title={tr("Building data not available")} description={tr("This account/city has no authenticated building inventory.")} icon={Building2}/>}</div><label className="field"><span>{tr("Target level")}</span><input type="number" min="1" max="150" value={targetLevel} onChange={e=>{setTargetLevel(Number(e.target.value));setPreview(null);}}/></label><button className="primary-button" disabled={automationBusy||!buildingPosition} onClick={showPreview}>{automationBusy?tr("Preparing preview…"):tr("Preview upgrade (read-only)")}<ArrowRight size={16}/></button></>}</> :INVENTORIES[chosenTask]?<div className="inventory-editor">
+                {isCityTask(chosenTask)?<NativeCityEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isDomainTask(chosenTask)?<NativeDomainEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isNativeTask(chosenTask)?<NativeAutomationEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role+":"+alertScope+":"+JSON.stringify(accounts.filter(a=>alertScope==="all"||selected.includes(a.id)).map(a=>[a.id,a.enabled]))} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role} batchTargets={(chosenTask==="alertAttacks"||chosenTask==="alertLowWine")&&alertScope!=="one"?accounts.filter(a=>alertScope==="all"||selected.includes(a.id)).map(a=>({id:a.id,name:automationNames[a.id]+" · "+accountWorld(a),enabled:a.enabled===true})):undefined}/>:chosenTask==="constructionList"?<ConstructionEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/> :INVENTORIES[chosenTask]?<div className="inventory-editor">
                   {INVENTORIES[chosenTask].scope === "city" && <label className="field"><span>{tr("Choose your city")}</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">{tr("Select an authenticated city")}</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??tr("City"))}</option>)}</select></label>}
                   {INVENTORIES[chosenTask].resource === "market-quotes" && <div className="market-fields"><label className="field"><span>{tr("Resource")}</span><select value={marketResource} onChange={e=>setMarketResource(Number(e.target.value))}>{RESOURCES.map((resource,index)=><option key={resource} value={index}>{tr(readable(resource))}</option>)}</select></label><label className="field"><span>{tr("Market action")}</span><select value={marketSide} onChange={e=>setMarketSide(e.target.value)}><option value="buy">{tr("Buy available offers")}</option><option value="sell_to_offers">{tr("Sell to available offers")}</option><option value="create_offer">{tr("Create offer (preview)")}</option></select></label></div>}
                   <div className="form-section-title">{tr(INVENTORIES[chosenTask].title)}</div>
                   {inventoryBusy ? <p className="soft-loading">{tr("Retrieving authenticated controller data…")}</p> : inventoryError ? <div role="alert" className="inline-error">{tr(inventoryError)}</div> : inventory ? <InventoryDetails data={inventory}/> : <p className="subtle-message">{tr("Select an authenticated city to inspect the available data.")}</p>}
                   <div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Inventory is read-only. Starting this task requires a separately audited, account-scoped configuration and confirmation flow.")}</span></div>
                 </div> :<div className="empty-adapter"><Landmark size={24}/><strong>{tr("Domain editor pending audit")}</strong><p>{tr("This upstream operation is catalogued, but a web-safe, independently reviewed adapter is required before this browser can execute it. The preflight shown above is informational.")}</p></div>}
-                {preview&&<div className="preview-panel"><h4>{tr("Read-only construction preview")}</h4><p>{tr("These values come from IkaBot. Preview does not authorize or execute upgrades.")}</p>{Object.entries(preview).filter(([k,v])=>typeof v!=="object").map(([k,v])=><div key={k} className="key-value"><span>{tr(readable(k))}</span><strong>{String(v??tr("Unknown"))}</strong></div>)}{Object.entries(preview).filter(([k,v])=>Array.isArray(v)).map(([k,v])=><div key={k}><div className="form-section-title">{tr(readable(k))}</div><DataTable rows={(v as unknown[]).filter(x=>x && typeof x==="object").map(x=>x as Record<string,unknown>)} /></div>)}</div>}
                 {automationError&&<p role="alert" className="form-error">{tr(automationError)}</p>}
-                {!isNativeTask(chosenTask)&&<div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.")}</span></div>}
+                {!isNativeTask(chosenTask)&&chosenTask!=="constructionList"&&<div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.")}</span></div>}
               </div></section></div>
         </div>}
         {page==="military"&&<div className="content-stack"><div className="under-tabs"><button className={militaryTab==="troops"?"tab-selected":""} onClick={()=>setMilitaryTab("troops")}>{tr("Troops & fleet")}</button><button className={militaryTab==="movements"?"tab-selected":""} onClick={()=>setMilitaryTab("movements")}>{tr("Movements")}</button></div><section className="panel"><div className="panel-heading"><div><h3>{militaryTab==="troops"?tr("Military strength"):tr("Ship movements")}</h3><p>{tr("Read-only observations for the selected accounts")}</p></div><Status ok={Object.keys(militaryErrors).length===0&&Object.keys(militaryData).length>0} label={tr("Controller data")}/></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{militaryErrors[id]?<div className="inline-error">{tr(militaryErrors[id])}</div>:militaryData[id]?<div>{Object.entries(militaryData[id]).filter(([k])=>!["account_id","synthetic_demo"].includes(k)).map(([key,value])=><div key={key} className="military-group"><strong className="table-label">{tr(readable(key))}</strong>{Array.isArray(value)?<DataTable rows={value.filter(x=>x && typeof x==="object") as Record<string,unknown>[]} />:typeof value==="object"&&value!==null?<DataTable rows={Object.entries(value).map(([key,v])=>({type:key,value:typeof v==="object"?tr("See controller details"):v}))}/>:<div className="key-value"><span>{tr(readable(key))}</span><strong>{String(value??tr("Unknown"))}</strong></div>}</div>)}</div>:<div className="soft-loading">{tr("Retrieving current observations…")}</div>}</div>)}</section></div>}

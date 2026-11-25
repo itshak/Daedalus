@@ -1,3 +1,9 @@
+# Web Access Security
+
+## Purpose
+
+Enforce typed, reviewed web operation dispatch and protected administrative boundaries.
+
 ## ADDED Requirements
 
 ### Requirement: Web operation-specific authorization and safe administrative boundaries
