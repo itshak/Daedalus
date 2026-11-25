@@ -22,3 +22,15 @@ Desktop and web SHALL expose current controller version, build revision when ava
 #### Scenario: An operator checks for an update
 - **WHEN** the operator requests release discovery
 - **THEN** the system displays validated metadata without modifying the controller, desktop or game session
+
+
+### Requirement: Host-approved extension registration
+Desktop and web SHALL expose a bounded, redacted catalog of locally installed, host-approved extensions. The worker SHALL verify the manifest identity and source digest before registering an extension and compare the current registration against the reviewed state. Web mutation SHALL require owner authorization and explicit worker-global consent. Registration MUST NOT download, upload, execute or delete code or disclose local filesystem paths. Legacy per-user overrides SHALL block shared-default mutation.
+
+#### Scenario: An installed extension changes
+- **WHEN** its source digest or reviewed registration state differs from the approved or observed value
+- **THEN** registration fails without changing the shared configuration
+
+#### Scenario: A previously registered extension is removed from the menu
+- **WHEN** the owner confirms unregistering an approved entry
+- **THEN** the shared registration is removed without deleting or executing its source file

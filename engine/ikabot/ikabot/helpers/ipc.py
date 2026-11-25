@@ -838,6 +838,17 @@ class IPCServer:
                                 "username": session.username, "result": result}
                     except Exception:
                         return {"status": "error", "error": "Provider configuration unavailable or outcome uncertain"}
+                if action in {"extension_status_existing", "extension_registration_existing"}:
+                    try:
+                        from ikabot.helpers import nativeExtensions
+
+                        session = self._existing_session(request)
+                        result = (nativeExtensions.status(session) if action == "extension_status_existing"
+                                  else nativeExtensions.set_registration(session, request.get("draft")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Protected extension registration unavailable"}
                 if action == "administrative_status_existing":
                     from ikabot.helpers.nativeAdminStatus import administrative_status
 

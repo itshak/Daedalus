@@ -1062,6 +1062,18 @@ class DaedalusClient:
         except (ValueError, APIConnectionError):
             raise APIConnectionError("Provider configuration unavailable or outcome uncertain") from None
 
+    def extension_settings(self, account_id: str, draft=None):
+        from daedalus.extension_settings import validate_extension_draft, validate_extension_status
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/extensions"
+        result = self._read(path) if draft is None else self._write(path, validate_extension_draft(draft))
+        try:
+            return validate_extension_status(result, account_id)
+        except ValueError:
+            raise APIConnectionError("Invalid extension status") from None
+
     def administrative_status(self, account_id: str) -> dict[str, object]:
         from daedalus.admin_status import validate_admin_status
 

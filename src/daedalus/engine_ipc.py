@@ -1084,6 +1084,28 @@ class ExistingIPCClient:
         except ValueError as exc:
             raise EngineIPCUnavailable("Invalid provider configuration receipt") from exc
 
+    def extension_settings(self, account: Account, draft=None) -> dict[str, object]:
+        from daedalus.extension_settings import validate_extension_draft, validate_extension_status
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "extension_status_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="extension_registration_existing", draft=validate_extension_draft(draft))
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid extension scope")
+        try:
+            result = validate_extension_status({**reply["result"], "account_id": account.id}, account.id)
+            if draft is not None and not any(r["id"] == draft["id"] and r["sha256"] == draft["sha256"]
+                    and r["registered"] is draft["registered"] for r in result["extensions"]):
+                raise ValueError("Registration result unconfirmed")
+            return result
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid extension status") from exc
+
     def administrative_status(self, account: Account) -> dict[str, object]:
         from daedalus.admin_status import scoped_admin_status
 

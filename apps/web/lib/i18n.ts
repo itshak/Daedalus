@@ -2,6 +2,23 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Proxy settings and challenge handling must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.": "Настройки прокси и проверки выполняются на узле рабочего процесса. Браузер не предоставляет необработанный игровой сервис, cookie разработчика или непроверенные команды обновления.",
+  "Change the worker-global extension registration without executing code?": "Изменить общую регистрацию расширения без запуска кода?",
+  "Extension settings unavailable or changed. Refresh before retrying.": "Настройки расширений недоступны или изменились. Обновите данные перед повторной попыткой.",
+  "Register": "Зарегистрировать",
+  "Unregister": "Отменить регистрацию",
+  "Not registered": "Не зарегистрировано",
+  "Registered": "Зарегистрировано",
+  "Hash mismatch": "Контрольная сумма не совпадает",
+  "Registration": "Регистрация",
+  "Verification": "Проверка",
+  "Extension": "Расширение",
+  "No locally approved extensions": "Нет локально одобренных расширений",
+  "Local per-user override blocks changes.": "Локальное индивидуальное переопределение блокирует изменения.",
+  "Legacy registrations": "Старые регистрации",
+  "Read approved extensions": "Загрузить одобренные расширения",
+  "Only locally installed and hash-approved extensions can be registered. Registration does not execute or delete code.": "Можно зарегистрировать только локально установленные расширения с проверенной контрольной суммой. Регистрация не запускает и не удаляет код.",
+  "Host-approved extensions": "Расширения, одобренные на сервере",
   "Published previews are not notarized. Verify the checksum before installation. Controller updates and rollback use the reviewed host release workflow, not a remote shell.": "Предварительные версии не нотарифицированы Apple. Проверьте контрольную сумму перед установкой. Обновление и откат контроллера выполняются через проверенный процесс выпуска на сервере, а не через удалённую оболочку.",
   "Public preview unavailable or no verified catalog entry": "Опубликованная версия недоступна или отсутствует подтверждённая запись",
   "SHA-256 checksum": "Контрольная сумма SHA-256",

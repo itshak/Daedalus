@@ -61,3 +61,10 @@ The owner explicitly deferred proxy configuration. Nonsecret proxy status is ret
 Both Settings interfaces offer explicit read-only release lookup through a fixed public GitHub catalog endpoint. Only published preview tags with both expected uploaded project assets are returned; both clients validate exact link destinations. The worker/backend and packaged desktop build expose only a validated revision when available. No arbitrary URL, shell, cookie, environment dump, or automatic update is exposed. The existing authenticated controller is the remote service equivalent; legacy raw game-service start/stop and controlled production rollout/rollback are not claimed accepted. The Mac release remains unnotarized and the checksum is provided for user verification, not asserted verified locally.
 
 Focused release/packaging/desktop/registry tests: 26 passed. Web suite: 55 passed. TypeScript, Ruff passed.
+
+
+## Host-approved extension registration
+
+Settings on both platforms can list a bounded host-installed approved catalog and register/unregister exactly one reviewed extension with explicit worker-global consent. The worker rechecks locally installed file hashes, rejects symlinks and unsafe POSIX permissions, compares the previously observed registration state, and preserves legacy registrations and unrelated global settings. Selected-account legacy overrides block changes. Source code and absolute paths are never transmitted. The browser owner role is required for mutation. Registration is not execution, installation or code deletion; host-local approval and review are required. Unreviewed legacy modules remain protected-local. A changed source file cannot be newly registered from the UI.
+
+Verification: 13 focused extension and notification/admin tests, 11 desktop/registry tests, 56 web tests and TypeScript/Ruff passed. No actual host extensions were installed or registered.

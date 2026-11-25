@@ -32,6 +32,7 @@ class AppearancePage(QWidget):
     administrative_status_requested = Signal(str)
     notification_settings_requested = Signal(str, str, object)
     release_status_requested = Signal()
+    extension_settings_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -158,8 +159,31 @@ class AppearancePage(QWidget):
         self.notification_secret.textChanged.connect(self._notification_controls)
         self.notification_chat.textChanged.connect(self._notification_controls)
         self._notification_changed()
+        layout.addWidget(SubtitleLabel("Host-approved extensions"))
+        self.extension_note = CaptionLabel(
+            "Only extensions installed and hash-approved by the host administrator are listed. "
+            "Registration changes the shared default menu; it does not run or delete code.")
+        self.extension_note.setWordWrap(True)
+        layout.addWidget(self.extension_note)
+        self.extension_refresh = PushButton("Read approved extensions")
+        self.extension_refresh.clicked.connect(self._request_extensions)
+        self.extension_refresh.setEnabled(False)
+        layout.addWidget(self.extension_refresh)
+        self.extension_picker = ComboBox()
+        self.extension_picker.setAccessibleName("Host-approved extension")
+        self.extension_picker.currentIndexChanged.connect(self._extension_controls)
+        layout.addWidget(self.extension_picker)
+        self.extension_toggle = PushButton("Change registration…")
+        self.extension_toggle.setEnabled(False)
+        self.extension_toggle.clicked.connect(self._change_extension)
+        layout.addWidget(self.extension_toggle)
+        self.extension_status = CaptionLabel()
+        self.extension_status.setWordWrap(True)
+        layout.addWidget(self.extension_status)
+        self._extension_rows = []
+        self._extension_override = True
         boundary = CaptionLabel(
-             "Proxy configuration, challenge handling and custom extensions "
+             "Proxy configuration, challenge handling and legacy unreviewed extensions "
             "are managed on the authenticated worker host. The raw engine web service, developer "
             "cookie dump and unverified update commands are not exposed. Use Daedalus for remote control "
             "and the reviewed release workflow for updates.")
@@ -230,6 +254,8 @@ class AppearancePage(QWidget):
         self.admin_refresh.setEnabled(isinstance(self.admin_account.currentData(), str))
         if hasattr(self, "notification_secret"):
             self._notification_changed()
+        if hasattr(self, "extension_picker"):
+            self._reset_extensions()
 
     def _notification_changed(self, *_args):
         self.notification_secret.clear()
@@ -280,6 +306,73 @@ class AppearancePage(QWidget):
         if account == self.admin_account.currentData():
             self.admin_rows.clear()
             self.notification_note.setText("Configuration unavailable or outcome uncertain. Refresh status before retrying.")
+
+    def _reset_extensions(self):
+        self._extension_rows = []
+        self._extension_override = True
+        self.extension_picker.clear()
+        self.extension_status.clear()
+        self.extension_refresh.setEnabled(isinstance(self.admin_account.currentData(), str))
+        self.extension_toggle.setEnabled(False)
+
+    def _extension_controls(self, *_args):
+        index = self.extension_picker.currentIndex()
+        row = self._extension_rows[index] if 0 <= index < len(self._extension_rows) else None
+        self.extension_toggle.setEnabled(bool(row and not self._extension_override
+                                               and (row["verified"] or row["registered"])))
+        self.extension_toggle.setText("Unregister…" if row and row["registered"] else "Register…")
+
+    def _request_extensions(self):
+        account = self.admin_account.currentData()
+        if isinstance(account, str):
+            self._reset_extensions()
+            self.extension_status.setText("Reading locally approved extensions…")
+            self.extension_settings_requested.emit(account, None)
+
+    def _change_extension(self):
+        account = self.admin_account.currentData()
+        index = self.extension_picker.currentIndex()
+        if not isinstance(account, str) or not self.extension_toggle.isEnabled() or not 0 <= index < len(self._extension_rows):
+            return
+        row = self._extension_rows[index]
+        register = not row["registered"]
+        if QMessageBox.question(self, "Review worker-global registration",
+                f"{'Register' if register else 'Unregister'} {row['name']}?\nSHA-256: {row['sha256']}\n"
+                "This changes the shared default for the worker host. No extension will be executed.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        self._reset_extensions()
+        self.extension_status.setText("Updating reviewed registration…")
+        self.extension_settings_requested.emit(account, {"id": row["id"], "sha256": row["sha256"],
+            "registered": register, "expected_registered": row["registered"], "confirmed_global": True})
+
+    def set_extension_status(self, result):
+        from daedalus.extension_settings import validate_extension_status
+
+        account = self.admin_account.currentData()
+        if not isinstance(result, dict) or result.get("account_id") != account:
+            return
+        self._reset_extensions()
+        try:
+            result = validate_extension_status(result, account)
+        except ValueError:
+            self.extension_status.setText("Approved extension inventory unavailable")
+            return
+        self._extension_override = result["legacy_override"]
+        self._extension_rows = result["extensions"]
+        for row in self._extension_rows:
+            label = "registered" if row["registered"] else "not registered"
+            self.extension_picker.addItem(f"{row['name']} · {label} · {'verified' if row['verified'] else 'hash mismatch'}")
+        self.extension_status.setText(
+            f"{len(self._extension_rows)} locally approved; {result['unreviewed_count']} legacy registrations. "
+            + ("Local per-user override blocks changes." if self._extension_override else
+               "Unreviewed modules require host-local reconciliation."))
+        self._extension_controls()
+
+    def set_extension_unavailable(self, account):
+        if self.admin_account.currentData() == account:
+            self._reset_extensions()
+            self.extension_status.setText("Extension settings unavailable or changed. Refresh before retrying.")
 
     def _request_admin_status(self) -> None:
         account = self.admin_account.currentData()

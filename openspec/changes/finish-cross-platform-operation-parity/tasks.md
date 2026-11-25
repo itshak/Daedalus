@@ -42,3 +42,5 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Recheck source identity and exact cargo stock before reservation and mutation; do not record missing cargo as delivered.
 
 - [x] Expose authenticated public release lookup, exact Mac DMG and checksum references, installed build revision when stamped, and safe developer/connection diagnostics; never execute an update command from either client.
+
+- [x] Implement host-approved extension inventory and owner-only compare-and-set registration/unregistration, with bounded hash verification, no paths in responses, no upload or remote code execution, and legacy override protection.

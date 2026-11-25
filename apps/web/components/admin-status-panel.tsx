@@ -1,4 +1,5 @@
 "use client";
+import {ExtensionPanel} from "./extension-panel";
 import {useState,useRef} from "react";
 import {useLanguage} from "./language-provider";
 import {validNotificationSettings,sealNotificationSettings,parseNotificationReceipt,type Provider,type NotificationSettings} from "../lib/notification-settings";
@@ -57,6 +58,7 @@ export function AdminStatusPanel({accounts,role="viewer"}:{accounts:{id:string;n
       <div className="report-tools"><button type="button" className="primary-button" disabled={!consent||!validNotificationSettings(provider,provider==="telegram"?{mode:"replace",bot_token:secret.trim(),chat_id:chat.trim()}:{mode:"replace",webhook_url:secret.trim()})} onClick={()=>void configure(false)}>{t("Test and save")}</button><button type="button" className="secondary-button" disabled={!consent} onClick={()=>void configure(true)}>{t("Clear configured default")}</button></div>
     </fieldset>}
     {notice&&<p role="status">{t(notice)}</p>}
-    <p className="subtle-message">{t("Proxy settings, challenge handling and custom extensions must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.")}</p>
+    <ExtensionPanel key={account+":"+role} account={account} role={role}/>
+    <p className="subtle-message">{t("Proxy settings and challenge handling must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.")}</p>
   </section>;
 }
