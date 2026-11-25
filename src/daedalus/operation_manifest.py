@@ -30,9 +30,7 @@ _LOCAL_BOUNDARIES = frozenset({
     "updateTelegramData", "updateDiscordData", "testTelegramBot", "testDiscordBot",
     "show_proxy",
 })
-_PENDING = frozenset({
-    "vacationMode",
-})
+_PENDING = frozenset()
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})
 ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PENDING | {"logs"}
 

@@ -304,6 +304,8 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.cities(self.account_id),
                 }
+            elif self.action == "task_vacation_preview" and self.account_id and self.task_payload:
+                result = self.client.vacation_preview(self.account_id, self.task_payload["city_id"])
             elif self.action == "task_attack_inventory" and self.account_id and self.task_payload:
                 result = self.client.attack_inventory(self.account_id, self.task_payload["city_id"])
             elif self.action == "task_attack_preview" and self.account_id and self.task_payload:
@@ -829,6 +831,10 @@ class MainWindow(FluentWindow):
             view.shrine_requested.connect(self._queue_shrine)
             view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
+            view.vacation_preview_requested.connect(
+                lambda aid, city, nonce: self._request("task_vacation_preview", account_id=aid,
+                    task_payload={"city_id": city, "nonce": nonce})
+            )
             view.attack_inventory_requested.connect(
                 lambda aid, city, nonce: self._request("task_attack_inventory", account_id=aid,
                     task_payload={"city_id": city, "nonce": nonce})
@@ -2339,6 +2345,11 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
                                           payload["buildings"])
+        elif action == "task_vacation_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_vacation_preview(payload, request["nonce"])
         elif action in {"task_attack_inventory", "task_attack_preview"}:
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2587,6 +2598,10 @@ class MainWindow(FluentWindow):
             city_id = request.get("city_id") if isinstance(request, dict) else None
             if isinstance(account_id, str) and type(city_id) is int:
                 self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action == "task_vacation_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_vacation_unavailable(request["nonce"])
         if action in {"task_attack_inventory", "task_attack_preview"}:
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

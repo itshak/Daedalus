@@ -25,6 +25,7 @@ from daedalus.reviewed_operations import (
     validate_grind_plan,
     validate_layout_plan,
     validate_station_plan,
+    validate_vacation_plan,
     validate_worker_plan,
     validated_attack_draft,
     validated_build_draft,
@@ -46,7 +47,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
@@ -159,7 +160,7 @@ class ExistingIPCClient:
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
@@ -174,7 +175,7 @@ class ExistingIPCClient:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
                       "preview_donation_existing", "preview_workers_existing", "preview_layout_existing",
-                      "list_build_options_existing", "preview_build_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
+                      "list_build_options_existing", "preview_build_existing", "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -240,7 +241,7 @@ class ExistingIPCClient:
         elif attack_draft is not None:
             raise ValueError("Unexpected manual attack draft")
         return self._exchange(payload, read_timeout=60.0 if action in {
-            "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
+            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
             "list_build_options_existing", "preview_build_existing",
             "preview_layout_existing",
             "preview_workers_existing",
@@ -403,6 +404,18 @@ class ExistingIPCClient:
                 "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
+
+    def vacation_preview(self, account: Account, city_id: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("preview_vacation_existing", account=account, city_id=city_id)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid vacation preview scope")
+        try:
+            return {"account_id": account.id, **validate_vacation_plan(city_id, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid vacation preview") from exc
 
     def attack_inventory(self, account: Account, city_id: int) -> dict[str, object]:
         if city_id not in {row["id"] for row in self.cities(account)}:

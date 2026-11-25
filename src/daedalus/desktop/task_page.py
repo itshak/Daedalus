@@ -85,6 +85,7 @@ _TASK_LABELS = {
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
     "loginDaily": "Daily login", "dumpWorld": "Export world data",
+    "vacationMode": "Activate vacation mode",
     "stationArmy": "Station troops or fleet",
     "constructBuilding": "Build new building",
     "reorganizeCityBuildings": "Copy city building layout",
@@ -140,6 +141,7 @@ class TasksPage(QWidget):
     grind_preview_requested = Signal(str, object, str)
     attack_inventory_requested = Signal(str, int, str)
     attack_preview_requested = Signal(str, object, str)
+    vacation_preview_requested = Signal(str, int, str)
     build_options_requested = Signal(str, int, str)
     build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
@@ -899,6 +901,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "vacationMode":
+            self.building_note.setText("Checking account jobs and automatic recovery policy…")
+            self.vacation_preview_requested.emit(account, draft["city_id"], self._city_review_nonce)
         elif task == "attackBarbarians":
             self.building_note.setText("Checking actual village and planned waves…")
             self.attack_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -945,6 +950,38 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_vacation_preview(self, result, nonce):
+        if (self.selected_task_name() != "vacationMode" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if result.get("city_id") != draft.get("city_id"):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        warnings = []
+        if result["active_jobs"] or result["managed_active"]:
+            warnings.append("Stop all active account jobs first.")
+        if not result["recovery_disabled"]:
+            warnings.append("Disable automatic recovery in Recovery settings first.")
+        self.building_note.setText(
+            f"{result['city_name']}: vacation mode affects the entire account, not only this city. "
+            "Game access and automation may be suspended. Keep recovery disabled until you manually end vacation. "
+            + ("Ready for review." if self._city_review_plan else " ".join(warnings))
+        )
+        self._invalidate_review()
+
+    def set_vacation_unavailable(self, nonce):
+        if self.selected_task_name() == "vacationMode" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Vacation preview unavailable. Check account and recovery settings.")
             self._invalidate_review()
 
     def _clear_attack_inventory(self, *_args):
@@ -1831,6 +1868,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview vacation activation…" if name == "vacationMode" else
             "Load troops / preview attack…" if name == "attackBarbarians" else
             "Preview automatic attacks…" if name == "autoBarbarians" else
             "Preview deployment…" if name == "stationArmy" else

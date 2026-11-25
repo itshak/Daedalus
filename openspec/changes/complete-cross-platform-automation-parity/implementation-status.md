@@ -27,7 +27,7 @@ Focused tests: four native donation/Qt tests, 17 session expiry/retry tests (12 
 
 The three upstream worker operations (production, academy, temple) now have structured, city-scoped engine adapters and native desktop/web editors. The current project/building slider and normal/extra capacity are read from the game; the selected percentage is converted into an exact target. A one-shot ticket binds the operation and city to the reviewed slider state, and the child revalidates it before mutation. No raw game fields or automatic retry/replay. Population, production and faith impact estimates beyond the source slider are not inferred.
 
-The versioned capability manifest records 29 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
+The versioned capability manifest records 30 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
 
 Donation integration baseline: 705 Python tests passed, 11 skipped; 408 engine tests passed, 9 skipped, 123 subtests passed; 25 web tests, TypeScript, lint (warnings only), production build, Ruff and proposal validation passed. Worker/manifest focused regression: 33 Python tests passed; 27 web unit tests passed before the final manifest UI wiring. Full combined validation is required.
 
@@ -59,6 +59,12 @@ Both clients load named available troops for an owned origin city, select the is
 
 Focused manual/automatic tests: 6 Python engine/API/manifest, 2 Qt, 32 web tests and TypeScript passed. Full latest-revision CI remains required.
 
+## Vacation mode
+
+Both clients implement account-wide vacation activation through an owned city identity, a preview and explicit confirmation. Active engine/managed jobs and enabled automatic recovery block ticket issuance; the controller and engine independently recheck before dispatch, the engine rejects concurrent managed starts, and the child rechecks active processes. The upstream activation request is submitted once without uncertain transport replay. The task is never captured as a desired job. Recovery must be manually disabled beforehand and kept disabled until the operator ends vacation; this slice does not automatically change recovery policy or claim verified game activation.
+
+Focused vacation tests (engine/API/Qt) passed. Live vacation behavior and policy-change races across independent operators require acceptance review.
+
 ## Still open
 
-Vacation mode and the engine web-service workflow need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.
+The engine web-service and other protected administrative workflows need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.

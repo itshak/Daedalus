@@ -383,6 +383,12 @@ class TaskController:
             existing = self._ledger.existing(account.id, request_id, task, digest)
             if existing is not None:
                 return existing
+            if task == "vacationMode":
+                if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
+                    raise TaskUnavailable("Disable automatic recovery before activating vacation mode")
+                if any(row.get("status") in {"running", "stopping"}
+                       for row in self._ipc.list_managed_tasks(account)):
+                    raise TaskUnavailable("Stop all account jobs before activating vacation mode")
             # Preflight happens BEFORE durable dispatch reservation. A known
             # prerequisite failure is not an uncertain in-game launch.
             # Unknown/unavailable preflight also refuses dispatch, fail closed.
@@ -428,7 +434,7 @@ class TaskController:
             receipt = {"account_id": account.id, "request_id": request_id,
                        "task": task, "status": "started",
                        "task_id": started["task_id"], "pid": started["pid"]}
-            if track_desired and self._recovery_store is not None:
+            if track_desired and self._recovery_store is not None and task != "vacationMode":
                 try:
                     if is_fixed:
                         self._recovery_store.finish_fixed_transfer(

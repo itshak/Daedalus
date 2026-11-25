@@ -17,6 +17,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "activateShrine": "Run the configured shrine schedule with explicit approval.",
     "alertAttacks": "Get notified about incoming attacks at a chosen polling interval.",
     "alertLowWine": "Alert before city wine supplies run out, with optional transfers.",
+    "vacationMode": "Activate vacation mode after stopping jobs and disabling recovery.",
     "attackBarbarians": "Execute an independently prepared barbarian attack plan.",
     "autoBarbarians": "Run the upstream automatic attack preset on a selected island.",
     "autoPirate": "Run a configured piracy schedule or mission.",
@@ -124,6 +125,8 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         (task_name, "expected"): {"type": "hidden_derived"}
         for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
     },
+    ("vacationMode", "city_id"): {"type": "city_picker", "label": "City (account identity)"},
+    ("vacationMode", "expected"): {"type": "hidden_derived"},
     ("attackBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
     ("attackBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
     ("attackBarbarians", "waves"): {"type": "attack_waves", "label": "Attack waves", "required": True},

@@ -60,6 +60,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "vacation-plan" && !z.object({}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid vacation review"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "attack-plan") {
       const wave=z.object({round:z.number().int().min(1).max(100),loot:z.boolean(),ships:z.number().int().min(0).max(1e9),units:z.record(z.string().regex(/^[0-9]{1,6}$/),z.number().int().positive().max(1e9))}).strict();
       const draft=z.object({target_city_id:z.number().int().positive().max(999_999_999_999),waves:z.array(wave).min(1).max(8)}).strict().safeParse(value);
@@ -76,7 +78,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
       return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });

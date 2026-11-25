@@ -705,6 +705,35 @@ def create_app(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
 
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/vacation-plan",
+              dependencies=[Depends(authorized)])
+    def vacation_plan(account_id: str, city_id: int,
+                      payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if payload:
+            raise HTTPException(status_code=422, detail="Unexpected vacation parameters")
+        if demo_mode or ipc_client is None or task_controller is None:
+            raise HTTPException(status_code=503, detail="Vacation planner unavailable")
+        try:
+            plan = ipc_client.vacation_preview(account, city_id)
+            managed_active = any(row.get("status") in {"running", "stopping"}
+                                 for row in task_controller.list_tasks(account_id)["engine_tasks"])
+            recovery_disabled = recovery_store is None or not recovery_store.policy(account)["enabled"]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Vacation preview rejected") from exc
+        except (EngineIPCUnavailable, TaskUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="Vacation preview unavailable") from exc
+        config = plan.pop("config")
+        plan["managed_active"] = managed_active
+        plan["recovery_disabled"] = recovery_disabled
+        plan["ready"] = plan["ready"] and not managed_active and recovery_disabled
+        ticket = operation_previews.issue(account_id, "vacationMode", config) if plan["ready"] else None
+        return {**plan, "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None}
+
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/attack-options",
              dependencies=[Depends(authorized)])
     def attack_options(account_id: str, city_id: int) -> dict[str, object]:
@@ -1415,6 +1444,12 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/vacation-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_vacation(account_id: str,
+                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "vacationMode", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/attack-start",
               dependencies=[Depends(authorized)])

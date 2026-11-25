@@ -96,3 +96,9 @@ test("manual attack inventory and reviewed wave endpoints are explicit",()=>{
   assert.equal(allowedRequest("POST","accounts/a/tasks/attack-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/attack-plan".split("/"),params("raw=true")),false);
 });
+
+test("vacation activation requires explicit review paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/vacation-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/vacation-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/vacation-plan".split("/"),params("raw=true")),false);
+});

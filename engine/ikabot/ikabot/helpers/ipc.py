@@ -774,6 +774,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_vacation_existing":
+                    return self._preview_vacation_existing(request)
                 if action == "list_attack_units_existing":
                     return self._attack_units_existing(request)
                 if action == "preview_attack_existing":
@@ -916,6 +918,14 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _preview_vacation_existing(self, request):
+        from ikabot.function.vacationMode import preview_native_vacation
+
+        session = self._existing_session(request)
+        plan = preview_native_vacation(session, request.get("city_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _attack_units_existing(self, request):
         from ikabot.function.attackBarbarians import native_attack_inventory
@@ -1781,6 +1791,12 @@ class IPCServer:
                 and entry["process"].is_alive()
                 for entry in self._daedalus_tasks.values()
             )
+            if ((canonical_name == "vacationMode" and active_same_account)
+                    or any(entry["world"].casefold() == fingerprint[0]
+                           and entry["player"].casefold() == fingerprint[1]
+                           and entry["task"] == "vacationMode" and entry["process"].is_alive()
+                           for entry in self._daedalus_tasks.values())):
+                return {"status": "rejected", "reason": "invalid_configuration"}
             if active_same_account >= 16:
                 raise ValueError("Account has reached the active task safety limit")
             if len(self._daedalus_tasks) >= 256:
@@ -1802,7 +1818,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

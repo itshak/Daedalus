@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians", "vacationMode"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -315,3 +315,18 @@ def validate_attack_plan(city_id: int, draft: dict[str, object], plan: object) -
         raise ValueError("Invalid manual attack fingerprint")
     return {k: plan[k] for k in ("city_id", "target_city_id", "city_name", "target_name", "level",
                                  "waves", "available_ships", "required_ships", "ready", "config")}
+
+def validate_vacation_plan(city_id: int, plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or not isinstance(plan.get("city_name"), str) or not 0 < len(plan["city_name"]) <= 100
+            or type(plan.get("active_jobs")) is not int or not 0 <= plan["active_jobs"] <= 10000
+            or plan.get("ready") is not (plan["active_jobs"] == 0)):
+        raise ValueError("Invalid vacation preview")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", "expected"}
+            or config["city_id"] != city_id or not isinstance(config["expected"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid vacation fingerprint")
+    return {k: plan[k] for k in ("city_id", "city_name", "active_jobs", "ready", "config")}

@@ -900,3 +900,33 @@ def test_attack_editor_native_waves_and_review(page, monkeypatch):
     assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
     page._form_inputs["city_id"].setCurrentIndex(2)
     assert not editor.loaded
+
+
+def test_vacation_editor_blocks_recovery_and_active_jobs(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "vacationMode"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    calls = []
+    page.vacation_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "city_name": "Town",
+              "active_jobs": 0, "managed_active": False, "recovery_disabled": False,
+              "ready": False, "preview_id": None, "expires_in": None}
+    page.set_vacation_preview(result, calls[0][2])
+    assert not page.start_button.isEnabled()
+    page._request_native_preview()
+    page.set_vacation_preview({**result, "recovery_disabled": True, "ready": True,
+                               "preview_id": "a" * 43, "expires_in": 120}, calls[1][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
