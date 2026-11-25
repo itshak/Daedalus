@@ -19,6 +19,7 @@ class AccountSelectionDialog(QDialog):
         self, accounts: list[dict[str, object]], selected: list[str], parent=None,
         *, title: str = "Choose accounts", max_accounts: int | None = None,
         explanation: str | None = None,
+        display_names: dict[str, str] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -64,9 +65,9 @@ class AccountSelectionDialog(QDialog):
         self.checkboxes: dict[str, CheckBox] = {}
         for row in self._accounts:
             aid = str(row["id"])
-            label = account_display_name(row)
+            label = (display_names or {}).get(aid) or account_display_name(row)
             world = str(row.get("world") or "")
-            checkbox = CheckBox(f"{label}  ·  {world}" if world else label)
+            checkbox = CheckBox(f"{label}  ·  {world}" if world and not (display_names and " · " in label) else label)
             checkbox.setChecked(aid in selected_ids)
             checkbox.setAccessibleName(f"Include {label} in selected accounts")
             checkbox.stateChanged.connect(self._update_count)
