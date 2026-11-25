@@ -23,7 +23,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   const {t}=useLanguage();
   const [cities,setCities]=useState<City[]>([]);
   const [ready,setReady]=useState(false);
-  const [loading,setLoading]=useState(true);
+  const [loading,setLoading]=useState(Boolean(account&&enabled));
   const [loadError,setLoadError]=useState(false);
   const [routes,setRoutes]=useState<Route[]>([route(1)]);
   const nextRoute=useRef(2);
@@ -56,7 +56,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role}:P
   useEffect(()=>{
     let alive=true;
     mounted.current=true;
-    if (!account || !enabled) {setLoading(false);return ()=>{mounted.current=false;};}
+    if (!account || !enabled) return ()=>{mounted.current=false;};
     Promise.all([
       api(prefix+"/tasks/preflight?task="+encodeURIComponent(task)),
       cityTask ? api(prefix+"/cities") : Promise.resolve(null)
