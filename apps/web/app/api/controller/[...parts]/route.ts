@@ -1,3 +1,4 @@
+import {notificationRoute,notificationOwnerAllowed,validNotificationEnvelope} from "@/lib/notification-settings";
 import {validSupply} from "@/lib/construction-contract";
 import {validTrainingDraft} from "@/lib/training-contract";
 import {REVIEW_START_ROUTES} from "@/lib/generated-operation-contract";
@@ -40,6 +41,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const { parts } = await context.params;
   const url = new URL(request.url);
   if (!allowedRequest(request.method, parts, url.searchParams)) return NextResponse.json({ error: "Operation unavailable in web control center" }, { status: 404, headers: responseHeaders });
+  if (!notificationOwnerAllowed(operator.role,parts)) return NextResponse.json({error:"Owner authorization required"},{status:403,headers:responseHeaders});
   if (request.method !== "GET" && operator.role === "viewer") return NextResponse.json({ error: "Read-only administrator" }, { status: 403, headers: responseHeaders });
   if (request.method !== "GET" && request.headers.get("origin") !== url.origin)
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403, headers: responseHeaders });
@@ -53,6 +55,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     if (raw.length > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
+    if (notificationRoute(parts) && (parts[4]==="begin"?JSON.stringify(value)!=='{"confirmed_global":true}':!validNotificationEnvelope(value)))
+      return NextResponse.json({error:"Invalid encrypted provider configuration"},{status:422,headers:responseHeaders});
     if (parts.join("/") === "tasks/reviewed-batch-check" && !validReviewBatch(value))
       return NextResponse.json({error:"Invalid independent reviews"},{status:422,headers:responseHeaders});
     if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))

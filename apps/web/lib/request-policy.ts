@@ -1,4 +1,5 @@
 // Pure allowlist — safe to exercise outside the Next.js runtime.
+import {notificationRoute} from "./notification-settings.ts";
 import {REVIEW_START_ROUTES} from "./generated-operation-contract.ts";
 const simpleRead = new Set(["health", "accounts", "capabilities", "task-control", "account-config", "recovery"]);
 const accountResources = new Set(["session", "cities", "academies", "taverns", "miracles", "shrine-status", "pirate-fortresses", "military", "ship-movements", "tasks"]);
@@ -31,6 +32,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     return parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "policy";
   }
   if (method === "POST") {
+    if (notificationRoute(parts)) return params.size===0;
     if (parts.join("/") === "tasks/reviewed-batch-check") return params.size===0;
     if (parts.length === 3 && parts.join("/") === "recovery/policy/bulk") return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery"

@@ -1210,6 +1210,51 @@ def create_app(
         except (ValueError, EngineIPCUnavailable):
             raise HTTPException(status_code=503, detail="Administrative status unavailable") from None
 
+    def notification_account(account_id, provider):
+        from daedalus.notification_settings import PROVIDERS
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if provider not in PROVIDERS:
+            raise HTTPException(status_code=404, detail="Unsupported notification provider")
+        if demo_mode or ipc_client is None or task_controller is None:
+            raise HTTPException(status_code=503, detail="Protected provider configuration unavailable")
+        return account
+
+    @app.post("/api/v1/accounts/{account_id}/notifications/{provider}/begin",
+              dependencies=[Depends(authorized)])
+    def notification_settings_begin(account_id: str, provider: str,
+                                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.notification_settings import validate_challenge
+
+        account = notification_account(account_id, provider)
+        if set(payload) != {"confirmed_global"} or payload["confirmed_global"] is not True:
+            raise HTTPException(status_code=422, detail="Explicit worker-global consent required")
+        try:
+            return validate_challenge(ipc_client.notification_settings_begin(account, provider), account_id, provider)
+        except Exception:  # noqa: BLE001 - redact all provider/IPC failures
+            raise HTTPException(status_code=503, detail="Protected provider configuration unavailable") from None
+
+    @app.post("/api/v1/accounts/{account_id}/notifications/{provider}/complete",
+              dependencies=[Depends(authorized)])
+    def notification_settings_complete(account_id: str, provider: str,
+                                       payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.notification_settings import validate_envelope, validate_receipt
+
+        account = notification_account(account_id, provider)
+        try:
+            envelope = validate_envelope(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid encrypted provider configuration") from None
+        try:
+            return validate_receipt(ipc_client.notification_settings_complete(account, provider, envelope),
+                                    account_id, provider)
+        except Exception:  # noqa: BLE001 - redact all provider/IPC failures
+            raise HTTPException(status_code=503, detail="Provider configuration unavailable or outcome uncertain") from None
+
     @app.get(
         "/api/v1/accounts/{account_id}/shrine-status",
         dependencies=[Depends(authorized)],

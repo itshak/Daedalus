@@ -2,6 +2,18 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Invalid provider settings": "Некорректные настройки провайдера",
+  "Configuration unavailable or outcome uncertain. Refresh status before retrying.": "Настройка недоступна или результат неизвестен. Обновите статус перед повторной попыткой.",
+  "Worker-global notification default cleared.": "Общие настройки уведомлений очищены.",
+  "Worker-global notification default saved after successful provider test.": "Общие настройки уведомлений сохранены после успешной проверки.",
+  "Clear configured default": "Очистить общую настройку",
+  "Test and save": "Проверить и сохранить",
+  "I approve changing the worker-global notification default": "Подтверждаю изменение общих настроек уведомлений сервера",
+  "Telegram chat ID": "ID чата Telegram",
+  "New Discord webhook URL": "Новый URL вебхука Discord",
+  "New Telegram bot token": "Новый токен бота Telegram",
+  "Worker-global defaults affect all accounts using this worker host. Legacy per-user overrides require local reconciliation. Replacement sends one fixed test message before saving.": "Общие настройки действуют на все аккаунты этого сервера. Старые индивидуальные переопределения требуют локального согласования. Перед сохранением отправляется одно тестовое сообщение.",
+  "Notification configuration": "Настройки уведомлений",
   "Travel ETA unavailable. Manual recovery only.": "Время доставки неизвестно. Только ручное восстановление.",
   "Uncovered shortage": "Непокрытый дефицит",
   "(construction only)": "(только строительство)",

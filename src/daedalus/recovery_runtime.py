@@ -46,6 +46,7 @@ _ACCOUNT_METHODS = frozenset({
     "market_quotes", "academies", "taverns", "miracles",
     "shrine_status", "pirate_fortresses", "military_overview", "administrative_status",
     "ship_movements", "warehouses", "preflight_task",
+    "notification_settings_begin", "notification_settings_complete",
     "start_managed_task", "list_managed_tasks", "stop_managed_task",
 })
 

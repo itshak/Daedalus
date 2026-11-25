@@ -1035,6 +1035,25 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid wonder inventory")
         return result
 
+    def configure_notification(self, account_id: str, provider: str,
+                               settings: dict[str, object]) -> dict[str, object]:
+        from daedalus.notification_settings import (
+            PROVIDERS,
+            seal_notification_settings,
+            validate_receipt,
+        )
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        path = f"accounts/{account_id}/notifications/{provider}"
+        try:
+            challenge = self._write(path + "/begin", {"confirmed_global": True})
+            envelope = seal_notification_settings(challenge, account_id, provider, settings)
+            receipt = self._write(path + "/complete", envelope)
+            return validate_receipt(receipt, account_id, provider)
+        except (ValueError, APIConnectionError):
+            raise APIConnectionError("Provider configuration unavailable or outcome uncertain") from None
+
     def administrative_status(self, account_id: str) -> dict[str, object]:
         from daedalus.admin_status import validate_admin_status
 

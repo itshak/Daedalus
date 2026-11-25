@@ -180,6 +180,13 @@ class APIWorker(QThread):
                 }
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "notification_settings" and self.account_id and self.task_payload:
+                provider = self.task_payload["provider"]
+                settings = self.task_payload.pop("settings")
+                try:
+                    result = self.client.configure_notification(self.account_id, provider, settings)
+                finally:
+                    settings.clear()
             elif self.action == "administrative_status" and self.account_id:
                 result = self.client.administrative_status(self.account_id)
             elif self.action == "recovery_index":
@@ -727,6 +734,10 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.notification_settings_requested.connect(
+            lambda aid, provider, settings: self._request("notification_settings", account_id=aid,
+                task_payload={"provider": provider, "settings": settings})
+        )
         self.appearance_page.administrative_status_requested.connect(
             lambda aid: self._request("administrative_status", account_id=aid)
         )
@@ -1764,6 +1775,9 @@ class MainWindow(FluentWindow):
         task_payload: dict[str, object] | None = None,
     ) -> None:
         if self.client is None or self._worker is not None:
+            if action == "notification_settings" and task_payload is not None:
+                task_payload.get("settings", {}).clear()
+                self.appearance_page.set_notification_unavailable(account_id)
             if action == "reviewed_batch":
                 for view in self._task_views:
                     view.set_batch_launch_result({"account_ids": [], "submitted": [],
@@ -2158,6 +2172,9 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "notification_settings":
+            assert isinstance(payload, dict)
+            self.appearance_page.set_notification_result(payload)
         elif action == "administrative_status":
             assert isinstance(payload, dict)
             self.appearance_page.set_admin_status(payload)
@@ -2583,6 +2600,10 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "notification_settings":
+            aid = getattr(self._worker, "account_id", None)
+            if isinstance(aid, str):
+                self.appearance_page.set_notification_unavailable(aid)
         if action == "administrative_status":
             aid = getattr(self._worker, "account_id", None)
             if isinstance(aid, str):

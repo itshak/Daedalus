@@ -820,6 +820,24 @@ class IPCServer:
                     return self._list_taverns_existing(request)
                 if action == "list_miracles_existing":
                     return self._list_miracles_existing(request)
+                if action in {"notification_settings_begin_existing", "notification_settings_complete_existing"}:
+                    # These narrow encrypted operations must not log exception
+                    # traces or provider responses, even on a persistence error.
+                    try:
+                        from ikabot.helpers import nativeNotificationSettings
+
+                        session = self._existing_session(request)
+                        account, provider = request.get("account_id"), request.get("provider")
+                        if action == "notification_settings_begin_existing":
+                            if request.get("confirmed_global") is not True:
+                                raise ValueError("Explicit worker-global consent required")
+                            result = nativeNotificationSettings.begin(session, account, provider)
+                        else:
+                            result = nativeNotificationSettings.complete(session, account, provider, request.get("envelope"))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Provider configuration unavailable or outcome uncertain"}
                 if action == "administrative_status_existing":
                     from ikabot.helpers.nativeAdminStatus import administrative_status
 

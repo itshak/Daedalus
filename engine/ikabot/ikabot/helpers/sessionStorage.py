@@ -215,9 +215,10 @@ def write_json_file(filepath, data):
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
 
-    tmp_path = f"{filepath}.tmp.{os.getpid()}"
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(prefix=".session-", dir=dir_path or ".")
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())

@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, ComboBox, PushButton, SubtitleLabel
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMessageBox, QScrollArea, QVBoxLayout, QWidget
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CheckBox,
+    ComboBox,
+    LineEdit,
+    PushButton,
+    SubtitleLabel,
+)
 
 from daedalus.desktop.design_system import PageHeading
 from daedalus.gui_preferences import GuiPreferences
@@ -21,6 +29,7 @@ class AppearancePage(QWidget):
     report_accounts_requested = Signal()
     report_all_requested = Signal()
     administrative_status_requested = Signal(str)
+    notification_settings_requested = Signal(str, str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -87,8 +96,44 @@ class AppearancePage(QWidget):
         self.admin_rows = BodyLabel()
         self.admin_rows.setWordWrap(True)
         layout.addWidget(self.admin_rows)
+        layout.addWidget(SubtitleLabel("Notification configuration"))
+        notice = CaptionLabel("These are worker-global defaults, shared by game accounts on that worker host. "
+                              "Existing legacy per-user overrides require local reconciliation. "
+                              "Replacement sends one fixed test message before saving. Credentials are never returned.")
+        notice.setWordWrap(True)
+        layout.addWidget(notice)
+        self.notification_provider = ComboBox()
+        self.notification_provider.addItems(["Telegram", "Discord"])
+        self.notification_provider.currentIndexChanged.connect(self._notification_changed)
+        layout.addWidget(self.notification_provider)
+        self.notification_secret = LineEdit()
+        self.notification_secret.setEchoMode(QLineEdit.Password)
+        self.notification_secret.setAccessibleName("Write-only notification credential")
+        layout.addWidget(self.notification_secret)
+        self.notification_chat = LineEdit()
+        self.notification_chat.setEchoMode(QLineEdit.Password)
+        self.notification_chat.setAccessibleName("Write-only Telegram chat identifier")
+        self.notification_chat.setPlaceholderText("Telegram chat ID")
+        layout.addWidget(self.notification_chat)
+        self.notification_confirm = CheckBox("I approve changing the worker-global notification default")
+        layout.addWidget(self.notification_confirm)
+        actions = QHBoxLayout()
+        self.notification_save = PushButton("Test and save")
+        self.notification_clear = PushButton("Clear configured default")
+        self.notification_save.clicked.connect(lambda: self._configure_notification(False))
+        self.notification_clear.clicked.connect(lambda: self._configure_notification(True))
+        actions.addWidget(self.notification_save)
+        actions.addWidget(self.notification_clear)
+        layout.addLayout(actions)
+        self.notification_note = CaptionLabel()
+        self.notification_note.setWordWrap(True)
+        layout.addWidget(self.notification_note)
+        self.notification_confirm.stateChanged.connect(self._notification_controls)
+        self.notification_secret.textChanged.connect(self._notification_controls)
+        self.notification_chat.textChanged.connect(self._notification_controls)
+        self._notification_changed()
         boundary = CaptionLabel(
-            "Notification credentials, proxy configuration, challenge handling and custom extensions "
+             "Proxy configuration, challenge handling and custom extensions "
             "are managed on the authenticated worker host. The raw engine web service, developer "
             "cookie dump and unverified update commands are not exposed. Use Daedalus for remote control "
             "and the reviewed release workflow for updates.")
@@ -123,6 +168,58 @@ class AppearancePage(QWidget):
         self.admin_rows.clear()
         self.admin_note.setText("Select an enabled account and refresh. No credentials will be displayed.")
         self.admin_refresh.setEnabled(isinstance(self.admin_account.currentData(), str))
+        if hasattr(self, "notification_secret"):
+            self._notification_changed()
+
+    def _notification_changed(self, *_args):
+        self.notification_secret.clear()
+        self.notification_chat.clear()
+        self.notification_confirm.setChecked(False)
+        self.notification_note.clear()
+        telegram = self.notification_provider.currentIndex() == 0
+        self.notification_secret.setPlaceholderText("New Telegram bot token" if telegram else "New Discord webhook URL")
+        self.notification_chat.setVisible(telegram)
+        self._notification_controls()
+
+    def _notification_controls(self, *_args):
+        ready = isinstance(self.admin_account.currentData(), str) and self.notification_confirm.isChecked()
+        self.notification_save.setEnabled(ready and bool(self.notification_secret.text().strip()) and
+            (self.notification_provider.currentIndex() != 0 or bool(self.notification_chat.text().strip())))
+        self.notification_clear.setEnabled(ready)
+
+    def _configure_notification(self, clear):
+        account = self.admin_account.currentData()
+        if not isinstance(account, str) or not self.notification_confirm.isChecked():
+            return
+        provider = "telegram" if self.notification_provider.currentIndex() == 0 else "discord"
+        if clear:
+            if QMessageBox.question(self, "Clear notification default",
+                    f"Clear the worker-global {provider} default for all accounts using it?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
+            settings = {"mode": "clear"}
+        elif provider == "telegram":
+            settings = {"mode": "replace", "bot_token": self.notification_secret.text().strip(),
+                        "chat_id": self.notification_chat.text().strip()}
+        else:
+            settings = {"mode": "replace", "webhook_url": self.notification_secret.text().strip()}
+        self.notification_secret.clear()
+        self.notification_chat.clear()
+        self.notification_confirm.setChecked(False)
+        self.notification_note.setText("Submitting encrypted provider configuration…")
+        self.notification_settings_requested.emit(account, provider, settings)
+
+    def set_notification_result(self, result):
+        if result.get("account_id") == self.admin_account.currentData():
+            self.admin_rows.clear()
+            self.notification_note.setText(
+                "Worker-global notification default saved after successful provider test."
+                if result.get("result") == "configured" else "Worker-global notification default cleared.")
+
+    def set_notification_unavailable(self, account):
+        if account == self.admin_account.currentData():
+            self.admin_rows.clear()
+            self.notification_note.setText("Configuration unavailable or outcome uncertain. Refresh status before retrying.")
 
     def _request_admin_status(self) -> None:
         account = self.admin_account.currentData()

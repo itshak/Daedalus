@@ -1051,6 +1051,39 @@ class ExistingIPCClient:
             })
         return {"account_id": account.id, "miracles": result}
 
+    def notification_settings_begin(self, account: Account, provider: str) -> dict[str, object]:
+        from daedalus.notification_settings import PROVIDERS, validate_challenge
+
+        if not account.enabled or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        reply = self._exchange({"action": "notification_settings_begin_existing", "world": account.world,
+                                "player": account.player, "account_id": account.id, "provider": provider,
+                                "confirmed_global": True})
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid provider scope")
+        try:
+            return validate_challenge(reply.get("result"), account.id, provider)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid provider configuration challenge") from exc
+
+    def notification_settings_complete(self, account: Account, provider: str,
+                                       envelope: dict[str, object]) -> dict[str, object]:
+        from daedalus.notification_settings import PROVIDERS, validate_envelope, validate_receipt
+
+        if not account.enabled or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        reply = self._exchange({"action": "notification_settings_complete_existing", "world": account.world,
+                                "player": account.player, "account_id": account.id, "provider": provider,
+                                "envelope": validate_envelope(envelope)}, read_timeout=30.0)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid provider scope")
+        try:
+            return validate_receipt(reply.get("result"), account.id, provider)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid provider configuration receipt") from exc
+
     def administrative_status(self, account: Account) -> dict[str, object]:
         from daedalus.admin_status import scoped_admin_status
 

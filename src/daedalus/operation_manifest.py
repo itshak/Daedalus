@@ -29,12 +29,12 @@ _READ_VIEWS = {
 _LOCAL_BOUNDARIES = frozenset({
     "importExportCookie", "developer", "loadCustomModule", "update",
     "checkForUpdate", "webServer", "proxyConf", "decaptchaConf",
-    "updateTelegramData", "updateDiscordData",
     "show_proxy",
 })
+_PROTECTED_SETTINGS = frozenset({"updateTelegramData", "updateDiscordData"})
 _PENDING = frozenset()
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})
-ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PENDING | {"logs"}
+ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PROTECTED_SETTINGS | _PENDING | {"logs"}
 
 
 def operation_workflow(name: str) -> dict[str, object]:
@@ -57,6 +57,10 @@ def operation_workflow(name: str) -> dict[str, object]:
     if name == "logs":
         return {"desktop": "existing_view", "web": "existing_view", "view": "activity",
                 "review": "read_only", "coverage": "partial", "scopes": ["current"],
+                "live_accepted": False}
+    if name in _PROTECTED_SETTINGS:
+        return {"desktop": "existing_view", "web": "existing_view", "view": "settings",
+                "review": "admin_review", "coverage": "partial", "scopes": ["current"],
                 "live_accepted": False}
     if name in _LOCAL_BOUNDARIES:
         # Only import/session recovery already has a protected local workflow.
