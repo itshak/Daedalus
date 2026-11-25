@@ -774,6 +774,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_layout_existing":
+                    return self._preview_layout_existing(request)
                 if action == "preview_workers_existing":
                     return self._preview_workers_existing(request)
                 if action == "preview_donation_existing":
@@ -902,6 +904,14 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _preview_layout_existing(self, request):
+        from ikabot.function.reorganizeCityBuildings import preview_native_layout
+
+        session = self._existing_session(request)
+        plan = preview_native_layout(session, request.get("city_id"), request.get("template_city_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _preview_workers_existing(self, request):
         from ikabot.function.modifyProduction import preview_native_workers
@@ -1730,6 +1740,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
+                    "reorganizeCityBuildings",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

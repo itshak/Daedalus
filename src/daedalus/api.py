@@ -45,7 +45,12 @@ from daedalus.operation_previews import OperationPreviews, PreviewUnavailable
 from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentialsUnavailable
 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore
-from daedalus.reviewed_operations import CITY_REVIEW_TASKS, WORKER_TASKS, validated_worker_draft
+from daedalus.reviewed_operations import (
+    CITY_REVIEW_TASKS,
+    WORKER_TASKS,
+    validated_layout_draft,
+    validated_worker_draft,
+)
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
@@ -697,6 +702,31 @@ def create_app(
             ) from exc
 
     @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/layout-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def layout_plan(account_id: str, city_id: int,
+                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real layout planner unavailable")
+        try:
+            template = validated_layout_draft(city_id, payload)
+            plan = ipc_client.layout_preview(account, city_id, template)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Layout preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Layout preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "reorganizeCityBuildings", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
         "/api/v1/accounts/{account_id}/cities/{city_id}/worker-plan",
         dependencies=[Depends(authorized)],
     )
@@ -1259,6 +1289,12 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/layout-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_layout(account_id: str,
+                              payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "reorganizeCityBuildings", payload)
 
     @app.post(
         "/api/v1/accounts/{account_id}/tasks/worker-start",

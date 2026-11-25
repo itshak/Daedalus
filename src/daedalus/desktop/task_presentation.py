@@ -24,6 +24,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "consolidateResources": "Consolidate known resources to a target city.",
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
+    "reorganizeCityBuildings": "Copy the layout of an owned template city to another owned city.",
     "modifyProduction": "Set workers for a forest or luxury-resource project.",
     "modifyAcademyWorkers": "Set scientists in a verified academy.",
     "modifyTempleWorkers": "Set priests in a verified temple.",
@@ -121,6 +122,9 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         (task_name, "expected"): {"type": "hidden_derived"}
         for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
     },
+    ("reorganizeCityBuildings", "city_id"): {"type": "city_picker", "label": "Target city"},
+    ("reorganizeCityBuildings", "template_city_id"): {"type": "city_picker", "label": "Template city"},
+    ("reorganizeCityBuildings", "expected"): {"type": "hidden_derived"},
     ("modifyProduction", "project"): {
         "type": "text", "choices": ["resource", "tradegood"],
         "choice_labels": ["Forest", "Luxury resource"], "label": "Resource production",

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -60,3 +60,38 @@ def validate_worker_plan(task: str, city_id: int, draft: dict[str, object],
     return {k: plan[k] for k in ("task", "city_id", "city_name", "percentage",
                                  "project", "overcharge", "maximum", "extra",
                                  "current", "target", "ready", "config")}
+
+def validated_layout_draft(city_id: object, draft: object) -> int:
+    if (type(city_id) is not int or not 0 < city_id < 10**12
+            or not isinstance(draft, dict) or set(draft) != {"template_city_id"}
+            or type(draft["template_city_id"]) is not int
+            or not 0 < draft["template_city_id"] < 10**12
+            or city_id == draft["template_city_id"]):
+        raise ValueError("Choose two different owned cities")
+    return draft["template_city_id"]
+
+
+def validate_layout_plan(city_id: int, template_id: int, plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or plan.get("template_city_id") != template_id
+            or any(not isinstance(plan.get(k), str) or not 0 < len(plan[k]) <= 100
+                   for k in ("city_name", "template_name"))
+            or not isinstance(plan.get("moves"), list) or len(plan["moves"]) > 80
+            or plan.get("ready") is not bool(plan["moves"])):
+        raise ValueError("Invalid layout preview")
+    for move in plan["moves"]:
+        if (not isinstance(move, dict) or set(move) != {"from", "to", "building", "displaced"}
+                or any(type(move[k]) is not int or not 0 <= move[k] <= 80 for k in ("from", "to"))
+                or move["from"] == move["to"]
+                or any(not isinstance(move[k], str) or not 0 < len(move[k]) <= 64
+                       for k in ("building", "displaced"))):
+            raise ValueError("Invalid layout move")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", "template_city_id", "expected"}
+            or config["city_id"] != city_id or config["template_city_id"] != template_id
+            or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid layout fingerprint")
+    return {k: plan[k] for k in ("city_id", "template_city_id", "city_name", "template_name",
+                                 "moves", "ready", "config")}

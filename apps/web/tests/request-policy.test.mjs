@@ -63,3 +63,10 @@ test("worker plans and starts have bounded explicit paths",()=>{
   assert.equal(allowedRequest("POST","accounts/a/tasks/worker-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/worker-plan".split("/"),params("raw=true")),false);
 });
+
+test("layout plans require the two-city ticket workflow",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/layout-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/layout-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/0/layout-plan".split("/"),params()),false);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/layout-plan".split("/"),params("raw=true")),false);
+});

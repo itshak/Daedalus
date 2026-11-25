@@ -17,7 +17,12 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.accounts import Account
-from daedalus.reviewed_operations import validate_worker_plan, validated_worker_draft
+from daedalus.reviewed_operations import (
+    validate_layout_plan,
+    validate_worker_plan,
+    validated_layout_draft,
+    validated_worker_draft,
+)
 from daedalus.warehouse import (
     RESOURCES,
     CityWarehouseSnapshot,
@@ -31,7 +36,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
@@ -133,14 +138,15 @@ class ExistingIPCClient:
                 resource_type: int | None = None,
                 market_side: str | None = None,
                 project: str | None = None, amount: int | None = None,
-                worker_task: str | None = None, worker_draft: dict[str, object] | None = None) -> dict[str, Any]:
+                worker_task: str | None = None, worker_draft: dict[str, object] | None = None,
+                template_city_id: int | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
@@ -154,7 +160,7 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
-                      "preview_donation_existing", "preview_workers_existing",
+                      "preview_donation_existing", "preview_workers_existing", "preview_layout_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -199,7 +205,12 @@ class ExistingIPCClient:
             payload.update(task=worker_task, **validated_worker_draft(worker_task, worker_draft))
         elif worker_task is not None or worker_draft is not None:
             raise ValueError("Worker fields are allowed only for a worker preview")
+        if action == "preview_layout_existing":
+            payload["template_city_id"] = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        elif template_city_id is not None:
+            raise ValueError("Unexpected layout template")
         return self._exchange(payload, read_timeout=60.0 if action in {
+            "preview_layout_existing",
             "preview_workers_existing",
             "preview_donation_existing",
             "preview_construction_existing", "military_overview_existing",
@@ -360,6 +371,22 @@ class ExistingIPCClient:
                 "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
+
+    def layout_preview(self, account: Account, city_id: int, template_city_id: int) -> dict[str, object]:
+        template = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or template not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_layout_existing", account=account,
+                            city_id=city_id, template_city_id=template)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid layout preview scope")
+        try:
+            plan = validate_layout_plan(city_id, template, data.get("plan"))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid layout preview") from exc
+        return {"account_id": account.id, **plan}
 
     def worker_preview(self, account: Account, city_id: int, task: str,
                        draft: dict[str, object]) -> dict[str, object]:

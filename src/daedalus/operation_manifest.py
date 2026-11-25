@@ -32,7 +32,7 @@ _LOCAL_BOUNDARIES = frozenset({
 })
 _PENDING = frozenset({
     "attackBarbarians", "autoBarbarians", "constructBuilding",
-    "reorganizeCityBuildings", "stationArmy", "vacationMode",
+    "stationArmy", "vacationMode",
 })
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})
 ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PENDING | {"logs"}

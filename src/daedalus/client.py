@@ -13,7 +13,11 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
+from daedalus.reviewed_operations import (
+    WORKER_TASKS,
+    validated_layout_draft,
+    validated_worker_draft,
+)
 
 _ACCOUNT_ID = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z")
 
@@ -179,6 +183,13 @@ class DaedalusClient:
             return self._write(f"accounts/{account_id}/tasks/worker-start", {
                 "task": task, "preview_id": config["preview_id"],
                 "request_id": request_id, "confirmed": confirmed,
+            })
+        if task == "reorganizeCityBuildings":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the layout first")
+            return self._write(f"accounts/{account_id}/tasks/layout-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
             })
         if task == "donate":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
@@ -622,6 +633,29 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def layout_preview(self, account_id: str, city_id: int, template_city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        template = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/layout-plan",
+                           {"template_city_id": template})
+        moves = data.get("moves")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("template_city_id") != template
+                or not isinstance(moves, list) or len(moves) > 80
+                or any(not isinstance(m, dict) or set(m) != {"from", "to", "building", "displaced"}
+                       or any(type(m[k]) is not int or not 0 <= m[k] <= 80 for k in ("from", "to"))
+                       or any(not isinstance(m[k], str) or not 0 < len(m[k]) <= 64
+                              for k in ("building", "displaced")) for m in moves)
+                or any(not isinstance(data.get(k), str) for k in ("city_name", "template_name"))
+                or data.get("ready") is not bool(moves)
+                or (moves and (not isinstance(data.get("preview_id"), str)
+                               or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                               or type(data.get("expires_in")) is not int
+                               or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Backend returned invalid layout preview")
         return data
 
     def worker_preview(self, account_id: str, city_id: int, task: str,

@@ -27,9 +27,15 @@ Focused tests: four native donation/Qt tests, 17 session expiry/retry tests (12 
 
 The three upstream worker operations (production, academy, temple) now have structured, city-scoped engine adapters and native desktop/web editors. The current project/building slider and normal/extra capacity are read from the game; the selected percentage is converted into an exact target. A one-shot ticket binds the operation and city to the reviewed slider state, and the child revalidates it before mutation. No raw game fields or automatic retry/replay. Population, production and faith impact estimates beyond the source slider are not inferred.
 
-The versioned capability manifest records 24 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
+The versioned capability manifest records 25 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
 
 Donation integration baseline: 705 Python tests passed, 11 skipped; 408 engine tests passed, 9 skipped, 123 subtests passed; 25 web tests, TypeScript, lint (warnings only), production build, Ruff and proposal validation passed. Worker/manifest focused regression: 33 Python tests passed; 27 web unit tests passed before the final manifest UI wiring. Full combined validation is required.
+
+## Copy city building layout
+
+The layout editor selects two different authenticated cities on the same account. It uses the original IkaBot move planner, checks both slot maps, rejects busy/missing/incompatible known slots, fingerprints the reviewed layouts, and presents the applicable swaps. The engine rereads both cities before dispatch and before one non-retried save request. No-op previews issue no ticket. This is a single target city per review and game acceptance must be verified; full multi-target parity is not claimed.
+
+Focused layout/Qt/manifest regression: 31 Python tests passed. Web: TypeScript and 28 unit tests passed.
 
 ## Still open
 

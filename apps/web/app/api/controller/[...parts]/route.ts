@@ -60,9 +60,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "layout-plan" && !z.object({template_city_id:z.number().int().positive().max(999_999_999_999)}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+    if (["construction-start","donation-start","layout-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
       return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });

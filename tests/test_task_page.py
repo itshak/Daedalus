@@ -717,3 +717,34 @@ def test_worker_editor_requires_scope_bound_preview(page, monkeypatch, task):
     page.confirm_box.setChecked(True)
     page._start()
     assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_layout_editor_two_owned_cities_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "reorganizeCityBuildings"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Template"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["template_city_id"].setCurrentIndex(2)
+    calls = []
+    page.layout_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    account, draft, nonce = calls[0]
+    assert account == "alpha" and draft == {"city_id": 1, "template_city_id": 2}
+    assert not page.start_button.isEnabled()
+    result = {"account_id": "alpha", **draft, "city_name": "Town", "template_name": "Template",
+              "moves": [{"from": 1, "to": 2, "building": "academy", "displaced": "warehouse"}],
+              "ready": True, "preview_id": "a" * 43, "expires_in": 120}
+    page.set_layout_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_layout_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})

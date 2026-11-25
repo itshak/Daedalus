@@ -84,6 +84,7 @@ _TASK_LABELS = {
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
     "loginDaily": "Daily login", "dumpWorld": "Export world data",
+    "reorganizeCityBuildings": "Copy city building layout",
     "modifyProduction": "Production workers", "modifyAcademyWorkers": "Academy scientists",
     "modifyTempleWorkers": "Temple priests",
     "webServer": "IkaBot web server", "autoPirate": "Piracy automation",
@@ -101,7 +102,7 @@ _TASK_CATEGORIES = {
                           "distributeResources", "donationBot", "donate"},
     "City management": {"constructionList", "tavernManager", "research",
                         "loginDaily", "activateMiracle", "activateShrine",
-                        "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"},
+                        "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers", "reorganizeCityBuildings"},
     "Military & missions": {"trainArmy", "UpgradeUnits", "attackBarbarians",
                             "autoBarbarians", "autoPirate"},
 }
@@ -131,6 +132,7 @@ class TasksPage(QWidget):
     construction_preview_requested = Signal(str, int, object)
     donation_preview_requested = Signal(str, object, str)
     worker_preview_requested = Signal(str, str, object, str)
+    layout_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
     trainable_units_requested = Signal(str, int, bool)
     market_quotes_requested = Signal(str, int, int, str)
@@ -858,6 +860,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "reorganizeCityBuildings":
+            self.building_note.setText("Comparing the actual city layouts…")
+            self.layout_preview_requested.emit(account, draft, self._city_review_nonce)
         else:
             self.building_note.setText("Reading the actual island project and available wood…")
             self.donation_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -889,6 +894,35 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_layout_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "reorganizeCityBuildings"
+                or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        moves = result["moves"]
+        summary = "; ".join(f"{m['building']} {m['from']} → {m['to']} (swap {m['displaced']})" for m in moves)
+        self.building_note.setText(
+            f"{result['template_name']} → {result['city_name']}: {len(moves)} swaps. "
+            + (summary if moves else "No applicable layout swaps.")
+        )
+        self._invalidate_review()
+
+    def set_layout_preview_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "reorganizeCityBuildings" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Layout preview unavailable. Choose different owned cities.")
             self._invalidate_review()
 
     def set_worker_preview(self, result: dict[str, object], nonce: str) -> None:
@@ -1575,7 +1609,8 @@ class TasksPage(QWidget):
         self.construction_preview_button.setVisible(show_buildings or name in CITY_REVIEW_TASKS)
         self.construction_preview_button.setText(
             "Preview island donation…" if name == "donate" else
-            "Preview worker assignment…" if name in WORKER_TASKS else "Calculate actual upgrade costs & queue…")
+            "Preview worker assignment…" if name in WORKER_TASKS else
+            "Preview layout changes…" if name == "reorganizeCityBuildings" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
         if name in CITY_REVIEW_TASKS:
             self.building_note.setText("Choose a city and settings, then preview.")

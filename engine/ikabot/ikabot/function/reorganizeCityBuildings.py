@@ -1,4 +1,8 @@
-from ikabot.helpers.decorators import configurator
+from ikabot.helpers.decorators import configurator, task
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
+import hashlib
+import json
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -81,6 +85,94 @@ def _compute_moves(template_city, target_city):
             reverse_tracker[current] = displaced_original
 
     return moves
+
+
+def _review_layout(city):
+    """Validate the actual slot map, keeping only bounded nonsecret fields."""
+    rows = city["position"]
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 81:
+        raise ValueError("Invalid city layout")
+    result = []
+    seen = set()
+    for row in rows:
+        position, building = row.get("position"), row.get("building")
+        level = row.get("level", 0)
+        if (type(position) is not int or not 0 <= position <= 80 or position in seen
+                or not isinstance(building, str) or not 0 < len(building) <= 64
+                or type(level) is not int or not 0 <= level <= 150):
+            raise ValueError("Invalid building position")
+        seen.add(position)
+        result.append({"position": position, "building": building, "level": level,
+                       "busy": row.get("isBusy") is True, "type": str(row.get("type") or "")[:32]})
+    return sorted(result, key=lambda row: row["position"])
+
+
+def preview_native_layout(session, city_id, template_city_id):
+    if (type(city_id) is not int or type(template_city_id) is not int
+            or not 0 < city_id < 10**12 or not 0 < template_city_id < 10**12
+            or city_id == template_city_id):
+        raise ValueError("Choose two different owned cities")
+    pedirInfo.ids_cache = None
+    target_id = requireOwnCity(session, city_id, "Target city")
+    template_id = requireOwnCity(session, template_city_id, "Template city")
+    target = getCityById(session, target_id)
+    template = getCityById(session, template_id)
+    if str(target["id"]) != target_id or str(template["id"]) != template_id:
+        raise ValueError("City identity changed")
+    target_rows, template_rows = _review_layout(target), _review_layout(template)
+    target_slots = {row["position"]: dict(row) for row in target_rows}
+    moves = _compute_moves({"position": template_rows}, {"position": target_rows})
+    if len(moves) > 80:
+        raise ValueError("Too many layout moves")
+    display = []
+    for origin, destination in moves:
+        a, b = target_slots.get(origin), target_slots.get(destination)
+        if a is None or b is None or a["busy"] or b["busy"]:
+            raise ValueError("Layout touches an unavailable or busy slot")
+        if a["type"] and b["type"] and a["type"] != b["type"]:
+            raise ValueError("Layout crosses incompatible slot types")
+        display.append({"from": origin, "to": destination,
+                        "building": a["building"], "displaced": b["building"]})
+        target_slots[origin] = {**b, "position": origin, "type": a["type"]}
+        target_slots[destination] = {**a, "position": destination, "type": b["type"]}
+    expected = hashlib.sha256(json.dumps(
+        [target_rows, template_rows], sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    return {"city_id": city_id, "template_city_id": template_city_id,
+            "city_name": str(target["cityName"])[:100],
+            "template_name": str(template["cityName"])[:100],
+            "moves": display, "ready": bool(display),
+            "config": {"city_id": city_id, "template_city_id": template_city_id,
+                       "expected": expected}}
+
+
+def prepare_native_layout(session, city_id, template_city_id, expected):
+    plan = preview_native_layout(session, city_id, template_city_id)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Layout review is stale or no moves are needed")
+    return plan["config"]
+
+
+@task("reorganizeCityBuildings", prepare=prepare_native_layout)
+def native_layout(session, city_id: int, template_city_id: int, expected: str):
+    plan = preview_native_layout(session, city_id, template_city_id)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Layout review is stale or no moves are needed")
+    city = str(city_id)
+    session.post(
+        f"view=saveCityBuildingsPositions&cityId={city}&backgroundView=city"
+        f"&currentCityId={city}&actionRequest={actionRequest}&ajax=1",
+        noIndex=True,
+    )
+    params = {"action": "SaveBuildingPositions", "backgroundView": "city",
+              "currentCityId": city, "templateView": "saveCityBuildingsPositions",
+              "actionRequest": actionRequest, "ajax": "1", "cityId": city}
+    for index, move in enumerate(plan["moves"]):
+        params[f"moves[{index}][from]"] = move["from"]
+        params[f"moves[{index}][to]"] = move["to"]
+    session.setStatus("Submitting reviewed building layout")
+    session.post(params=params, noIndex=True, retry_on_failure=False)
+    session.setStatus("Layout submitted; verify the city")
 
 
 @configurator

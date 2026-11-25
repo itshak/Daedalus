@@ -70,4 +70,4 @@ See [implementation-status.md](implementation-status.md) for current editors and
 
 ### Reviewed implementation coverage
 
-See [capability-matrix.json](capability-matrix.json) for the versioned, machine-checked current coverage policy and [implementation-status.md](implementation-status.md) for evidence and limitations. The 24 native workflows include the newly reviewed one-shot donation and three worker-assignment operations. Native does not imply complete upstream option parity or live acceptance.
+See [capability-matrix.json](capability-matrix.json) for the versioned, machine-checked current coverage policy and [implementation-status.md](implementation-status.md) for evidence and limitations. The 25 native workflows include the newly reviewed one-shot donation, three worker-assignment operations and city-layout copy. Native does not imply complete upstream option parity or live acceptance.
