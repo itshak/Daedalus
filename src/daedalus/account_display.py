@@ -32,7 +32,8 @@ def account_player_name(account: Mapping[str, object]) -> str:
     if (isinstance(player, str) and player.strip()
             and not _IMPORTED.fullmatch(player.strip())):
         return player.strip()
-    return account_display_name(account)
+    # A placeholder in the player field must not leak back through the fallback.
+    return account_display_name({**account, "player": None})
 
 
 def account_player_names(accounts: list[dict[str, object]]) -> dict[str, str]:
