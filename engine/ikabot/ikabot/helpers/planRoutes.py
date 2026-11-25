@@ -192,7 +192,8 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
                 available_ships,
                 send,
                 useFreighters,
-                checkpoint=checkpoint, route_index=route_index, verify_recipient=verify_recipient,
+                checkpoint=checkpoint, route_index=route_index,
+                **({"verify_recipient": verify_recipient} if verify_recipient is not None else {}),
             )
             if checkpoint:
                 toSend = [remaining - transferred

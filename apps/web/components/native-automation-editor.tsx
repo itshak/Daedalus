@@ -197,8 +197,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       {task==="alertLowWine"&&<>{numeric(t("Warn when wine has less than (hours)"),hours,setHours,1,720)}<label className="check-label"><input type="checkbox" checked={autoTransfer} onChange={e=>{edit();setAutoTransfer(e.target.checked);}}/>{t("Automatic wine transfer")}</label>{autoTransfer&&numeric(t("Wine to transfer"),transferAmount,setTransferAmount,1,MAX_AMOUNT)}</>}
       {task==="sendResources"&&<>
         <fieldset><legend>{t("Find external cities")}</legend>
-          {numeric(t("Island X"),islandX,v=>{resetExternal();setIslandX(v);},1,100)}
-          {numeric(t("Island Y"),islandY,v=>{resetExternal();setIslandY(v);},1,100)}
+          <label className="field"><span>{t("Island X")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandX)?"":islandX} onChange={e=>{resetExternal();setIslandX(e.target.value===""?NaN:Number(e.target.value));}}/></label>
+          <label className="field"><span>{t("Island Y")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandY)?"":islandY} onChange={e=>{resetExternal();setIslandY(e.target.value===""?NaN:Number(e.target.value));}}/></label>
           <button type="button" className="secondary-button" disabled={lookingUp||!cities.length||!Number.isInteger(islandX)||islandX<1||islandX>100||!Number.isInteger(islandY)||islandY<1||islandY>100} onClick={()=>void lookup()}>{t(lookingUp?"Looking up cities…":"Find external cities")}</button>
           {lookupMessage&&<p role="status">{t(lookupMessage)}</p>}
         </fieldset>
