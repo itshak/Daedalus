@@ -57,3 +57,9 @@ test("one-shot donations use reviewed ticket endpoints, not arbitrary paths",()=
   assert.equal(allowedRequest("POST","accounts/a/cities/12/donation-plan".split("/"),params("raw=true")),false);
   assert.equal(allowedRequest("POST","accounts/a/cities/0/donation-plan".split("/"),params()),false);
 });
+
+test("worker plans and starts have bounded explicit paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/worker-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/worker-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/worker-plan".split("/"),params("raw=true")),false);
+});

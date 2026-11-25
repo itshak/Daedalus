@@ -1383,7 +1383,7 @@ class OperationsPage(QWidget):
         self.configure_button.setEnabled(False)
         header.addWidget(self.configure_button)
         layout.addLayout(header)
-        self.table = _table(["Operation", "Kind", "Module", "Parameters"])
+        self.table = _table(["Operation", "Kind", "Module", "Parameters", "Availability"])
         self.table.setAccessibleName("IkaBot operation catalog")
         self.table.setToolTip("Read-only catalog. Double-click a background task to configure it.")
         self.table.itemSelectionChanged.connect(self._update_configure)
@@ -1399,15 +1399,19 @@ class OperationsPage(QWidget):
     def _update_configure(self) -> None:
         row = self.table.currentRow()
         item = self.table.item(row, 1) if row >= 0 else None
+        name = self.table.item(row, 0) if row >= 0 else None
+        record = next((o for o in self._operations if name and o.get("name") == name.text()), {})
+        workflow = record.get("workflow")
         self.configure_button.setEnabled(
-            bool(item is not None and item.text() == "background_task")
+            bool(item is not None and item.text() == "background_task"
+                 and (not isinstance(workflow, dict) or workflow.get("desktop") == "native"))
         )
 
     def _configure_selected(self) -> None:
         row = self.table.currentRow()
         kind = self.table.item(row, 1) if row >= 0 else None
         name = self.table.item(row, 0) if row >= 0 else None
-        if kind is not None and kind.text() == "background_task" and name is not None:
+        if self.configure_button.isEnabled() and kind is not None and kind.text() == "background_task" and name is not None:
             self.configure_requested.emit(name.text())
 
     def set_operations(self, operations: list[dict[str, object]]) -> None:
@@ -1430,6 +1434,13 @@ class OperationsPage(QWidget):
                     item.get("kind") or "",
                     item.get("module") or "",
                     ", ".join(str(value) for value in (item.get("parameters") or [])),
+                    {
+                        "native": "Native settings (partial parity)",
+                        "existing_view": "Existing view",
+                        "protected_local": "Protected local workflow",
+                        "pending": "Adapter not available",
+                    }.get(item.get("workflow", {}).get("desktop"), "Not reported")
+                    if isinstance(item.get("workflow"), dict) else "Not reported",
                 ]
                 for item in filtered
             ],

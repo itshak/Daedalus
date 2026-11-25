@@ -40,10 +40,12 @@ from daedalus.login_vault import (
     write_login_vault,
 )
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
+from daedalus.operation_manifest import MANIFEST_VERSION, operation_workflow
 from daedalus.operation_previews import OperationPreviews, PreviewUnavailable
 from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentialsUnavailable
 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore
+from daedalus.reviewed_operations import CITY_REVIEW_TASKS, WORKER_TASKS, validated_worker_draft
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
@@ -581,7 +583,9 @@ def create_app(
     def capabilities() -> dict[str, object]:
         operations = inspect_engine()
         return {
-            "operations": [item.to_dict() for item in operations],
+            "operations": [{**item.to_dict(), "workflow": operation_workflow(item.name)}
+                           for item in operations],
+            "operation_manifest_version": MANIFEST_VERSION,
             "structured_engine_dispatch": task_controller is not None,
             "session_monitoring": recovery_monitor is not None,
             "synthetic_demo": demo_mode,
@@ -691,6 +695,36 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/worker-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def worker_plan(account_id: str, city_id: int,
+                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real worker planner unavailable")
+        if set(payload) != {"task", "draft"} or not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid worker draft")
+        task = payload["task"]
+        try:
+            clean = validated_worker_draft(task, payload["draft"])
+            plan = ipc_client.worker_preview(account, city_id, task, clean)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Worker preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Worker preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = None
+        if plan["ready"] and task_controller is not None:
+            ticket = operation_previews.issue(account_id, task, config)
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
 
     @app.post(
         "/api/v1/accounts/{account_id}/cities/{city_id}/donation-plan",
@@ -1184,8 +1218,8 @@ def create_app(
     def start_account_task(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
-        if payload.get("task") == "donate":
-            raise HTTPException(status_code=422, detail="Use the reviewed donation endpoint")
+        if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS:
+            raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
         return dispatch_account_task(account_id, payload)
 
     def dispatch_account_task(account_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -1225,6 +1259,19 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/worker-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_worker(account_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        task = payload.get("task")
+        if not isinstance(task, str) or task not in WORKER_TASKS:
+            raise HTTPException(status_code=422, detail="Invalid worker operation")
+        return start_reviewed_operation(
+            account_id, task, {k: v for k, v in payload.items() if k != "task"},
+        )
 
     def start_reviewed_operation(account_id: str, task: str,
                                  payload: dict[str, object]) -> dict[str, object]:

@@ -675,3 +675,45 @@ def test_donate_once_requires_scoped_preview(page, monkeypatch):
     page.confirm_box.setChecked(True)
     page._start()
     assert launched[0][:3] == ("alpha", "donate", {"preview_id": "a" * 43})
+
+
+@pytest.mark.parametrize("task", ["modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"])
+def test_worker_editor_requires_scope_bound_preview(page, monkeypatch, task):
+    from daedalus.engine_registry import inspect_engine
+
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True,
+                        "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["percentage"].setValue(50)
+    if task == "modifyProduction":
+        page._form_inputs["project"].setCurrentIndex(0)
+        page._form_inputs["overcharge"].setChecked(False)
+    assert not page.start_button.isEnabled()
+    calls = []
+    page.worker_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    account, name, draft, nonce = calls[0]
+    assert account == "alpha" and name == task
+    assert draft["percentage"] == 50 and draft["city_id"] == 1
+    result = {"account_id": "alpha", "task": task, **draft, "city_name": "Town",
+              "current": 25, "maximum": 100, "extra": 0, "target": 50, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_worker_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_worker_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    page.confirm_box.setChecked(True)
+    page._form_inputs["percentage"].setValue(51)
+    assert not page.start_button.isEnabled()
+    assert not page.confirm_box.isChecked()
+    page._request_native_preview()
+    page.set_worker_preview({**result, "percentage": 51, "target": 51}, calls[-1][3])
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})

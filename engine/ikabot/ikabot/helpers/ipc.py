@@ -774,6 +774,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_workers_existing":
+                    return self._preview_workers_existing(request)
                 if action == "preview_donation_existing":
                     return self._preview_donation_existing(request)
                 if action == "preview_construction_existing":
@@ -900,6 +902,16 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _preview_workers_existing(self, request):
+        from ikabot.function.modifyProduction import preview_native_workers
+
+        session = self._existing_session(request)
+        plan = preview_native_workers(session, request.get("task"), request.get("city_id"),
+                                      request.get("percentage"), request.get("project"),
+                                      request.get("overcharge", False))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _preview_donation_existing(self, request):
         from ikabot.function.donate import preview_native_donation
@@ -1716,7 +1728,9 @@ class IPCServer:
             try:
                 prepared = prepare(session, **clean_config)
             except ValueError:
-                if existing_only and canonical_name == "donate":
+                if existing_only and canonical_name in {
+                    "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
+                }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise
             if prepared is not None:

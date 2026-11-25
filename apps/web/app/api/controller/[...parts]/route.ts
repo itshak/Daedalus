@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
-import { validNativeLaunch } from "@/lib/native-task-contract";
+import { validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,6 +53,13 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "construction-plan" && !buildingTargets.safeParse(value).success)
       return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) === "worker-plan") {
+      const item=value as {task?:unknown;draft?:unknown}|null;
+      if(!item || typeof item!=="object" || Object.keys(item).length!==2 || !validWorkerDraft(item.task,item.draft))
+        return NextResponse.json({error:"Invalid worker draft"},{status:422,headers:responseHeaders});
+    }
+    if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
+      return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
     if (["construction-start","donation-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)

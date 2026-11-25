@@ -24,6 +24,9 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "consolidateResources": "Consolidate known resources to a target city.",
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
+    "modifyProduction": "Set workers for a forest or luxury-resource project.",
+    "modifyAcademyWorkers": "Set scientists in a verified academy.",
+    "modifyTempleWorkers": "Set priests in a verified temple.",
     "donate": "Make one reviewed wood donation to an owned city’s island project.",
     "donationBot": "Coordinate supported island donations across configured cities.",
     "dumpWorld": "Export an allowed portion of the world map.",
@@ -104,6 +107,26 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "type": "integer", "choices": [1, 2, 3],
         "choice_labels": ["Trade ships", "Freighters", "Both fleets"],
         "label": "Fleet type",
+    },
+    **{
+        (task_name, "city_id"): {"type": "city_picker", "label": "City"}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    **{
+        (task_name, "percentage"): {"type": "integer", "label": "Capacity percentage",
+                                    "minimum": 0, "maximum": 100, "default": 100}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    **{
+        (task_name, "expected"): {"type": "hidden_derived"}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    ("modifyProduction", "project"): {
+        "type": "text", "choices": ["resource", "tradegood"],
+        "choice_labels": ["Forest", "Luxury resource"], "label": "Resource production",
+    },
+    ("modifyProduction", "overcharge"): {
+        "type": "boolean", "default": False, "label": "Use overcharge (only at 100%)",
     },
     ("donate", "city_id"): {"type": "city_picker", "label": "Donation city"},
     ("donate", "project"): {

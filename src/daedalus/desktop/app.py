@@ -304,6 +304,12 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.cities(self.account_id),
                 }
+            elif self.action == "task_worker_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.worker_preview(
+                    self.account_id, draft["city_id"], self.task_payload["task"],
+                    {k: v for k, v in draft.items() if k != "city_id"},
+                )
             elif self.action == "task_donation_preview" and self.account_id and self.task_payload:
                 draft = self.task_payload["draft"]
                 result = self.client.donation_preview(
@@ -800,6 +806,12 @@ class MainWindow(FluentWindow):
             view.shrine_requested.connect(self._queue_shrine)
             view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
+            view.worker_preview_requested.connect(
+                lambda aid, task, draft, nonce: self._request(
+                    "task_worker_preview", account_id=aid,
+                    task_payload={"task": task, "draft": draft, "nonce": nonce},
+                )
+            )
             view.donation_preview_requested.connect(
                 lambda aid, draft, nonce: self._request(
                     "task_donation_preview", account_id=aid,
@@ -2275,6 +2287,11 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
                                           payload["buildings"])
+        elif action == "task_worker_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_worker_preview(payload, request["nonce"])
         elif action == "task_donation_preview":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2487,6 +2504,10 @@ class MainWindow(FluentWindow):
             city_id = request.get("city_id") if isinstance(request, dict) else None
             if isinstance(account_id, str) and type(city_id) is int:
                 self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action == "task_worker_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_worker_preview_unavailable(request["nonce"])
         if action == "task_donation_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

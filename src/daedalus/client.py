@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
+
 _ACCOUNT_ID = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z")
 
 
@@ -171,6 +173,13 @@ class DaedalusClient:
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
+        if task in WORKER_TASKS:
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the worker assignment first")
+            return self._write(f"accounts/{account_id}/tasks/worker-start", {
+                "task": task, "preview_id": config["preview_id"],
+                "request_id": request_id, "confirmed": confirmed,
+            })
         if task == "donate":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
                 raise ValueError("Review the donation first")
@@ -613,6 +622,29 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def worker_preview(self, account_id: str, city_id: int, task: str,
+                       draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid worker city")
+        clean = validated_worker_draft(task, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/worker-plan",
+                           {"task": task, "draft": clean})
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("task") != task or data.get("percentage") != clean["percentage"]
+                or data.get("project") != clean.get("project")
+                or data.get("overcharge") is not clean.get("overcharge", False)
+                or data.get("ready") is not True
+                or not isinstance(data.get("city_name"), str)
+                or any(type(data.get(k)) is not int or not 0 <= data[k] <= 2*10**6
+                       for k in ("maximum", "extra", "target"))
+                or (data.get("current") is not None and type(data["current"]) is not int)
+                or not isinstance(data.get("preview_id"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                or type(data.get("expires_in")) is not int
+                or not 1 <= data["expires_in"] <= 120):
+            raise APIConnectionError("Backend returned invalid worker preview")
         return data
 
     def donation_preview(self, account_id: str, city_id: int,

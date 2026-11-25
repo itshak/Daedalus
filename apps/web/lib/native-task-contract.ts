@@ -200,7 +200,7 @@ export function scopedCities(value: unknown, account: string): City[] {
   }
   return result;
 }
-export function readyPreflight(value:unknown,account:string,task:NativeTask|"donate"):boolean {
+export function readyPreflight(value:unknown,account:string,task:NativeTask|"donate"|WorkerTask):boolean {
   return obj(value) && value.account_id===account && value.task===task && value.ready===true
     && value.unresolved_request===false;
 }
@@ -241,4 +241,24 @@ export async function launchAlertBatch(
     }catch{rows[i].status="uncertain";return rows;}
   }
   return rows;
+}
+
+
+export const WORKER_TASKS = ["modifyProduction","modifyAcademyWorkers","modifyTempleWorkers"] as const;
+export type WorkerTask = typeof WORKER_TASKS[number];
+export function isWorkerTask(task:unknown):task is WorkerTask {
+  return (WORKER_TASKS as readonly unknown[]).includes(task);
+}
+export function validWorkerDraft(task:unknown,draft:unknown):boolean {
+  if(!isWorkerTask(task)||!obj(draft)||!integer(draft.percentage,0,100))return false;
+  return task==="modifyProduction"
+    ? exact(draft,["percentage","project","overcharge"])&&["resource","tradegood"].includes(String(draft.project))
+      &&typeof draft.project==="string"&&typeof draft.overcharge==="boolean"&&(!draft.overcharge||draft.percentage===100)
+    : exact(draft,["percentage"]);
+}
+export function validWorkerLaunch(value:unknown):boolean {
+  return obj(value)&&exact(value,["task","preview_id","request_id","confirmed"])&&isWorkerTask(value.task)
+    &&typeof value.preview_id==="string"&&/^[A-Za-z0-9_-]{43}$/.test(value.preview_id)
+    &&typeof value.request_id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.request_id)
+    &&value.confirmed===true;
 }

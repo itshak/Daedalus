@@ -66,3 +66,8 @@ See [implementation-status.md](implementation-status.md) for current editors and
 - Web account display currently prefers email/name before player. Desktop main task selectors prefer imported label. PR #95 addresses desktop player names and removes raw editors; web requires equivalent player-first naming for automation only.
 - Existing engine registry infers opaque structures as json; that metadata is not a UI schema. Current BFF launch schema accepts arbitrary config keys structurally; new routes must validate operation-specific drafts server-side, not rely on browser widgets.
 - Existing pending OpenSpecs native-automation-workflows, redesign-macos-desktop-experience, apple-style-nextjs-web-control-center and delayed-session-reconnect-and-task-restoration must be reconciled. Do not archive work that remains unverified.
+
+
+### Reviewed implementation coverage
+
+See [capability-matrix.json](capability-matrix.json) for the versioned, machine-checked current coverage policy and [implementation-status.md](implementation-status.md) for evidence and limitations. The 24 native workflows include the newly reviewed one-shot donation and three worker-assignment operations. Native does not imply complete upstream option parity or live acceptance.

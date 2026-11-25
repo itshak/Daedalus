@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch} from "../lib/native-task-contract.ts";
+import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch} from "../lib/native-task-contract.ts";
 test("fixed shipment: strict route shape, positive quantities, distinct cities, no external/raw override",()=>{
   const route={from:1,to:2,resources:[5,0,0,0,0]};
   const config={routes:[route],useFreighters:false};
@@ -98,4 +98,18 @@ test("alert batch preflights every account before any dispatch and stops on unce
   assert.deepEqual(calls,["pre:a","pre:b","pre:c","start:a","start:b"]);
   assert.deepEqual(receipts.map(r=>r.status),["started","uncertain","not attempted"]);
   await assert.rejects(launchAlertBatch("sendResources",{minutes:20},targets,preflight,dispatch,()=>crypto.randomUUID(),()=>true));
+});
+
+test("worker assignments accept only operation-specific drafts and reviewed tickets",()=>{
+  assert.equal(validWorkerDraft("modifyProduction",{percentage:100,project:"resource",overcharge:true}),true);
+  assert.equal(validWorkerDraft("modifyAcademyWorkers",{percentage:0}),true);
+  assert.equal(validWorkerDraft("modifyTempleWorkers",{percentage:50}),true);
+  assert.equal(validWorkerDraft("modifyProduction",{percentage:50,project:"resource",overcharge:true}),false);
+  assert.equal(validWorkerDraft("modifyAcademyWorkers",{percentage:50,expected:{}}),false);
+  assert.equal(validWorkerDraft("modifyTempleWorkers",{percentage:true}),false);
+  const receipt={task:"modifyAcademyWorkers",preview_id:"a".repeat(43),request_id:"12345678-1234-4234-8234-123456789abc",confirmed:true};
+  assert.equal(validWorkerLaunch(receipt),true);
+  assert.equal(validWorkerLaunch({...receipt,task:"developer"}),false);
+  assert.equal(validWorkerLaunch({...receipt,confirmed:false}),false);
+  assert.equal(validWorkerLaunch({...receipt,config:{}}),false);
 });

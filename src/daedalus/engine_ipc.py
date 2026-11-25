@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.accounts import Account
+from daedalus.reviewed_operations import validate_worker_plan, validated_worker_draft
 from daedalus.warehouse import (
     RESOURCES,
     CityWarehouseSnapshot,
@@ -30,7 +31,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
@@ -131,14 +132,15 @@ class ExistingIPCClient:
                 train_troops: bool | None = None,
                 resource_type: int | None = None,
                 market_side: str | None = None,
-                project: str | None = None, amount: int | None = None) -> dict[str, Any]:
+                project: str | None = None, amount: int | None = None,
+                worker_task: str | None = None, worker_draft: dict[str, object] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
@@ -152,7 +154,7 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
-                      "preview_donation_existing",
+                      "preview_donation_existing", "preview_workers_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -193,7 +195,12 @@ class ExistingIPCClient:
             payload.update(project=project, amount=amount)
         elif project is not None or amount is not None:
             raise ValueError("Donation fields are allowed only for a donation preview")
+        if action == "preview_workers_existing":
+            payload.update(task=worker_task, **validated_worker_draft(worker_task, worker_draft))
+        elif worker_task is not None or worker_draft is not None:
+            raise ValueError("Worker fields are allowed only for a worker preview")
         return self._exchange(payload, read_timeout=60.0 if action in {
+            "preview_workers_existing",
             "preview_donation_existing",
             "preview_construction_existing", "military_overview_existing",
             "ship_movements_existing",
@@ -353,6 +360,22 @@ class ExistingIPCClient:
                 "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
+
+    def worker_preview(self, account: Account, city_id: int, task: str,
+                       draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_worker_draft(task, draft)
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Worker city is not owned by this account")
+        data = self.request("preview_workers_existing", account=account,
+                            city_id=city_id, worker_task=task, worker_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid worker preview scope")
+        try:
+            plan = validate_worker_plan(task, city_id, clean, data.get("plan"))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid worker preview") from exc
+        return {"account_id": account.id, **plan}
 
     def donation_preview(self, account: Account, city_id: int,
                          project: str, amount: int) -> dict[str, object]:
