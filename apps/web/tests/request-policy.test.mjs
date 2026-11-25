@@ -44,3 +44,82 @@ test('recovery routes allow only audited nonsecret controls', () => {
   assert.equal(allowedRequest('PUT', 'accounts/a/recovery/pause'.split('/'), params()), false);
   assert.equal(allowedRequest('GET', 'accounts/a/recovery/secret'.split('/'), params()), false);
 });
+
+test("construction uses reviewed tickets rather than a browser-supplied engine plan",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/construction-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/construction-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/construction-preview".split("/"),params()),false);
+});
+
+test("one-shot donations use reviewed ticket endpoints, not arbitrary paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/donation-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/donation-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/donation-plan".split("/"),params("raw=true")),false);
+  assert.equal(allowedRequest("POST","accounts/a/cities/0/donation-plan".split("/"),params()),false);
+});
+
+test("worker plans and starts have bounded explicit paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/worker-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/worker-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/worker-plan".split("/"),params("raw=true")),false);
+});
+
+test("layout plans require the two-city ticket workflow",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/layout-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/layout-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/0/layout-plan".split("/"),params()),false);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/layout-plan".split("/"),params("raw=true")),false);
+});
+
+test("new building uses live options and reviewed tickets",()=>{
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/build-options".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/build-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/build-start".split("/"),params()),true);
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/build-options".split("/"),params("raw=true")),false);
+});
+
+test("station deployment uses explicit reviewed paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/station-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/station-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/station-plan".split("/"),params("raw=true")),false);
+});
+
+test("automatic attacks use explicit reviewed paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/grind-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/grind-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/grind-plan".split("/"),params("raw=true")),false);
+});
+
+test("manual attack inventory and reviewed wave endpoints are explicit",()=>{
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/attack-options".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/attack-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/attack-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/attack-plan".split("/"),params("raw=true")),false);
+});
+
+test("vacation activation requires explicit review paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/vacation-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/vacation-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/vacation-plan".split("/"),params("raw=true")),false);
+});
+
+test("external island lookup allows only two bounded coordinates",()=>{
+  const path="accounts/a/island-destinations".split("/");
+  assert.equal(allowedRequest("GET",path,params("x=50&y=60")),true);
+  for(const q of ["x=0&y=60","x=101&y=60","x=50&y=60&raw=true","x=50&x=60","x=50"])
+    assert.equal(allowedRequest("GET",path,params(q)),false);
+});
+
+test("shipment plan and ticket launch are allowlisted only for exact paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/shipment-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/shipment-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/shipment-plan".split("/"),params("raw=1")),false);
+});
+
+test("activity history permits only bounded filters and cursor",()=>{
+  const path="accounts/a/activity".split("/");
+  assert.equal(allowedRequest("GET",path,params("limit=50&status=started&before=12")),true);
+  for(const q of ["limit=101","status=raw","before=0","before=9999999999999999","raw=true","limit=1&limit=2"])
+    assert.equal(allowedRequest("GET",path,params(q)),false);
+  assert.equal(allowedRequest("POST",path,params()),false);
+});

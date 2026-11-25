@@ -30,7 +30,10 @@ macos-build = ["pyinstaller>=6.13"]
 recovery = ["keyring>=25"]
 browser-recovery = ["keyring>=25", "playwright>=1.48"]
 server = ["fastapi>=0.115", "uvicorn>=0.30", "filelock>=3.16", "cryptography>=42", "keyring>=25"]
-dev = ["pytest>=8", "ruff>=0.9", "build>=1", "fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.27", "filelock>=3.16", "cryptography>=42"]
+# Integration tests import the checked-out engine, not a separately published wheel.
+# Keep its test-time requirements aligned with engine/ikabot/setup.py.
+dev = ["pytest>=8", "ruff>=0.9", "build>=1", "fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.27", "filelock>=3.16", "cryptography>=42",
+       "requests[socks]>=2.32", "psutil", "python-dotenv", "pytest-mock"]
 
 [project.scripts]
 daedalus = "daedalus.cli:main"
@@ -44,6 +47,7 @@ daedalus = ["desktop/resources/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "engine/ikabot"]
 
 [tool.ruff]
 line-length = 100

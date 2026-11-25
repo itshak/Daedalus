@@ -1,0 +1,185 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities,scopedShipmentPlan,mergeIslandCities,removeIslandCities} from "../lib/native-task-contract.ts";
+test("fixed shipment: strict route shape, positive quantities, distinct cities, no unverified external/raw override",()=>{
+  const route={from:1,to:2,resources:[5,0,0,0,0]};
+  const config={routes:[route],useFreighters:false};
+  assert.equal(validNativeConfig("sendResources",config),true);
+  for(const r of [{...route,to:1},{...route,to:"2"},{...route,island:9},{...route,resources:[0,0,0,0,0]},{...route,resources:[-1,0,0,0,0]}])
+    assert.equal(validNativeConfig("sendResources",{...config,routes:[r]}),false);
+  assert.equal(validNativeConfig("sendResources",{...config,transfer_id:"untrusted"}),false);
+  assert.equal(validNativeConfig("sendResources",{...config,routes:[{...route,resources:[MAX_AMOUNT,0,0,0,0]},route]}),false);
+});
+test("resource policies and alerts are operation-specific",()=>{
+  assert.equal(validNativeConfig("distributeResources",{resource:"wine",mode:"producers",cities_ids:[1,2],useFreighters:true}),true);
+  assert.equal(validNativeConfig("distributeResources",{resource:"wood",mode:"producers",cities_ids:[1,2],useFreighters:true}),false);
+  assert.equal(validNativeConfig("consolidateResources",{limits:[-1,0,20,-1,-1],sourceCityIds:[1],destinationCityId:2,intervalInHours:2,shipType:3}),true);
+  assert.equal(validNativeConfig("consolidateResources",{limits:[-1,-1,-1,-1,-1],sourceCityIds:[1],destinationCityId:2,intervalInHours:2,shipType:3}),false);
+  const manager={mode:"consolidate",origin_cities:[1],destination_city:2,send_mode:"keep",resource_config:[0,null,null,null,null],interval_hours:0,useFreighters:false,notify:"none"};
+  assert.equal(validNativeConfig("resourceTransportManager",manager),true);
+  assert.equal(validNativeConfig("resourceTransportManager",{...manager,notify:["none"]}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{...manager,send_mode:"send"}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{mode:"distribute",origin_city:1,destination_cities:[2],resource_config:[1,0,0,0,0],interval_hours:4,useFreighters:true,notify:"all"}),true);
+  assert.equal(validNativeConfig("alertAttacks",{minutes:3}),true);
+  assert.equal(validNativeConfig("alertAttacks",{minutes:2}),false);
+  assert.equal(validNativeConfig("alertLowWine",{hours:4,auto_transfer:true,transfer_amount:0}),false);
+  assert.equal(validNativeConfig("alertLowWine",{hours:4,auto_transfer:false,transfer_amount:0}),true);
+});
+test("launch requires reviewed operation, exact shape, confirmation and v4 request ID",()=>{
+  const request={task:"alertAttacks",config:{minutes:20},confirmed:true,request_id:"12345678-1234-4234-8234-123456789abc"};
+  assert.equal(validNativeLaunch(request),true);
+  for(const invalid of [{...request,confirmed:false},{...request,task:"developer"},{...request,request_id:"123"},{...request,config:{minutes:20,token:"secret"}},{...request,extra:true}])
+    assert.equal(validNativeLaunch(invalid),false);
+});
+test("player first, duplicate display, scoped inventory and preflight fail closed",()=>{
+  const accounts=[{id:"a",player:"Monjo",label:"Imported IkaBot identity 01",email:"a@example.org"},{id:"b",player:"Ais"},{id:"c",player:"Monjo",world:"s2"}];
+  const names=playerNames(accounts);
+  assert.match(names.a,/^Monjo/);assert.notEqual(names.a,names.c);assert.equal(names.b,"Ais");
+  const data={account_id:"a",cities:[{id:1,name:"Actual city"}]};
+  assert.equal(scopedCities(data,"a").length,1);assert.deepEqual(scopedCities(data,"b"),[]);
+  assert.deepEqual(scopedCities({...data,synthetic_demo:true},"a"),[]);
+  const p={account_id:"a",task:"alertAttacks",ready:true,unresolved_request:false};
+  assert.equal(readyPreflight(p,"a","alertAttacks"),true);
+  assert.equal(readyPreflight(p,"b","alertAttacks"),false);
+  assert.equal(readyPreflight({...p,unresolved_request:true},"a","alertAttacks"),false);
+});
+
+test("domain editors accept exact native contracts and reject foreign-shaped data",()=>{
+  const cases=[
+    ["loginDaily",{wine_city:1,wood_city:null,luxury_city:2,favour_tasks:["resource"],collect_ambrosia:false}],
+    ["research",{cities_ids:[1,2],qty:null}],
+    ["tavernManager",{cities_ids:[1],run_hours:8,notification_mode:1}],
+    ["activateMiracle",{wonder:"3",iterations:1}],
+    ["activateShrine",{godids:[1,2],mode:2,times:0}],
+    ["donationBot",{cities_dict:{"1":{donation_type:"resource",percentage:10}},waiting_time:10,donate_method:1}],
+    ["autoPirate",{pirateCount:1,pirateSchedule:false,pirateMissionChoice:1,pirateMissionDayChoice:null,pirateMissionNightChoice:null,dayStart:null,dayEnd:null,nightStart:null,nightEnd:null,autoConvert:"n",convertPerMission:0,maxRandomWaitingTime:0,piracyCities:[{id:1}]}],
+    ["searchForIslandSpaces",{time:10,islandList:["50:50"],fights:"n"}],
+    ["dumpWorld",{waiting_time:2,coords:[50,50],radius:5,shallow:false,non_empty_islands:true}]
+  ];
+  for(const [task,c] of cases){
+    assert.equal(validNativeConfig(task,c),true,task);
+    assert.equal(validNativeConfig(task,{...c,raw:"override"}),false,task);
+  }
+  assert.equal(validNativeConfig("research",{cities_ids:[1,2],qty:1}),false);
+  assert.equal(validNativeConfig("activateShrine",{godids:[1,1],mode:2,times:0}),false);
+  assert.equal(validNativeConfig("donationBot",{cities_dict:{"1":{donation_type:"resource",percentage:101}},waiting_time:10,donate_method:1}),false);
+});
+test("military and trade forms accept reviewed inventory shapes and bounded quantities",()=>{
+  const train={city:{id:"1",pos:"2",cityName:"Town"},tranings:[[{unit_type_id:301,cantidad:5}]],trainTroops:true,replicate:"n",countRepeat:0,cityTrainings:[],units:[]};
+  const upgrade={jobs:[{city_id:1,upgrades:[{unitId:"301",upgradeType:"attack",target:2}]}]};
+  const city={id:"1",pos:2,rango:3,name:"Town",cityName:"Town",availableResources:[100,100,100,100,100]};
+  const quote={ciudadDestino:"Other",jugadorAComprar:"Trader",amountAvailable:5,tipo:"Wood",precio:4,destinationCityId:"2",cityId:"1",position:"2",type:"1",resource:"resource"};
+  const buy={city,offers:[quote],amount_to_buy:5};
+  const sell={mode:"create_offer",amount_to_sell:5,price:4,resource_type:0,sell_market_capacity:10,city};
+  for(const [task,c] of [["UpgradeUnits",upgrade],["buyResources",buy],["sellResources",sell]]){
+    assert.equal(validNativeConfig(task,c),true,task);
+    assert.equal(validNativeConfig(task,{...c,extra:"no"}),false,task);
+  }
+  assert.equal(validNativeConfig("trainArmy",train),false);
+  assert.equal(validNativeConfig("trainArmy",{...train,replicate:"y"}),false);
+  assert.equal(validNativeConfig("buyResources",{...buy,amount_to_buy:6}),false);
+  assert.equal(validNativeConfig("sellResources",{...sell,price:0}),false);
+});
+
+test("alert batch preflights every account before any dispatch and stops on uncertainty",async()=>{
+  const targets=["a","b","c"].map(id=>({id,name:id,enabled:true}));
+  const calls=[];
+  const preflight=async id=>{calls.push("pre:"+id);return {account_id:id,task:"alertAttacks",ready:id!=="b",unresolved_request:false};};
+  const dispatch=async id=>{calls.push("start:"+id);throw new Error("should not run");};
+  const blocked=await launchAlertBatch("alertAttacks",{minutes:20},targets,preflight,dispatch,()=>crypto.randomUUID(),()=>true);
+  assert.deepEqual(calls,["pre:a","pre:b","pre:c"]);
+  assert.deepEqual(blocked.map(r=>r.status),["not attempted","blocked","not attempted"]);
+  calls.length=0;
+  const receipts=await launchAlertBatch("alertAttacks",{minutes:20},targets,async id=>{
+    calls.push("pre:"+id);return {account_id:id,task:"alertAttacks",ready:true,unresolved_request:false};
+  },async(id,rid)=>{
+    calls.push("start:"+id);
+    return {account_id:id,request_id:rid,task:"alertAttacks",status:id==="b"?"unconfirmed":"started"};
+  },()=>crypto.randomUUID(),()=>true);
+  assert.deepEqual(calls,["pre:a","pre:b","pre:c","start:a","start:b"]);
+  assert.deepEqual(receipts.map(r=>r.status),["started","uncertain","not attempted"]);
+  await assert.rejects(launchAlertBatch("sendResources",{minutes:20},targets,preflight,dispatch,()=>crypto.randomUUID(),()=>true));
+});
+
+test("worker assignments accept only operation-specific drafts and reviewed tickets",()=>{
+  assert.equal(validWorkerDraft("modifyProduction",{percentage:100,project:"resource",overcharge:true}),true);
+  assert.equal(validWorkerDraft("modifyAcademyWorkers",{percentage:0}),true);
+  assert.equal(validWorkerDraft("modifyTempleWorkers",{percentage:50}),true);
+  assert.equal(validWorkerDraft("modifyProduction",{percentage:50,project:"resource",overcharge:true}),false);
+  assert.equal(validWorkerDraft("modifyAcademyWorkers",{percentage:50,expected:{}}),false);
+  assert.equal(validWorkerDraft("modifyTempleWorkers",{percentage:true}),false);
+  const receipt={task:"modifyAcademyWorkers",preview_id:"a".repeat(43),request_id:"12345678-1234-4234-8234-123456789abc",confirmed:true};
+  assert.equal(validWorkerLaunch(receipt),true);
+  assert.equal(validWorkerLaunch({...receipt,task:"developer"}),false);
+  assert.equal(validWorkerLaunch({...receipt,confirmed:false}),false);
+  assert.equal(validWorkerLaunch({...receipt,config:{}}),false);
+});
+
+test("external city inventory and route identity must be scoped",()=>{
+  const data={account_id:"a",x:50,y:60,cities:[{id:9,recipient:7,island:44,name:"Town",owner:"Other"}]};
+  assert.deepEqual(scopedExternalCities(data,"a",50,60),data.cities);
+  assert.throws(()=>scopedExternalCities(data,"b",50,60));
+  assert.throws(()=>scopedExternalCities(data,"a",51,60));
+  assert.throws(()=>scopedExternalCities({...data,cities:[...data.cities,...data.cities]},"a",50,60));
+  assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:7,resources:[1,0,0,0,0]}],useFreighters:false}),true);
+  assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:0,resources:[1,0,0,0,0]}],useFreighters:false}),false);
+});
+
+test("shipment capacity preview binds account, exact cargo and fleet arithmetic",()=>{
+  const config={routes:[{from:1,to:2,resources:[450,0,0,0,0]}],useFreighters:false};
+  const result={account_id:"a",routes:[{from:1,to:2,origin_name:"A",destination_name:"B",resources:[450,0,0,0,0],
+    stock:[500,0,0,0,0],destination_space:[50,0,0,0,0],first_load_limit:50,minimum_loads:2}],
+    useFreighters:false,capacity:100,total_ships:3,available_ships:1,ready:true,preview_id:"a".repeat(43),expires_in:120};
+  assert.equal(scopedShipmentPlan(result,"a",config).routes[0].first_load_limit,50);
+  assert.throws(()=>scopedShipmentPlan(result,"b",config));
+  assert.throws(()=>scopedShipmentPlan({...result,routes:[{...result.routes[0],minimum_loads:1}]},"a",config));
+  assert.throws(()=>scopedShipmentPlan({...result,preview_id:null},"a",config));
+  const timed={...result,routes:[{...result.routes[0],first_load_timing:{
+    cargo:50,total_seconds:30,loading_seconds:10,travel_seconds:20,queue_seconds:0}}]};
+  assert.equal(scopedShipmentPlan(timed,"a",config).routes[0].first_load_timing.total_seconds,30);
+  timed.routes[0].first_load_timing.total_seconds=31;
+  assert.throws(()=>scopedShipmentPlan(timed,"a",config));
+
+});
+
+test("full-route delivery is a conditional model, not a guaranteed ETA",()=>{
+  const config={routes:[{from:1,to:2,resources:[250,0,0,0,0]}],useFreighters:false};
+  const row={...config.routes[0],origin_name:"A",destination_name:"B",stock:[250,0,0,0,0],
+    destination_space:[250,0,0,0,0],first_load_limit:100,minimum_loads:3,
+    first_load_timing:{cargo:100,total_seconds:30,loading_seconds:10,travel_seconds:20,queue_seconds:0},
+    full_route_model:{loads:3,last_cargo:50,last_loading_seconds:5,delivery_seconds:125}};
+  const plan={account_id:"a",routes:[row],useFreighters:false,capacity:100,total_ships:1,available_ships:1,
+    ready:true,preview_id:"a".repeat(43),expires_in:120};
+  assert.equal(scopedShipmentPlan(plan,"a",config).routes[0].full_route_model.delivery_seconds,125);
+  assert.throws(()=>scopedShipmentPlan({...plan,routes:[{...row,full_route_model:{...row.full_route_model,delivery_seconds:124}}]},"a",config));
+  assert.throws(()=>scopedShipmentPlan({...plan,routes:[{...row,destination_space:[249,0,0,0,0]}]},"a",config));
+});
+
+test("notification tests allow no custom payload or credentials",()=>{
+  for(const task of ["testTelegramBot","testDiscordBot"]){
+    assert.equal(validNativeConfig(task,{}),true);
+    assert.equal(validNativeConfig(task,{message:"arbitrary"}),false);
+    assert.equal(validNativeConfig(task,{token:"arbitrary"}),false);
+  }
+});
+
+test("recurring consolidation allows only a complete verified external identity",()=>{
+  const base={mode:"consolidate",origin_cities:[1],destination_city:9,interval_hours:2,resource_config:[50,null,null,null,null],useFreighters:false,send_mode:"keep",notify:"none"};
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44,recipient:7}),true);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,recipient:7}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44,recipient:0}),false);
+});
+
+test("multiple islands retain prior routes but invalidate refreshed and moved recipients",()=>{
+  const first={id:9,island:44,recipient:7,name:"Town",owner:"Other"};
+  const second={id:10,island:45,recipient:8,name:"Second",owner:"Another"};
+  const a=mergeIslandCities([], [first],50,60);
+  const b=mergeIslandCities(a.cities,[second],51,60);
+  assert.deepEqual(b.cities.map(c=>[c.id,c.x,c.y]),[[9,50,60],[10,51,60]]);
+  assert.deepEqual(b.invalidated,[]);
+  const c=mergeIslandCities(b.cities,[{...first,island:45,recipient:99}],51,60);
+  assert.deepEqual(c.invalidated,[9,10]);
+  assert.deepEqual(c.cities.map(r=>r.recipient),[99]);
+  assert.deepEqual(removeIslandCities(b.cities,51,60),a.cities);
+});

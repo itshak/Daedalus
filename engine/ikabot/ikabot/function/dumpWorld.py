@@ -80,7 +80,7 @@ def prepare_dumpWorld(session, waiting_time=1.5, coords=None, radius=None, shall
 
 
 @task("dumpWorld", prepare=prepare_dumpWorld)
-def do_dumpWorld(session, waiting_time=1.5, coords=None, radius=None, shallow=False, non_empty_islands=False, show_progress=False):
+def do_dumpWorld(session, waiting_time=1.5, coords=None, radius=None, shallow=False, non_empty_islands=False, show_progress=False, managed_report_id=None):
     stop_updating = threading.Event()
     lock = threading.Lock()
     shared_data = ["", "", 0, stop_updating, lock]
@@ -95,9 +95,16 @@ def do_dumpWorld(session, waiting_time=1.5, coords=None, radius=None, shallow=Fa
     setInfoSignal(session, info)
 
     start_time = time.time()
-    dump_path = do_it(
-        session, waiting_time, coords, radius, shallow, non_empty_islands, shared_data
-    )
+    if managed_report_id is None:
+        dump_path = do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, shared_data)
+    else:
+        try:
+            do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, shared_data,
+                  managed_report_id=managed_report_id)
+            session.setStatus("Aggregate world report ready")
+        finally:
+            shared_data[3].set()
+        return
 
     shared_data[3].set()
     if not show_progress:
@@ -191,7 +198,7 @@ def dumpWorld(session, event, stdin_fd, predetermined_input):
     }
 
 
-def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, shared_data):
+def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, shared_data, *, managed_report_id=None):
     """
     Parameters
     ----------
@@ -213,7 +220,7 @@ def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, sha
 
     shared_data[2] = time.time()
     partial = (
-        True if (coords and radius and radius >= 0) or non_empty_islands else False
+        True if (coords is not None and radius is not None and radius >= 0) or non_empty_islands else False
     )
     world = {
         "name": "s" + str(session.mundo) + "-" + str(session.servidor),
@@ -334,6 +341,11 @@ def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, sha
         dump_name = dump_name.replace(".json.gz", "_shallow") + ".json.gz"
         update_status("Shallow dump is on. Dumping data...", 100, 100, shared_data, True)
         world["islands"] = shallow_islands
+        if managed_report_id is not None:
+            from ikabot.helpers.nativeWorldReports import save_report
+
+            save_report(session, managed_report_id, world)
+            return None
         dump(world, dump_path, dump_name)
         return dump_path + dump_name
 
@@ -346,8 +358,8 @@ def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, sha
         if non_empty_islands and not int(island["players"]):
             continue
         if (
-            coords
-            and radius
+            coords is not None
+            and radius is not None
             and ((x - coords[0]) ** 2 + (y - coords[1]) ** 2) ** 0.5 > radius
         ):
             continue
@@ -373,6 +385,11 @@ def do_it(session, waiting_time, coords, radius, shallow, non_empty_islands, sha
 
     name_suffix = "_partial" if partial else ""
     dump_name = dump_name.replace(".json.gz", name_suffix) + ".json.gz"
+    if managed_report_id is not None:
+        from ikabot.helpers.nativeWorldReports import save_report
+
+        save_report(session, managed_report_id, shared_data[5])
+        return None
     update_status("Dumping data to {}".format(dump_path + dump_name), 100, 100, shared_data, True)
     dump(shared_data[5], dump_path, dump_name)
     return dump_path + dump_name

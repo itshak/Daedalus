@@ -8,20 +8,19 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
-from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -45,10 +44,14 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.account_display import account_player_name, account_player_names
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.native_controls import (
     AcademyResearchEditor,
+    BarbarianWavesEditor,
     DonationPoliciesEditor,
+    ExternalDestinationEditor,
+    IslandMonitorEditor,
     MapAreaEditor,
     MarketOffersEditor,
     MiracleTempleEditor,
@@ -63,11 +66,18 @@ from daedalus.desktop.native_controls import (
 )
 from daedalus.desktop.pages import _populate, _table
 from daedalus.desktop.task_presentation import (
+    BATCH_TASKS,
     configuration_summary,
     expert_configuration_needed,
     present_fields,
     task_explanation,
 )
+from daedalus.native_policy_review import POLICY_TASKS
+from daedalus.reviewed_batch import BATCH_REVIEW_TASKS, validated_batch_entries
+from daedalus.reviewed_operations import CITY_REVIEW_TASKS as ENGINE_REVIEW_TASKS
+from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
+
+CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | POLICY_TASKS | {"sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
 
 # Fixed, reviewed display labels. Unknown built-ins get a readable fallback,
 # but dispatch always uses the engine's canonical original task name.
@@ -77,12 +87,19 @@ _TASK_LABELS = {
     "constructionList": "Construction planner", "research": "Research manager",
     "resourceTransportManager": "Resource transport manager",
     "consolidateResources": "Consolidate resources", "distributeResources": "Distribute resources",
+    "fillCityWarehouse": "Fill city warehouse",
     "sendResources": "Send resources", "buyResources": "Buy resources",
-    "sellResources": "Sell resources", "donationBot": "Island donations",
+    "sellResources": "Sell resources", "donate": "Donate once", "donationBot": "Island donations",
     "trainArmy": "Train army", "attackBarbarians": "Attack barbarians",
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
     "loginDaily": "Daily login", "dumpWorld": "Export world data",
+    "vacationMode": "Activate vacation mode",
+    "stationArmy": "Station troops or fleet",
+    "constructBuilding": "Build new building",
+    "reorganizeCityBuildings": "Copy city building layout",
+    "modifyProduction": "Production workers", "modifyAcademyWorkers": "Academy scientists",
+    "modifyTempleWorkers": "Temple priests",
     "webServer": "IkaBot web server", "autoPirate": "Piracy automation",
 }
 _CATEGORIES = ("All automations", "Alerts & monitoring", "Resources & trade",
@@ -92,12 +109,13 @@ _TEMPLATE_TASKS = {
     "construction": {"constructionList", "research"},
 }
 _TASK_CATEGORIES = {
-    "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces"},
-    "Resources & trade": {"buyResources", "sellResources", "sendResources",
+    "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces", "testTelegramBot", "testDiscordBot"},
+    "Resources & trade": {"fillCityWarehouse", "buyResources", "sellResources", "sendResources",
                           "resourceTransportManager", "consolidateResources",
-                          "distributeResources", "donationBot"},
+                          "distributeResources", "donationBot", "donate"},
     "City management": {"constructionList", "tavernManager", "research",
-                        "loginDaily", "activateMiracle", "activateShrine"},
+                        "loginDaily", "activateMiracle", "activateShrine",
+                        "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers", "reorganizeCityBuildings", "constructBuilding"},
     "Military & missions": {"trainArmy", "UpgradeUnits", "attackBarbarians",
                             "autoBarbarians", "autoPirate"},
 }
@@ -122,9 +140,25 @@ class TasksPage(QWidget):
     reconcile_requested = Signal(str, str)
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
+    reviewed_batch_requested = Signal(object)
     cities_requested = Signal(str)
+    island_destinations_requested = Signal(str, int, int, str)
+    shipment_preview_requested = Signal(str, object, str)
+    reward_distribution_preview_requested = Signal(str, str, object, str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
+    construction_supply_preview_requested = Signal(str, int, object, object)
+    donation_preview_requested = Signal(str, object, str)
+    worker_preview_requested = Signal(str, str, object, str)
+    layout_preview_requested = Signal(str, object, str)
+    station_preview_requested = Signal(str, object, str)
+    training_preview_requested = Signal(str, object, str)
+    grind_preview_requested = Signal(str, object, str)
+    attack_inventory_requested = Signal(str, int, str)
+    attack_preview_requested = Signal(str, object, str)
+    vacation_preview_requested = Signal(str, int, str)
+    build_options_requested = Signal(str, int, str)
+    build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
     trainable_units_requested = Signal(str, int, bool)
     market_quotes_requested = Signal(str, int, int, str)
@@ -148,16 +182,18 @@ class TasksPage(QWidget):
         self._prereq_ready: bool | None = None
         self._selection_generation = 0
         self._unresolved = False
-        self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
         self._form_inputs: dict[str, QWidget] = {}
         self._form_dirty = False
         self._reviewed = False
         self._pending_launch = False
+        self._review_queue = {}
+        self._construction_ticket = None
         self._bulk_account_ids: list[str] = []
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
+        self._account_names: dict[str, str] = {}
         self._status_account_ids: list[str] = []
         # Authenticated, account-bound read-only city options; never invent IDs.
         self._cities_by_account: dict[str, list[dict[str, object]]] = {}
@@ -165,6 +201,9 @@ class TasksPage(QWidget):
         self._construction_prepared: dict[str, object] | None = None
         self._construction_preview_ready = False
         self._pending_preview_key: tuple[object, ...] | None = None
+        self._city_review_nonce: str | None = None
+        self._city_review_plan: dict[str, object] | None = None
+        self._city_review_expires = 0.0
         self._building_rows: list[dict[str, object]] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
@@ -202,7 +241,7 @@ class TasksPage(QWidget):
             "Automations"
         )
         layout.addWidget(PageHeading(
-            title, "Choose an automation, review its settings, then start."
+            title, "Choose an account and action, then review and start."
         ))
         self.status_label = CaptionLabel(
             "Connect to your backend to configure an automation."
@@ -245,34 +284,39 @@ class TasksPage(QWidget):
         account_row = QHBoxLayout()
         account_row.addWidget(BodyLabel("Account"))
         self.account_combo = ComboBox()
+        self.account_combo.setAccessibleName("Player account for automation")
         self.account_combo.currentIndexChanged.connect(self._account_changed)
         account_row.addWidget(self.account_combo, 1)
-        self.refresh_button = PushButton("Refresh tasks")
+        self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self._refresh)
         account_row.addWidget(self.refresh_button)
-        layout.addLayout(account_row)
 
         scope_row = QHBoxLayout()
         self.choose_bulk_button = PushButton("Choose accounts…")
         self.choose_bulk_button.setAccessibleName("Choose accounts for automation actions")
         self.choose_bulk_button.clicked.connect(self._choose_bulk_accounts)
-        scope_row.addWidget(self.choose_bulk_button)
+        account_row.addWidget(self.choose_bulk_button)
+        layout.addLayout(account_row)
         self.view_all_button = PushButton("View all task statuses")
         self.view_all_button.setToolTip("Read-only task status for every configured account, including disabled accounts")
         self.view_all_button.clicked.connect(self._refresh_all)
         scope_row.addWidget(self.view_all_button)
-        self.view_selected_button = PushButton("View selected statuses")
+        self.view_selected_button = PushButton("Refresh selected")
         self.view_selected_button.clicked.connect(self._refresh_selected)
         scope_row.addWidget(self.view_selected_button)
+        self.overview_choose_button = PushButton("Choose accounts…")
+        self.overview_choose_button.clicked.connect(self._choose_bulk_accounts)
+        scope_row.addWidget(self.overview_choose_button)
         scope_row.addStretch(1)
-        layout.addLayout(scope_row)
 
+        layout.addWidget(SubtitleLabel("Choose action"))
         self.category_combo = ComboBox(self)
+        self.category_combo.hide()
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
         self.group_tabs = Pivot(self)
         self.group_tabs.setAccessibleName("Automation categories")
-        for index, category in enumerate(_CATEGORIES):
+        for index, category in enumerate(("All", "Alerts", "Resources", "Cities", "Military", "Advanced")):
             self.group_tabs.addItem(
                 routeKey=f"group-{index}", text=category,
                 onClick=lambda index=index: self.category_combo.setCurrentIndex(index),
@@ -284,7 +328,6 @@ class TasksPage(QWidget):
         self.search_input.setPlaceholderText("Search automations")
         self.search_input.textChanged.connect(self._filter_tasks)
         filter_row.addWidget(self.search_input, 1)
-        layout.addLayout(filter_row)
 
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
         # These are read-only selection cards; only the separate, reviewed
@@ -293,7 +336,8 @@ class TasksPage(QWidget):
         self.browse_button.setToolTip("Show or hide available automation choices")
         self._gallery_open = False
         self.browse_button.clicked.connect(self._toggle_gallery)
-        layout.addWidget(self.browse_button)
+        filter_row.addWidget(self.browse_button)
+        layout.addLayout(filter_row)
         self.discovery_scroll = QScrollArea(self)
         self.discovery_scroll.setWidgetResizable(True)
         self.discovery_scroll.setFrameShape(QScrollArea.NoFrame)
@@ -309,10 +353,10 @@ class TasksPage(QWidget):
         self.discovery_note.setWordWrap(True)
         self.discovery_note.hide()
         self.discovery_scroll.hide()
-        layout.addWidget(SubtitleLabel("Configure"))
+        layout.addWidget(self.discovery_note)
 
         task_row = QHBoxLayout()
-        task_row.addWidget(BodyLabel("Automation"))
+        task_row.addWidget(BodyLabel("Action"))
         self.task_combo = ComboBox()
         task_row.addWidget(self.task_combo, 1)
         layout.addLayout(task_row)
@@ -328,7 +372,7 @@ class TasksPage(QWidget):
         self.prerequisite_label = CaptionLabel("Select an automation to check readiness.")
         self.prerequisite_label.setWordWrap(True)
         layout.addWidget(self.prerequisite_label)
-
+        layout.addWidget(SubtitleLabel("Settings"))
 
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
@@ -351,8 +395,28 @@ class TasksPage(QWidget):
         self.building_table.setMaximumHeight(320)
         self.building_table.itemChanged.connect(self._mark_form_dirty)
         layout.addWidget(self.building_table)
+        self.construction_supply_panel = QWidget()
+        supply_layout = QVBoxLayout(self.construction_supply_panel)
+        supply_layout.setContentsMargins(0, 0, 0, 0)
+        supply_layout.addWidget(QLabel("Construction supply (optional)"))
+        self.construction_suppliers = QListWidget()
+        self.construction_suppliers.setAccessibleName("Owned construction supplier cities")
+        self.construction_suppliers.setMaximumHeight(115)
+        self.construction_suppliers.itemChanged.connect(self._mark_form_dirty)
+        supply_layout.addWidget(self.construction_suppliers)
+        self.construction_supply_mode = ComboBox()
+        self.construction_supply_mode.addItems(["Self-funded construction", "Send supplies and build", "Send supplies only"])
+        self.construction_supply_mode.currentIndexChanged.connect(self._mark_form_dirty)
+        supply_layout.addWidget(self.construction_supply_mode)
+        self.construction_freighters = CheckBox("Use freighters")
+        self.construction_round_up = CheckBox("Round up shipment amounts")
+        for checkbox in (self.construction_freighters, self.construction_round_up):
+            checkbox.stateChanged.connect(self._mark_form_dirty)
+            supply_layout.addWidget(checkbox)
+        layout.addWidget(self.construction_supply_panel)
+        self.construction_supply_panel.hide()
         self.construction_preview_button = PushButton("Calculate actual upgrade costs & queue…")
-        self.construction_preview_button.clicked.connect(self._request_construction_preview)
+        self.construction_preview_button.clicked.connect(self._request_native_preview)
         self.construction_preview_button.setAccessibleDescription(
             "Only reads IkaBot game information. Does not upgrade or ship anything."
         )
@@ -367,39 +431,10 @@ class TasksPage(QWidget):
         self.building_table.hide()
         self.building_note.hide()
         self.construction_preview_button.hide()
-        self.advanced_toggle = PushButton("Show advanced JSON options")
-        self.advanced_toggle.clicked.connect(self._toggle_advanced)
-        layout.addWidget(self.advanced_toggle)
-        self.advanced_note = CaptionLabel(
-            "Advanced mode overrides the guided settings with a custom JSON object. "
-            "Use Build JSON to copy the current guided fields into the editor."
-        )
-        self.advanced_note.setWordWrap(True)
-        layout.addWidget(self.advanced_note)
-        self.build_json_button = PushButton("Build JSON from guided settings")
-        self.build_json_button.clicked.connect(self._build_config_from_form)
-        layout.addWidget(self.build_json_button)
-        self.import_config_button = PushButton("Import a prepared configuration…")
-        self.import_config_button.setToolTip(
-            "Load an explicitly chosen, small JSON configuration previously prepared "
-            "for this engine task. Daedalus validates allowed parameter names."
-        )
-        self.import_config_button.clicked.connect(self._import_advanced_config)
-        layout.addWidget(self.import_config_button)
-        self.config_editor = QPlainTextEdit()
-        self.config_editor.setPlaceholderText('{"minutes": 20}')
-        self.config_editor.setPlainText("{}")
-        self.config_editor.setMaximumHeight(108)
-        layout.addWidget(self.config_editor)
-        self.advanced_note.hide()
-        self.build_json_button.hide()
-        self.import_config_button.hide()
-        self.config_editor.hide()
-        self.config_editor.textChanged.connect(self._review_advanced_json)
         self.task_combo.currentIndexChanged.connect(self._selected_task_changed)
 
         launch_row = QHBoxLayout()
-        self.confirm_box = CheckBox("I reviewed this automation and approve starting it")
+        self.confirm_box = CheckBox("I approve starting this automation")
         self.confirm_box.stateChanged.connect(self._approval_changed)
         launch_row.addWidget(self.confirm_box)
         launch_row.addStretch(1)
@@ -409,6 +444,9 @@ class TasksPage(QWidget):
         )
         self.start_button.clicked.connect(self._start)
         launch_row.addWidget(self.start_button)
+        self.queue_review_button = PushButton("Add reviewed account to batch")
+        self.queue_review_button.clicked.connect(self._queue_review)
+        launch_row.addWidget(self.queue_review_button)
         self.configure_footer = CardWidget(configure_root)
         self.configure_footer.setAccessibleName("Review and launch automation")
         footer_layout = QVBoxLayout(self.configure_footer)
@@ -422,7 +460,6 @@ class TasksPage(QWidget):
             "checked independently; dispatch stops if any account is not ready."
         )
         self.bulk_note.setWordWrap(True)
-        self.bulk_note.hide()
         batch_row.addStretch(1)
         self.start_selected_button = PushButton("Start for selected…")
         self.start_selected_button.setToolTip(
@@ -431,6 +468,7 @@ class TasksPage(QWidget):
         self.start_selected_button.clicked.connect(self._start_selected)
         batch_row.addWidget(self.start_selected_button)
         footer_layout.addLayout(batch_row)
+        footer_layout.addWidget(self.bulk_note)
         configure_layout.addWidget(self.configure_footer)
 
         running_panel = QWidget(self.stack)
@@ -526,11 +564,27 @@ class TasksPage(QWidget):
             "View all accounts or selected accounts to see their task status side by side."
         )
         self.multi_summary.setWordWrap(True)
-        self.multi_summary.hide()
+        layout.addLayout(scope_row)
+        layout.addWidget(self.multi_summary)
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
-        self.multi_table.setMaximumHeight(185)
-        layout.addWidget(self.multi_table)
-        layout.addStretch(1)
+        layout.addWidget(self.multi_table, 1)
+        layout.addWidget(SubtitleLabel("Independently reviewed account batch"))
+        self.review_queue_note = CaptionLabel("Configure and approve each account separately, then add its review. Tickets expire after two minutes.")
+        self.review_queue_note.setWordWrap(True)
+        layout.addWidget(self.review_queue_note)
+        self.review_queue_table = _table(["Account", "Operation", "Reviewed settings"])
+        self.review_queue_table.setMinimumHeight(110)
+        layout.addWidget(self.review_queue_table, 1)
+        queue_actions = QHBoxLayout()
+        self.review_queue_remove = PushButton("Remove selected review")
+        self.review_queue_remove.clicked.connect(self._remove_review)
+        self.review_queue_clear = PushButton("Clear reviews")
+        self.review_queue_clear.clicked.connect(self._clear_review_queue)
+        self.review_queue_start = PrimaryPushButton("Review and start batch…")
+        self.review_queue_start.clicked.connect(self._start_reviewed_batch)
+        for button in (self.review_queue_remove, self.review_queue_clear, self.review_queue_start):
+            queue_actions.addWidget(button)
+        layout.addLayout(queue_actions)
 
         # The capability catalog belongs to this same workspace. It is not
         # a separate operations window with a second selection lifecycle.
@@ -551,8 +605,8 @@ class TasksPage(QWidget):
         self.discovery_scroll.setVisible(self._gallery_open and bool(self._task_names))
         self.discovery_note.setVisible(self._gallery_open)
         self.browse_button.setText(
-            "Hide automation gallery" if self._gallery_open
-            else "Browse automation gallery ▾"
+            "Hide actions" if self._gallery_open
+            else "Browse actions ▾"
         )
 
     def _show_section(self, index: int) -> None:
@@ -570,6 +624,7 @@ class TasksPage(QWidget):
     def reset_backend_context(self) -> None:
         """Discard account IDs, task drafts and reviews after backend origin changes."""
         self._selection_generation += 1
+        self._clear_review_queue()
         self._pending_launch = False
         self._prereq_ready = None
         self._unresolved = False
@@ -584,6 +639,7 @@ class TasksPage(QWidget):
         self._show_section(0)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
+        self._clear_review_queue()
         previous = self.selected_account_id()
         # Read-only "All accounts" includes disabled accounts; only enabled
         # accounts can be offered as candidates for task mutation.
@@ -592,10 +648,12 @@ class TasksPage(QWidget):
             if isinstance(a.get("id"), str) and a["id"]
         ]
         self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
+        self._account_names = account_player_names(self._all_account_metadata)
         # A metadata refresh may represent a changed session, so discard city caches.
         self._cities_by_account.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -610,11 +668,8 @@ class TasksPage(QWidget):
         self.account_combo.blockSignals(True)
         try:
             self.account_combo.clear()
-            for a in accounts:
-                if a.get("id") in self._account_ids:
-                    self.account_combo.addItem(str(
-                        a.get("label") or a.get("player") or a["id"]
-                    ))
+            for aid in self._account_ids:
+                self.account_combo.addItem(self._account_names[aid])
             if previous in self._account_ids:
                 self.account_combo.setCurrentIndex(self._account_ids.index(previous))
         finally:
@@ -624,10 +679,8 @@ class TasksPage(QWidget):
         for combo in (self.running_account_combo, self.history_account_combo):
             with QSignalBlocker(combo):
                 combo.clear()
-                for account in self._account_metadata:
-                    combo.addItem(str(
-                        account.get("label") or account.get("player") or account["id"]
-                    ))
+                for aid in self._account_ids:
+                    combo.addItem(self._account_names[aid])
                 combo.setCurrentIndex(self.account_combo.currentIndex())
         self._update_bulk_buttons()
         self._account_changed()
@@ -722,6 +775,24 @@ class TasksPage(QWidget):
                 entry.setCheckState(Qt.Unchecked)
                 widget.addItem(entry)
 
+    def _lookup_destinations(self, x, y, nonce):
+        account = self.selected_account_id()
+        if account and self.selected_task_name() in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
+            self.island_destinations_requested.emit(account, x, y, nonce)
+
+    def set_island_destinations(self, result, nonce):
+        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() not in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
+            return
+        editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city") or self._form_inputs.get("islandList")
+        if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor,IslandMonitorEditor)):
+            editor.set_external(result, nonce)
+
+    def set_island_destinations_unavailable(self, account, nonce):
+        if account == self.selected_account_id() and self.selected_task_name() in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
+            editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city") or self._form_inputs.get("islandList")
+            if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor,IslandMonitorEditor)):
+                editor.lookup_failed(nonce)
+
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
         if account_id not in self._account_ids:
             return
@@ -736,6 +807,9 @@ class TasksPage(QWidget):
                 })
         self._cities_by_account[account_id] = verified
         if account_id == self.selected_account_id():
+            if self.selected_task_name() in CITY_REVIEW_TASKS:
+                self._city_review_plan = None
+                self._city_review_nonce = None
             picker = self._form_inputs.get("city_id")
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
@@ -754,8 +828,12 @@ class TasksPage(QWidget):
                     self._populate_city_picker(input_widget, optional=not
                                                self._field_is_required(key))
                     self._invalidate_review()
+                    if self.selected_task_name() == "attackBarbarians" and key == "city_id":
+                        self._clear_attack_inventory()
+                    if self.selected_task_name() == "constructBuilding" and key == "city_id":
+                        self._clear_build_options()
                 elif isinstance(input_widget, (
-                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    ShipmentRoutesEditor, ExternalDestinationEditor, IslandMonitorEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
                     # Account-scoped read data are never portable between cities/worlds.
@@ -783,11 +861,44 @@ class TasksPage(QWidget):
         self.construction_preview_button.setEnabled(False)
         city_id = self._selected_construction_city()
         account_id = self.selected_account_id()
+        self._populate_construction_suppliers()
         if account_id and city_id:
             self.building_note.setText("Loading real building levels for the chosen city…")
             self.buildings_requested.emit(account_id, city_id)
         else:
             self.building_note.setText("Choose an actual city to inspect its buildings.")
+
+    def _populate_construction_suppliers(self):
+        selected = self._selected_construction_city()
+        with QSignalBlocker(self.construction_suppliers):
+            self.construction_suppliers.clear()
+            for city in self._cities_by_account.get(self.selected_account_id() or "", []):
+                if city["id"] == selected:
+                    continue
+                item = QListWidgetItem(city["name"] + (" · " + city["coords"] if city.get("coords") else ""))
+                item.setData(Qt.UserRole, city["id"])
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.construction_suppliers.addItem(item)
+        with QSignalBlocker(self.construction_supply_mode):
+            self.construction_supply_mode.setCurrentIndex(0)
+        for checkbox in (self.construction_freighters, self.construction_round_up):
+            with QSignalBlocker(checkbox):
+                checkbox.setChecked(False)
+
+    def _construction_supply_draft(self):
+        from daedalus.reviewed_operations import validated_construction_supply
+
+        mode = self.construction_supply_mode.currentIndex()
+        if mode == 0:
+            return None
+        return validated_construction_supply(self._selected_construction_city(), {
+            "source_ids": [self.construction_suppliers.item(i).data(Qt.UserRole)
+                           for i in range(self.construction_suppliers.count())
+                           if self.construction_suppliers.item(i).checkState() == Qt.Checked],
+            "useFreighters": self.construction_freighters.isChecked(),
+            "round_up": self.construction_round_up.isChecked(), "supply_only": mode == 2,
+        })
 
     def set_buildings(self, account_id: str, city_id: int,
                       buildings: list[dict[str, object]]) -> None:
@@ -830,6 +941,8 @@ class TasksPage(QWidget):
         self._invalidate_review()
 
     def _reset_construction_preview(self) -> None:
+        self._construction_ticket = None
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -854,6 +967,523 @@ class TasksPage(QWidget):
             raise ValueError("Select 1 to 12 real buildings before preview")
         return upgrades
 
+    def _request_native_preview(self) -> None:
+        task = self.selected_task_name()
+        if task not in CITY_REVIEW_TASKS:
+            self._request_construction_preview()
+            return
+        account = self.selected_account_id()
+        if account is None:
+            return
+        if task == "attackBarbarians":
+            editor = self._form_inputs.get("waves")
+            picker = self._form_inputs.get("city_id")
+            cities = self._cities_by_account.get(account, [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if not 1 <= index <= len(cities):
+                QMessageBox.warning(self, "Choose origin city", "Choose an actual city first.")
+                return
+            if not isinstance(editor, BarbarianWavesEditor) or not editor.loaded:
+                self._city_review_nonce = str(uuid.uuid4())
+                self.building_note.setText("Loading actual troops and ships…")
+                self.attack_inventory_requested.emit(account, cities[index-1]["id"], self._city_review_nonce)
+                return
+        if task == "constructBuilding":
+            picker = self._form_inputs.get("city_id")
+            choice = self._form_inputs.get("position")
+            cities = self._cities_by_account.get(account, [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if not 1 <= index <= len(cities):
+                QMessageBox.warning(self, "Choose construction city", "Choose an actual city first.")
+                return
+            if not isinstance(choice, ComboBox) or choice.currentIndex() <= 0:
+                self._city_review_nonce = str(uuid.uuid4())
+                self.building_note.setText("Loading current empty slots and building options…")
+                self.build_options_requested.emit(account, cities[index-1]["id"], self._city_review_nonce)
+                return
+        try:
+            draft = self._form_inputs['city'].reviewed_draft() if task == 'trainArmy' else self._form_config()
+            if task in WORKER_TASKS:
+                validated_worker_draft(task, {k: v for k, v in draft.items() if k != "city_id"})
+        except ValueError as exc:
+            QMessageBox.warning(self, "Choose operation settings", str(exc))
+            return
+        self._city_review_plan = None
+        self._invalidate_review()
+        self._city_review_nonce = str(uuid.uuid4())
+        if task in WORKER_TASKS:
+            self.building_note.setText("Reading the actual worker capacity…")
+            self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
+            self.building_note.setText("Reading actual operation data…")
+            self.reward_distribution_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "sendResources":
+            self.building_note.setText("Reading current fleet, stock and storage…")
+            self.shipment_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "vacationMode":
+            self.building_note.setText("Checking account jobs and automatic recovery policy…")
+            self.vacation_preview_requested.emit(account, draft["city_id"], self._city_review_nonce)
+        elif task == "attackBarbarians":
+            self.building_note.setText("Checking actual village and planned waves…")
+            self.attack_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "autoBarbarians":
+            self.building_note.setText("Reading village level, unit requirements and ships…")
+            self.grind_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "trainArmy":
+            self.building_note.setText("Checking actual recruitable units and cost in every selected city…")
+            self.training_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "stationArmy":
+            self.building_note.setText("Checking actual available units and transport capacity…")
+            self.station_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "constructBuilding":
+            self.building_note.setText("Checking selected building and actual costs…")
+            self.build_preview_requested.emit(account, draft, self._city_review_nonce)
+        elif task == "reorganizeCityBuildings":
+            self.building_note.setText("Comparing the actual city layouts…")
+            self.layout_preview_requested.emit(account, draft, self._city_review_nonce)
+        else:
+            self.building_note.setText("Reading the actual island project and available wood…")
+            self.donation_preview_requested.emit(account, draft, self._city_review_nonce)
+
+    def set_reward_distribution_preview(self, result, nonce):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_ticket,
+        )
+        from daedalus.market_review import market_draft
+        from daedalus.native_policy_review import policy_draft, policy_summary
+
+        task = self.selected_task_name()
+        account = self.selected_account_id()
+        if (task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"} or nonce != self._city_review_nonce
+                or result.get("account_id") != account):
+            return
+        try:
+            original = self._form_config()
+            clean = (daily_draft(original) if task == "loginDaily" else distribution_draft(original)
+                     if task == "distributeResources" else policy_draft(task, original) if task in POLICY_TASKS
+                     else market_draft(task, original))
+            validate_ticket(result, account, task, clean)
+        except (ValueError, TypeError, KeyError):
+            self.set_reward_distribution_unavailable(nonce)
+            return
+        observation = result["observation"]
+        if task == "loginDaily":
+            labels = observation["cities"]
+            lines = [f"{key.replace('_', ' ')}: {name}" for key, name in labels.items()]
+            lines += ["Favour: " + ", ".join(clean["favour_tasks"]), "Collect ambrosia: " + str(clean["collect_ambrosia"]),
+                      (f"Observed favour: {observation['favour']:,}/{observation['limit']:,}; "
+                      f"{observation['collectable']} collectable tasks; reset in {observation['reset_seconds']:,} s."),
+                      "Recurring policy; eligibility and reward quantities can change. No reward collected by preview."]
+        elif task == "distributeResources":
+            lines = [f"{clean['resource']} · {clean['mode']} · {observation['available_ships']}/{observation['total_ships']} ships free."]
+            for row in observation["routes"]:
+                lines.append(f"{row['origin_name']} → {row['destination_name']}: {sum(row['resources']):,}; "
+                             f"first load ≤ {row['first_load_limit']:,}; minimum loads {row['minimum_loads']}.")
+            lines.append("Exact allocation; a changed plan requires a new review. No combined ETA.")
+        elif task in POLICY_TASKS:
+            lines = [configuration_summary(original), policy_summary(task, clean, observation),
+                     "Observed current state; future eligibility and costs may change."]
+        else:
+            lines = [f"{observation['mode'].replace('_', ' ')} · quoted total {observation['gold_total']:,} gold."]
+            if observation["gold_available"] is not None:
+                lines.append(f"Observed available gold: {observation['gold_available']:,}.")
+            for row in observation["rows"]:
+                lines.append(f"{row['city']} {row['player']}: {row['amount']:,} × {row['unit_price']:,} gold.")
+            lines.append("Quoted allocation, not a completion receipt. Changed quotes halt execution; no automatic replay.")
+        self._city_review_plan = {**original, "preview_id": result["preview_id"]}
+        self._city_review_expires = time.monotonic() + result["expires_in"]
+        self._city_review_nonce = None
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_reward_distribution_unavailable(self, nonce):
+        if nonce == self._city_review_nonce:
+            self._city_review_plan = None
+            self._city_review_nonce = None
+            self.building_note.setText("Operation preview unavailable; refresh before retrying.")
+            self._invalidate_review()
+
+    def set_shipment_preview(self, result, nonce):
+        if (self.selected_task_name() != "sendResources" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if result.get("draft") != draft:
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = {**result, **draft} if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        lines = [f"{result['available_ships']:,}/{result['total_ships']:,} "
+                 + ("freighters" if draft["useFreighters"] else "trade ships")
+                 + f" available; {result['capacity']:,} cargo per vessel."]
+        for row in result["routes"]:
+            cargo = ", ".join(f"{n} {v:,}" for n,v in zip(
+                ("wood", "wine", "marble", "crystal", "sulfur"), row["resources"]) if v)
+            loads = row["minimum_loads"] if row["minimum_loads"] is not None else "unavailable"
+            stock = ", ".join(f"{n} {v:,}" for n,v,w in zip(
+                ("wood", "wine", "marble", "crystal", "sulfur"), row["stock"], row["resources"]) if w)
+            lines.append(f"{row['origin_name']} → {row['destination_name']}: {cargo}. "
+                         f"Origin stock: {stock}. "
+                         f"First load ≤ {row['first_load_limit']:,}; minimum loads {loads}."
+                         + (" Recipient storage unknown." if row["destination_space"] is None else ""))
+            timing = row.get("first_load_timing")
+            if timing:
+                lines.append(f"First-load estimate: {timing['total_seconds']:,} s "
+                             f"(queue {timing['queue_seconds']:,}, load {timing['loading_seconds']:,}, "
+                             f"travel {timing['travel_seconds']:,} s).")
+            else:
+                lines.append("First-load timing unavailable.")
+            model = row.get("full_route_model")
+            if model:
+                lines.append(f"Modeled final delivery: {model['delivery_seconds']:,} s ({model['loads']} sequential loads).")
+        lines.append("Model assumes exclusive available fleet, symmetric return travel, unchanged loading and storage, no extra waits. Multiple routes share the fleet; no combined ETA.")
+        if not result["ready"]:
+            lines.append("No usable fleet; choose another fleet or acquire ships.")
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_shipment_unavailable(self, nonce):
+        if self.selected_task_name() == "sendResources" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Shipment preview unavailable. Check stock, recipients and fleet.")
+            self._invalidate_review()
+
+    def set_donation_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "donate" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(key) != draft.get(key) for key in ("city_id", "project", "amount")):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        self.building_note.setText(
+            f"{result['city_name']} · {result['project_name']} (level {result['level']}). "
+            f"Wood available: {result['stock']:,}; project remaining: {result['remaining']:,}. "
+            f"Donate {result['amount']:,} wood once. "
+            + ("Ready for review." if self._city_review_plan else
+               "Project is upgrading or the amount is unavailable; adjust and preview again.")
+        )
+        self._invalidate_review()
+
+    def set_donation_preview_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "donate" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_vacation_preview(self, result, nonce):
+        if (self.selected_task_name() != "vacationMode" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if result.get("city_id") != draft.get("city_id"):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        warnings = []
+        if result["active_jobs"] or result["managed_active"]:
+            warnings.append("Stop all active account jobs first.")
+        if not result["recovery_disabled"]:
+            warnings.append("Disable automatic recovery in Recovery settings first.")
+        self.building_note.setText(
+            f"{result['city_name']}: vacation mode affects the entire account, not only this city. "
+            "Game access and automation may be suspended. Keep recovery disabled until you manually end vacation. "
+            + ("Ready for review." if self._city_review_plan else " ".join(warnings))
+        )
+        self._invalidate_review()
+
+    def set_vacation_unavailable(self, nonce):
+        if self.selected_task_name() == "vacationMode" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Vacation preview unavailable. Check account and recovery settings.")
+            self._invalidate_review()
+
+    def _clear_attack_inventory(self, *_args):
+        editor = self._form_inputs.get("waves")
+        if isinstance(editor, BarbarianWavesEditor):
+            editor.clear()
+
+    def set_attack_inventory(self, result, nonce):
+        if (self.selected_task_name() != "attackBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        picker = self._form_inputs.get("city_id")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        editor = self._form_inputs.get("waves")
+        if (not isinstance(editor, BarbarianWavesEditor) or not 1 <= index <= len(cities)
+                or result.get("city_id") != cities[index-1]["id"]):
+            return
+        editor.set_inventory(result)
+        self.building_note.setText("Choose quantities, then preview the attack. No troops have been sent.")
+        self._invalidate_review()
+
+    def set_attack_preview(self, result, nonce):
+        if (self.selected_task_name() != "attackBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if (result.get("city_id") != draft.get("city_id") or result.get("target_city_id") != draft.get("target_city_id")
+                or result.get("reviewed_waves") != draft.get("waves")):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = {**result, "waves": draft["waves"]} if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        waves = "; ".join(f"Round {w['round']}: " + ", ".join(
+            f"{u['name']} × {u['amount']}" for u in w["units"]) +
+            (" (looting)" if w["loot"] else f"; loot ships {w['ships']}") for w in result["waves"])
+        self.building_note.setText(f"{result['city_name']} → island of {result['target_name']}, "
+                                   f"village level {result['level']}. Ships: {result['available_ships']:,}/{result['required_ships']:,}. "
+                                   + waves + (". Ready for review." if self._city_review_plan else ". Prerequisites missing."))
+        self._invalidate_review()
+
+    def set_attack_unavailable(self, nonce):
+        if self.selected_task_name() == "attackBarbarians" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Attack inventory or preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_grind_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "autoBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        requirements = "; ".join(f"{r['name']}: {r['available']:,}/{r['required']:,}" for r in result["requirements"])
+        self.building_note.setText(
+            f"{result['city_name']} → island of {result['target_name']}, village level {result['level']}. "
+            f"Ships: {result['available_ships']:,}/{result['required_ships']:,}. {requirements}. "
+            "Repeat using the upstream preset until stopped or unsupported. "
+            + ("Ready for review." if self._city_review_plan else "Village destroyed or prerequisites missing.")
+        )
+        self._invalidate_review()
+
+    def set_grind_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "autoBarbarians" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Automatic attack preview unavailable. Check the village and try again.")
+            self._invalidate_review()
+
+    def set_training_preview(self, result: dict[str, object], nonce: str) -> None:
+        from daedalus.training_contract import RESOURCES, validate_training_review
+
+        if (self.selected_task_name() != "trainArmy" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_inputs["city"].reviewed_draft()
+            validate_training_review(self.selected_account_id(), draft, result)
+        except (ValueError, TypeError, KeyError, IndexError):
+            self.set_training_unavailable(nonce)
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        lines = [f"{result['cycles']} cycle(s); {len(result['rounds'])} ordered round(s)."]
+        for row in result["cities"]:
+            lines.append(row["city_name"] + (" — ready" if row["ready"] else " — insufficient initial stock"))
+            for index, group in enumerate(row["rounds"], 1):
+                lines.append(f"Round {index}: " + ", ".join(f"{u['local_name']} × {u['cantidad']:,}" for u in group))
+            lines.append("Total commitment: " + ", ".join(f"{k} {v:g}" for k,v in zip(RESOURCES,row["total_costs"]) if v))
+        lines.append("Later rounds stop if costs, resources, city or queue observations change. Manual recovery only.")
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_training_unavailable(self, nonce):
+        if self.selected_task_name() == "trainArmy" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Recruitment preview unavailable. Check selected cities, buildings and units.")
+            self._invalidate_review()
+
+    def set_station_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "stationArmy" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        capacity = (f" Cargo weight {result['weight']:,} / capacity {result['capacity']:,}."
+                    if result["ground"] else "")
+        if result.get("deployments"):
+            description = "\n".join(
+                f"{row['city_name']} → {result['destination_name']}: {row['total']:,} "
+                + ("ground units" if row["ground"] else "fleet units")
+                for row in result["deployments"])
+            description += "\nTotal: " + f"{result['total']:,} units." + capacity
+        else:
+            description = (f"{result['city_name']} → {result['destination_name']}: all {result['total']:,} "
+                           + ("available ground units." if result["ground"] else "available fleet units.") + capacity)
+        self.building_note.setText(description + (" Ready for review." if self._city_review_plan else
+                                                " No units or insufficient shared capacity."))
+        self._invalidate_review()
+
+    def set_station_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "stationArmy" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Deployment preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def _clear_build_options(self, *_args: object) -> None:
+        choice = self._form_inputs.get("position")
+        if self.selected_task_name() == "constructBuilding" and isinstance(choice, ComboBox):
+            with QSignalBlocker(choice):
+                choice.clear()
+                choice.addItem("Load actual building options first…")
+            self._mark_form_dirty()
+
+    def set_build_options(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "constructBuilding" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        picker = self._form_inputs.get("city_id")
+        choice = self._form_inputs.get("position")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        if (not isinstance(choice, ComboBox) or not 1 <= index <= len(cities)
+                or result.get("city_id") != cities[index-1]["id"]):
+            return
+        with QSignalBlocker(choice):
+            choice.clear()
+            choice.addItem("Choose an actual building and slot…")
+            for row in result["options"]:
+                label = f"{row['name']} · slot {row['position']} ({row['surface']})"
+                if not row["ready"]:
+                    label += " — not ready"
+                choice.addItem(label, userData={"position": row["position"], "building_id": row["building_id"]})
+            choice.setCurrentIndex(0)
+        self._city_review_nonce = None
+        self._city_review_plan = None
+        self.building_note.setText(
+            f"{len(result['options'])} actual building choices. Select one and preview the cost."
+        )
+        self._invalidate_review()
+
+    def set_build_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "constructBuilding" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        costs = ", ".join(f"{r}: {n:,}" for r, n in zip(("wood", "wine", "marble", "crystal", "sulfur"), result["costs"]))
+        self.building_note.setText(
+            f"{result['name']} · slot {result['position']}. Cost: {costs}. "
+            + ("Ready for review." if self._city_review_plan else "City is busy or materials are missing.")
+        )
+        self._invalidate_review()
+
+    def set_build_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "constructBuilding" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Building inventory or preview unavailable. Retry after refresh.")
+            self._invalidate_review()
+
+    def set_layout_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "reorganizeCityBuildings"
+                or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        moves = result["moves"]
+        summary = "; ".join(f"{m['building']} {m['from']} → {m['to']} (swap {m['displaced']})" for m in moves)
+        self.building_note.setText(
+            f"{result['template_name']} → {result['city_name']}: {len(moves)} swaps. "
+            + (summary if moves else "No applicable layout swaps.")
+        )
+        self._invalidate_review()
+
+    def set_layout_preview_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "reorganizeCityBuildings" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Layout preview unavailable. Choose different owned cities.")
+            self._invalidate_review()
+
+    def set_worker_preview(self, result: dict[str, object], nonce: str) -> None:
+        task = self.selected_task_name()
+        if (task not in WORKER_TASKS or result.get("task") != task
+                or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(key) != value for key, value in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        rows = result.get("assignments") or [result]
+        lines = []
+        for row in rows:
+            current = row["current"] if row["current"] is not None else "not reported"
+            project = {"resource": "forest", "tradegood": "luxury resource"}.get(row.get("project"), task)
+            lines.append(f"{row['city_name']} · {project}: current {current}; maximum {row['maximum']}; "
+                         f"extra {row['extra']}; set to {row['target']} workers.")
+        self.building_note.setText("\n".join(lines) +
+            "\nThe game may reject assignments if population is insufficient. Review and approve before starting.")
+        self._invalidate_review()
+
+    def set_worker_preview_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() in WORKER_TASKS and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Worker preview unavailable. Check the city and try again.")
+            self._invalidate_review()
+
     def _request_construction_preview(self) -> None:
         account_id = self.selected_account_id()
         city_id = self._selected_construction_city()
@@ -863,6 +1493,7 @@ class TasksPage(QWidget):
             return
         try:
             upgrades = self._selected_building_upgrades()
+            supply = self._construction_supply_draft()
         except ValueError as exc:
             QMessageBox.warning(self, "Choose upgrades", str(exc))
             return
@@ -870,23 +1501,28 @@ class TasksPage(QWidget):
         self._pending_preview_key = (
             account_id, city_id,
             tuple((row["position"], row["target_level"]) for row in upgrades),
+            supply,
         )
         self.construction_preview_button.setEnabled(False)
         self.building_note.setText(
             "Reading IkaBot's actual building costs and queue durations. "
             "No upgrade or shipment has started."
         )
-        self.construction_preview_requested.emit(account_id, city_id, upgrades)
+        if supply is None:
+            self.construction_preview_requested.emit(account_id, city_id, upgrades)
+        else:
+            self.construction_supply_preview_requested.emit(account_id, city_id, upgrades, supply)
 
     def set_construction_preview(self, result: dict[str, object]) -> None:
         account_id, city_id = result.get("account_id"), result.get("city_id")
         try:
             upgrades = self._selected_building_upgrades()
+            supply = self._construction_supply_draft()
         except ValueError:
             return
         scope = (account_id, city_id, tuple(
             (row["position"], row["target_level"]) for row in upgrades
-        ))
+        ), supply)
         if (self.selected_task_name() != "constructionList"
                 or self._pending_preview_key != scope
                 or self.selected_account_id() != account_id
@@ -898,8 +1534,17 @@ class TasksPage(QWidget):
         if not isinstance(config, dict):
             self.set_construction_preview_unavailable(account_id, city_id)
             return
+        if supply is not None and (not isinstance(result.get("supply"), dict) or result["supply"].get("options") != supply):
+            self.set_construction_preview_unavailable(account_id, city_id)
+            return
         self._construction_prepared = config if ready else None
-        self._construction_preview_ready = ready
+        key, ttl = result.get("preview_id"), result.get("expires_in")
+        self._construction_ticket = (
+            (key, time.monotonic() + ttl)
+            if ready and isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
+            and type(ttl) is int and 0 < ttl <= 120 else None
+        )
+        self._construction_preview_ready = ready and (supply is None or self._construction_ticket is not None)
         names = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
         costs, missing = result["costs"], result["missing"]
         cost_text = " · ".join(f"{name} {qty:,}" for name, qty in zip(names, costs))
@@ -909,7 +1554,29 @@ class TasksPage(QWidget):
         seconds = result["estimated_seconds"]
         description = (f"Actual IkaBot costs: {cost_text}. Estimated queue: "
                        f"{seconds // 3600}h {(seconds % 3600) // 60}m. ")
-        if ready:
+        if supply is not None:
+            observation = result["supply"]
+            fleet = observation.get("shipment")
+            description += "\n" + ("Supply only." if supply["supply_only"] else "Supply, then build when resources arrive.")
+            if fleet:
+                description += f"\n{'Freighters' if supply['useFreighters'] else 'Trade ships'}: {fleet['available_ships']} free / {fleet['total_ships']} total; capacity {fleet['capacity']:,} each."
+                for row in fleet["routes"]:
+                    amounts = ", ".join(f"{name} {n:,}" for name,n in zip(names,row["resources"]) if n)
+                    description += f"\n{row['origin_name']} → {row['destination_name']}: {amounts}; minimum loads {row['minimum_loads']}."
+                    timing = row.get("first_load_timing")
+                    if timing:
+                        description += f" First-load estimate: {timing['total_seconds']:,} s."
+                    else:
+                        description += " First-load timing unavailable."
+                    model = row.get("full_route_model")
+                    if model:
+                        description += f" Modeled final delivery: {model['delivery_seconds']:,} s."
+            if any(observation["remaining"]):
+                description += "\nUncovered shortage: " + ", ".join(f"{n} {v:,}" for n,v in zip(names,observation["remaining"]) if v)
+            description += "\nModel assumes exclusive fleet and unchanged route conditions; no combined ETA. Manual recovery only."
+            if not ready:
+                description += " Cannot start: choose more suppliers, check storage and fleet, or use self-funded construction."
+        elif ready:
             description += "Resources are sufficient. Review and approve the queue to start."
         else:
             description += (f"Missing: {shortages}. Supply the shortages, then preview again. "
@@ -1006,7 +1673,7 @@ class TasksPage(QWidget):
             return
         editor = self._form_inputs.get("cities_ids")
         if isinstance(editor, AcademyResearchEditor):
-            editor.set_academies(result["academies"])
+            editor.set_academies(result["academies"], result.get("studies"))
 
     def set_academies_unavailable(self, account_id: str) -> None:
         if account_id != self.selected_account_id():
@@ -1110,7 +1777,7 @@ class TasksPage(QWidget):
                                                self._field_is_required(key))
                     self._invalidate_review()
                 elif isinstance(input_widget, (
-                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    ShipmentRoutesEditor, IslandMonitorEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
                     # Account-scoped read data are never portable between cities/worlds.
@@ -1123,6 +1790,7 @@ class TasksPage(QWidget):
         dialog = AccountSelectionDialog(
             self._all_account_metadata, self._bulk_account_ids, self,
             title="Choose automation accounts",
+            display_names=self._account_names,
             explanation=(
                 "View task status for any chosen accounts, including disabled accounts. "
                 "Starting an automation is separate and requires explicit approval, "
@@ -1139,24 +1807,27 @@ class TasksPage(QWidget):
         self.view_all_button.setEnabled(bool(self._status_account_ids))
         self.view_selected_button.setEnabled(bool(count))
         self.choose_bulk_button.setEnabled(bool(self._status_account_ids))
-        self.view_selected_button.setText(f"View selected ({count})")
+        self.overview_choose_button.setEnabled(bool(self._status_account_ids))
+        self.choose_bulk_button.setText(f"Choose accounts ({count})…")
+        self.overview_choose_button.setText(f"Choose accounts ({count})…")
+        self.view_selected_button.setText(f"Refresh selected ({count})")
         self.start_selected_button.setText(f"Start for selected ({count})…")
         ineligible = [aid for aid in self._bulk_account_ids
                       if aid not in self._account_ids]
         can_start = bool(count) and count <= 32 and not ineligible
         # One city's construction plan cannot be dispatched against other account IDs.
-        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources", "autoPirate"}:
+        if self.selected_task_name() not in BATCH_TASKS:
+            can_start = False
+        if expert_configuration_needed(
+                self._config_fields_by_task.get(self.selected_task_name() or "", [])):
             can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
         )
-        if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                            "buyResources", "sellResources", "autoPirate"}:
+        if self.selected_task_name() not in BATCH_TASKS:
             self.bulk_note.setText(
-                "Construction, workshop, training and market plans are city-specific. Configure "
-                "each account separately; never reuse a quote or game plan across accounts."
+                "Account-specific plans must be configured separately for each account."
             )
         elif count > 32:
             self.bulk_note.setText(
@@ -1170,8 +1841,7 @@ class TasksPage(QWidget):
             )
         else:
             self.bulk_note.setText(
-                "Multi-account starts require approval and an independent preflight "
-                "for each account. A blocked account stops the batch."
+                "Each selected account is checked separately before a batch starts."
             )
 
     def _refresh_all(self) -> None:
@@ -1200,7 +1870,7 @@ class TasksPage(QWidget):
             account = next(
                 (a for a in self._all_account_metadata if a["id"] == row["account_id"]), {}
             )
-            label = str(account.get("label") or account.get("player") or row["account_id"])
+            label = self._account_names.get(str(row["account_id"])) or str(row["account_id"])
             if row.get("error"):
                 error_count += 1
                 data.append([label, "—", "—",
@@ -1234,15 +1904,101 @@ class TasksPage(QWidget):
                if error_count else "")
         )
 
+    def _current_review_ticket(self):
+        task = self.selected_task_name()
+        if task == "constructionList":
+            return self._construction_ticket
+        if task in CITY_REVIEW_TASKS and self._city_review_plan:
+            return self._city_review_plan.get("preview_id"), self._city_review_expires
+        return None
+
+    def _update_review_queue_controls(self):
+        ticket = self._current_review_ticket()
+        task = self.selected_task_name()
+        account = self.selected_account_id()
+        self.queue_review_button.setVisible(task in BATCH_REVIEW_TASKS)
+        self.queue_review_button.setEnabled(bool(
+            ticket and ticket[0] and ticket[1] > time.monotonic() and account
+            and self.start_button.isEnabled() and self._reviewed and self.confirm_box.isChecked()
+            and (account in self._review_queue or len(self._review_queue) < 32)))
+        self.review_queue_remove.setEnabled(bool(self._review_queue) and not self._pending_launch)
+        self.review_queue_clear.setEnabled(bool(self._review_queue) and not self._pending_launch)
+        self.review_queue_start.setEnabled(bool(self._review_queue) and self._dispatch_enabled and not self._pending_launch)
+
+    def _render_review_queue(self):
+        _populate(self.review_queue_table, [
+            [self._account_names.get(aid, aid), _friendly_task(row["task"]), row["summary"]]
+            for aid,row in self._review_queue.items()
+        ])
+        self.review_queue_note.setText(
+            f"{len(self._review_queue)} independently approved accounts. Expired reviews block the whole batch; no job starts until all checks pass."
+            if self._review_queue else "Configure and approve each account separately, then add its review. Tickets expire after two minutes.")
+        self._update_review_queue_controls()
+
+    def _clear_review_queue(self):
+        self._review_queue.clear()
+        self._render_review_queue()
+
+    def _remove_review(self):
+        index = self.review_queue_table.currentRow()
+        if 0 <= index < len(self._review_queue):
+            self._review_queue.pop(list(self._review_queue)[index])
+            self._render_review_queue()
+
+    def _queue_review(self):
+        ticket = self._current_review_ticket()
+        account, task = self.selected_account_id(), self.selected_task_name()
+        if (not self.queue_review_button.isEnabled() or not ticket or not account
+                or task not in BATCH_REVIEW_TASKS or time.monotonic() >= ticket[1]):
+            return
+        # For construction include the exact queue of named building targets.
+        summary = self.building_note.text()
+        if task == "constructionList" and self._construction_prepared:
+            buildings = self._construction_prepared.get("buildings", [])
+            summary = "; ".join(f"{b['name']} {b['level']} → {b['upgradeTo']}" for b in buildings) + ". " + summary
+        row = {"account_id": account, "task": task, "preview_id": ticket[0]}
+        validated_batch_entries([row])
+        self._review_queue[account] = {**row, "summary": summary, "expires": ticket[1]}
+        self._city_review_plan = None
+        self._construction_ticket = None
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._invalidate_review()
+        self._render_review_queue()
+        self._show_section(3)
+
+    def _start_reviewed_batch(self):
+        if not self.review_queue_start.isEnabled():
+            return
+        if any(aid not in self._account_ids or row["expires"] <= time.monotonic()
+               for aid,row in self._review_queue.items()):
+            self.review_queue_note.setText("One or more reviews expired or the account is unavailable. Replace those reviews before starting.")
+            return
+        entries = validated_batch_entries([
+            {k:row[k] for k in ("account_id", "task", "preview_id")}
+            for row in self._review_queue.values()
+        ])
+        summaries = "\n\n".join(self._account_description(aid) + " · " + _friendly_task(row["task"]) +
+                                 "\n" + row["summary"] for aid,row in self._review_queue.items())
+        answer = QMessageBox.question(self, "Review independent account batch",
+            summaries + "\n\nStart these exact independently approved operations? All tickets and prerequisites are checked first. Dispatch stops on uncertainty.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self._pending_launch = True
+            self._clear_review_queue()
+            self.reviewed_batch_requested.emit(entries)
+            self._invalidate_review()
+
     def _start_selected(self) -> None:
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
         if (not self._dispatch_enabled or self._pending_launch
-                or self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
-                                                 "buyResources", "sellResources", "autoPirate"}
+                or self.selected_task_name() not in BATCH_TASKS
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
-                or not self.selected_task_name()):
+                or not self.selected_task_name()
+                or expert_configuration_needed(self._config_fields_by_task.get(
+                    self.selected_task_name() or "", []))):
             return
         if not self._reviewed or not self.confirm_box.isChecked():
             # Invalid consent should be contextual, not an unexpected modal.
@@ -1252,19 +2008,8 @@ class TasksPage(QWidget):
                 "before starting tasks for selected accounts."
             )
             return
-        if self._form_dirty and self._advanced_visible:
-            QMessageBox.warning(
-                self, "Review changed settings",
-                "Build JSON from the guided form or hide Advanced before starting."
-            )
-            return
         try:
-            if self._advanced_visible:
-                config = json.loads(self.config_editor.toPlainText())
-                if not isinstance(config, dict):
-                    raise ValueError("Advanced configuration must be a JSON object")
-            else:
-                config = self._form_config()
+            config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
@@ -1324,6 +2069,8 @@ class TasksPage(QWidget):
         self._all_task_names = sorted((
             str(item["name"]) for item in operations
             if item.get("kind") == "background_task" and item.get("name")
+            and (not isinstance(item.get("workflow"), dict)
+                 or item["workflow"].get("desktop") == "native")
             and (self._workflow is None
                  or self._workflow in str(item["name"]).casefold())
         ), key=_friendly_task)
@@ -1462,86 +2209,6 @@ class TasksPage(QWidget):
             self.parameter_scroll.ensureVisible(0, 0)
             self._show_section(0)
 
-    def _toggle_advanced(self) -> None:
-        self._advanced_visible = not self._advanced_visible
-        for widget in (
-            self.advanced_note, self.config_editor, self.build_json_button,
-            self.import_config_button,
-        ):
-            widget.setVisible(self._advanced_visible)
-        self.advanced_toggle.setText(
-            "Hide advanced JSON options" if self._advanced_visible
-            else "Show advanced JSON options"
-        )
-        if self._advanced_visible and self.selected_task_name() != "constructionList":
-            fields = self._config_fields_by_task.get(self.selected_task_name() or "", [])
-            if not expert_configuration_needed(fields):
-                self._build_config_from_form()
-            else:
-                # Never attempt to compile an unsupported raw game plan while
-                # opening Advanced. That would display a modal error dialog,
-                # blocking a headless Mac session and obscuring the import path.
-                self.advanced_note.setText(
-                    "This IkaBot operation requires an existing validated engine plan. "
-                    "Import it explicitly or review an account-specific configuration; "
-                    "do not invent city, combat or ship identifiers."
-                )
-        self._set_controls()
-
-    def _import_advanced_config(self) -> None:
-        """User-directed bounded JSON import, never a system or account-file search."""
-        name = self.selected_task_name()
-        if not name:
-            return
-        filename, _selected_filter = QFileDialog.getOpenFileName(
-            self, "Import reviewed IkaBot automation settings", "", "JSON files (*.json)"
-        )
-        if not filename:
-            return
-        try:
-            source = Path(filename)
-            if source.stat().st_size > 16384:
-                raise ValueError("Configuration file exceeds the 16 KiB safety limit")
-            raw = source.read_text(encoding="utf-8")
-            config = json.loads(raw, parse_constant=lambda _x: (
-                _ for _ in ()
-            ).throw(ValueError("Invalid nonfinite value")))
-            if not isinstance(config, dict):
-                raise TypeError("Configuration must be one JSON object")
-            allowed = {str(field["name"])
-                       for field in self._config_fields_by_task.get(name, [])}
-            if not allowed or not all(isinstance(key, str) and key in allowed
-                                      for key in config):
-                raise ValueError("File has parameters not registered for this automation")
-            if len(json.dumps(config, ensure_ascii=False, allow_nan=False).encode()) > 16384:
-                raise ValueError("Configuration exceeds the task size limit")
-        except (OSError, UnicodeError, ValueError, TypeError):
-            QMessageBox.warning(
-                self, "Configuration not imported",
-                "Choose a valid JSON object under 16 KiB containing only "
-                "this automation's registered parameter names. "
-                "No account operation was started.",
-            )
-            return
-        if not self._advanced_visible:
-            self._advanced_visible = True
-            for widget in (
-                self.advanced_note, self.config_editor, self.build_json_button,
-                self.import_config_button,
-            ):
-                widget.show()
-            self.advanced_toggle.setText("Hide advanced JSON options")
-        self.config_editor.setPlainText(
-            json.dumps(config, ensure_ascii=False, indent=2)
-        )
-        self._form_dirty = False
-        self._invalidate_review()
-        QMessageBox.information(
-            self, "Configuration loaded",
-            "Review the advanced settings and confirm the correct account "
-            "before starting anything. The backend will still validate the task.",
-        )
-
     def _approval_changed(self, *_args: object) -> None:
         # Consent is scoped to the current account, task and configuration.
         self._reviewed = self.confirm_box.isChecked()
@@ -1556,14 +2223,14 @@ class TasksPage(QWidget):
             self.confirm_box.blockSignals(False)
         self._set_controls()
 
-    def _review_advanced_json(self) -> None:
-        """Hand-edited JSON supersedes unbuilt form values deliberately."""
-        self._form_dirty = False
-        self._invalidate_review()
-
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
+        if self.selected_task_name() in CITY_REVIEW_TASKS:
+            self._city_review_plan = None
+            self._city_review_nonce = None
+            self.building_note.setText("Preview the chosen city and settings before approval.")
         if self.selected_task_name() == "constructionList":
+            self._construction_ticket = None
             self._construction_prepared = None
             self._construction_preview_ready = False
             self._pending_preview_key = None
@@ -1574,11 +2241,14 @@ class TasksPage(QWidget):
         # A response from a prior visit to the same account/task must not
         # unlock the new draft merely because its identifiers match again.
         self._selection_generation += 1
+        self._city_review_plan = None
+        self._city_review_nonce = None
         while self.parameter_layout.rowCount():
             self.parameter_layout.removeRow(0)
         self._form_inputs.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -1587,9 +2257,30 @@ class TasksPage(QWidget):
         show_buildings = name == "constructionList"
         self.building_header.setVisible(show_buildings)
         self.building_table.setVisible(show_buildings)
-        self.building_note.setVisible(show_buildings)
-        self.construction_preview_button.setVisible(show_buildings)
-        self.construction_preview_button.setEnabled(False)
+        self.construction_supply_panel.setVisible(show_buildings)
+        if show_buildings:
+            self._populate_construction_suppliers()
+        self.building_note.setVisible(show_buildings or name in CITY_REVIEW_TASKS)
+        self.construction_preview_button.setVisible(show_buildings or name in CITY_REVIEW_TASKS)
+        self.construction_preview_button.setText(
+            "Preview island donation…" if name == "donate" else
+            "Preview worker assignment…" if name in WORKER_TASKS else
+            "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview operation…" if name in POLICY_TASKS else
+            "Preview market allocation…" if name in {"buyResources", "sellResources"} else
+            "Preview daily rewards…" if name == "loginDaily" else
+            "Preview distribution allocation…" if name == "distributeResources" else
+            "Preview shipment capacity…" if name == "sendResources" else
+            "Preview vacation activation…" if name == "vacationMode" else
+            "Load troops / preview attack…" if name == "attackBarbarians" else
+            "Preview automatic attacks…" if name == "autoBarbarians" else
+            "Preview recruitment rounds…" if name == "trainArmy" else
+            "Preview deployment…" if name == "stationArmy" else
+            "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
+        self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
+        if name in CITY_REVIEW_TASKS:
+            self.building_note.setText("Choose a city and settings, then preview.")
+
         if show_buildings:
             self.building_note.setText("Choose a city to load its actual buildings.")
         fields = self._config_fields_by_task.get(name or "", [])
@@ -1601,26 +2292,23 @@ class TasksPage(QWidget):
             f"Automation description: {_friendly_task(name)}" if name else
             "No matching automations"
         )
-        expert_needed = expert_configuration_needed(fields)
+        expert_needed = name == "webServer" or (
+            name != "constructionList" and expert_configuration_needed(fields)
+        )
         self.expert_note.setVisible(expert_needed)
         if expert_needed:
             self.expert_note.setText(
-                "This operation needs a prepared engine plan (for example, a "
-                "validated city, building queue or route). Daedalus cannot "
-                "invent those values. Use Advanced to import an existing "
-                "configuration or supply reviewed fields."
+                "Not yet available in the desktop app: this action needs a dedicated "
+                "game-data editor. Starting is disabled until that editor is supported."
             )
         for field in fields:
             key = str(field["name"])
             if name == "constructionList" and key not in {"city_id", "city_name"}:
-                # Complex planner internals belong to an expert imported plan,
-                # never to the normal construction interface.
+                # Construction internals are supplied by the verified preview.
                 continue
             if (field.get("type") in {"hidden_derived", "json"}
                     and not (name == "constructionList" and key == "city_id")):
-                # Game-derived nested plans must never look like free-form text
-                # inputs in the normal workflow. Import a verified expert plan
-                # through Advanced until a source-backed native editor exists.
+                # Opaque engine structures never become editable text fields.
                 continue
             if name == "constructionList" and key == "city_name":
                 # The paired, verified name comes from the selected city's read-only record.
@@ -1639,6 +2327,7 @@ class TasksPage(QWidget):
                 widget.changed.connect(self._mark_form_dirty)
             elif kind == "shipment_routes":
                 widget = ShipmentRoutesEditor(self)
+                widget.lookup_requested.connect(self._lookup_destinations)
                 widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
                 widget.changed.connect(self._mark_form_dirty)
             elif kind == "donation_policies":
@@ -1679,12 +2368,10 @@ class TasksPage(QWidget):
                 widget.changed.connect(self._mark_form_dirty)
                 widget.city_requested.connect(self._workshop_city_requested)
             elif kind == "island_list":
-                widget = QListWidget(self)
-                widget.setProperty("island_scope", True)
-                widget.setMinimumHeight(110)
-                widget.setMaximumHeight(140)
-                self._populate_island_list(widget)
-                widget.itemChanged.connect(self._mark_form_dirty)
+                widget = IslandMonitorEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.lookup_requested.connect(self._lookup_destinations)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "city_list":
                 widget = QListWidget(self)
                 widget.setProperty("city_scope", True)
@@ -1706,12 +2393,28 @@ class TasksPage(QWidget):
                     item.setCheckState(Qt.Unchecked)
                     widget.addItem(item)
                 widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "external_destination":
+                widget = ExternalDestinationEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.lookup_requested.connect(self._lookup_destinations)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "attack_waves":
+                widget = BarbarianWavesEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
+            elif kind == "build_choice":
+                widget = ComboBox()
+                widget.addItem("Load actual building options first…")
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
             elif kind == "city_picker":
                 widget = ComboBox()
                 widget.setProperty("city_picker", True)
                 widget.setAccessibleName(f"Choose actual city for {label}")
                 self._populate_city_picker(widget, optional=not field["required"])
                 widget.currentIndexChanged.connect(self._mark_form_dirty)
+                if name == "attackBarbarians" and key == "city_id":
+                    widget.currentIndexChanged.connect(self._clear_attack_inventory)
+                if name == "constructBuilding" and key == "city_id":
+                    widget.currentIndexChanged.connect(self._clear_build_options)
             elif name == "constructionList" and key == "city_id":
                 widget = ComboBox()
                 widget.setAccessibleName("Choose a real city for construction")
@@ -1766,23 +2469,12 @@ class TasksPage(QWidget):
                 widget.valueChanged.connect(self._mark_form_dirty)
             else:
                 widget = LineEdit()
-                if kind == "json":
-                    widget.setPlaceholderText(
-                        'JSON value (e.g. 10, "text", [1,2])'
-                        if field["required"] else "Optional value"
-                    )
-                    if default is not None:
-                        widget.setText(json.dumps(default, ensure_ascii=False))
-                elif default is not None:
+                if default is not None:
                     widget.setText(str(default))
                 else:
                     widget.setPlaceholderText("Required" if field["required"] else "Optional")
                 widget.textChanged.connect(self._mark_form_dirty)
             help_text = str(field.get("help") or "")
-            if kind == "json" and not field.get("choices"):
-                help_text = (help_text + " " if help_text else "") + (
-                    "Structured JSON input; do not guess game identifiers or required plan values."
-                )
             style_form_input(widget, label, help_text)
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
@@ -1836,9 +2528,6 @@ class TasksPage(QWidget):
                 len(visible_fields) * 44 + 24 + list_extra,
             )
             self.parameter_scroll.setFixedHeight(min(3000, max(72, content_height)))
-        self.build_json_button.setEnabled(bool(fields))
-        self._invalidate_review()
-        self.config_editor.setPlainText("{}")
         self._form_dirty = False
         self._invalidate_review()
         self._prereq_ready = None
@@ -1853,7 +2542,7 @@ class TasksPage(QWidget):
         if (account_id and account_id not in self._cities_by_account
                 and (name == "constructionList"
                      or any(field.get("type") in {
-                         "city_list", "city_picker", "island_list", "shipment_routes",
+                         "city_list", "city_picker", "island_list", "shipment_routes", "attack_waves", "external_destination",
                          "donation_policies", "workshop_jobs", "train_units",
                          "market_buy", "market_sell", "academy_research",
                          "tavern_cities", "miracle_temple", "olympus_shrine",
@@ -1931,14 +2620,14 @@ class TasksPage(QWidget):
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
             if name == "constructionList":
-                # Full engine-prepared construction internals remain expert-only.
+                # Construction is assembled only by the engine preview.
                 continue
             kind = str(field["type"])
             if kind == "hidden_derived":
                 continue
             if kind == "json":
                 if field["required"]:
-                    raise ValueError("This task requires an existing reviewed engine plan")
+                    raise ValueError("This action needs a dedicated native editor before it can start")
                 # An optional opaque game value is intentionally left unset.
                 continue
             if name == "autoPirate":
@@ -1961,6 +2650,15 @@ class TasksPage(QWidget):
                         or key == "island"):
                     continue
             widget = self._form_inputs[key]
+            if isinstance(widget, ExternalDestinationEditor):
+                config.update(widget.to_config())
+                continue
+            if isinstance(widget, BarbarianWavesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, IslandMonitorEditor):
+                config[key] = widget.to_config()
+                continue
             if isinstance(widget, ResourceLimitsEditor):
                 config[key] = widget.to_config()
                 continue
@@ -2023,6 +2721,12 @@ class TasksPage(QWidget):
                 config[key] = ([str(city) for city in chosen] if kind == "city_list"
                                else chosen)
                 continue
+            if kind == "build_choice" and isinstance(widget, ComboBox):
+                selected = widget.currentData()
+                if not isinstance(selected, dict) or set(selected) != {"position", "building_id"}:
+                    raise ValueError("Choose a verified building option")
+                config.update(selected)
+                continue
             if kind == "city_picker" and isinstance(widget, ComboBox):
                 cities = self._cities_by_account.get(self.selected_account_id() or "", [])
                 index = widget.currentIndex()
@@ -2082,8 +2786,15 @@ class TasksPage(QWidget):
             destination = config.get("destinationCityId")
             if destination is not None and str(destination) in config.get("sourceCityIds", []):
                 raise ValueError("Destination cannot also be a source city")
-        if name == "resourceTransportManager" and "mode" not in config:
-            raise ValueError("Choose a transport strategy")
+        if name == "resourceTransportManager":
+            if "mode" not in config:
+                raise ValueError("Choose a transport strategy")
+            if config["mode"] == "consolidate":
+                if not config.get("origin_cities") or config.get("destination_city") is None:
+                    raise ValueError("Choose source cities and a receiving city")
+                if str(config["destination_city"]) in config["origin_cities"]:
+                    raise ValueError("Destination cannot also be a source city")
+                config["origin_cities"] = [int(c) for c in config["origin_cities"]]
         if name == "dumpWorld" and config.get("shallow") is True and "coords" in config:
             raise ValueError("Whole-world shallow scans cannot be limited to a map area")
         if name == "distributeResources" and config.get("mode") == "producers" and config.get("resource") == "wood":
@@ -2104,17 +2815,18 @@ class TasksPage(QWidget):
             )
         if len(json.dumps(config, allow_nan=False).encode("utf-8")) > 16384:
             raise ValueError("Task configuration exceeds the safe size limit")
+        if name == "stationArmy":
+            for option in ("all_origins", "both"):
+                if not config.get(option):
+                    config.pop(option, None)
+            if config.get("both"):
+                config["ground"] = True
+        if name in WORKER_TASKS and "additional_city_ids" in config:
+            config["additional_city_ids"] = [int(cid) for cid in config["additional_city_ids"]
+                                             if int(cid) != config["city_id"]]
+            if not config["additional_city_ids"]:
+                config.pop("additional_city_ids")
         return config
-
-    def _build_config_from_form(self) -> None:
-        try:
-            config = self._form_config()
-        except (TypeError, ValueError) as exc:
-            QMessageBox.warning(self, "Invalid task parameters", str(exc))
-            return
-        self.config_editor.setPlainText(json.dumps(config, ensure_ascii=False, indent=2))
-        self._form_dirty = False
-        self._invalidate_review()
 
     def set_tasks(self, data: dict[str, object]) -> None:
         task_rows = data.get("engine_tasks")
@@ -2126,7 +2838,9 @@ class TasksPage(QWidget):
         )
         _populate(self.task_table, [
             [_friendly_task(str(task.get("task", ""))),
-             str(task.get("status", "unknown")).replace("_", " ").capitalize(),
+             str(task.get("status", "unknown")).replace("_", " ").capitalize() + (
+                 " · " + str(task["outcome"]).replace("_", " ") if task.get("outcome") in
+                 {"accepted", "failed_or_uncertain"} else ""),
              task.get("started_at") or "Not provided", "Selected account"]
             for task in tasks
         ])
@@ -2163,14 +2877,14 @@ class TasksPage(QWidget):
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
-            # Every unspecialized structured field requires an expert-verified
-            # plan. A guided form cannot silently omit required IkaBot settings.
-            and (self._advanced_visible or self.selected_task_name() == "constructionList"
+            and self.selected_task_name() != "webServer"
+            and (self.selected_task_name() not in CITY_REVIEW_TASKS or self._city_review_plan is not None)
+            # A native editor must cover all required structured parameters.
+            and (self.selected_task_name() == "constructionList"
                  or not expert_configuration_needed(
                      self._config_fields_by_task.get(self.selected_task_name() or "", [])))
-            # Live building selection alone is NOT a prepared engine plan.
             and (self.selected_task_name() != "constructionList"
-                 or self._advanced_visible or self._construction_preview_ready)
+                 or self._construction_preview_ready)
         )
         # Status/history is read-only even on a backend that refuses dispatch.
         has_read_scope = bool(self._account_ids)
@@ -2192,6 +2906,7 @@ class TasksPage(QWidget):
             and bool(selected_request.get("request_id"))
         )
         self._update_bulk_buttons()
+        self._update_review_queue_controls()
 
     def _refresh(self) -> None:
         account_id = self.selected_account_id()
@@ -2203,7 +2918,7 @@ class TasksPage(QWidget):
             (a for a in self._all_account_metadata if a["id"] == account_id),
             {},
         )
-        label = str(record.get("label") or record.get("player") or account_id)
+        label = account_player_name(record or {"id": account_id})
         world = str(record.get("world") or "world unspecified")
         return f"{label} · {world} (account {account_id})"
 
@@ -2226,45 +2941,56 @@ class TasksPage(QWidget):
                 "Check the authorization box before starting this automation.")
             return
         try:
-            if self._advanced_visible:
-                if self._form_dirty and task != "constructionList":
-                    QMessageBox.warning(self, "Guided settings changed",
-                        "Build JSON from guided settings or hide Advanced to use the form.")
-                    return
-                config = json.loads(self.config_editor.toPlainText())
-                if not isinstance(config, dict):
-                    raise ValueError("Advanced configuration must be a JSON object")
-                if task == "constructionList":
-                    city_id = self._selected_construction_city()
-                    cities = self._cities_by_account.get(account_id, [])
-                    matching = next((city for city in cities if city["id"] == city_id), None)
-                    if (matching is None or config.get("city_id") != city_id
-                            or config.get("city_name") != matching["name"]):
-                        raise ValueError(
-                            "Prepared construction plan must match the selected "
-                            "authenticated city and its exact name"
-                        )
-                    if any(key not in config for key in (
-                        "buildings", "shipments", "expand_overall", "wait_resources",
-                        "construction_queue", "total_time",
-                    )):
-                        raise ValueError("Import a complete upstream-prepared construction plan")
-            else:
-                if task == "constructionList":
-                    if not self._construction_preview_ready or self._construction_prepared is None:
-                        raise ValueError("Calculate and approve the actual IkaBot construction preview first")
-                    config = dict(self._construction_prepared)
+            if task in CITY_REVIEW_TASKS:
+                if self._city_review_plan is None or time.monotonic() >= self._city_review_expires:
+                    raise ValueError("Operation preview expired; prepare a new preview")
+                draft = self._form_inputs["city"].reviewed_draft() if task == "trainArmy" else self._form_config()
+                if any(self._city_review_plan.get(key) != value for key, value in draft.items()):
+                    raise ValueError("Operation settings changed; prepare a new preview")
+                config = {"preview_id": self._city_review_plan["preview_id"]}
+            elif task == "constructionList":
+                if not self._construction_preview_ready or self._construction_prepared is None:
+                    raise ValueError("Calculate and approve the actual IkaBot construction preview first")
+                if self._construction_ticket is not None:
+                    key, expires = self._construction_ticket
+                    if time.monotonic() >= expires:
+                        raise ValueError("Construction review expired; prepare a new preview")
+                    config = {"preview_id": key}
                 else:
-                    config = self._form_config()
+                    config = dict(self._construction_prepared)
+            else:
+                config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
-        params = configuration_summary(config)
+        params = self.building_note.text() if task in CITY_REVIEW_TASKS | {"constructionList"} else configuration_summary(config)
+        if task == "resourceTransportManager" and config.get("mode") == "consolidate":
+            editor = self._form_inputs.get("destination_city")
+            names = {c["id"]:c["name"] for c in self._cities_by_account.get(account_id, [])}
+            params = (", ".join(names[c] for c in config["origin_cities"]) + " → "
+                      + editor.picker.currentText() + "\n"
+                      + ("Keep reserve: " if config.get("send_mode") == "keep" else "Send: ")
+                      + ", ".join(f"{n} {v:,}" for n,v in zip(
+                          ("wood","wine","marble","crystal","sulfur"),config["resource_config"]) if v is not None)
+                      + f"\nRepeat every {config['interval_hours']} hours; "
+                      + ("freighters" if config.get("useFreighters") else "trade ships")
+                      + f"; notifications: {config.get('notify','none')}"
+                      + ("\nExternal shipments require manual recovery." if "recipient" in config else ""))
+        if task == "searchForIslandSpaces" and "preview_id" not in config:
+            params = ("All owned islands" if not config.get("islandList") else ", ".join(config["islandList"]))
+            params += f"\nCheck every {config['time']} minutes; fights: {config.get('fights', 'n')}"
+        if task == "tavernManager" and "fixed_servings" in config:
+            draft = config["fixed_servings"]
+            params = f"Set {draft['percentage']}% of maximum serving once.\n" + "\n".join(
+                f"{r['city_name']}: level {r['current_level']} → {r['target_level']}; "
+                f"wine/hour {r['current_wine']} → {r['target_wine']}" for r in draft["rows"])
+        if task in {"testTelegramBot", "testDiscordBot"}:
+            params = "Send one fixed test message to the existing configured provider. Check task Activity for acceptance."
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces', 'distributeResources', 'loginDaily', 'buyResources', 'sellResources'} | WORKER_TASKS | POLICY_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,
@@ -2275,6 +3001,8 @@ class TasksPage(QWidget):
         self._pending_launch = True
         self._set_controls()
         self.launch_requested.emit(account_id, task, config, str(uuid.uuid4()))
+        if task in CITY_REVIEW_TASKS:
+            self._city_review_plan = None
         self._invalidate_review()
 
     def finish_launch(self) -> None:

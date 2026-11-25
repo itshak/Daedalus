@@ -1,4 +1,8 @@
-from ikabot.helpers.decorators import configurator
+from ikabot.helpers.decorators import configurator, task
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
+import hashlib
+import json
 import re
 
 from ikabot.config import *
@@ -133,6 +137,159 @@ def sendArmy(session, origin_city, destination_city, type_army, army_available):
         params[army] = army_available[army]
 
     session.post(params=params)
+
+
+def _station_plan(session, city_id, destination_city_id, ground):
+    if (type(city_id) is not int or type(destination_city_id) is not int
+            or not 0 < city_id < 10**12 or not 0 < destination_city_id < 10**12
+            or city_id == destination_city_id or type(ground) is not bool):
+        raise ValueError("Choose two different owned cities and a deployment mode")
+    pedirInfo.ids_cache = None
+    origin = requireOwnCity(session, city_id, "Origin city")
+    destination = requireOwnCity(session, destination_city_id, "Destination city")
+    origin_city = getCityById(session, origin)
+    target_city = getCityById(session, destination)
+    if str(origin_city["id"]) != origin or str(target_city["id"]) != destination:
+        raise ValueError("City identity changed")
+    island = int(target_city["islandId"])
+    if not 0 < island < 10**12:
+        raise ValueError("Invalid destination island")
+    # The original CLI deployment view, but no interactive prompts or mutation.
+    mode = "army" if ground else "fleet"
+    data = session.post(params={
+        "view": "deployment", "deploymentType": mode,
+        "destinationCityId": destination, "backgroundView": "city",
+        "currentCityId": origin, "actionRequest": actionRequest, "ajax": 1,
+    })
+    amounts = re.findall(r'<div class=\\"amount\\">(.*?)<\\/div>', data)
+    codes = re.findall(r'name=\\"cargo_' + mode + r'_([^\\]+)_upkeep\\"\\n\s+value=\\"([^\\"]+)\\"', data)
+    weights = re.findall(r'<div class=\\"weight\\">(.*?)<\\/div>', data) if ground else []
+    if len(codes) != len(amounts) or len(codes) > 100 or (ground and len(codes) != len(weights)):
+        raise ValueError("Incomplete deployment inventory")
+    cargo = {}
+    total = weight = 0
+    for index, (code, upkeep) in enumerate(codes):
+        if not re.fullmatch(r"[0-9]{1,6}", code) or not re.fullmatch(r"[0-9]{1,10}", upkeep):
+            raise ValueError("Invalid deployment unit")
+        quantity = amounts[index]
+        if not re.fullmatch(r"[0-9]{1,10}", quantity):
+            raise ValueError("Invalid deployment quantity")
+        key = f"cargo_{mode}_{code}"
+        if key in cargo:
+            raise ValueError("Repeated deployment unit")
+        cargo[key] = int(quantity)
+        cargo[key + "_upkeep"] = int(upkeep)
+        total += int(quantity)
+        if ground:
+            if not re.fullmatch(r"[0-9]{1,8}", weights[index]):
+                raise ValueError("Invalid deployment weight")
+            weight += int(quantity) * int(weights[index])
+    # An exact available-transport capacity is required for ground deployments.
+    capacity = None
+    if ground:
+        ship_capacity, _ = getShipCapacity(session)
+        free_ships = int(getAvailableShips(session))
+        if type(ship_capacity) is not int or not 0 < ship_capacity <= 10**8 or not 0 <= free_ships <= 10**8:
+            raise ValueError("Invalid transport capacity")
+        capacity = free_ships * ship_capacity
+    if total > 10**12 or weight > 10**15:
+        raise ValueError("Deployment exceeds safe preview size")
+    expected = hashlib.sha256(json.dumps(
+        [city_id, destination_city_id, ground, island, cargo, weight],
+        sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    plan = {"city_id": city_id, "destination_city_id": destination_city_id, "ground": ground,
+            "city_name": str(origin_city["cityName"])[:100],
+            "destination_name": str(target_city["cityName"])[:100],
+            "total": total, "weight": weight if ground else None, "capacity": capacity,
+            "ready": total > 0 and (not ground or weight <= capacity),
+            "config": {"city_id": city_id, "destination_city_id": destination_city_id,
+                       "ground": ground, "expected": expected}}
+    return plan, cargo, island
+
+
+def _station_batch(session, city_id, destination_city_id, ground, all_origins=False, both=False):
+    """Plan the original CLI's all-city and both-category deployment options."""
+    if type(all_origins) is not bool or type(both) is not bool or (both and ground is not True):
+        raise ValueError("Invalid deployment options")
+    if not all_origins and not both:
+        plan, cargo, island = _station_plan(session, city_id, destination_city_id, ground)
+        return plan, [(plan, cargo, island)]
+    if (type(city_id) is not int or type(destination_city_id) is not int
+            or not 0 < city_id < 10**12 or not 0 < destination_city_id < 10**12
+            or city_id == destination_city_id or type(ground) is not bool):
+        raise ValueError("Choose two different owned cities")
+    pedirInfo.ids_cache = None
+    if all_origins:
+        ids, _ = getIdsOfCities(session)
+        origins = sorted({int(cid) for cid in ids} - {destination_city_id})
+        if city_id not in origins or not 1 <= len(origins) <= 32:
+            raise ValueError("Invalid or oversized owned city inventory")
+    else:
+        origins = [city_id]
+    modes = [True, False] if both else [ground]
+    routes = [_station_plan(session, origin, destination_city_id, mode)
+              for origin in origins for mode in modes]
+    if len({r[0]["destination_name"] for r in routes}) != 1 or len({r[2] for r in routes}) != 1:
+        raise ValueError("Destination changed during review")
+    ground_routes = [r[0] for r in routes if r[0]["ground"]]
+    weight = sum(r["weight"] for r in ground_routes) if ground_routes else None
+    capacity = min(r["capacity"] for r in ground_routes) if ground_routes else None
+    total = sum(r[0]["total"] for r in routes)
+    if total > 10**12 or (weight is not None and weight > 10**15):
+        raise ValueError("Deployment exceeds safe preview size")
+    # Shared merchant transport cannot be counted once per source city.
+    ready = total > 0 and (weight is None or weight <= capacity)
+    config = {"city_id": city_id, "destination_city_id": destination_city_id, "ground": ground,
+              **({"all_origins": True} if all_origins else {}), **({"both": True} if both else {})}
+    expected = hashlib.sha256(json.dumps(
+        [config, [r[0]["config"]["expected"] for r in routes]],
+        sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    fields = ("city_id", "city_name", "ground", "total", "weight", "capacity")
+    plan = {**config, "city_name": next(r[0]["city_name"] for r in routes if r[0]["city_id"] == city_id),
+            "destination_name": routes[0][0]["destination_name"], "total": total,
+            "weight": weight, "capacity": capacity, "ready": ready,
+            "deployments": [{k: r[0][k] for k in fields} for r in routes],
+            "config": {**config, "expected": expected}}
+    return plan, routes
+
+
+def preview_native_station(session, city_id, destination_city_id, ground, all_origins=False, both=False):
+    return _station_batch(session, city_id, destination_city_id, ground, all_origins, both)[0]
+
+
+def prepare_native_station(session, city_id, destination_city_id, ground, expected,
+                           all_origins=False, both=False):
+    plan = preview_native_station(session, city_id, destination_city_id, ground, all_origins, both)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Deployment review is stale or unavailable")
+    return plan["config"]
+
+
+@task("stationArmy", prepare=prepare_native_station)
+def native_station(session, city_id: int, destination_city_id: int, ground: bool, expected: str,
+                   all_origins: bool = False, both: bool = False):
+    plan, routes = _station_batch(session, city_id, destination_city_id, ground, all_origins, both)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Deployment review is stale or unavailable")
+    for route, cargo, island in routes:
+        if not route["total"]:
+            continue
+        if all_origins or both:
+            fresh, cargo, island = _station_plan(session, route["city_id"], destination_city_id, route["ground"])
+            if not fresh["ready"] or fresh["config"]["expected"] != route["config"]["expected"]:
+                raise ValueError("Deployment changed; stop remaining routes")
+        mode = "army" if route["ground"] else "fleet"
+        session.setStatus("Submitting reviewed owned-city deployment")
+        session.post(params={
+            "action": "transportOperations", "function": "deployArmy" if route["ground"] else "deployFleet",
+            "actionRequest": actionRequest, "islandId": str(island),
+            "destinationCityId": str(destination_city_id), "deploymentType": mode,
+            "backgroundView": "city", "currentCityId": str(route["city_id"]), "templateView": "deployment",
+            "ajax": 1, **cargo,
+        }, retry_on_failure=False)
+    session.setStatus("Deployment submitted; verify military movements")
 
 
 @configurator

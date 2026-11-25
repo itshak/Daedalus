@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import json
+import hashlib
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
 import math
 import re
 import time
@@ -480,12 +483,14 @@ def wait_until_attack_is_over(session, city, island):
 
 
 def load_troops(
-    session, city, island, attack_round, units_data, attack_data, ship_capacity, extra_cargo=0
+    session, city, island, attack_round, units_data, attack_data, ship_capacity, extra_cargo=0, strict_review=False
 ):
     ships_needed = Decimal(extra_cargo) / Decimal(ship_capacity)
     speeds = []
     current_units = get_units(session, city)
     for unit_id in attack_round["units"]:
+        if strict_review and current_units.get(unit_id, {}).get("amount", 0) < attack_round["units"][unit_id]:
+            raise ValueError("Reviewed troops are no longer available")
         amount_to_send = min(
             attack_round["units"][unit_id], current_units[unit_id]["amount"]
         )
@@ -506,7 +511,7 @@ def load_troops(
     return attack_data, ships_needed, travel_time
 
 
-def loot(session, island, city, units_data, loot_round, ship_capacity):
+def loot(session, island, city, units_data, loot_round, ship_capacity, strict_review=False):
     while True:
 
         attack_data = {
@@ -563,7 +568,7 @@ def loot(session, island, city, units_data, loot_round, ship_capacity):
             return
 
         attack_data, ships_needed, travel_time = load_troops(
-            session, city, island, loot_round, units_data, attack_data, ship_capacity, sum(resources)
+            session, city, island, loot_round, units_data, attack_data, ship_capacity, sum(resources), strict_review=strict_review
         )
         attack_data["transporter"] = min(ships_available, ships_needed)
 
@@ -577,11 +582,11 @@ def loot(session, island, city, units_data, loot_round, ship_capacity):
             return
 
         # send attack
-        session.post(params=attack_data)
+        session.post(params=attack_data, retry_on_failure=False)
 
 
 @task("attackBarbarians")
-def do_it(session, island, city, babarians_info, plan, ship_capacity):
+def do_it(session, island, city, babarians_info, plan, ship_capacity, strict_review=False):
     info = "\nI attack the barbarians in [{}:{}]\n".format(island["x"], island["y"])
     setInfoSignal(session, info)
 
@@ -632,7 +637,7 @@ def do_it(session, island, city, babarians_info, plan, ship_capacity):
         }
 
         attack_data, ships_needed, travel_time = load_troops(
-            session, city, island, attack_round, units_data, attack_data, ship_capacity
+            session, city, island, attack_round, units_data, attack_data, ship_capacity, strict_review=strict_review
         )
 
         try:
@@ -654,8 +659,15 @@ def do_it(session, island, city, babarians_info, plan, ship_capacity):
             babarians_info["ships"], attack_round["ships"], ships_available
         )
 
+        if strict_review:
+            latest_units = get_units(session, city)
+            if any(latest_units.get(uid, {}).get("amount", 0) < count
+                   for uid, count in attack_round["units"].items()):
+                raise ValueError("Reviewed troops are no longer available")
+            if attack_data["transporter"] != attack_round["ships"]:
+                raise ValueError("Reviewed loot ships are no longer available")
         # send new round
-        session.post(params=attack_data)
+        session.post(params=attack_data, retry_on_failure=False)
 
         if attack_round["round"] == 1:
             battle_start = time.time() + travel_time
@@ -665,6 +677,149 @@ def do_it(session, island, city, babarians_info, plan, ship_capacity):
     last_round = plan[-1]
     if last_round["loot"]:
         loot(session, city, island, units_data, last_round, ship_capacity)
+
+
+def _native_attack_city(session, city_id):
+    if type(city_id) is not int or not 0 < city_id < 10**12:
+        raise ValueError("Invalid city")
+    pedirInfo.ids_cache = None
+    owned = requireOwnCity(session, city_id, "Attack city")
+    city = getCityById(session, owned)
+    if str(city["id"]) != owned:
+        raise ValueError("City identity changed")
+    return city
+
+
+def _native_attack_inventory(session, city):
+    rows = []
+    for uid, unit in get_units(session, city).items():
+        name, amount = unit.get("name"), unit.get("amount")
+        if (not isinstance(uid, str) or not re.fullmatch(r"[0-9]{1,6}", uid)
+                or not isinstance(name, str) or not 0 < len(name) <= 100
+                or type(amount) is not int or not 0 <= amount <= 10**9):
+            raise ValueError("Invalid troop inventory")
+        if amount:
+            rows.append({"unit_id": uid, "name": name, "available": amount})
+    ships = getAvailableShips(session)
+    if type(ships) is not int or not 0 <= ships <= 10**9 or len(rows) > 100:
+        raise ValueError("Invalid transport inventory")
+    return {"city_id": int(city["id"]), "city_name": str(city["cityName"])[:100],
+            "units": rows, "available_ships": ships}
+
+
+def native_attack_inventory(session, city_id):
+    return _native_attack_inventory(session, _native_attack_city(session, city_id))
+
+
+def _native_attack_plan(session, city_id, target_city_id, waves):
+    city = _native_attack_city(session, city_id)
+    anchor = city if city_id == target_city_id else _native_attack_city(session, target_city_id)
+    if type(target_city_id) is not int or not 0 < target_city_id < 10**12:
+        raise ValueError("Invalid target city")
+    island_id = str(anchor["islandId"])
+    if not island_id.isdigit() or not 0 < int(island_id) < 10**12:
+        raise ValueError("Invalid target island")
+    island = getIsland(session.get(island_url + island_id))
+    if str(island["id"]) != island_id:
+        raise ValueError("Island identity changed")
+    ship_capacity, _ = getShipCapacity(session)
+    if type(ship_capacity) is not int or not 0 < ship_capacity <= 10**8:
+        raise ValueError("Invalid ship capacity")
+    village = get_barbarians_lv(session, island, ship_capacity)
+    inventory = _native_attack_inventory(session, city)
+    by_id = {row["unit_id"]: row for row in inventory["units"]}
+    if not isinstance(waves, list) or not 1 <= len(waves) <= 8:
+        raise ValueError("Choose 1 to 8 waves")
+    previous = 0
+    totals = {}
+    unit_data = {}
+    summary = []
+    plan = []
+    total_ships = 0
+    ready = island["barbarians"]["destroyed"] == 0
+    if (type(village["level"]) is not int or not 1 <= village["level"] <= 1000
+            or type(village["ships"]) is not int or not 0 <= village["ships"] <= 10**9):
+        raise ValueError("Invalid village level or loot capacity")
+    for index, wave in enumerate(waves):
+        if (not isinstance(wave, dict) or set(wave) != {"round", "loot", "ships", "units"}
+                or type(wave["round"]) is not int or not previous < wave["round"] <= 100
+                or (index == 0 and wave["round"] != 1)
+                or type(wave["loot"]) is not bool
+                or (wave["loot"] and (index == 0 or index != len(waves)-1))
+                or type(wave["ships"]) is not int or not 0 <= wave["ships"] <= 10**9
+                or (wave["loot"] and wave["ships"] != 0)
+                or not isinstance(wave["units"], dict) or not 1 <= len(wave["units"]) <= 100):
+            raise ValueError("Invalid wave settings")
+        previous = wave["round"]
+        weight = 0
+        units = []
+        for uid, count in wave["units"].items():
+            if uid not in by_id or type(count) is not int or not 1 <= count <= 10**9:
+                raise ValueError("Unknown troop or invalid quantity")
+            totals[uid] = totals.get(uid, 0) + count
+            if totals[uid] > by_id[uid]["available"]:
+                ready = False
+            if uid not in unit_data:
+                unit_data[uid] = get_unit_data(session, city["id"], uid)
+            data = unit_data[uid]
+            if (type(data.get("weight")) is not int or not 0 <= data["weight"] <= 10**8
+                    or type(data.get("speed")) is not int or data["speed"] <= 0):
+                raise ValueError("Invalid troop transport data")
+            if not city_is_in_island(city, island):
+                weight += count * data["weight"]
+            units.append({"name": by_id[uid]["name"], "amount": count})
+        transport = (weight + ship_capacity - 1) // ship_capacity
+        if wave["loot"]:
+            # Loot capacity changes after combat; the original task computes it at execution.
+            required = transport
+        else:
+            if wave["ships"] > village["ships"]:
+                ready = False
+            required = transport + wave["ships"]
+        total_ships += required
+        summary.append({"round": wave["round"], "loot": wave["loot"], "ships": wave["ships"],
+                        "transport_ships": transport, "units": units})
+        plan.append(dict(wave))
+    ready = ready and total_ships <= inventory["available_ships"]
+    config = {"city_id": city_id, "target_city_id": target_city_id, "waves": waves,
+              "expected": hashlib.sha256(json.dumps(
+                  [city_id, target_city_id, island_id, village["level"], village["resources"],
+                   ship_capacity, unit_data, waves], sort_keys=True, separators=(",", ":")
+              ).encode()).hexdigest()}
+    return {"city_id": city_id, "target_city_id": target_city_id, "city_name": inventory["city_name"],
+            "target_name": str(anchor["cityName"])[:100], "level": village["level"],
+            "waves": summary, "available_ships": inventory["available_ships"], "required_ships": total_ships,
+            "ready": ready, "config": config}, (island, city, village, plan, ship_capacity)
+
+
+def preview_native_attack(session, city_id, target_city_id, waves):
+    return _native_attack_plan(session, city_id, target_city_id, waves)[0]
+
+
+def prepare_native_attack(session, city_id=None, target_city_id=None, waves=None, expected=None, **legacy):
+    if city_id is None and target_city_id is None and waves is None and expected is None:
+        if set(legacy) != {"island", "city", "babarians_info", "plan", "ship_capacity"}:
+            raise ValueError("Incomplete legacy attack")
+        return legacy
+    if legacy:
+        raise ValueError("Mixed native and legacy settings")
+    preview = preview_native_attack(session, city_id, target_city_id, waves)
+    if not preview["ready"] or preview["config"]["expected"] != expected:
+        raise ValueError("Attack review is stale or prerequisites are missing")
+    return preview["config"]
+
+
+@task("attackBarbarians", prepare=prepare_native_attack)
+def native_attack(session, city_id: int = None, target_city_id: int = None,
+                  waves: list = None, expected: str = None, **legacy):
+    if city_id is None and target_city_id is None and waves is None and expected is None:
+        return do_it.__wrapped__(session, **legacy)
+    if legacy:
+        raise ValueError("Mixed native and legacy settings")
+    preview, args = _native_attack_plan(session, city_id, target_city_id, waves)
+    if not preview["ready"] or preview["config"]["expected"] != expected:
+        raise ValueError("Attack review is stale or prerequisites are missing")
+    return do_it.__wrapped__(session, *args, strict_review=True)
 
 
 @configurator

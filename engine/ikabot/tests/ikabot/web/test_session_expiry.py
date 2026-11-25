@@ -176,6 +176,18 @@ class TestFalseSessionExpiry(unittest.TestCase):
         self.assertEqual(session.relogins, 0)
         self.assertEqual(len(session.s.urls), 2)
 
+    def test_single_attempt_post_never_replays_uncertain_action(self):
+        for answer in (requests.exceptions.ConnectionError(),
+                       requests.exceptions.Timeout(), response("", 503),
+                       response("", 307, BASE),
+                       response("TXT_ERROR_WRONG_REQUEST_ID")):
+            with self.subTest(answer=answer):
+                session = self.make_session([answer, response(GAME_PAGE)])
+                with self.assertRaises(RuntimeError):
+                    session.post("action=Something&function=do", retry_on_failure=False)
+                self.assertEqual(len(session.s.urls), 1)
+                self.assertEqual(session.relogins, 0)
+
     def test_post_expired_session_logs_in_again(self):
         session = self.make_session([response(ERROR_PAGE), response(RELOAD), response(GAME_PAGE)])
         session.post("view=something")

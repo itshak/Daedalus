@@ -681,3 +681,17 @@ def test_olympus_shrine_status_ipc_owns_city_and_favor(tmp_path):
             "world": "s301-en", "player": "ExamplePlayer",
         } in requests
         assert not any("start_task" in row["action"] for row in requests)
+
+
+def test_research_advisor_projection_is_scoped(tmp_path):
+    def responder(request):
+        if request["action"] == "list_sessions":
+            return {"status": "ok", "sessions": [{"world": "s301-en", "player": "ExamplePlayer"}]}
+        if request["action"] == "list_cities_existing":
+            return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer",
+                    "cities": [{"id": 42, "name": "Athens", "coords": "1:2", "tradegood": "wine"}]}
+        return {"status": "ok", "world": "s301-en", "username": "ExamplePlayer", "academies": [],
+                "studies": [{"index": 0, "name": "Navigation", "research_type": "seafaring"}]}
+    with fake_worker(tmp_path, responder) as (client, _, _):
+        assert client.academies(ALPHA)["studies"] == [
+            {"index": 0, "name": "Navigation", "research_type": "seafaring"}]

@@ -4,6 +4,7 @@ The exported config is what the process list holds:
   - CLI launch: the prepare result (ipc._start_task)
 Relaunching sends it through _validate_task_config + prepare again."""
 import json
+import hashlib
 import unittest
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
@@ -17,6 +18,7 @@ import ikabot.function.distributeResources, ikabot.function.resourceTransportMan
 import ikabot.function.trainArmy  # noqa
 import ikabot.function.constructionList  # noqa
 import ikabot.function.buyResources, ikabot.function.sellResources  # noqa
+import ikabot.function.vacationMode, ikabot.function.testTelegramBot, ikabot.function.testDiscordBot  # noqa
 from ikabot.helpers.decorators import _TASK_REGISTRY
 from ikabot.helpers.ipc import _validate_task_config
 
@@ -48,6 +50,9 @@ MARKET_QUOTE = {
 MARKET_BUYER = ["Buyer", "Merchant", 1000, 10, 4, 1234]
 
 MENU = {
+    "vacationMode": {"city_id": 111, "expected": hashlib.sha256(b"1-en:Example:111").hexdigest()},
+    "testTelegramBot": {},
+    "testDiscordBot": {},
     "buyResources": {"city": MARKET_CITY, "offers": [MARKET_QUOTE], "amount_to_buy": 100},
     "sellResources": {"mode": "sell_to_offers", "amount_to_sell": 100,
                       "resource_type": 0, "city_to_buy_from": MARKET_CITY,
@@ -120,6 +125,9 @@ class TestRelaunchFromExportedConfig(unittest.TestCase):
         for mod in ["alertAttacks", "alertLowWine", "searchForIslandSpaces"]:
             stack.enter_context(patch(f"ikabot.function.{mod}.requireNotifications"))
         stack.enter_context(patch("ikabot.helpers.taskConfig.getIdsOfCities", return_value=OWN))
+        stack.enter_context(patch("ikabot.function.vacationMode.getCityById", return_value={
+            "id": "111", "cityName": "Alpha"}))
+        stack.enter_context(patch("ikabot.function.vacationMode.updateProcessList", return_value=[]))
         stack.enter_context(patch("ikabot.function.donationBot.getIdsOfCities", return_value=OWN))
         stack.enter_context(patch("ikabot.function.activateShrine.findShrine", return_value=("111", 3)))
         stack.enter_context(patch("ikabot.function.autoPirate.getPiracyCities", return_value=FORTRESS))
@@ -169,7 +177,11 @@ class TestRelaunchFromExportedConfig(unittest.TestCase):
         }))
 
     def test_every_task_relaunches_from_its_exported_config(self):
-        session = MagicMock()
+        session = MagicMock(mundo=1, servidor="en", username="Example")
+        session.getSessionData.return_value = {"shared": {
+            "telegram": {"botToken": "123456:" + "x"*30, "chatId": "123"},
+            "discord": {"webhookUrl": "https://discord.com/api/webhooks/123/" + "x"*25},
+        }}
         for label, menu_result in MENU.items():
             name = label.split(" ")[0]
             func = _TASK_REGISTRY[name]

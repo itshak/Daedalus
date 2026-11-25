@@ -13,6 +13,23 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from daedalus.reviewed_operations import (
+    validate_attack_inventory,
+    validate_attack_plan,
+    validate_build_inventory,
+    validate_grind_plan,
+    validate_island_destinations,
+    validate_shipment_plan,
+    validated_attack_draft,
+    validated_build_draft,
+    validated_coordinates,
+    validated_grind_draft,
+    validated_layout_draft,
+    validated_shipment_draft,
+    validated_station_draft,
+    validated_worker_draft,
+)
+
 _ACCOUNT_ID = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z")
 
 
@@ -165,12 +182,43 @@ class DaedalusClient:
     def task_control_status(self) -> dict[str, object]:
         return self._read("task-control")
 
+    def reviewed_batch_check(self, entries: list[dict[str, str]]) -> dict[str, object]:
+        from daedalus.reviewed_batch import validate_batch_check, validated_batch_entries
+
+        clean = validated_batch_entries(entries)
+        result = self._write("tasks/reviewed-batch-check", {"entries": clean})
+        try:
+            return validate_batch_check(result, clean)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid independent review check") from exc
+
+    def start_reviewed_task(self, account_id: str, task: str, preview_id: str,
+                            request_id: str) -> dict[str, object]:
+        from daedalus.reviewed_batch import validated_batch_entries
+
+        validated_batch_entries([{"account_id": account_id, "task": task, "preview_id": preview_id}])
+        return self.start_task(account_id, task, {"preview_id": preview_id},
+                               request_id, confirmed=True)
+
     def start_task(
         self, account_id: str, task: str, config: dict[str, object],
         request_id: str, *, confirmed: bool,
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
+        from daedalus.reviewed_batch import PREVIEW_ID_PATTERN, REVIEW_ENDPOINTS
+
+        endpoint = REVIEW_ENDPOINTS.get(task)
+        # Keep legacy own-city construction/shipment clients compatible.
+        if endpoint and (task not in {"constructionList", "sendResources"} or set(config) == {"preview_id"}):
+            if (set(config) != {"preview_id"} or not isinstance(config["preview_id"], str)
+                    or not re.fullmatch(PREVIEW_ID_PATTERN, config["preview_id"])):
+                raise ValueError("Prepare a valid operation review first")
+            payload = {"preview_id": config["preview_id"], "request_id": request_id,
+                       "confirmed": confirmed}
+            if endpoint == "worker-start":
+                payload["task"] = task
+            return self._write(f"accounts/{account_id}/tasks/{endpoint}", payload)
         return self._write(f"accounts/{account_id}/tasks", {
             "task": task, "config": config, "request_id": request_id,
             "confirmed": confirmed,
@@ -191,6 +239,22 @@ class DaedalusClient:
                 or type(data.get("unresolved_request")) is not bool):
             raise APIConnectionError("Backend returned invalid prerequisite status")
         return data
+
+    def activity(self, account_id: str, *, before: int | None = None,
+                 limit: int = 50, status: str = "all") -> dict[str, object]:
+        from daedalus.activity_history import validate_activity_page, validate_activity_query
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        validate_activity_query(before, limit, status)
+        path = f"accounts/{account_id}/activity?limit={limit}&status={status}"
+        if before is not None:
+            path += f"&before={before}"
+        data = self._read(path)
+        try:
+            return validate_activity_page(data, account_id, before, limit, status)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid server activity") from exc
 
     def tasks(self, account_id: str) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
@@ -300,6 +364,14 @@ class DaedalusClient:
 
     def health(self) -> dict[str, object]:
         return self._read("health")
+
+    def release_status(self) -> dict[str, object]:
+        from daedalus.release_catalog import validate_release_status
+
+        try:
+            return validate_release_status(self._read("release-status"))
+        except ValueError:
+            raise APIConnectionError("Invalid release metadata") from None
 
     def accounts(self) -> list[dict[str, object]]:
         data = self._read("accounts").get("accounts")
@@ -608,8 +680,243 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid city data")
         return data
 
+    def reward_distribution_preview(self, account_id, task, draft):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_ticket,
+        )
+        from daedalus.market_review import market_draft
+        from daedalus.native_policy_review import POLICY_TASKS, policy_draft
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
+            raise ValueError("Unsupported preview")
+        clean = (daily_draft(draft) if task == "loginDaily" else distribution_draft(draft)
+                 if task == "distributeResources" else policy_draft(task, draft) if task in POLICY_TASKS
+                 else market_draft(task, draft))
+        value = self._write(f"accounts/{account_id}/reward-distribution-plan", {"task": task, "draft": clean})
+        try:
+            return validate_ticket(value, account_id, task, clean)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise APIConnectionError("Invalid operation preview") from exc
+
+    def shipment_preview(self, account_id: str, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_shipment_draft(draft)
+        result = self._write(f"accounts/{account_id}/shipment-plan", clean)
+        if result.get("account_id") != account_id:
+            raise APIConnectionError("Shipment scope mismatch")
+        try:
+            validate_shipment_plan(clean, result)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid shipment preview") from exc
+        if result["ready"] and (not isinstance(result.get("preview_id"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", result["preview_id"])
+                or type(result.get("expires_in")) is not int or not 1 <= result["expires_in"] <= 120):
+            raise APIConnectionError("Invalid shipment review")
+        return {**result, "draft": clean}
+
+    def island_destinations(self, account_id: str, x: int, y: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        validated_coordinates(x, y)
+        data = self._read(f"accounts/{account_id}/island-destinations?x={x}&y={y}")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Invalid island scope")
+        try:
+            return {"account_id": account_id, "x": x, "y": y,
+                    "cities": validate_island_destinations(x, y, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid island inventory") from exc
+
+    def vacation_preview(self, account_id: str, city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid vacation scope")
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/vacation-plan", {})
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or not isinstance(data.get("city_name"), str)
+                or type(data.get("active_jobs")) is not int or not 0 <= data["active_jobs"] <= 10000
+                or any(type(data.get(k)) is not bool for k in ("managed_active", "recovery_disabled", "ready"))
+                or data["ready"] is not (not data["active_jobs"] and not data["managed_active"]
+                                         and data["recovery_disabled"])
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Invalid vacation preview")
+        return data
+
+    def attack_inventory(self, account_id: str, city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid troop inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/attack-options")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Troop inventory scope mismatch")
+        try:
+            return {"account_id": account_id, **validate_attack_inventory(city_id, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid troop inventory") from exc
+
+    def attack_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_attack_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/attack-plan", clean)
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Manual attack preview scope mismatch")
+        try:
+            validate_attack_plan(city_id, clean, {**data, "config": {
+                "city_id": city_id, **clean, "expected": "0" * 64,
+            }})
+        except ValueError as exc:
+            raise APIConnectionError("Invalid manual attack preview") from exc
+        if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                              or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                              or type(data.get("expires_in")) is not int
+                              or not 1 <= data["expires_in"] <= 120):
+            raise APIConnectionError("Invalid manual attack ticket")
+        # Internal correlation only; the user sees named wave summaries.
+        return {**data, "reviewed_waves": clean["waves"]}
+
+    def grind_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_grind_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/grind-plan", clean)
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Automatic attack preview scope mismatch")
+        try:
+            # Validate display data without exposing the internal fingerprint to the GUI.
+            validate_grind_plan(city_id, clean, {**data, "config": {
+                "city_id": city_id, **clean, "expected": "0" * 64,
+            }})
+        except ValueError as exc:
+            raise APIConnectionError("Invalid automatic attack preview") from exc
+        if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                              or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                              or type(data.get("expires_in")) is not int
+                              or not 1 <= data["expires_in"] <= 120):
+            raise APIConnectionError("Invalid automatic attack ticket")
+        return data
+
+    def station_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_station_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/station-plan", clean)
+        from daedalus.reviewed_operations import validate_station_observation
+
+        try:
+            if data.get("account_id") != account_id:
+                raise ValueError("Invalid account scope")
+            validate_station_observation(city_id, clean, data)
+            if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                    or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise ValueError("Invalid deployment ticket")
+        except ValueError as exc:
+            raise APIConnectionError("Invalid deployment preview") from exc
+        return data
+
+    def build_options(self, account_id: str, city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/build-options")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Building inventory scope mismatch")
+        try:
+            return {"account_id": account_id, **validate_build_inventory(city_id, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid building inventory") from exc
+
+    def build_preview(self, account_id: str, city_id: int, draft: dict[str, int]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building review scope")
+        clean = validated_build_draft(draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/build-plan", clean)
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or any(data.get(k) != v for k, v in clean.items())
+                or not isinstance(data.get("name"), str) or type(data.get("ready")) is not bool
+                or any(not isinstance(data.get(k), list) or len(data[k]) != 5
+                       or any(type(n) is not int or not 0 <= n <= 10**15 for n in data[k])
+                       for k in ("costs", "available", "missing"))
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Invalid building preview")
+        return data
+
+    def layout_preview(self, account_id: str, city_id: int, template_city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account ID")
+        template = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/layout-plan",
+                           {"template_city_id": template})
+        moves = data.get("moves")
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("template_city_id") != template
+                or not isinstance(moves, list) or len(moves) > 80
+                or any(not isinstance(m, dict) or set(m) != {"from", "to", "building", "displaced"}
+                       or any(type(m[k]) is not int or not 0 <= m[k] <= 80 for k in ("from", "to"))
+                       or any(not isinstance(m[k], str) or not 0 < len(m[k]) <= 64
+                              for k in ("building", "displaced")) for m in moves)
+                or any(not isinstance(data.get(k), str) for k in ("city_name", "template_name"))
+                or data.get("ready") is not bool(moves)
+                or (moves and (not isinstance(data.get("preview_id"), str)
+                               or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                               or type(data.get("expires_in")) is not int
+                               or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Backend returned invalid layout preview")
+        return data
+
+    def worker_preview(self, account_id: str, city_id: int, task: str,
+                       draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid worker city")
+        clean = validated_worker_draft(task, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/worker-plan",
+                           {"task": task, "draft": clean})
+        from daedalus.reviewed_operations import validate_worker_observation
+
+        try:
+            if data.get("account_id") != account_id:
+                raise ValueError("Invalid account scope")
+            validate_worker_observation(task, city_id, clean, data)
+            if (not isinstance(data.get("preview_id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                    or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise ValueError("Invalid worker ticket")
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid worker preview") from exc
+        return data
+
+    def donation_preview(self, account_id: str, city_id: int,
+                         project: str, amount: int) -> dict[str, object]:
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or not 0 < city_id < 10**12 or project not in ("resource", "tradegood")
+                or type(amount) is not int or not 1 <= amount <= 10**9):
+            raise ValueError("Invalid donation draft")
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/donation-plan",
+                           {"project": project, "amount": amount})
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("project") != project or data.get("amount") != amount
+                or type(data.get("ready")) is not bool
+                or type(data.get("upgrading")) is not bool
+                or any(type(data.get(k)) is not int or data[k] < 0
+                       for k in ("level", "stock", "remaining"))
+                or any(not isinstance(data.get(k), str) for k in ("city_name", "project_name"))
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Backend returned invalid donation preview")
+        return data
+
     def construction_preview(
         self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+        *, supply: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Ask the existing IkaBot worker for a read-only, account-scoped plan."""
         if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
@@ -622,9 +929,16 @@ class DaedalusClient:
                     or type(upgrade["position"]) is not int
                     or type(upgrade["target_level"]) is not int):
                 raise ValueError("Invalid construction preview target")
+        from daedalus.reviewed_operations import (
+            validate_construction_supply,
+            validated_construction_supply,
+        )
+
+        if supply is not None:
+            supply = validated_construction_supply(city_id, supply)
         data = self._write(
             f"accounts/{account_id}/cities/{city_id}/construction-preview",
-            {"upgrades": upgrades},
+            {"upgrades": upgrades, **({"supply": supply} if supply is not None else {})},
         )
         if (data.get("account_id") != account_id or data.get("city_id") != city_id
                 or type(data.get("ready")) is not bool
@@ -633,6 +947,15 @@ class DaedalusClient:
                        or len(data[name]) != 5 for name in ("costs", "missing", "available"))
                 or type(data.get("estimated_seconds")) is not int):
             raise APIConnectionError("Backend returned an invalid construction preview")
+        if supply is not None:
+            try:
+                validate_construction_supply(city_id, supply, data, data, data["config"])
+            except (ValueError, KeyError, TypeError) as exc:
+                raise APIConnectionError("Invalid construction supply preview") from exc
+            if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                   or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                   or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise APIConnectionError("Invalid construction supply ticket")
         return data
 
     def workshop_upgrades(self, account_id: str, city_id: int) -> dict[str, object]:
@@ -646,6 +969,19 @@ class DaedalusClient:
                 or type(data.get("workshop_level")) is not int
                 or any(not isinstance(choice, dict) for choice in choices)):
             raise APIConnectionError("Backend returned invalid workshop options")
+        return data
+
+    def training_preview(self, account_id: str, draft: dict[str, object]) -> dict[str, object]:
+        from daedalus.training_contract import training_draft, validate_training_review
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = training_draft(draft)
+        data = self._write(f"accounts/{account_id}/cities/{clean['city_ids'][0]}/training-plan", clean)
+        try:
+            validate_training_review(account_id, clean, data)
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            raise APIConnectionError("Invalid recruitment review") from exc
         return data
 
     def trainable_units(
@@ -701,6 +1037,13 @@ class DaedalusClient:
                 or len(result["academies"]) > 100
                 or any(not isinstance(row, dict) for row in result["academies"])):
             raise APIConnectionError("Backend returned invalid academy research inventory")
+        from daedalus.research_choices import validate_studies
+
+        try:
+            if "studies" in result:
+                result["studies"] = validate_studies(result["studies"])
+        except ValueError:
+            raise APIConnectionError("Invalid research advisor inventory") from None
         return result
 
     def taverns(self, account_id: str) -> dict[str, object]:
@@ -726,6 +1069,93 @@ class DaedalusClient:
                 or any(not isinstance(item, dict) for item in result["miracles"])):
             raise APIConnectionError("Backend returned invalid wonder inventory")
         return result
+
+    def configure_notification(self, account_id: str, provider: str,
+                               settings: dict[str, object]) -> dict[str, object]:
+        from daedalus.notification_settings import (
+            PROVIDERS,
+            seal_notification_settings,
+            validate_receipt,
+        )
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        path = f"accounts/{account_id}/notifications/{provider}"
+        try:
+            challenge = self._write(path + "/begin", {"confirmed_global": True})
+            envelope = seal_notification_settings(challenge, account_id, provider, settings)
+            receipt = self._write(path + "/complete", envelope)
+            return validate_receipt(receipt, account_id, provider)
+        except (ValueError, APIConnectionError):
+            raise APIConnectionError("Provider configuration unavailable or outcome uncertain") from None
+
+    def proxy_profiles(self, account_id: str, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_draft, validate_proxy_result
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/proxy-settings"
+        result = self._read(path) if draft is None else self._write(path, validate_proxy_draft(draft))
+        try:
+            return validate_proxy_result(result, account_id, draft)
+        except ValueError:
+            raise APIConnectionError("Invalid network profile result") from None
+
+    def challenge_policy(self, account_id: str, draft=None):
+        from daedalus.challenge_policy import (
+            validate_challenge_policy,
+            validate_challenge_policy_draft,
+        )
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/challenge-policy"
+        result = self._read(path) if draft is None else self._write(path, validate_challenge_policy_draft(draft))
+        try:
+            return validate_challenge_policy(result, account_id)
+        except ValueError:
+            raise APIConnectionError("Invalid human challenge policy") from None
+
+    def extension_settings(self, account_id: str, draft=None):
+        from daedalus.extension_settings import validate_extension_draft, validate_extension_status
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/extensions"
+        result = self._read(path) if draft is None else self._write(path, validate_extension_draft(draft))
+        try:
+            return validate_extension_status(result, account_id)
+        except ValueError:
+            raise APIConnectionError("Invalid extension status") from None
+
+    def world_reports(self, account_id: str, report_id=None):
+        from daedalus.world_reports import REPORT_ID, collect_report, validate_world_reports
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or (report_id is not None and
+                (not isinstance(report_id, str) or not REPORT_ID.fullmatch(report_id))):
+            raise ValueError("Invalid map report scope")
+        path = f"accounts/{account_id}/world-reports"
+        try:
+            if report_id is None:
+                return validate_world_reports(self._read(path), account_id)
+            return collect_report(lambda offset: self._read(f"{path}/{report_id}?offset={offset}"),
+                                  account_id, report_id)
+        except ValueError:
+            raise APIConnectionError("Invalid aggregate map report") from None
+
+    def administrative_status(self, account_id: str) -> dict[str, object]:
+        from daedalus.admin_status import validate_admin_status
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        result = self._read(f"accounts/{account_id}/administrative-status")
+        try:
+            if result.get("account_id") != account_id:
+                raise ValueError("Account changed")
+            return {"account_id": account_id,
+                    "settings": validate_admin_status(result.get("settings"))}
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid administrative status") from exc
 
     def shrine_status(self, account_id: str) -> dict[str, object]:
         """Read actual Olympus shrine, preserving unknown favour as unknown."""

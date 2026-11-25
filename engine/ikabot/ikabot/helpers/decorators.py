@@ -87,7 +87,7 @@ def _send_error(session, info, exc_text):
 # @task decorator
 # ---------------------------------------------------------------------------
 
-def task(configurator_name, prepare=None):
+def task(configurator_name, prepare=None, *, report_error=True):
     """Register a background task function for a given configurator.
 
     Parameters
@@ -121,7 +121,8 @@ def task(configurator_name, prepare=None):
             try:
                 return func(*args, **kwargs)
             except Exception:
-                _send_error(session, func.__name__, traceback.format_exc())
+                if report_error:
+                    _send_error(session, func.__name__, traceback.format_exc())
                 raise
             finally:
                 if session is not None and hasattr(session, "logout"):

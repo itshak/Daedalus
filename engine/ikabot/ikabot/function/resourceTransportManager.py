@@ -19,7 +19,8 @@ from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.naval import getAvailableShips, getAvailableFreighters
 from ikabot.helpers.varios import addThousandSeparator, getDateTime
 from ikabot.helpers.taskConfig import asBool, asId, asInt, requireOwnCity
-from ikabot.function.sendResources import RESOURCE_KEYS, get_island
+from ikabot.function.sendResources import RESOURCE_KEYS, get_island, _verify_recipient, _destination_id
+from ikabot.helpers import pedirInfo
 
 
 def print_module_banner(page_title=None):
@@ -245,7 +246,7 @@ def notify_from_saved(notify, telegram_enabled, notify_on_start):
 def prepare_resourceTransportManager(
     session, mode, origin_cities=None, destination_city=None, island=None, interval_hours=0, resource_config=None,
     useFreighters=False, send_mode=None, notify=None, origin_city=None, destination_cities=None,
-    info=None, telegram_enabled=None, notify_on_start=None,
+    info=None, telegram_enabled=None, notify_on_start=None, recipient=None,
 ):
     """Checks the config of a resourceTransportManager task started from the CLI
     Parameters
@@ -284,6 +285,10 @@ def prepare_resourceTransportManager(
         raise ValueError('notify must be "none", "start" or "all", got {!r}'.format(notify))
     if notify != "none" and not (telegramDataIsValid(session) or discordDataIsValid(session)):
         raise ValueError('notify "{}" needs Telegram or Discord, set one of them up first (Options > Notifications) or use "none"'.format(notify))
+    if recipient is not None:
+        pedirInfo.ids_cache = None
+        if mode != "consolidate":
+            raise ValueError("External recipients require consolidation mode")
     own_ids, _ = getIdsOfCities(session)
     config = {"mode": mode, "interval_hours": interval_hours, "useFreighters": useFreighters, "notify": notify}
 
@@ -320,6 +325,12 @@ def prepare_resourceTransportManager(
             if not any(str(c.get("id")) == destination for c in found["cities"] if c.get("type") == "city"):
                 raise ValueError("destination_city {} is not on island {}:{}".format(destination, found["x"], found["y"]))
             config["island"] = str(found["id"])
+            if recipient is not None:
+                _verify_recipient(session, {"to": destination, "island": config["island"],
+                                            "recipient": recipient}, found)
+                config["recipient"] = str(_destination_id(recipient))
+        elif recipient is not None:
+            raise ValueError("Reviewed external recipient is now an owned city")
         return config
 
     if origin_city is None:
@@ -344,12 +355,14 @@ def prepare_resourceTransportManager(
 @task("resourceTransportManager", prepare=prepare_resourceTransportManager)
 def do_it_unified(session, mode, origin_cities=None, destination_city=None, island=None, interval_hours=0, resource_config=None,
                   useFreighters=False, send_mode=None, notify="none", origin_city=None, destination_cities=None,
-                  info="", telegram_enabled=None, notify_on_start=None):
+                  info="", telegram_enabled=None, notify_on_start=None, recipient=None):
     """The config holds city ids; the task reads the cities and islands from the game"""
     notify = notify_from_saved(notify, telegram_enabled, notify_on_start)
     # telegram_enabled: a message for every shipment; notify_on_start: one when each round starts
     every_shipment = True if notify == "all" else None
     on_start = notify in ("all", "start")
+    if recipient is not None:
+        pedirInfo.ids_cache = None
     own_ids, _ = getIdsOfCities(session)
 
     if mode == "consolidate":
@@ -362,11 +375,18 @@ def do_it_unified(session, mode, origin_cities=None, destination_city=None, isla
             dest_island = getIsland(session.get(island_url + str(island)))
             name = next((c.get("name") for c in dest_island["cities"] if str(c.get("id")) == destination_id), destination_id)
             destination = {"id": destination_id, "name": name, "islandId": str(dest_island["id"])}
+        if recipient is not None:
+            if destination_id in own_ids:
+                raise ValueError("Reviewed external recipient is now an owned city")
+            _verify_recipient(session, {"to": destination_id, "island": str(island),
+                                        "recipient": recipient}, dest_island)
         destination["isOwnCity"] = destination_id in own_ids
         setInfoSignal(session, "\nAuto-send resources from {} to {} every {} hour(s)\n".format(
             ", ".join(c["name"] for c in origins), destination["name"], interval_hours))
         send_mode = SEND_MODES.get(send_mode, send_mode)
-        do_it(session, origins, destination, dest_island, interval_hours, resource_config, useFreighters, send_mode, every_shipment, on_start)
+        do_it(session, origins, destination, dest_island, interval_hours, resource_config,
+              useFreighters, send_mode, every_shipment, on_start,
+              **({"recipient": recipient} if recipient is not None else {}))
     elif mode == "distribute":
         origin = getCity(session.get(city_url + str(origin_city)))
         destinations = [getCity(session.get(city_url + str(city_id))) for city_id in destination_cities]
@@ -1065,7 +1085,7 @@ def distributeMode(session, telegram_enabled):
     }
 
 
-def do_it(session, origin_cities, destination_city, island, interval_hours, resource_config, useFreighters, send_mode, telegram_enabled, notify_on_start):
+def do_it(session, origin_cities, destination_city, island, interval_hours, resource_config, useFreighters, send_mode, telegram_enabled, notify_on_start, recipient=None):
     """
     Parameters
     ----------
@@ -1085,6 +1105,12 @@ def do_it(session, origin_cities, destination_city, island, interval_hours, reso
     next_run_time = datetime.datetime.now()
     total_shipments = 0
     consecutive_failures = 0  # Track consecutive lock acquisition failures
+    reviewed = {"to": destination_city["id"], "island": island["id"], "recipient": recipient}
+    def verify(_index):
+        pedirInfo.ids_cache = None
+        for city in origin_cities:
+            requireOwnCity(session, city["id"], "Reviewed source")
+        _verify_recipient(session, reviewed)
     
     while True:
         current_time = datetime.datetime.now()
@@ -1093,6 +1119,9 @@ def do_it(session, origin_cities, destination_city, island, interval_hours, reso
             time.sleep(60)
             continue
         
+        if recipient is not None:
+            verify(0)
+
         # Send start notification if enabled
         if notify_on_start:
             # Calculate total resources to be sent this cycle
@@ -1244,7 +1273,8 @@ def do_it(session, origin_cities, destination_city, island, interval_hours, reso
                             f"{origin_city['name']} -> {destination_city['name']} | Sending resources..."
                         )
                         
-                        executeRoutes(session, [route], useFreighters)
+                        executeRoutes(session, [route], useFreighters,
+                                      **({"verify_recipient": verify} if recipient is not None else {}))
                         total_shipments += 1
                         
                         # Reset consecutive failures on success

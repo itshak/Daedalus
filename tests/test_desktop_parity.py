@@ -228,8 +228,7 @@ def test_dedicated_wine_and_construction_workflows_filter_registered_tasks(qt_ap
             assert page.start_button.isEnabled() is (kind == "wine")
             if kind == "wine":
                 page._form_inputs["threshold"].setText("1000")
-                page._build_config_from_form()
-                assert '"threshold": 1000' in page.config_editor.toPlainText()
+                assert page._form_config() == {"threshold": 1000}
             page.confirm_box.setChecked(True)
             page._start()
             if kind == "wine":
@@ -294,3 +293,55 @@ def test_native_navigation_uses_one_contextual_automation_workspace(qt_app, monk
         assert page.task_table.rowCount() == 1
     finally:
         _dispose(window, qt_app)
+
+
+def test_protected_admin_settings_scope(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
+
+    page = AppearancePage()
+    try:
+        page.set_admin_accounts([
+            {"id": "a", "player": "Player A", "world": "s1-en", "enabled": True},
+            {"id": "b", "player": "Player B", "world": "s2-en", "enabled": True},
+            {"id": "c", "player": "Disabled", "world": "s3-en", "enabled": False},
+        ])
+        assert page.admin_account.count() == 3
+        page.admin_account.setCurrentIndex(1)
+        calls = []
+        page.administrative_status_requested.connect(calls.append)
+        page._request_admin_status()
+        assert calls == ["a"]
+        settings = {"telegram": "configured", "discord": "not_configured",
+                    "proxy_enabled": True, "proxy_protocol": "socks5", "proxy_port": 9050,
+                    "proxy_auth": True, "challenge_provider": "default", "registered_extensions": 1}
+        page.set_admin_status({"account_id": "b", "settings": settings})
+        assert not page.admin_rows.text()
+        page.set_admin_status({"account_id": "a", "settings": settings})
+        assert "Telegram: configured" in page.admin_rows.text()
+        page.admin_account.setCurrentIndex(2)
+        assert not page.admin_rows.text()
+    finally:
+        _dispose(page, qt_app)
+
+
+def test_proxy_profile_editor_rejects_foreign_status_and_busy_account(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
+
+    page = AppearancePage()
+    try:
+        page.set_admin_accounts([{"id":"alpha","player":"Player","world":"s1-en","enabled":True}])
+        page.admin_account.setCurrentIndex(1)
+        observed = {"account_id":"alpha","revision":"a"*64,"enabled":False,"current":None,
+                    "allow_direct":True,"busy":False,"result":"observed",
+                    "profiles":[{"id":"office","label":"Office network","protocol":"http"}]}
+        page.set_proxy_profiles({**observed,"account_id":"beta"})
+        assert page.proxy_picker.count() == 0
+        page.set_proxy_profiles(observed)
+        assert page.proxy_picker.count() == 3
+        page.proxy_picker.setCurrentIndex(2)
+        assert page.proxy_test.isEnabled() and page.proxy_save.isEnabled()
+        page.set_proxy_profiles({**observed,"busy":True})
+        page.proxy_picker.setCurrentIndex(2)
+        assert not page.proxy_test.isEnabled() and not page.proxy_save.isEnabled()
+    finally:
+        _dispose(page, qt_app)

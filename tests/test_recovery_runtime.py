@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -210,7 +211,7 @@ def test_engine_account_descriptor_env_is_exact_and_private(tmp_path,monkeypatch
     )
     from ikabot.helpers.ipc import get_ipc_file_path, get_ipc_lock_path
     monkeypatch.delenv("DAEDALUS_ACCOUNT_IPC_FILE",raising=False)
-    assert get_ipc_file_path().endswith(".ikabot/ipc.json")
+    assert tuple(Path(get_ipc_file_path()).parts[-2:]) == (".ikabot", "ipc.json")
     monkeypatch.setattr("pathlib.Path.home",lambda:tmp_path)
     directory=tmp_path/".local"/"state"/"daedalus"/"account-ipc"
     path=directory/(("a"*64)+".json")

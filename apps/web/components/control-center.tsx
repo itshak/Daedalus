@@ -1,10 +1,29 @@
 "use client";
+import {ReleasePanel} from "./release-panel";
+import {AdminStatusPanel} from "./admin-status-panel";
+import {ReviewedBatchProvider,ReviewedBatchPanel} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { LanguageSelector, useLanguage } from "@/components/language-provider";
 import { formatNumber } from "@/lib/i18n";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {WorldReportsPanel} from "./world-reports-panel";
+import { ActivityHistory } from "./activity-history";
 import { RecoveryPanel } from "./recovery-panel";
+import { NativeAutomationEditor } from "./native-automation-editor";
+import { VacationEditor } from "./vacation-editor";
+import { AttackEditor } from "./attack-editor";
+import { GrindEditor } from "./grind-editor";
+import { TrainingEditor } from "./training-editor";
+import { StationEditor } from "./station-editor";
+import { NewBuildingEditor } from "./new-building-editor";
+import { LayoutEditor } from "./layout-editor";
+import { WorkerEditor } from "./worker-editor";
+import { DonationEditor } from "./donation-editor";
+import { ConstructionEditor } from "./construction-editor";
+import { NativeDomainEditor } from "./native-domain-editor";
+import { NativeCityEditor } from "./native-city-editor";
+import { isCityTask, isDomainTask, isNativeTask, isWorkerTask, playerNames } from "@/lib/native-task-contract";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, CheckCircle2, ChevronDown,
   ChevronRight, CircleAlert, CircleHelp, ClipboardList, CloudOff, Compass,
@@ -13,7 +32,7 @@ import {
   ShieldCheck, Ship, Sun, UsersRound, Warehouse, Workflow, X
 } from "lucide-react";
 
-type Account = { id: string; email?: string | null; world?: string; player?: string; name?: string; enabled?: boolean; session_status?: string; synthetic?: boolean };
+type Account = { id: string; email?: string | null; world?: string; player?: string; label?: string; name?: string; enabled?: boolean; session_status?: string; synthetic?: boolean };
 type WarehouseCity = {
   account_id: string; city_id: number; city_name: string; island?: string | null; captured_at?: string;
   resources: { unsecured: Record<string, number | null>; total?: Record<string, number | null>; capacity?: number | null }
@@ -53,10 +72,10 @@ function ResourceIcon({resource, small = false}: {resource: Resource; small?: bo
 }
 
 const TASK_GROUPS = [
-  { name: "City & research", icon: Building2, tasks: ["constructionList", "research", "tavernManager", "loginDaily", "activateMiracle", "activateShrine"] },
-  { name: "Resources & trade", icon: Layers3, tasks: ["sendResources", "resourceTransportManager", "consolidateResources", "distributeResources", "buyResources", "sellResources", "donationBot"] },
-  { name: "Military & missions", icon: Ship, tasks: ["trainArmy", "UpgradeUnits", "autoPirate"] },
-  { name: "Alerts & exploration", icon: Compass, tasks: ["alertAttacks", "alertLowWine", "searchForIslandSpaces"] },
+  { name: "City & research", icon: Building2, tasks: ["constructionList", "research", "tavernManager", "loginDaily", "activateMiracle", "activateShrine","modifyProduction","modifyAcademyWorkers","modifyTempleWorkers","reorganizeCityBuildings","constructBuilding"] },
+  { name: "Resources & trade", icon: Layers3, tasks: ["fillCityWarehouse", "sendResources", "resourceTransportManager", "consolidateResources", "distributeResources", "buyResources", "sellResources", "donate", "donationBot"] },
+  { name: "Military & missions", icon: Ship, tasks: ["trainArmy", "UpgradeUnits", "stationArmy", "attackBarbarians", "autoBarbarians", "autoPirate"] },
+  { name: "Alerts & exploration", icon: Compass, tasks: ["alertAttacks", "alertLowWine", "searchForIslandSpaces", "testTelegramBot", "testDiscordBot"] },
   { name: "System & advanced", icon: Settings2, tasks: ["dumpWorld", "viewArmy", "shipMovements"] }
 ];
 const INVENTORIES: Record<string, { resource: string; scope: "account" | "city"; title: string }> = {
@@ -73,7 +92,7 @@ const INVENTORIES: Record<string, { resource: string; scope: "account" | "city";
   shipMovements: {resource: "ship-movements", scope: "account", title: "Ship movements"}
 };
 function name(a: Account) { return a.email || a.name || a.player || a.id; }
-function readable(text: string) { return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
+function readable(text: string) { if(text==="fillCityWarehouse")return "Fill city warehouse"; return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
 function isConnected(a: Account) { return a.session_status === "authenticated"; }
 function accountWorld(a: Account) { return a.world || "Unknown world"; }
 function safeCsv(value: unknown) { const str=String(value??""); const protectedValue=/^[=+@-]/.test(str)?"'"+str:str;return '"'+protectedValue.replace(/"/g,'""')+'"'; }
@@ -147,17 +166,38 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const [pendingAction, setPendingAction] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [automationGroup, setAutomationGroup] = useState("All");
+  const [automationQuery, setAutomationQuery] = useState("");
+  const operationGroups = useMemo(() => {
+    const registered = Array.isArray(capabilities?.operations)
+      ? (capabilities.operations as Result[]).map(o=>o.name).filter((n):n is string=>typeof n==="string" && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(n))
+      : null;
+    const groups = TASK_GROUPS.map(g=>({...g,tasks:registered ? g.tasks.filter(t=>registered.includes(t)) : g.tasks}));
+    if (registered) {
+      const known = new Set(groups.flatMap(g=>g.tasks));
+      const other = [...new Set(registered)].filter(t=>!known.has(t)).sort();
+      if(other.length)groups.push({name:"Other operations",icon:Settings2,tasks:other});
+    }
+    return groups.filter(g=>g.tasks.length);
+  },[capabilities]);
+  const operationWorkflows = useMemo(() => {
+    const result: Record<string, Result> = {};
+    if (Array.isArray(capabilities?.operations)) {
+      for (const entry of capabilities.operations as Result[]) {
+        if (typeof entry.name === "string" && entry.workflow && typeof entry.workflow === "object") result[entry.name] = entry.workflow as Result;
+      }
+    }
+    return result;
+  }, [capabilities]);
   const [chosenTask, setChosenTask] = useState("constructionList");
+  const selectedWorkflow = operationWorkflows[chosenTask];
+  const nativeAllowed = !selectedWorkflow || selectedWorkflow.web === "native";
+  const existingPage = selectedWorkflow?.web === "existing_view" && (selectedWorkflow.view === "military" || selectedWorkflow.view === "overview" || selectedWorkflow.view === "activity" || selectedWorkflow.view === "settings") ? selectedWorkflow.view : null;
   const [automationAccount, setAutomationAccount] = useState("");
+  const [alertScope, setAlertScope] = useState<"one"|"selected"|"all">("one");
   const [cities, setCities] = useState<Record<string,unknown>[]>([]);
   const [selectedCity, setSelectedCity] = useState("");
-  const [buildings, setBuildings] = useState<Record<string,unknown>[]>([]);
-  const [buildingPosition, setBuildingPosition] = useState("");
-  const [targetLevel, setTargetLevel] = useState(1);
-  const [preview, setPreview] = useState<Result | null>(null);
   const [automationError, setAutomationError] = useState("");
   const [preflight, setPreflight] = useState<Result | null>(null);
-  const [automationBusy, setAutomationBusy] = useState(false);
   const [inventory, setInventory] = useState<Result | null>(null);
   const [inventoryBusy, setInventoryBusy] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
@@ -228,8 +268,8 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     if(page!=="automations")return;
     const id=automationAccount || scopeIds[0] || "";
     if(!automationAccount && id)setAutomationAccount(id);
-    setSelectedCity("");setCities([]);setPreview(null);setPreflight(null);setAutomationError("");
-    if(!id)return;
+    setSelectedCity("");setCities([]);setPreflight(null);setAutomationError("");
+    if(!id || !nativeAllowed)return;
     let live=true;
     Promise.allSettled([
       controller<{cities:Record<string,unknown>[]}>("accounts/"+encodeURIComponent(id)+"/cities"),
@@ -242,15 +282,7 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     });
     return ()=>{live=false};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[page,chosenTask,automationAccount,reload]);
-
-  useEffect(()=>{
-    if(page!=="automations" || !selectedCity || !automationAccount || chosenTask!=="constructionList") {setBuildings([]);return;}
-    let live=true;setBuildingPosition("");setPreview(null);
-    controller<{buildings:Record<string,unknown>[]}>("accounts/"+encodeURIComponent(automationAccount)+"/cities/"+encodeURIComponent(selectedCity)+"/buildings")
-      .then(r=>{if(live)setBuildings(r.buildings??[])}).catch(()=>{if(live)setBuildings([])});
-    return ()=>{live=false};
-  },[page,selectedCity,automationAccount,chosenTask,reload]);
+  },[page,chosenTask,automationAccount,reload,nativeAllowed]);
 
   useEffect(() => {
     const observation = INVENTORIES[chosenTask];
@@ -269,6 +301,7 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     return () => {live = false;};
   }, [page, chosenTask, automationAccount, selectedCity, marketResource, marketSide, reload]);
 
+  const automationNames=useMemo(()=>playerNames(accounts),[accounts]);
   const accountById=useMemo(()=>Object.fromEntries(accounts.map(a=>[a.id,a])) as Record<string,Account>,[accounts]);
   const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeKey,warehouseMap]);
   const displayedRows=rows.filter(c=>{
@@ -300,18 +333,7 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     catch(e) {setActionMessage(e instanceof Error ? e.message : "Outcome uncertain; do not repeat before reviewing Activity.");}
     finally {setPendingAction("");}
   };
-  const showPreview=async()=>{
-    if(!selectedCity||!buildingPosition||!automationAccount)return;
-    setAutomationBusy(true);setAutomationError("");setPreview(null);
-    try{
-      const p=await controller<Result>("accounts/"+encodeURIComponent(automationAccount)+"/cities/"+encodeURIComponent(selectedCity)+"/construction-preview",
-        {method:"POST",body:JSON.stringify({upgrades:[{position:Number(buildingPosition),target_level:targetLevel}]})});
-      setPreview(p);
-    }catch(e){setAutomationError(e instanceof Error?e.message:"Planner unavailable");}
-    finally {setAutomationBusy(false);}
-  };
-
-  return <div className={"app-shell "+(theme==="dark"?"theme-dark":"theme-light")}>
+  return <ReviewedBatchProvider key={reload+":"+role} role={role}><div className={"app-shell "+(theme==="dark"?"theme-dark":"theme-light")}>
     {sidebar && <button className="mobile-backdrop" aria-label={tr("Close navigation")} onClick={()=>setSidebar(false)}/>}
     <aside className={"sidebar "+(sidebar?"sidebar-open":"")}>
       <button className="brand" onClick={()=>go("overview")} aria-label={tr("Daedalus overview")}><Image className="sidebar-wordmark" src="/brand/daedalus-horizontal-dark.svg" alt="Daedalus" width={1700} height={520} priority /><small>{tr("CONTROL CENTER")}</small></button>
@@ -361,31 +383,30 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
         </div>}
         {page==="automations"&&<div className="content-stack">
           <div className="notice"><ShieldCheck size={18}/><span>{tr("Automation uses the existing game engine. Inspect authoritative city data and preflight before preparing a change. No task starts without a separate reviewed, account-specific confirmation.")}</span></div>
-          <div className="automation-layout"><section className="panel action-catalog"><div className="panel-heading"><div><h3>{tr("Operation library")}</h3><p>{tr("Search and select a workflow")}</p></div></div><div className="category-tabs"><button className={automationGroup==="All"?"active":""} onClick={()=>setAutomationGroup("All")}>{tr("All")}</button>{TASK_GROUPS.map(g=><button className={automationGroup===g.name?"active":""} onClick={()=>setAutomationGroup(g.name)} key={g.name}>{tr(g.name)}</button>)}</div><div className="action-list">{TASK_GROUPS.filter(g=>automationGroup==="All"||g.name===automationGroup).map(g=><div key={g.name}><div className="action-group-title"><g.icon size={15}/>{tr(g.name)}</div>{g.tasks.map(t=><button className={"action-card "+(chosenTask===t?"action-card-selected":"")} onClick={()=>setChosenTask(t)} key={t}><span><strong>{tr(readable(t))}</strong><small>{t==="constructionList"?tr("Real building preview"):tr("Preflight / adapter status")}</small></span><ChevronRight size={16}/></button>)}</div>)}</div></section>
+          <ReviewedBatchPanel/><div className="automation-layout"><section className="panel action-catalog"><div className="panel-heading"><div><h3>{tr("Operation library")}</h3><p>{tr("Search and select a workflow")}</p></div></div><label className="field"><span>{tr("Search operations")}</span><input value={automationQuery} onChange={e=>setAutomationQuery(e.target.value)} /></label><div className="category-tabs"><button className={automationGroup==="All"?"active":""} onClick={()=>setAutomationGroup("All")}>{tr("All")}</button>{operationGroups.map(g=><button className={automationGroup===g.name?"active":""} onClick={()=>setAutomationGroup(g.name)} key={g.name}>{tr(g.name)}</button>)}</div><div className="action-list">{operationGroups.filter(g=>automationGroup==="All"||g.name===automationGroup).map(g=><div key={g.name}><div className="action-group-title"><g.icon size={15}/>{tr(g.name)}</div>{g.tasks.filter(t=>(t+" "+tr(readable(t))).toLowerCase().includes(automationQuery.trim().toLowerCase())).map(t=><button className={"action-card "+(chosenTask===t?"action-card-selected":"")} onClick={()=>setChosenTask(t)} key={t}><span><strong>{tr(readable(t))}</strong><small>{operationWorkflows[t]?.web==="existing_view"?tr("Existing view"):operationWorkflows[t]?.web==="protected_local"?tr("Protected local workflow"):operationWorkflows[t]?.web==="pending"?tr("Adapter not available"):t==="constructionList"?tr("Construction queue"):t==="donate"||t==="reorganizeCityBuildings"||t==="constructBuilding"||t==="stationArmy"||t==="autoBarbarians"||t==="attackBarbarians"||t==="vacationMode"||isWorkerTask(t)||isNativeTask(t)?tr("Native settings"):tr("Preflight / adapter status")}</small></span><ChevronRight size={16}/></button>)}</div>)}</div></section>
             <section className="panel automation-detail"><div className="panel-heading"><div><div className="section-kicker">{tr("WORKFLOW INSPECTOR")}</div><h3>{tr(readable(chosenTask))}</h3><p>{tr("Live account-bound data and availability")}</p></div><Status ok={preflight?.ready===true} label={preflight?.ready===true?tr("Ready to review"):tr("Not approved")}/></div>
-              <div className="editor-body"><label className="field"><span>{tr("Account")}</span><select value={automationAccount} onChange={e=>setAutomationAccount(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{name(a)} · {tr(accountWorld(a))}</option>)}</select></label>
+              <div className="editor-body">{(chosenTask==="alertAttacks"||chosenTask==="alertLowWine")&&<label className="field"><span>{tr("Launch scope")}</span><select value={alertScope} onChange={e=>setAlertScope(e.target.value as "one"|"selected"|"all")}><option value="one">{tr("One account")}</option><option value="selected">{tr("Selected accounts")}</option><option value="all">{tr("All accounts")}</option></select></label>}<label className="field"><span>{tr("Account")}</span><select value={automationAccount} onChange={e=>setAutomationAccount(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{automationNames[a.id]} · {tr(accountWorld(a))}</option>)}</select></label>
                 {preflight&&<div className="preflight-card"><div className="preflight-top"><span><ShieldCheck size={18}/> {tr("Authoritative preflight")}</span><Status ok={preflight.ready===true} label={preflight.ready===true?tr("Ready"):tr("Unavailable")}/></div><p>{typeof preflight.reason==="string"?preflight.reason:tr("The controller has checked prerequisites for this account and operation.")}</p>{preflight.unresolved_request===true&&<p className="warning-text">{tr("An earlier request is unresolved. Review Activity before any new operation.")}</p>}</div>}
-                {chosenTask==="constructionList"?<><div className="form-section-title">{tr("Choose a real city")}</div><label className="field"><span>{tr("City")}</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">{tr("Select an authenticated city")}</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??tr("City"))}</option>)}</select></label>{selectedCity&&<><div className="form-section-title">{tr("Buildings in this city")}</div><div className="building-list">{buildings.length?buildings.map((b,i)=><label key={i} className={"building-item "+(buildingPosition===String(b.position)?"building-chosen":"")}><input type="radio" name="building" checked={buildingPosition===String(b.position)} onChange={()=>{setBuildingPosition(String(b.position??""));setTargetLevel(Number(b.level??0)+1);setPreview(null);}}/><span><strong>{String(b.name??b.building??b.type??tr("Building"))}</strong><small>{tr("Position")} {String(b.position??"—")}</small></span><span className="level-pill">{tr("Level")} {String(b.level??"—")}</span></label>):<Empty title={tr("Building data not available")} description={tr("This account/city has no authenticated building inventory.")} icon={Building2}/>}</div><label className="field"><span>{tr("Target level")}</span><input type="number" min="1" max="150" value={targetLevel} onChange={e=>{setTargetLevel(Number(e.target.value));setPreview(null);}}/></label><button className="primary-button" disabled={automationBusy||!buildingPosition} onClick={showPreview}>{automationBusy?tr("Preparing preview…"):tr("Preview upgrade (read-only)")}<ArrowRight size={16}/></button></>}</> :INVENTORIES[chosenTask]?<div className="inventory-editor">
+                {existingPage?<div className="empty-adapter"><Landmark size={24}/><strong>{tr("Existing view")}</strong><p>{tr("Open the existing controller view for this operation. Full upstream parity is not yet verified.")}</p><button className="secondary-button" onClick={()=>{if(existingPage==="military")setMilitaryTab(chosenTask==="shipMovements"?"movements":"troops");go(existingPage);}}>{tr("Open view")}</button></div>:!nativeAllowed?<div className="empty-adapter"><LockKeyhole size={24}/><strong>{selectedWorkflow?.web==="protected_local"?tr("Protected local workflow"):tr("Adapter not available")}</strong><p>{tr("This operation does not have an approved browser execution adapter.")}</p></div>:chosenTask==="vacationMode"?<VacationEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="attackBarbarians"?<AttackEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="autoBarbarians"?<GrindEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="trainArmy"?<TrainingEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="stationArmy"?<StationEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="constructBuilding"?<NewBuildingEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="reorganizeCityBuildings"?<LayoutEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isWorkerTask(chosenTask)?<WorkerEditor key={automationAccount+":"+chosenTask+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:chosenTask==="donate"?<DonationEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isCityTask(chosenTask)?<NativeCityEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isDomainTask(chosenTask)?<NativeDomainEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role}/>:isNativeTask(chosenTask)?<NativeAutomationEditor key={automationAccount+":"+chosenTask+":"+reload+":"+String(accountById[automationAccount]?.enabled)+":"+role+":"+alertScope+":"+JSON.stringify(accounts.filter(a=>alertScope==="all"||selected.includes(a.id)).map(a=>[a.id,a.enabled]))} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} task={chosenTask} enabled={accountById[automationAccount]?.enabled===true} role={role} batchTargets={(chosenTask==="alertAttacks"||chosenTask==="alertLowWine")&&alertScope!=="one"?accounts.filter(a=>alertScope==="all"||selected.includes(a.id)).map(a=>({id:a.id,name:automationNames[a.id]+" · "+accountWorld(a),enabled:a.enabled===true})):undefined}/>:chosenTask==="constructionList"?<ConstructionEditor key={automationAccount+":"+reload+":"+role+":"+String(accountById[automationAccount]?.enabled)} account={automationAccount} accountName={automationNames[automationAccount]??automationAccount} enabled={accountById[automationAccount]?.enabled===true} role={role}/> :INVENTORIES[chosenTask]?<div className="inventory-editor">
                   {INVENTORIES[chosenTask].scope === "city" && <label className="field"><span>{tr("Choose your city")}</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">{tr("Select an authenticated city")}</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??tr("City"))}</option>)}</select></label>}
                   {INVENTORIES[chosenTask].resource === "market-quotes" && <div className="market-fields"><label className="field"><span>{tr("Resource")}</span><select value={marketResource} onChange={e=>setMarketResource(Number(e.target.value))}>{RESOURCES.map((resource,index)=><option key={resource} value={index}>{tr(readable(resource))}</option>)}</select></label><label className="field"><span>{tr("Market action")}</span><select value={marketSide} onChange={e=>setMarketSide(e.target.value)}><option value="buy">{tr("Buy available offers")}</option><option value="sell_to_offers">{tr("Sell to available offers")}</option><option value="create_offer">{tr("Create offer (preview)")}</option></select></label></div>}
                   <div className="form-section-title">{tr(INVENTORIES[chosenTask].title)}</div>
                   {inventoryBusy ? <p className="soft-loading">{tr("Retrieving authenticated controller data…")}</p> : inventoryError ? <div role="alert" className="inline-error">{tr(inventoryError)}</div> : inventory ? <InventoryDetails data={inventory}/> : <p className="subtle-message">{tr("Select an authenticated city to inspect the available data.")}</p>}
                   <div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Inventory is read-only. Starting this task requires a separately audited, account-scoped configuration and confirmation flow.")}</span></div>
                 </div> :<div className="empty-adapter"><Landmark size={24}/><strong>{tr("Domain editor pending audit")}</strong><p>{tr("This upstream operation is catalogued, but a web-safe, independently reviewed adapter is required before this browser can execute it. The preflight shown above is informational.")}</p></div>}
-                {preview&&<div className="preview-panel"><h4>{tr("Read-only construction preview")}</h4><p>{tr("These values come from IkaBot. Preview does not authorize or execute upgrades.")}</p>{Object.entries(preview).filter(([k,v])=>typeof v!=="object").map(([k,v])=><div key={k} className="key-value"><span>{tr(readable(k))}</span><strong>{String(v??tr("Unknown"))}</strong></div>)}{Object.entries(preview).filter(([k,v])=>Array.isArray(v)).map(([k,v])=><div key={k}><div className="form-section-title">{tr(readable(k))}</div><DataTable rows={(v as unknown[]).filter(x=>x && typeof x==="object").map(x=>x as Record<string,unknown>)} /></div>)}</div>}
                 {automationError&&<p role="alert" className="form-error">{tr(automationError)}</p>}
-                <div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.")}</span></div>
+                {!isNativeTask(chosenTask)&&chosenTask!=="constructionList"&&chosenTask!=="donate"&&chosenTask!=="reorganizeCityBuildings"&&chosenTask!=="constructBuilding"&&chosenTask!=="stationArmy"&&chosenTask!=="trainArmy"&&chosenTask!=="autoBarbarians"&&chosenTask!=="attackBarbarians"&&chosenTask!=="vacationMode"&&!isWorkerTask(chosenTask)&&<div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.")}</span></div>}
               </div></section></div>
         </div>}
         {page==="military"&&<div className="content-stack"><div className="under-tabs"><button className={militaryTab==="troops"?"tab-selected":""} onClick={()=>setMilitaryTab("troops")}>{tr("Troops & fleet")}</button><button className={militaryTab==="movements"?"tab-selected":""} onClick={()=>setMilitaryTab("movements")}>{tr("Movements")}</button></div><section className="panel"><div className="panel-heading"><div><h3>{militaryTab==="troops"?tr("Military strength"):tr("Ship movements")}</h3><p>{tr("Read-only observations for the selected accounts")}</p></div><Status ok={Object.keys(militaryErrors).length===0&&Object.keys(militaryData).length>0} label={tr("Controller data")}/></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{militaryErrors[id]?<div className="inline-error">{tr(militaryErrors[id])}</div>:militaryData[id]?<div>{Object.entries(militaryData[id]).filter(([k])=>!["account_id","synthetic_demo"].includes(k)).map(([key,value])=><div key={key} className="military-group"><strong className="table-label">{tr(readable(key))}</strong>{Array.isArray(value)?<DataTable rows={value.filter(x=>x && typeof x==="object") as Record<string,unknown>[]} />:typeof value==="object"&&value!==null?<DataTable rows={Object.entries(value).map(([key,v])=>({type:key,value:typeof v==="object"?tr("See controller details"):v}))}/>:<div className="key-value"><span>{tr(readable(key))}</span><strong>{String(value??tr("Unknown"))}</strong></div>}</div>)}</div>:<div className="soft-loading">{tr("Retrieving current observations…")}</div>}</div>)}</section></div>}
-        {page==="activity"&&<div className="content-stack">
+        {page==="activity"&&<div className="content-stack"><WorldReportsPanel key={"world-reports:"+reload} accounts={scopeIds.map(id=>({id,name:automationNames[id]??id}))}/><ActivityHistory accounts={scopeIds.map(id=>({id,name:automationNames[id]??id}))} revision={reload}/>
           {actionMessage&&<div role="status" className="notice"><CircleAlert size={18}/>{tr(actionMessage)}</div>}
           <section className="panel"><div className="panel-heading"><div><h3>{tr("Managed task activity")}</h3><p>{tr("Observed engine tasks and durable controller request receipts")}</p></div><span className="table-info">{tr("No automatic replay on uncertain outcomes")}</span></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{taskErrors[id]?<div className="inline-error">{tr(taskErrors[id])}</div>:taskData[id]?<>
             <div className="form-section-title">{tr("Engine tasks")}</div>{(Array.isArray(taskData[id].engine_tasks)?taskData[id].engine_tasks as Result[]:[]).length?
-            <div className="activity-items">{(taskData[id].engine_tasks as Result[]).map((t,i)=><div className="activity-item" key={i}><div><strong>{String(t.task??t.name??tr("Managed task"))}</strong><small>{String(t.status??tr("Status unknown"))} · {String(t.task_id??t.id??"")}</small></div>{role!=="viewer"&&<button className="danger-outline" disabled={pendingAction===id+":"+String(t.task_id??t.id)} onClick={()=>{if(window.confirm(tr("Stop this managed task? The action may interrupt its running operation.")))safeAction("accounts/"+encodeURIComponent(id)+"/tasks/"+encodeURIComponent(String(t.task_id??t.id))+"/stop",{},id+":"+String(t.task_id??t.id));}}>{tr("Stop")}</button>}</div>)}</div>:<p className="subtle-message">{tr("No currently reported managed tasks.")}</p>}
+            <div className="activity-items">{(taskData[id].engine_tasks as Result[]).map((t,i)=><div className="activity-item" key={i}><div><strong>{String(t.task??t.name??tr("Managed task"))}</strong><small>{String(t.status??tr("Status unknown"))}{t.outcome?" · "+tr(readable(String(t.outcome))):""} · {String(t.task_id??t.id??"")}</small></div>{role!=="viewer"&&<button className="danger-outline" disabled={pendingAction===id+":"+String(t.task_id??t.id)} onClick={()=>{if(window.confirm(tr("Stop this managed task? The action may interrupt its running operation.")))safeAction("accounts/"+encodeURIComponent(id)+"/tasks/"+encodeURIComponent(String(t.task_id??t.id))+"/stop",{},id+":"+String(t.task_id??t.id));}}>{tr("Stop")}</button>}</div>)}</div>:<p className="subtle-message">{tr("No currently reported managed tasks.")}</p>}
             <div className="form-section-title">{tr("Request receipts")}</div>{(Array.isArray(taskData[id].requests)?taskData[id].requests as Result[]:[]).length?<div className="activity-items">{(taskData[id].requests as Result[]).map((r,i)=><div className="activity-item" key={i}><div><strong>{String(r.task??tr("Request"))} <span className="status-neutral-label">{String(r.status??tr("unknown"))}</span></strong><small>{String(r.request_id??tr("ID unavailable"))}</small></div>{role!=="viewer"&&r.status==="unconfirmed"&&<button className="danger-outline" onClick={()=>{if(window.confirm(tr("Only acknowledge after independently checking that this request will not execute again. Have you inspected its actual state?")))safeAction("accounts/"+encodeURIComponent(id)+"/tasks/requests/"+encodeURIComponent(String(r.request_id))+"/acknowledge",{confirmed:true},"ack:"+i);}}>{tr("Reconcile")}</button>}</div>)}</div>:<p className="subtle-message">{tr("No durable request receipts returned.")}</p>}</>:<p className="soft-loading">{tr("Checking controller activity…")}</p>}</div>)}</section>
         </div>}
-        {page==="settings"&&<div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Appearance")}</h3><p>{tr("Choose a comfortable workspace")}</p></div><Sun size={19}/></div><div className="settings-row"><div><strong>{tr("Color theme")}</strong><small>{tr("System typography, refined for clarity")}</small></div><div className="segmented"><button className={theme==="light"?"segment-on":""} onClick={()=>setTheme("light")}><Sun size={15}/> {tr("Light")}</button><button className={theme==="dark"?"segment-on":""} onClick={()=>setTheme("dark")}><Moon size={15}/> {tr("Dark")}</button></div></div><div className="settings-row"><div><strong>{tr("Reduced motion")}</strong><small>{tr("Respects your device accessibility setting")}</small></div><span className="settings-value">{tr("Automatic")}</span></div><div className="settings-row"><div><strong>{tr("Language preference")}</strong><small>{tr("Choose the language used across Daedalus")}</small></div><LanguageSelector /></div></section>
+        {page==="settings"&&<div className="settings-grid"><ReleasePanel key={reload+":"+role}/><AdminStatusPanel key={reload+":"+role} role={role} accounts={accounts.filter(a=>a.enabled===true).map(a=>({id:a.id,name:automationNames[a.id]??a.id}))}/><section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Appearance")}</h3><p>{tr("Choose a comfortable workspace")}</p></div><Sun size={19}/></div><div className="settings-row"><div><strong>{tr("Color theme")}</strong><small>{tr("System typography, refined for clarity")}</small></div><div className="segmented"><button className={theme==="light"?"segment-on":""} onClick={()=>setTheme("light")}><Sun size={15}/> {tr("Light")}</button><button className={theme==="dark"?"segment-on":""} onClick={()=>setTheme("dark")}><Moon size={15}/> {tr("Dark")}</button></div></div><div className="settings-row"><div><strong>{tr("Reduced motion")}</strong><small>{tr("Respects your device accessibility setting")}</small></div><span className="settings-value">{tr("Automatic")}</span></div><div className="settings-row"><div><strong>{tr("Language preference")}</strong><small>{tr("Choose the language used across Daedalus")}</small></div><LanguageSelector /></div></section>
           <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Authentication")}</h3><p>{tr("Your private administrator session")}</p></div><LockKeyhole size={19}/></div><div className="settings-row"><div><strong>{tr("Signed in as")}</strong><small>{email}</small></div><Status ok={true} label={tr(readable(role))}/></div><div className="settings-row"><div><strong>{tr("Web sessions")}</strong><small>{tr("Validated against Supabase on privileged requests")}</small></div><span className="settings-value">{tr("Secure cookies")}</span></div><button className="secondary-button" onClick={async()=>{await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});window.location.assign("/login");}}><LogOut size={15}/> {tr("Sign out")}</button></section>
           <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Backend connection")}</h3><p>{tr("Safe operational status, no credentials disclosed")}</p></div><Activity size={19}/></div>{[[tr("Availability"),health?tr("Connected"):tr("Unavailable")],[tr("Mode"),health?.mode??tr("Unknown")],[tr("Version"),health?.version??tr("Unknown")],[tr("Synthetic data"),health?.synthetic_demo?tr("Yes"):tr("No or unknown")],[tr("Engine dispatch"),capabilities?.structured_engine_dispatch?tr("Available"):tr("Not reported")]].map(([k,v])=><div className="settings-row" key={String(k)}><strong>{String(k)}</strong><span className="settings-value">{String(v)}</span></div>)}<button className="secondary-button" onClick={refresh}><RefreshCw size={16}/> {tr("Recheck backend")}</button></section>
           <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Security boundaries")}</h3><p>{tr("Safer by design")}</p></div><ShieldCheck size={19}/></div><div className="security-list"><p><CheckCircle2 size={17}/> {tr("No backend bearer token or vault material in the browser")}</p><p><CheckCircle2 size={17}/> {tr("No browser-based Gameforge or Selenium login")}</p><p><CheckCircle2 size={17}/> {tr("Operations require authenticated controllers")}</p><p><CheckCircle2 size={17}/> {tr("Read-only previews before any proposed mutation")}</p><p><CheckCircle2 size={17}/> {tr("No private offline data cache")}</p></div></section>
@@ -393,5 +414,5 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
         <footer className="content-footer"><div>{tr("Daedalus · Private operations workspace")}</div><span>Observed data only · {health?tr("Controller available"):tr("Controller not connected")}</span></footer>
       </main>
     </div>
-  </div>;
+  </div></ReviewedBatchProvider>;
 }

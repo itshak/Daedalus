@@ -49,7 +49,24 @@ def plan_routes(session, resource_type, mode, cities_ids):
     return routes
 
 
-def prepare_distributeResources(session, resource, mode="even", cities_ids=None, useFreighters=False, routes=None):
+def reviewed_distribution_routes(routes):
+    return [{"from": int(r[0]["id"]), "to": int(r[1]["id"]), "resources": list(r[3:])}
+            for r in routes]
+
+
+def preview_distribution(session, draft):
+    from ikabot.function.sendResources import preview_native_shipments
+
+    from ikabot.helpers import pedirInfo
+
+    pedirInfo.ids_cache = None
+    clean = prepare_distributeResources(session, **draft)
+    ids = clean["cities_ids"] or getIdsOfCities(session)[0]
+    routes = reviewed_distribution_routes(plan_routes(session, RESOURCE_KEYS.index(clean["resource"]), clean["mode"], ids))
+    return preview_native_shipments(session, routes, clean["useFreighters"])
+
+
+def prepare_distributeResources(session, resource, mode="even", cities_ids=None, useFreighters=False, routes=None, reviewed_routes=None):
     """Checks the config of a distributeResources task started from the CLI
     Parameters
     ----------
@@ -104,17 +121,20 @@ def prepare_distributeResources(session, resource, mode="even", cities_ids=None,
         if len(producers) == len(ids):
             raise ValueError("every city produces {}: there is nowhere to send it".format(name))
 
-    plan_routes(session, resource_type, mode, ids)
+    current_routes = plan_routes(session, resource_type, mode, ids)
+    if reviewed_routes is not None and reviewed_distribution_routes(current_routes) != reviewed_routes:
+        raise ValueError("Distribution allocation changed; prepare a new review")
     return {
         "resource": name,
         "mode": mode,
         "cities_ids": None if cities_ids is None else ids,
         "useFreighters": asBool(useFreighters, "useFreighters"),
+        **({"reviewed_routes": reviewed_routes} if reviewed_routes is not None else {}),
     }
 
 
 @task("distributeResources", prepare=prepare_distributeResources)
-def do_it(session, resource, mode="even", cities_ids=None, useFreighters=False, routes=None):
+def do_it(session, resource, mode="even", cities_ids=None, useFreighters=False, routes=None, reviewed_routes=None):
     """
     Parameters
     ----------
@@ -146,7 +166,18 @@ def do_it(session, resource, mode="even", cities_ids=None, useFreighters=False, 
         session.setStatus(msg)
         sendToBot(session, msg)
         return
-    executeRoutes(session, routes, useFreighters)
+    if reviewed_routes is not None and reviewed_distribution_routes(routes) != reviewed_routes:
+        raise ValueError("Distribution allocation changed; prepare a new review")
+    if reviewed_routes is not None:
+        from ikabot.helpers import pedirInfo
+
+        def verify_owned(index):
+            pedirInfo.ids_cache = None
+            requireOwnCity(session, reviewed_routes[index]["from"], "Origin")
+            requireOwnCity(session, reviewed_routes[index]["to"], "Destination")
+        executeRoutes(session, routes, useFreighters, verify_recipient=verify_owned)
+    else:
+        executeRoutes(session, routes, useFreighters)
     session.setStatus("Distributed {} in {} shipments @{}".format(resource, len(routes), getDateTime()))
 
 

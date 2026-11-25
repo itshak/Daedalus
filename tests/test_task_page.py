@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 
@@ -70,7 +69,7 @@ def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
     page.launch_requested.connect(lambda *args: emitted.append(args))
     answers = []
     monkeypatch.setattr(QMessageBox, "question", lambda *_args: (answers.append(True) or QMessageBox.Yes))
-    assert not page.config_editor.isVisible()
+    assert not hasattr(page, "config_editor")
     page.confirm_box.setChecked(True)
     page._start()
     assert answers == [True]
@@ -83,19 +82,10 @@ def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
     assert page.confirm_box.isChecked() is False
 
 
-def test_bad_json_does_not_emit_task_start(page, monkeypatch):
-    page.set_capabilities([{"name": "alertAttacks", "kind": "background_task"}], enabled=True)
-    page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
-    page._toggle_advanced()
-    page.confirm_box.setChecked(True)
-    page.config_editor.setPlainText("{not valid")
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    emitted = []
-    page.launch_requested.connect(lambda *args: emitted.append(args))
-    page._start()
-    assert warnings == [True]
-    assert emitted == []
+def test_no_raw_configuration_entry_points(page):
+    for name in ("config_editor", "advanced_toggle", "import_config_button",
+                 "build_json_button", "_toggle_advanced", "_import_advanced_config"):
+        assert not hasattr(page, name)
 
 
 def test_task_listing_stop_only_selected_managed_id(page, monkeypatch):
@@ -132,17 +122,15 @@ def test_uncertain_task_request_needs_manual_review(page, monkeypatch):
     assert emitted == [("alpha", rid)]
 
 
-def test_parameter_form_generates_json_but_requires_explicit_review(page, monkeypatch):
+def test_parameter_form_builds_internal_payload_and_requires_explicit_review(page, monkeypatch):
     from daedalus.engine_registry import inspect_engine
 
     record = next(cap for cap in inspect_engine() if cap.name == "alertAttacks")
     page.set_capabilities([record.to_dict()], enabled=True)
     assert "minutes" in page._form_inputs
-    assert page.build_json_button.isEnabled()
     widget = page._form_inputs["minutes"]
     assert widget.value() == 20
     assert widget.minimum() == 3
-    assert page.config_editor.isHidden()
 
     emitted = []
     warnings = []
@@ -152,44 +140,30 @@ def test_parameter_form_generates_json_but_requires_explicit_review(page, monkey
 
     widget.setValue(42)
     assert page._form_dirty is True
-    assert not page._advanced_visible
     page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
     page.confirm_box.setChecked(True)
     page._start()
     assert warnings == []
     assert emitted[0][2] == {"minutes": 42}
-    assert page.config_editor.isHidden()  # no manual JSON editing needed
-
-    page._toggle_advanced()
-    assert page._advanced_visible
-    assert json.loads(page.config_editor.toPlainText()) == {"minutes": 42}
+    assert not hasattr(page, "config_editor")
 
 
-def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypatch):
+def test_required_and_boolean_fields_are_typed_and_validated(page):
     from daedalus.engine_registry import inspect_engine
 
     record = next(cap for cap in inspect_engine() if cap.name == "alertLowWine")
     page.set_capabilities([record.to_dict()], enabled=True)
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page._build_config_from_form()
-    assert warnings
-    assert page.config_editor.toPlainText() == "{}"
-    # Upstream documents hours as an integer; the redesigned GUI uses a
-    # native Fluent SpinBox with a mandatory empty sentinel, not free-form JSON.
+    with pytest.raises(ValueError):
+        page._form_config()
     page._form_inputs["hours"].setValue(4)
     page._form_inputs["auto_transfer"].setChecked(True)
     page._form_inputs["transfer_amount"].setValue(1500)
-    page._build_config_from_form()
-    assert json.loads(page.config_editor.toPlainText()) == {
+    assert page._form_config() == {
         "hours": 4, "auto_transfer": True, "transfer_amount": 1500,
     }
-
-    previous_warnings = len(warnings)
-    page._form_inputs["hours"].setValue(0)  # missing-value sentinel
-    page._build_config_from_form()
-    assert len(warnings) > previous_warnings
-    assert '"hours": 4' in page.config_editor.toPlainText()
+    page._form_inputs["hours"].setValue(0)
+    with pytest.raises(ValueError):
+        page._form_config()
 
 
 def test_switching_tasks_clears_previous_task_configuration_and_confirmation(page):
@@ -201,10 +175,10 @@ def test_switching_tasks_clears_previous_task_configuration_and_confirmation(pag
     ]
     page.set_capabilities(operations, enabled=True)
     page._form_inputs["minutes"].setValue(15)
-    page._build_config_from_form()
+    assert page._form_config() == {"minutes": 15}
     page.confirm_box.setChecked(True)
     page.task_combo.setCurrentIndex(1)
-    assert page.config_editor.toPlainText() == "{}"
+    assert "minutes" not in page._form_inputs
     assert not page.confirm_box.isChecked()
     assert "hours" in page._form_inputs
 
@@ -345,7 +319,7 @@ def test_construction_table_renders_real_building_levels_and_draft_target(page):
     assert page.building_table.rowCount() == 0
 
 
-def test_construction_advanced_mode_does_not_require_making_up_queue_values(page, monkeypatch):
+def test_construction_has_no_raw_plan_override(page):
     page.set_capabilities([{
         "name": "constructionList", "kind": "background_task",
         "config_fields": [
@@ -354,11 +328,9 @@ def test_construction_advanced_mode_does_not_require_making_up_queue_values(page
                         "expand_overall", "wait_resources", "construction_queue", "total_time")
         ],
     }], enabled=True)
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page._toggle_advanced()
-    assert warnings == []  # Opening expert mode does not fabricate a plan.
-    assert page.config_editor.toPlainText() == "{}"
+    assert set(page._form_inputs) == {"city_id"}
+    assert not hasattr(page, "config_editor")
+    assert not page.start_button.isEnabled()
 
 
 def test_distribution_uses_verified_resource_policy_and_actual_city_multiselect(page):
@@ -459,7 +431,7 @@ def test_tavern_cities_are_native_and_never_fabricated(page):
     assert page._form_config()["cities_ids"] == ["30"]
 
 
-def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
+def test_construction_cannot_start_without_verified_preview(page):
     page.set_capabilities([{
         "name": "constructionList", "kind": "background_task",
         "config_fields": [
@@ -472,21 +444,12 @@ def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
     page._form_inputs["city_id"].setCurrentIndex(1)
     page.set_preflight({"account_id": "alpha", "task": "constructionList",
                         "ready": True, "reason": "none"})
-    page._toggle_advanced()
-    assert page.start_button.isEnabled()
     emitted = []
     page.launch_requested.connect(lambda *args: emitted.append(args))
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page.config_editor.setPlainText(json.dumps({
-        "city_id": 999, "city_name": "OtherPlayer", "buildings": [],
-        "shipments": [], "expand_overall": True, "wait_resources": False,
-        "construction_queue": [], "total_time": 0,
-    }))
     page.confirm_box.setChecked(True)
+    assert not page.start_button.isEnabled()
     page._start()
-    assert warnings
-    assert emitted == []
+    assert not emitted
 
 
 def test_daily_rewards_use_three_actual_city_pickers_and_native_favour_options(page):
@@ -669,9 +632,480 @@ def test_unknown_compound_engine_fields_do_not_create_raw_json_form_wall(page):
         "ready": True, "reason": "none", "unresolved_request": False,
     })
     assert not page.start_button.isEnabled()
-    with pytest.raises(ValueError, match="reviewed engine plan"):
+    with pytest.raises(ValueError, match="dedicated native editor"):
         page._form_config()
-    page._toggle_advanced()
-    assert page.start_button.isEnabled()
-    page._toggle_advanced()
+    assert not page.start_selected_button.isEnabled()
+    assert not hasattr(page, "advanced_toggle")
+
+
+def test_donate_once_requires_scoped_preview(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    capability = next(c for c in inspect_engine() if c.name == "donate")
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": "donate", "ready": True,
+                        "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["project"].setCurrentIndex(0)
+    page._form_inputs["amount"].setValue(100)
     assert not page.start_button.isEnabled()
+    calls = []
+    page.donation_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "project": "resource", "amount": 100})
+    nonce = calls[0][2]
+    result = {"account_id": "alpha", "city_id": 1, "project": "resource",
+              "city_name": "Town", "project_name": "Forest", "amount": 100,
+              "stock": 1000, "remaining": 400, "level": 2, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_donation_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_donation_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    page.confirm_box.setChecked(True)
+    page._form_inputs["amount"].setValue(101)
+    assert not page.start_button.isEnabled()
+    assert not page.confirm_box.isChecked()
+    page._request_native_preview()
+    page.set_donation_preview({**result, "amount": 101}, calls[-1][2])
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", "donate", {"preview_id": "a" * 43})
+
+
+@pytest.mark.parametrize("task", ["modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"])
+def test_worker_editor_requires_scope_bound_preview(page, monkeypatch, task):
+    from daedalus.engine_registry import inspect_engine
+
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True,
+                        "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["percentage"].setValue(50)
+    if task == "modifyProduction":
+        page._form_inputs["project"].setCurrentIndex(0)
+        page._form_inputs["overcharge"].setChecked(False)
+    assert not page.start_button.isEnabled()
+    calls = []
+    page.worker_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    account, name, draft, nonce = calls[0]
+    assert account == "alpha" and name == task
+    assert draft["percentage"] == 50 and draft["city_id"] == 1
+    result = {"account_id": "alpha", "task": task, **draft, "city_name": "Town",
+              "current": 25, "maximum": 100, "extra": 0, "target": 50, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_worker_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_worker_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    page.confirm_box.setChecked(True)
+    page._form_inputs["percentage"].setValue(51)
+    assert not page.start_button.isEnabled()
+    assert not page.confirm_box.isChecked()
+    page._request_native_preview()
+    page.set_worker_preview({**result, "percentage": 51, "target": 51}, calls[-1][3])
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_layout_editor_two_owned_cities_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "reorganizeCityBuildings"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Template"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["template_city_id"].setCurrentIndex(2)
+    calls = []
+    page.layout_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    account, draft, nonce = calls[0]
+    assert account == "alpha" and draft == {"city_id": 1, "template_city_id": 2}
+    assert not page.start_button.isEnabled()
+    result = {"account_id": "alpha", **draft, "city_name": "Town", "template_name": "Template",
+              "moves": [{"from": 1, "to": 2, "building": "academy", "displaced": "warehouse"}],
+              "ready": True, "preview_id": "a" * 43, "expires_in": 120}
+    page.set_layout_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_layout_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_new_building_editor_inventory_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "constructBuilding"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Other"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    calls = []
+    page.build_options_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "options": [
+        {"position": 1, "building_id": 4, "name": "Academy", "surface": "land",
+         "costs": [20, 0, 0, 0, 0], "ready": True}]}
+    page.set_build_options(result, "wrong")
+    assert page._form_inputs["position"].count() == 1
+    page.set_build_options(result, calls[0][2])
+    page._form_inputs["position"].setCurrentIndex(1)
+    reviews = []
+    page.build_preview_requested.connect(lambda *args: reviews.append(args))
+    page._request_native_preview()
+    assert reviews[0][:2] == ("alpha", {"city_id": 1, "position": 1, "building_id": 4})
+    assert not page.start_button.isEnabled()
+    plan = {"account_id": "alpha", "city_id": 1, **result["options"][0],
+            "preview_id": "a" * 43, "expires_in": 120}
+    page.set_build_preview(plan, reviews[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert page._form_inputs["position"].count() == 1
+
+
+def test_station_editor_requires_owned_city_preview(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "stationArmy"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["destination_city_id"].setCurrentIndex(2)
+    page._form_inputs["ground"].setChecked(True)
+    calls = []
+    page.station_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "destination_city_id": 2, "ground": True})
+    assert not page.start_button.isEnabled()
+    result = {"account_id": "alpha", **calls[0][1], "city_name": "Origin", "destination_name": "Target",
+              "total": 5, "weight": 10, "capacity": 20, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_station_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_station_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_grind_editor_named_cities_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "autoBarbarians"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["target_city_id"].setCurrentIndex(2)
+    page._form_inputs["send_notifications"].setChecked(False)
+    calls = []
+    page.grind_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "target_city_id": 2, "send_notifications": False})
+    result = {"account_id": "alpha", **calls[0][1], "city_name": "Origin", "target_name": "Target",
+              "level": 1, "requirements": [{"name": "Unit", "available": 100, "required": 90}],
+              "available_ships": 10, "required_ships": 8, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_grind_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_grind_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_attack_editor_native_waves_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "attackBarbarians"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["target_city_id"].setCurrentIndex(2)
+    inventory = []
+    page.attack_inventory_requested.connect(lambda *args: inventory.append(args))
+    page._request_native_preview()
+    assert inventory[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "available_ships": 100,
+              "units": [{"unit_id": "302", "name": "Unit", "available": 100}]}
+    editor = page._form_inputs["waves"]
+    page.set_attack_inventory(result, "wrong")
+    assert not editor.loaded
+    page.set_attack_inventory(result, inventory[0][2])
+    assert editor.loaded and len(editor.waves) == 1
+    editor.waves[0][3][0].setValue(30)
+    editor.waves[0][1].setValue(2)
+    editor.add_wave()
+    editor.waves[1][3][0].setValue(10)
+    editor.waves[1][2].setChecked(True)
+    calls = []
+    page.attack_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    draft = calls[0][1]
+    assert draft["city_id"] == 1 and draft["target_city_id"] == 2
+    assert draft["waves"][0]["units"] == {"302": 30}
+    assert draft["waves"][1]["loot"] is True
+    plan = {"account_id": "alpha", "city_id": 1, "target_city_id": 2, "city_name": "Origin",
+            "target_name": "Target", "level": 1, "available_ships": 100, "required_ships": 4,
+            "reviewed_waves": draft["waves"], "waves": [
+                {"round": 1, "loot": False, "ships": 2, "units": [{"name": "Unit", "amount": 30}]},
+                {"round": 2, "loot": True, "ships": 0, "units": [{"name": "Unit", "amount": 10}]},
+            ], "ready": True, "preview_id": "a" * 43, "expires_in": 120}
+    page.set_attack_preview(plan, calls[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert not editor.loaded
+
+
+def test_vacation_editor_blocks_recovery_and_active_jobs(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "vacationMode"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    calls = []
+    page.vacation_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "city_name": "Town",
+              "active_jobs": 0, "managed_active": False, "recovery_disabled": False,
+              "ready": False, "preview_id": None, "expires_in": None}
+    page.set_vacation_preview(result, calls[0][2])
+    assert not page.start_button.isEnabled()
+    page._request_native_preview()
+    page.set_vacation_preview({**result, "recovery_disabled": True, "ready": True,
+                               "preview_id": "a" * 43, "expires_in": 120}, calls[1][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_construction_review_queue_uses_ticket_and_explicit_batch_confirmation(page, monkeypatch):
+    from PySide6.QtCore import Qt
+
+    fields = [{"name": name, "type": "json", "required": True}
+              for name in ("city_id", "city_name", "buildings", "shipments",
+                           "expand_overall", "wait_resources", "construction_queue",
+                           "total_time")]
+    page.set_capabilities([{
+        "name": "constructionList", "kind": "background_task",
+        "config_fields": fields,
+    }], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Olympia"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_buildings("alpha", 101, [{
+        "position": 2, "level": 10, "name": "Town Hall", "building": "townHall",
+        "busy": False, "can_upgrade": True,
+    }])
+    page.set_preflight({
+        "account_id": "alpha", "task": "constructionList",
+        "ready": True, "reason": "none", "unresolved_request": False,
+    })
+    button = page.construction_preview_button
+    assert button.isEnabled()
+    assert not page.start_button.isEnabled()
+    target = page.building_table.cellWidget(0, 4)
+    target.setValue(11)
+    choice = page.building_table.item(0, 0)
+    choice.setCheckState(Qt.Checked)
+    requests = []
+    page.construction_preview_requested.connect(
+        lambda aid, city, upgrades: requests.append((aid, city, upgrades))
+    )
+    page._request_construction_preview()
+    assert requests == [("alpha", 101, [{"position": 2, "target_level": 11}])]
+    assert not page.start_button.isEnabled()
+    config = {
+        "city_id": 101, "city_name": "Olympia", "buildings": [{
+            "position": 2, "level": 10, "name": "Town Hall",
+            "building": "townHall", "upgradeTo": 11, "isBusy": False,
+            "constructionTime": 90, "constructionTimes": [90],
+        }],
+        "shipments": [], "expand_overall": True, "wait_resources": False,
+        "construction_queue": [90], "total_time": 90,
+    }
+    page.set_construction_preview({
+        "account_id": "disabled", "city_id": 101, "ready": True,
+        "config": config, "costs": [400, 0, 0, 0, 0],
+        "missing": [0] * 5, "estimated_seconds": 90,
+    })
+    assert not page.start_button.isEnabled()
+    page.set_construction_preview({
+        "account_id": "alpha", "city_id": 101, "ready": True,
+        "config": config, "costs": [400, 0, 0, 0, 0],
+        "missing": [0] * 5, "estimated_seconds": 90,
+        "preview_id": "a" * 43, "expires_in": 120,
+    })
+    assert page.start_button.isEnabled()
+    assert "Actual IkaBot costs" in page.building_note.text()
+    emitted = []
+    page.reviewed_batch_requested.connect(lambda entries: emitted.append(entries))
+    page.confirm_box.setChecked(True)
+    assert page.queue_review_button.isEnabled()
+    page._queue_review()
+    assert not page.start_button.isEnabled()
+    assert page.review_queue_table.rowCount() == 1
+    assert not emitted
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.No)
+    page._start_reviewed_batch()
+    assert not emitted and page.review_queue_table.rowCount() == 1
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page._start_reviewed_batch()
+    assert emitted == [[{"account_id": "alpha", "task": "constructionList", "preview_id": "a" * 43}]]
+    assert page.review_queue_table.rowCount() == 0
+
+
+def test_station_editor_all_origins_and_both_categories(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "stationArmy"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}, {"id": 3, "name": "Another"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["destination_city_id"].setCurrentIndex(2)
+    page._form_inputs["ground"].setChecked(False)
+    page._form_inputs["all_origins"].setChecked(True)
+    page._form_inputs["both"].setChecked(True)
+    calls = []
+    page.station_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "destination_city_id": 2, "ground": True, "all_origins": True, "both": True})
+    assert not page.start_button.isEnabled()
+    result = {"account_id": "alpha", **calls[0][1], "city_name": "Origin", "destination_name": "Target",
+              "total": 20, "weight": 20, "capacity": 20, "ready": True,
+              "deployments": [{"city_id": i, "city_name": name, "ground": g, "total": 5,
+                               "weight": 10 if g else None, "capacity": 20 if g else None}
+                              for i, name in [(1, "Origin"), (3, "Another")] for g in (True, False)],
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_station_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_station_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    assert "Another → Target" in page.building_note.text()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_worker_editor_reviews_both_projects_in_selected_cities(page):
+    from PySide6.QtCore import Qt
+
+    from daedalus.engine_registry import inspect_engine
+
+    task = "modifyProduction"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Another"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["project"].setCurrentIndex(2)
+    page._form_inputs["percentage"].setValue(50)
+    page._form_inputs["additional_city_ids"].item(1).setCheckState(Qt.Checked)
+    calls = []
+    page.worker_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    _, _, draft, nonce = calls[-1]
+    assert draft == {"city_id": 1, "percentage": 50, "project": "both", "overcharge": False,
+                     "additional_city_ids": [2]}
+    rows = [{"city_id": cid, "city_name": name, "project": project,
+             "current": 25, "maximum": 100, "extra": 20, "target": 50}
+            for cid, name in ((1, "Town"), (2, "Another"))
+            for project in ("resource", "tradegood")]
+    page.set_worker_preview({"account_id": "alpha", "task": task, **draft, "city_name": "Town",
+                             "current": 100, "maximum": 400, "extra": 80, "target": 200,
+                             "assignments": rows, "ready": True,
+                             "preview_id": "a"*43, "expires_in": 120}, nonce)
+    assert page.start_button.isEnabled()
+    assert "Another" in page.building_note.text()
+    page._form_inputs["additional_city_ids"].item(1).setCheckState(Qt.Unchecked)
+    assert not page.start_button.isEnabled()
+
+
+def test_construction_supplier_choices_are_scoped_and_invalidate_ticket(page):
+    from PySide6.QtCore import Qt
+
+    fields = [{"name": name, "type": "json", "required": True}
+              for name in ("city_id", "city_name", "buildings", "shipments",
+                           "expand_overall", "wait_resources", "construction_queue", "total_time")]
+    page.set_capabilities([{"name": "constructionList", "kind": "background_task",
+                            "config_fields": fields}], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Target"}, {"id": 102, "name": "Supplier"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_buildings("alpha", 101, [{"position": 2, "level": 10, "name": "Town Hall",
+                                       "building": "townHall", "busy": False, "can_upgrade": True}])
+    page.set_preflight({"account_id": "alpha", "task": "constructionList",
+                        "ready": True, "reason": "none", "unresolved_request": False})
+    page.building_table.item(0,0).setCheckState(Qt.Checked)
+    page.building_table.cellWidget(0,4).setValue(11)
+    page.construction_supply_mode.setCurrentIndex(1)
+    assert page.construction_suppliers.count() == 1
+    page.construction_suppliers.item(0).setCheckState(Qt.Checked)
+    requests = []
+    page.construction_supply_preview_requested.connect(lambda *args: requests.append(args))
+    page._request_construction_preview()
+    assert requests[-1][3] == {"source_ids": [102], "useFreighters": False,
+                               "round_up": False, "supply_only": False}
+    page._construction_ticket = ("a"*43, 999999999)
+    page._construction_preview_ready = True
+    page.construction_round_up.setChecked(True)
+    assert page._construction_ticket is None and not page._construction_preview_ready
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert page.construction_suppliers.item(0).data(Qt.UserRole) == 101
+    assert page.construction_supply_mode.currentIndex() == 0

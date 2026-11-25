@@ -1,4 +1,6 @@
-from ikabot.helpers.decorators import configurator
+from ikabot.helpers.decorators import configurator, task
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -11,6 +13,106 @@ from ikabot.helpers.gui import *
 from ikabot.helpers.pedirInfo import *
 from ikabot.helpers.resources import *
 from ikabot.helpers.varios import *
+
+
+def _submit_donation(session, island_id, project, amount, *, city_id=None, reviewed=False):
+    """Shared upstream donation action, with no ambiguous transport retry for native plans."""
+    params = {
+        "islandId": island_id,
+        "type": project,
+        "action": "IslandScreen",
+        "function": "donate",
+        "donation": amount,
+        "backgroundView": "island",
+        "templateView": "resource",
+        "actionRequest": actionRequest,
+        "ajax": "1",
+    }
+    if reviewed:
+        params["cityId"] = city_id
+        return session.post(params=params, retry_on_failure=False)
+    return session.post(params=params)
+
+
+def preview_native_donation(session, city_id, project, amount):
+    """Read only the chosen owned city and its actual island project."""
+    if (type(city_id) is not int or not 0 < city_id < 10**12
+            or project not in ("resource", "tradegood")
+            or type(amount) is not int or not 1 <= amount <= 10**9):
+        raise ValueError("Invalid donation settings")
+    pedirInfo.ids_cache = None
+    owned = requireOwnCity(session, city_id, "Donation city")
+    city = getCityById(session, owned)
+    if str(city["id"]) != owned:
+        raise ValueError("Donation city mismatch")
+    island_id = str(city["islandId"])
+    if not island_id.isdigit() or int(island_id) <= 0:
+        raise ValueError("Invalid island")
+    island = getIsland(session.get(island_url + island_id))
+    resource = int(island["tipo"])
+    if not 1 <= resource <= 4:
+        raise ValueError("Invalid island resource")
+    url = ("view={}&type={}&islandId={}&cityId={}&backgroundView=island"
+           "&currentIslandId={}&actionRequest={}&ajax=1").format(
+               project, "resource" if project == "resource" else resource,
+               island_id, owned, island_id, actionRequest)
+    response = json.loads(session.post(url), strict=False)
+    background = response[0][1]["backgroundData"]
+    level = int(background[project + "Level"])
+    upgrading = int(background[project + "EndUpgradeTime"]) > 0
+    amounts = re.findall(r'<li class="wood">(.*?)</li>', response[1][1][1])
+    if len(amounts) not in (2, 3):
+        raise ValueError("Project contribution data unavailable")
+    required, donated = [int(re.sub(r"[^0-9]", "", value)) for value in amounts[:2]]
+    stock = int(city["availableResources"][0])
+    if not (0 <= stock <= 10**15 and 0 <= donated <= required <= 10**15
+            and 0 <= level <= 150):
+        raise ValueError("Invalid project data")
+    remaining = required - donated
+    return {
+        "city_id": city_id,
+        "city_name": str(city.get("name") or city.get("cityName") or "")[:100],
+        "project": project,
+        "project_name": str(tradegoods_names[0 if project == "resource" else resource])[:100],
+        "level": level, "upgrading": upgrading, "stock": stock,
+        "required": required, "donated": donated, "remaining": remaining,
+        "amount": amount,
+        "ready": not upgrading and amount <= min(stock, remaining),
+        "config": {"city_id": city_id, "project": project, "amount": amount,
+                   "expected_island": int(island_id), "expected_level": level,
+                   "expected_donated": donated, "expected_required": required},
+    }
+
+
+def prepare_donate(session, city_id, project, amount, expected_island,
+                   expected_level, expected_donated, expected_required):
+    """Reject a stale or unaffordable one-shot plan before issuing a mutation."""
+    expected = {
+        "city_id": city_id, "project": project, "amount": amount,
+        "expected_island": expected_island, "expected_level": expected_level,
+        "expected_donated": expected_donated, "expected_required": expected_required,
+    }
+    if any(type(expected[key]) is not int for key in (
+            "expected_island", "expected_level", "expected_donated", "expected_required")):
+        raise ValueError("Invalid reviewed donation plan")
+    plan = preview_native_donation(session, city_id, project, amount)
+    if not plan["ready"] or plan["config"] != expected:
+        raise ValueError("Donation review is stale or insufficient")
+    return plan["config"]
+
+
+@task("donate", prepare=prepare_donate)
+def execute_native_donation(session, city_id: int, project: str, amount: int,
+                            expected_island: int, expected_level: int,
+                            expected_donated: int, expected_required: int):
+    # Recheck again in the child immediately before the single upstream mutation.
+    prepare_donate(session, city_id, project, amount, expected_island,
+                   expected_level, expected_donated, expected_required)
+    session.setStatus("Submitting reviewed island donation")
+    _submit_donation(session, str(expected_island), project, amount,
+                     city_id=str(city_id), reviewed=True)
+    # A submitted request is not a verified game receipt. Never repeat it.
+    session.setStatus("Donation submitted; verify the island balance")
 
 
 @configurator
@@ -186,20 +288,7 @@ def donate(session, event, stdin_fd, predetermined_input):
             event.set()
             return
 
-        # do the donation
-        session.post(
-            params={
-                "islandId": islandId,
-                "type": donation_type,
-                "action": "IslandScreen",
-                "function": "donate",
-                "donation": amount,
-                "backgroundView": "island",
-                "templateView": "resource",
-                "actionRequest": actionRequest,
-                "ajax": "1",
-            }
-        )
+        _submit_donation(session, islandId, donation_type, amount)
 
         print("\nDonation successful.")
         enter()

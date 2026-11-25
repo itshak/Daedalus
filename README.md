@@ -40,7 +40,7 @@ Requires Python 3.11+ and, for OpenSpec, Node.js:
 
 ```bash
 python -m pip install -e ".[dev]"
-python -m pip install -e ./engine/ikabot pytest-mock
+python -m pip install -e ./engine/ikabot pytest-mock  # optional: install engine CLI; controller tests use checked-out engine
 python -m pytest -q tests
 python -m pytest -q engine/ikabot/tests/ikabot
 python -m ruff check src tests scripts

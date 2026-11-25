@@ -4,7 +4,7 @@ This is a display-only adapter. Actual task names, availability, allowed
 parameter keys, and execution remain defined by the backend/engine. In
 particular, adapters never generate game city identifiers or send requests.
 Only explicitly source-documented primitive fields may refine an AST "json"
-type into a native control; everything unknown keeps its advanced fallback.
+type into a native control; unknown required structures block desktop launch.
 The reference engine source retains upstream MIT attribution in engine/.
 """
 
@@ -17,23 +17,34 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "activateShrine": "Run the configured shrine schedule with explicit approval.",
     "alertAttacks": "Get notified about incoming attacks at a chosen polling interval.",
     "alertLowWine": "Alert before city wine supplies run out, with optional transfers.",
+    "vacationMode": "Activate vacation mode after stopping jobs and disabling recovery.",
     "attackBarbarians": "Execute an independently prepared barbarian attack plan.",
-    "autoBarbarians": "Repeat a reviewed barbarian mission configuration.",
-    "autoPirate": "Run a configured piracy schedule or mission.",
+    "autoBarbarians": "Run the upstream automatic attack preset on a selected island.",
+    "autoPirate": "Run a configured piracy schedule or mission; stop for human attention at a game challenge.",
     "buyResources": "Make market purchases using a reviewed offer and amount.",
     "consolidateResources": "Consolidate known resources to a target city.",
+    "stationArmy": "Move all available ground units, fleet, or both, from one or all owned source cities.",
+    "constructBuilding": "Build a new building in an eligible empty slot.",
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
+    "reorganizeCityBuildings": "Copy the layout of an owned template city to another owned city.",
+    "modifyProduction": "Set workers for forest, luxury-resource projects or both in selected owned cities.",
+    "modifyAcademyWorkers": "Set scientists in selected owned cities with verified academies.",
+    "modifyTempleWorkers": "Set priests in selected owned cities with verified temples.",
+    "donate": "Make one reviewed wood donation to an owned city’s island project.",
     "donationBot": "Coordinate supported island donations across configured cities.",
-    "dumpWorld": "Export an allowed portion of the world map.",
+    "dumpWorld": "Scan a reviewed map area. Completed aggregate CSV reports are available in Settings.",
     "loginDaily": "Perform the supported daily collection routine.",
-    "research": "Run automatic academy experiments with a validated research configuration.",
+    "research": "Choose an available study or run verified academy experiments.",
+    "testTelegramBot": "Send one fixed test message to the configured Telegram bot and chat. Credentials are shared by the login; no credentials are shown.",
+    "testDiscordBot": "Send one fixed test message to the configured Discord webhook. Credentials are shared by the login; no credentials are shown.",
     "resourceTransportManager": "Manage validated resource transport routes and intervals.",
     "searchForIslandSpaces": "Monitor island availability using a reviewed search configuration.",
     "sellResources": "Offer resources for sale using validated market criteria.",
+    "fillCityWarehouse": "Fill a chosen owned city with one resource from all other cities, up to available storage.",
     "sendResources": "Send resources along prepared, approved routes.",
     "tavernManager": "Balance tavern wine consumption in all cities, or a selected subset.",
-    "trainArmy": "Execute a reviewed army-training plan for one city.",
+    "trainArmy": "Review recruitment rounds and repetitions across selected owned cities.",
     "UpgradeUnits": "Upgrade military units using a prepared plan.",
     "webServer": "Run the engine web service only with an explicitly reviewed configuration.",
 }
@@ -44,6 +55,13 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("fillCityWarehouse", "destination_city"): {"type": "city_picker", "label": "Destination city"},
+    ("fillCityWarehouse", "resource"): {"type": "text", "label": "Resource",
+        "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
+        "choice_labels": ["Wood", "Wine", "Marble", "Crystal", "Sulfur"]},
+    ("fillCityWarehouse", "reviewed_sources"): {"type": "hidden_derived"},
+    ("fillCityWarehouse", "useFreighters"): {"type": "boolean", "label": "Use freighters"},
+
     ("buyResources", "city"): {
         "type": "market_buy", "label": "Buy at this trading post",
         "help": "Choose live seller offers from this account's trading-post city.",
@@ -71,6 +89,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("trainArmy", "countRepeat"): {"type": "hidden_derived"},
     ("trainArmy", "cityTrainings"): {"type": "hidden_derived"},
     ("trainArmy", "units"): {"type": "hidden_derived"},
+    ("trainArmy", "reviewed_jobs"): {"type": "hidden_derived"},
     ("UpgradeUnits", "jobs"): {
         "type": "workshop_jobs", "label": "Workshop upgrade plan",
         "help": "Choose a real city, then available unit and ship upgrades from its IkaBot workshop.",
@@ -80,7 +99,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     # independent engine-side validation.
     ("sendResources", "routes"): {
         "type": "shipment_routes", "label": "Shipments",
-        "help": "Add origin, destination and resource quantities for each route. Own cities only.",
+        "help": "Add origin, destination and resource quantities. Find external cities by island coordinates.",
     },
     ("consolidateResources", "limits"): {
         "type": "resource_limits", "label": "Retain in source cities",
@@ -104,6 +123,64 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "choice_labels": ["Trade ships", "Freighters", "Both fleets"],
         "label": "Fleet type",
     },
+    **{
+        (task_name, "city_id"): {"type": "city_picker", "label": "City"}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    **{
+        (task_name, "percentage"): {"type": "integer", "label": "Capacity percentage",
+                                    "minimum": 0, "maximum": 100, "default": 100}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    **{
+        (task_name, "expected"): {"type": "hidden_derived"}
+        for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
+    },
+    ("vacationMode", "city_id"): {"type": "city_picker", "label": "City (account identity)"},
+    ("vacationMode", "expected"): {"type": "hidden_derived"},
+    ("attackBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
+    ("attackBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
+    ("attackBarbarians", "waves"): {"type": "attack_waves", "label": "Attack waves", "required": True},
+    ("attackBarbarians", "expected"): {"type": "hidden_derived"},
+    ("autoBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
+    ("autoBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
+    ("autoBarbarians", "send_notifications"): {"type": "boolean", "label": "Send notifications", "default": False},
+    ("autoBarbarians", "expected"): {"type": "hidden_derived"},
+    ("stationArmy", "city_id"): {"type": "city_picker", "label": "Origin city"},
+    ("stationArmy", "destination_city_id"): {"type": "city_picker", "label": "Destination city"},
+    ("stationArmy", "ground"): {"type": "boolean", "label": "Move ground troops (unchecked: fleet)", "default": True},
+    ("stationArmy", "all_origins"): {"type": "boolean", "label": "Include all other owned cities", "default": False},
+    ("stationArmy", "both"): {"type": "boolean", "label": "Move both ground troops and fleet", "default": False},
+    ("stationArmy", "expected"): {"type": "hidden_derived"},
+    ("constructBuilding", "city_id"): {"type": "city_picker", "label": "Construction city"},
+    ("constructBuilding", "position"): {"type": "build_choice", "label": "Available building"},
+    ("constructBuilding", "building_id"): {"type": "hidden_derived"},
+    ("constructBuilding", "expected"): {"type": "hidden_derived"},
+    ("reorganizeCityBuildings", "city_id"): {"type": "city_picker", "label": "Target city"},
+    ("reorganizeCityBuildings", "template_city_id"): {"type": "city_picker", "label": "Template city"},
+    ("reorganizeCityBuildings", "expected"): {"type": "hidden_derived"},
+    **{(task_name, "additional_city_ids"): {"type": "city_list", "label": "Additional owned cities (optional)", "required": False}
+       for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")},
+    ("modifyProduction", "project"): {
+        "type": "text", "choices": ["resource", "tradegood", "both"],
+        "choice_labels": ["Forest", "Luxury resource", "Both resource projects"], "label": "Resource production",
+    },
+    ("modifyProduction", "overcharge"): {
+        "type": "boolean", "default": False, "label": "Use overcharge (only at 100%)",
+    },
+    ("donate", "city_id"): {"type": "city_picker", "label": "Donation city"},
+    ("donate", "project"): {
+        "type": "text", "choices": ["resource", "tradegood"],
+        "choice_labels": ["Forest", "Luxury resource"], "label": "Island project",
+    },
+    ("donate", "amount"): {
+        "type": "integer", "label": "Wood to donate", "minimum": 1,
+        "maximum": 1000000000, "explicit_input": True,
+    },
+    ("donate", "expected_island"): {"type": "hidden_derived"},
+    ("donate", "expected_level"): {"type": "hidden_derived"},
+    ("donate", "expected_donated"): {"type": "hidden_derived"},
+    ("donate", "expected_required"): {"type": "hidden_derived"},
     ("donationBot", "cities_dict"): {
         "type": "donation_policies", "label": "Donation by city",
         "help": "Choose each city's island project and share or amount.",
@@ -135,7 +212,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Select one or more of your own source cities.",
     },
     ("resourceTransportManager", "destination_city"): {
-        "type": "city_picker", "label": "Receiving city",
+        "type": "external_destination", "label": "Receiving city",
     },
     ("resourceTransportManager", "origin_city"): {
         "type": "city_picker", "label": "Sending city",
@@ -155,7 +232,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("resourceTransportManager", "island"): {
         "type": "hidden_derived",
-        "help": "External destination islands need a separately verified lookup and are expert-only.",
+        "help": "Derived from the verified external recipient.",
     },
     ("resourceTransportManager", "interval_hours"): {
         "type": "integer", "minimum": 0, "maximum": 720,
@@ -168,15 +245,18 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
                           "For every shipment"],
         "label": "Notifications",
     },
+    ("resourceTransportManager", "recipient"): {"type": "hidden_derived"},
     ("resourceTransportManager", "info"): {"type": "hidden_derived"},
     ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
     ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},
+    ("research", "study_choice"): {"type": "hidden_derived"},
     ("research", "qty"): {"type": "hidden_derived"},
     ("research", "mode"): {"type": "hidden_derived"},
     ("research", "experiments"): {"type": "hidden_derived"},
     ("research", "automatic"): {"type": "hidden_derived"},
     ("research", "cities"): {"type": "hidden_derived"},
     ("research", "info"): {"type": "hidden_derived"},
+    ("tavernManager", "fixed_servings"): {"type": "hidden_derived"},
     ("tavernManager", "cities"): {"type": "hidden_derived"},
     ("activateMiracle", "wonder"): {
         "type": "miracle_temple", "label": "Actual owned wonder temple",
@@ -197,7 +277,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("activateShrine", "wait_time"): {"type": "hidden_derived"},
     ("searchForIslandSpaces", "islandList"): {
         "type": "island_list", "label": "Islands to monitor",
-        "help": "Optionally select islands already hosting your cities; otherwise IkaBot searches all owned islands.",
+        "help": "Choose verified owned or external islands, or explicitly monitor all owned islands.",
     },
     ("searchForIslandSpaces", "time"): {
         "type": "integer", "minimum": 3, "maximum": 1440,
@@ -215,14 +295,16 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("dumpWorld", "waiting_time"): {
         "type": "number", "label": "Delay between island requests",
-        "minimum": 0.1, "maximum": 60.0, "suffix": " s",
+        "minimum": 1.0, "maximum": 10.0, "suffix": " s",
         "help": "Avoid aggressive world requests. Default is 1.5 seconds.",
     },
+    ("dumpWorld", "managed_report_id"): {"type": "hidden_derived"},
     ("dumpWorld", "show_progress"): {"type": "hidden_derived"},
     ("autoPirate", "pirateCount"): {
         "type": "piracy_missions", "label": "Piracy mission planner",
         "help": "Choose a real owned fortress, missions and schedule using verified game levels.",
     },
+    ("autoPirate", "manual_challenge"): {"type": "hidden_derived"},
     ("autoPirate", "pirateSchedule"): {"type": "hidden_derived"},
     ("autoPirate", "pirateMissionChoice"): {"type": "hidden_derived"},
     ("autoPirate", "pirateMissionDayChoice"): {"type": "hidden_derived"},
@@ -255,6 +337,9 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Optional tasks: collect resource favour, visit information pages, stay online or collect completed tasks.",
     },
     # These are literal upstream enums in distributeResources.py, not guesses.
+    ("buyResources", "reviewed_market"): {"type": "hidden_derived"},
+    ("sellResources", "reviewed_market"): {"type": "hidden_derived"},
+    ("distributeResources", "reviewed_routes"): {"type": "hidden_derived"},
     ("distributeResources", "resource"): {
         "type": "text",
         "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
@@ -273,13 +358,13 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Leave all unchecked to use every city. Choose at least two for a custom subset.",
     },
     ("tavernManager", "cities_ids"): {
-        "type": "tavern_cities", "label": "Tavern equilibrium",
+        "type": "tavern_cities", "label": "Tavern management",
         "help": "Use actual wine, population and tavern statuses to choose managed cities.",
     },
     ("tavernManager", "run_hours"): {"type": "hidden_derived"},
     ("tavernManager", "notification_mode"): {"type": "hidden_derived"},
     ("research", "cities_ids"): {
-        "type": "academy_research", "label": "Academy experiments",
+        "type": "academy_research", "label": "Research and academy experiments",
         "help": "Choose actual academies; see current crystal and cooldown.",
     },
     ("alertLowWine", "hours"): {
@@ -388,7 +473,7 @@ def task_explanation(task_name: str) -> str:
     return TASK_DESCRIPTIONS.get(
         task_name,
         "Review the registered engine parameters. Complex tasks may require an "
-        "existing prepared configuration.",
+        "dedicated native editor before starting.",
     )
 
 
@@ -400,7 +485,7 @@ def expert_configuration_needed(fields: list[dict[str, object]]) -> bool:
     )
 
 
-# Intentionally allow-listed primitive display values. Advanced free-form values
+# Intentionally allow-listed primitive display values. Internal structured values
 # may contain private game data; do not echo them into dialogs or logs.
 _SUMMARY_SAFE_SCALARS = frozenset({
     "minutes", "hours", "run_hours", "auto_transfer", "transfer_amount",
@@ -411,6 +496,14 @@ _SUMMARY_SAFE_SCALARS = frozenset({
 
 def configuration_summary(config: dict[str, object]) -> str:
     """Human-readable, secret-free summary; never print arbitrary game data."""
+    if set(config) == {"study_choice"}:
+        from daedalus.research_choices import validate_study_choice
+
+        try:
+            choice = validate_study_choice(config["study_choice"])
+            return f"Study: {choice['name']} (one-time submission; verify advisor afterward)"
+        except ValueError:
+            return "Invalid research advisor choice"
     if not config:
         return "Use registered defaults"
     items = []
@@ -423,3 +516,7 @@ def configuration_summary(config: dict[str, object]) -> str:
         else:
             items.append(f"{title}: configured")
     return ", ".join(items)[:600]
+
+
+# Only account-independent settings may be reused across account boundaries.
+BATCH_TASKS = frozenset({"alertAttacks", "alertLowWine"})

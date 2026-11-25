@@ -54,3 +54,5 @@ Record each row as `pass`, `fail` or `not-tested`, including the UTC timestamp, 
 The archived implementation OpenSpec record does not close this checklist or
 authorize cutover. Manual login, approval and observation of real game effects
 cannot be replaced with an automated simulation.
+
+Owner update (2026-11-26): manual Mac installation/UI and live-account checks for the cross-platform parity milestone are deferred to issue #60, not marked passed. Automated CI, packaging and safe deployment checks remain required.

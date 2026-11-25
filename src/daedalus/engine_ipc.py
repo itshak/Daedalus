@@ -17,6 +17,27 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.accounts import Account
+from daedalus.reviewed_operations import (
+    validate_attack_inventory,
+    validate_attack_plan,
+    validate_build_inventory,
+    validate_build_plan,
+    validate_grind_plan,
+    validate_island_destinations,
+    validate_layout_plan,
+    validate_shipment_plan,
+    validate_station_plan,
+    validate_vacation_plan,
+    validate_worker_plan,
+    validated_attack_draft,
+    validated_build_draft,
+    validated_coordinates,
+    validated_grind_draft,
+    validated_layout_draft,
+    validated_shipment_draft,
+    validated_station_draft,
+    validated_worker_draft,
+)
 from daedalus.warehouse import (
     RESOURCES,
     CityWarehouseSnapshot,
@@ -28,12 +49,12 @@ from daedalus.warehouse import (
 _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
-    "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
+    "ping", "list_sessions", "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
-    "list_miracles_existing", "shrine_status_existing",
+    "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
     "list_pirate_fortresses_existing",
     "military_overview_existing", "ship_movements_existing",
 })
@@ -128,19 +149,28 @@ class ExistingIPCClient:
     def request(self, action: str, *, account: Account | None = None,
                 city_id: int | None = None,
                 upgrades: list[dict[str, int]] | None = None,
+                construction_supply: dict[str, object] | None = None,
                 train_troops: bool | None = None,
                 resource_type: int | None = None,
-                market_side: str | None = None) -> dict[str, Any]:
+                market_side: str | None = None,
+                project: str | None = None, amount: int | None = None,
+                worker_task: str | None = None, worker_draft: dict[str, object] | None = None,
+                template_city_id: int | None = None, build_draft: dict[str, int] | None = None,
+                station_draft: dict[str, object] | None = None,
+                grind_draft: dict[str, object] | None = None,
+                attack_draft: dict[str, object] | None = None,
+                coordinates: tuple[int, int] | None = None,
+                shipment_draft: dict[str, object] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
-            "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
+            "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
-            "list_miracles_existing", "shrine_status_existing",
+            "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
             "list_pirate_fortresses_existing",
     "military_overview_existing", "ship_movements_existing",
         } and account is None:
@@ -151,6 +181,8 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
+                      "preview_donation_existing", "preview_workers_existing", "preview_layout_existing",
+                      "list_build_options_existing", "preview_build_existing", "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -166,6 +198,10 @@ class ExistingIPCClient:
                             or type(upgrade["target_level"]) is not int):
                         raise ValueError("Invalid construction upgrade")
                 payload["upgrades"] = upgrades
+                if construction_supply is not None:
+                    from daedalus.reviewed_operations import validated_construction_supply
+
+                    payload["supply"] = validated_construction_supply(city_id, construction_supply)
             elif upgrades is not None:
                 raise ValueError("Upgrades are allowed only in a construction preview")
             if action == "list_trainables_existing":
@@ -185,7 +221,55 @@ class ExistingIPCClient:
         elif (city_id is not None or upgrades is not None or train_troops is not None
               or resource_type is not None or market_side is not None):
             raise ValueError("City argument is not supported for this IPC action")
+        if action == "preview_donation_existing":
+            if project not in ("resource", "tradegood") or type(amount) is not int or not 1 <= amount <= 10**9:
+                raise ValueError("Invalid donation draft")
+            payload.update(project=project, amount=amount)
+        elif project is not None or amount is not None:
+            raise ValueError("Donation fields are allowed only for a donation preview")
+        if action == "preview_workers_existing":
+            payload.update(task=worker_task, **validated_worker_draft(worker_task, worker_draft))
+        elif worker_task is not None or worker_draft is not None:
+            raise ValueError("Worker fields are allowed only for a worker preview")
+        if action == "preview_layout_existing":
+            payload["template_city_id"] = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        elif template_city_id is not None:
+            raise ValueError("Unexpected layout template")
+        if action == "preview_build_existing":
+            payload.update(validated_build_draft(build_draft))
+        elif build_draft is not None:
+            raise ValueError("Unexpected new building draft")
+        if action == "preview_station_existing":
+            payload.update(validated_station_draft(city_id, station_draft))
+        elif station_draft is not None:
+            raise ValueError("Unexpected deployment draft")
+        if action == "preview_grind_existing":
+            payload.update(validated_grind_draft(city_id, grind_draft))
+        elif grind_draft is not None:
+            raise ValueError("Unexpected automatic attack draft")
+        if action == "preview_attack_existing":
+            payload.update(validated_attack_draft(city_id, attack_draft))
+        elif attack_draft is not None:
+            raise ValueError("Unexpected manual attack draft")
+        if construction_supply is not None and action != "preview_construction_existing":
+            raise ValueError("Unexpected construction supply")
+        if action == "island_destinations_existing":
+            if not isinstance(coordinates, tuple) or len(coordinates) != 2:
+                raise ValueError("Choose an island")
+            payload["x"], payload["y"] = validated_coordinates(*coordinates)
+        elif coordinates is not None:
+            raise ValueError("Unexpected island coordinates")
+        if action == "preview_shipments_existing":
+            payload.update(validated_shipment_draft(shipment_draft))
+        elif shipment_draft is not None:
+            raise ValueError("Unexpected shipment draft")
         return self._exchange(payload, read_timeout=60.0 if action in {
+            "preview_shipments_existing", "island_destinations_existing",
+            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
+            "list_build_options_existing", "preview_build_existing",
+            "preview_layout_existing",
+            "preview_workers_existing",
+            "preview_donation_existing",
             "preview_construction_existing", "military_overview_existing",
             "ship_movements_existing",
         } else 8.0)
@@ -305,6 +389,123 @@ class ExistingIPCClient:
             )
         return result
 
+    def fill_preview(self, account: Account, draft):
+        from daedalus.fill_warehouse_review import draft_fill, validate_fill
+
+        clean = draft_fill(draft)
+        owned = {r["id"] for r in self.cities(account)}
+        if clean["destination_city"] not in owned or not account.enabled:
+            raise ValueError("Choose an owned destination")
+        response = self._exchange({"action": "preview_fill_existing", "world": account.world,
+                                   "player": account.player, "draft": clean}, read_timeout=120)
+        if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
+            raise EngineIPCUnavailable("Invalid fill scope")
+        try:
+            result = validate_fill(clean, response.get("result"))
+            if {r["city_id"] for r in result["sources"]} != owned - {clean["destination_city"]}:
+                raise ValueError("Owned city scope changed")
+            return result
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid fill observation") from exc
+
+    def recurring_preview(self, account: Account, task, draft):
+        from daedalus.recurring_review import (
+            RECURRING_TASKS,
+            recurring_draft,
+            route_scope,
+            validate_recurring,
+        )
+
+        if task not in RECURRING_TASKS - {"autoPirate"} or not account.enabled:
+            raise ValueError("Unsupported policy")
+        clean = recurring_draft(task, draft)
+        inventory = self.cities(account)
+        owned = {r["id"] for r in inventory}
+        if task in {"consolidateResources", "resourceTransportManager"}:
+            sources, destinations = route_scope(task, clean)
+            if any(i not in owned for i in sources) or any((i in owned) == ("recipient" in clean) for i in destinations):
+                raise ValueError("Invalid recipient scope")
+        if task == "donationBot" and not set(map(int, clean["cities_dict"])) <= owned:
+            raise ValueError("Invalid donation scope")
+        response = self._exchange({"action": "preview_recurring_existing", "task": task,
+                                   "world": account.world, "player": account.player, "draft": clean},
+                                  read_timeout=120)
+        if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
+            raise EngineIPCUnavailable("Invalid recurring scope")
+        try:
+            result = validate_recurring(task, clean, response.get("result"))
+            if (task == "searchForIslandSpaces" and not clean["islandList"]
+                    and set(result["islands"]) != {r["coords"] for r in inventory}):
+                raise ValueError("Owned island scope changed")
+            return result
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid recurring observation") from exc
+
+    def native_reward_distribution_preview(self, account: Account, task, draft):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_daily,
+            validate_distribution,
+        )
+        from daedalus.market_review import market_draft, validate_market_observation
+
+        if task not in ("loginDaily", "distributeResources", "buyResources", "sellResources") or not account.enabled:
+            raise ValueError("Unsupported preview")
+        clean = (daily_draft(draft) if task == "loginDaily" else distribution_draft(draft)
+                 if task == "distributeResources" else market_draft(task, draft))
+        owned = {r["id"] for r in self.cities(account)}
+        ids = ([clean[k] for k in ("wine_city", "wood_city", "luxury_city") if clean[k] is not None]
+               if task == "loginDaily" else clean["cities_ids"] if task == "distributeResources"
+               else [int((clean.get("city") or clean["city_to_buy_from"])["id"])])
+        if any(i not in owned for i in ids):
+            raise ValueError("Choose owned cities")
+        action = ("preview_daily_rewards_existing" if task == "loginDaily" else "preview_distribution_existing"
+                  if task == "distributeResources" else "preview_market_existing")
+        data = self._exchange({"action": action, "world": account.world, "player": account.player,
+                               "draft": clean, "task": task}, read_timeout=120.0)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid preview scope")
+        try:
+            observation = data["result"]
+            if task == "loginDaily":
+                validate_daily(clean, observation)
+            elif task == "distributeResources":
+                validate_distribution(clean, observation)
+            else:
+                validate_market_observation(task, clean, observation)
+            return observation
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid operation preview") from exc
+
+    def shipment_preview(self, account: Account, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_shipment_draft(draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if any(r["from"] not in owned or ((r["to"] in owned) == ("recipient" in r))
+               for r in clean["routes"]):
+            raise ValueError("Choose verified shipment cities")
+        data = self.request("preview_shipments_existing", account=account, shipment_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid shipment scope")
+        try:
+            return {"account_id": account.id, **validate_shipment_plan(clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid shipment preview") from exc
+
+    def island_destinations(self, account: Account, x: int, y: int) -> dict[str, object]:
+        validated_coordinates(x, y)
+        result = self.request("island_destinations_existing", account=account, coordinates=(x, y))
+        if (str(result.get("world", "")).casefold() != account.world.casefold()
+                or str(result.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid island scope")
+        try:
+            rows = validate_island_destinations(x, y, result)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid island inventory") from exc
+        return {"account_id": account.id, "x": x, "y": y, "cities": rows}
+
     def buildings(self, account: Account, city_id: int) -> list[dict[str, object]]:
         """Return sanitized existing-session building slots from an owned city."""
         if type(city_id) is not int or city_id <= 0:
@@ -345,17 +546,197 @@ class ExistingIPCClient:
             })
         return validated
 
+    def vacation_preview(self, account: Account, city_id: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("preview_vacation_existing", account=account, city_id=city_id)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid vacation preview scope")
+        try:
+            return {"account_id": account.id, **validate_vacation_plan(city_id, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid vacation preview") from exc
+
+    def attack_inventory(self, account: Account, city_id: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("list_attack_units_existing", account=account, city_id=city_id)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid attack inventory scope")
+        try:
+            return {"account_id": account.id, **validate_attack_inventory(city_id, data.get("inventory"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid attack inventory") from exc
+
+    def attack_preview(self, account: Account, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_attack_draft(city_id, draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or clean["target_city_id"] not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_attack_existing", account=account, city_id=city_id, attack_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid manual attack scope")
+        try:
+            return {"account_id": account.id, **validate_attack_plan(city_id, clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid manual attack plan") from exc
+
+    def grind_preview(self, account: Account, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_grind_draft(city_id, draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or clean["target_city_id"] not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_grind_existing", account=account, city_id=city_id, grind_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid automatic attack preview scope")
+        try:
+            return {"account_id": account.id, **validate_grind_plan(city_id, clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid automatic attack plan") from exc
+
+    def station_preview(self, account: Account, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_station_draft(city_id, draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or clean["destination_city_id"] not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_station_existing", account=account, city_id=city_id, station_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid deployment preview scope")
+        try:
+            plan = validate_station_plan(city_id, clean, data.get("plan"))
+            if clean.get("all_origins") and {r["city_id"] for r in plan["deployments"]} != owned - {clean["destination_city_id"]}:
+                raise ValueError("Owned city inventory changed")
+            return {"account_id": account.id, **plan}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid deployment plan") from exc
+
+    def build_options(self, account: Account, city_id: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("list_build_options_existing", account=account, city_id=city_id)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid building inventory scope")
+        try:
+            return {"account_id": account.id, **validate_build_inventory(city_id, data.get("inventory"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid building inventory") from exc
+
+    def build_preview(self, account: Account, city_id: int, draft: dict[str, int]) -> dict[str, object]:
+        clean = validated_build_draft(draft)
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("preview_build_existing", account=account, city_id=city_id, build_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid building preview scope")
+        try:
+            return {"account_id": account.id, **validate_build_plan(city_id, clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid building plan") from exc
+
+    def layout_preview(self, account: Account, city_id: int, template_city_id: int) -> dict[str, object]:
+        template = validated_layout_draft(city_id, {"template_city_id": template_city_id})
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or template not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_layout_existing", account=account,
+                            city_id=city_id, template_city_id=template)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid layout preview scope")
+        try:
+            plan = validate_layout_plan(city_id, template, data.get("plan"))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid layout preview") from exc
+        return {"account_id": account.id, **plan}
+
+    def worker_preview(self, account: Account, city_id: int, task: str,
+                       draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_worker_draft(task, draft)
+        owned = {row["id"] for row in self.cities(account)}
+        additional = clean.get("additional_city_ids", [])
+        if city_id not in owned or city_id in additional or not set(additional) <= owned:
+            raise ValueError("Worker city is not owned by this account")
+        data = self.request("preview_workers_existing", account=account,
+                            city_id=city_id, worker_task=task, worker_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid worker preview scope")
+        try:
+            plan = validate_worker_plan(task, city_id, clean, data.get("plan"))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid worker preview") from exc
+        return {"account_id": account.id, **plan}
+
+    def donation_preview(self, account: Account, city_id: int,
+                         project: str, amount: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Donation city is not owned by this account")
+        data = self.request("preview_donation_existing", account=account,
+                            city_id=city_id, project=project, amount=amount)
+        plan = data.get("plan")
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(plan, dict)
+                or plan.get("city_id") != city_id or plan.get("project") != project
+                or plan.get("amount") != amount):
+            raise EngineIPCUnavailable("Invalid donation preview scope")
+        for key in ("city_name", "project_name"):
+            if not isinstance(plan.get(key), str) or not 0 < len(plan[key]) <= 100:
+                raise EngineIPCUnavailable("Invalid donation name")
+        for key in ("stock", "required", "donated", "remaining", "level"):
+            if type(plan.get(key)) is not int or not 0 <= plan[key] <= 10**15:
+                raise EngineIPCUnavailable("Invalid donation observation")
+        if (type(plan.get("upgrading")) is not bool or type(plan.get("ready")) is not bool
+                or plan["remaining"] != plan["required"] - plan["donated"]
+                or plan["ready"] != (not plan["upgrading"]
+                                     and amount <= min(plan["stock"], plan["remaining"]))):
+            raise EngineIPCUnavailable("Invalid donation eligibility")
+        config = plan.get("config")
+        if (not isinstance(config, dict)
+                or set(config) != {"city_id", "project", "amount", "expected_island",
+                                   "expected_level", "expected_donated", "expected_required"}
+                or type(config.get("expected_island")) is not int
+                or not 0 < config["expected_island"] < 10**12
+                or config != {"city_id": city_id, "project": project, "amount": amount,
+                              "expected_island": config["expected_island"],
+                              "expected_level": plan["level"],
+                              "expected_donated": plan["donated"],
+                              "expected_required": plan["required"]}):
+            raise EngineIPCUnavailable("Invalid reviewed donation config")
+        return {"account_id": account.id, **{k: plan[k] for k in (
+            "city_id", "city_name", "project", "project_name", "amount", "stock",
+            "required", "donated", "remaining", "level", "upgrading", "ready", "config",
+        )}}
+
     def construction_preview(
         self, account: Account, city_id: int, upgrades: list[dict[str, int]],
+        *, supply: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """One strictly read-only engine calculation, bound to an owned city."""
         if type(city_id) is not int or city_id <= 0:
             raise ValueError("Invalid preview city")
-        if city_id not in {row["id"] for row in self.cities(account)}:
+        from daedalus.reviewed_operations import (
+            validate_construction_supply,
+            validated_construction_supply,
+        )
+
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned:
             raise ValueError("Construction city is not owned by this account")
+        if supply is not None:
+            supply = validated_construction_supply(city_id, supply)
+            if not set(supply["source_ids"]) <= owned:
+                raise ValueError("Construction supplier is not owned")
         data = self.request(
             "preview_construction_existing", account=account, city_id=city_id,
-            upgrades=upgrades,
+            upgrades=upgrades, construction_supply=supply,
         )
         if (str(data.get("world", "")).casefold() != account.world.casefold()
                 or str(data.get("username", "")).casefold() != account.player.casefold()
@@ -377,13 +758,14 @@ class ExistingIPCClient:
             "city_id", "city_name", "buildings", "shipments", "expand_overall",
             "wait_resources", "construction_queue", "total_time",
         }
+        if supply is not None:
+            expected_keys.add("supply_review")
         if (not isinstance(config, dict) or set(config) != expected_keys
                 or config.get("city_id") != city_id
                 or not isinstance(config.get("city_name"), str)
                 or not 0 < len(config["city_name"]) <= 100
-                or config.get("shipments") != []
-                or config.get("expand_overall") is not True
-                or config.get("wait_resources") is not False
+                or (supply is None and (config.get("shipments") != []
+                    or config.get("expand_overall") is not True or config.get("wait_resources") is not False))
                 or not isinstance(config.get("buildings"), list)
                 or not 0 < len(config["buildings"]) <= 12
                 or not isinstance(config.get("construction_queue"), list)
@@ -392,6 +774,14 @@ class ExistingIPCClient:
                 or type(config.get("total_time")) is not int
                 or config["total_time"] < 0):
             raise EngineIPCUnavailable("IkaBot returned an invalid prepared plan")
+        extra = {}
+        if supply is not None:
+            try:
+                extra["supply"] = validate_construction_supply(city_id, supply, numbers, plan, config)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise EngineIPCUnavailable("Invalid construction supply preview") from exc
+        elif "supply" in plan:
+            raise EngineIPCUnavailable("Unexpected construction supply preview")
         allowed_building_keys = {
             "position", "name", "building", "level", "isBusy", "upgradeTo",
             "constructionTime", "constructionTimes",
@@ -421,7 +811,7 @@ class ExistingIPCClient:
             raise EngineIPCUnavailable("IkaBot returned an invalid construction time")
         return {
             "account_id": account.id, "city_id": city_id, "ready": plan["ready"],
-            "config": config, "estimated_seconds": seconds, **numbers,
+            "config": config, "estimated_seconds": seconds, **numbers, **extra,
         }
 
     def workshop_upgrades(self, account: Account, city_id: int) -> dict[str, object]:
@@ -655,7 +1045,15 @@ class ExistingIPCClient:
                 "city_id": ident, "city_name": name, "position": position,
                 "crystal": crystal, "cooldown": cooldown, "can_experiment_now": ready,
             })
-        return {"account_id": account.id, "academies": result}
+        response = {"account_id": account.id, "academies": result}
+        if "studies" in data:
+            from daedalus.research_choices import validate_studies
+
+            try:
+                response["studies"] = validate_studies(data["studies"])
+            except ValueError as exc:
+                raise EngineIPCUnavailable("Invalid research advisor inventory") from exc
+        return response
 
     def taverns(self, account: Account) -> dict[str, object]:
         """Account-local wine, servings and satisfaction observations."""
@@ -704,6 +1102,14 @@ class ExistingIPCClient:
                 "satisfaction": satisfaction,
                 "population": population, "capacity": capacity,
             })
+            if "serving_options" in record:
+                from daedalus.tavern_choices import validate_serving_options
+
+                try:
+                    result[-1]["serving_options"] = validate_serving_options(
+                        record["serving_options"], servings, consumption)
+                except ValueError as exc:
+                    raise EngineIPCUnavailable("Invalid tavern serving choices") from exc
         return {"account_id": account.id, "taverns": result}
 
     def miracles(self, account: Account) -> dict[str, object]:
@@ -750,6 +1156,134 @@ class ExistingIPCClient:
                 "available": enabled, "available_in_seconds": seconds,
             })
         return {"account_id": account.id, "miracles": result}
+
+    def notification_settings_begin(self, account: Account, provider: str) -> dict[str, object]:
+        from daedalus.notification_settings import PROVIDERS, validate_challenge
+
+        if not account.enabled or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        reply = self._exchange({"action": "notification_settings_begin_existing", "world": account.world,
+                                "player": account.player, "account_id": account.id, "provider": provider,
+                                "confirmed_global": True})
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid provider scope")
+        try:
+            return validate_challenge(reply.get("result"), account.id, provider)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid provider configuration challenge") from exc
+
+    def notification_settings_complete(self, account: Account, provider: str,
+                                       envelope: dict[str, object]) -> dict[str, object]:
+        from daedalus.notification_settings import PROVIDERS, validate_envelope, validate_receipt
+
+        if not account.enabled or provider not in PROVIDERS:
+            raise ValueError("Invalid provider scope")
+        reply = self._exchange({"action": "notification_settings_complete_existing", "world": account.world,
+                                "player": account.player, "account_id": account.id, "provider": provider,
+                                "envelope": validate_envelope(envelope)}, read_timeout=30.0)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid provider scope")
+        try:
+            return validate_receipt(reply.get("result"), account.id, provider)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid provider configuration receipt") from exc
+
+    def proxy_profiles(self, account: Account, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_draft, validate_proxy_result
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "proxy_profiles_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="configure_proxy_profile_existing", draft=validate_proxy_draft(draft))
+        reply = self._exchange(payload, read_timeout=20.0)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid network profile scope")
+        try:
+            return validate_proxy_result({**reply["result"], "account_id": account.id}, account.id, draft)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid network profile result") from exc
+
+    def challenge_policy(self, account: Account, draft=None) -> dict[str, object]:
+        from daedalus.challenge_policy import (
+            validate_challenge_policy,
+            validate_challenge_policy_draft,
+        )
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "challenge_policy_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="set_challenge_policy_existing", draft=validate_challenge_policy_draft(draft))
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid human challenge policy scope")
+        try:
+            value = validate_challenge_policy({**reply["result"], "account_id": account.id}, account.id)
+            if draft is not None and value["mode"] != draft["mode"]:
+                raise ValueError("Human challenge policy result unconfirmed")
+            return value
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid human challenge policy") from exc
+
+    def extension_settings(self, account: Account, draft=None) -> dict[str, object]:
+        from daedalus.extension_settings import validate_extension_draft, validate_extension_status
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "extension_status_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="extension_registration_existing", draft=validate_extension_draft(draft))
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid extension scope")
+        try:
+            result = validate_extension_status({**reply["result"], "account_id": account.id}, account.id)
+            if draft is not None and not any(r["id"] == draft["id"] and r["sha256"] == draft["sha256"]
+                    and r["registered"] is draft["registered"] for r in result["extensions"]):
+                raise ValueError("Registration result unconfirmed")
+            return result
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid extension status") from exc
+
+    def world_reports(self, account: Account, report_id=None, offset=0) -> dict[str, object]:
+        from daedalus.world_reports import REPORT_ID, validate_world_page, validate_world_reports
+
+        if not account.enabled or (report_id is not None and (
+                not isinstance(report_id, str) or not REPORT_ID.fullmatch(report_id)
+                or type(offset) is not int or not 0 <= offset <= 10201)):
+            raise ValueError("Invalid map report scope")
+        payload = {"action": "world_reports_existing", "world": account.world, "player": account.player}
+        if report_id is not None:
+            payload.update(action="world_report_page_existing", report_id=report_id, offset=offset)
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid map report scope")
+        value = {**reply["result"], "account_id": account.id}
+        try:
+            return (validate_world_reports(value, account.id) if report_id is None else
+                    validate_world_page(value, account.id, report_id, offset))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid aggregate map report") from exc
+
+    def administrative_status(self, account: Account) -> dict[str, object]:
+        from daedalus.admin_status import scoped_admin_status
+
+        data = self.request("administrative_status_existing", account=account)
+        try:
+            return scoped_admin_status(account, data)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid account-scoped administrative status") from exc
 
     def shrine_status(self, account: Account) -> dict[str, object]:
         """Verified account-local Shrine of Olympus, never a guessed favour balance."""
@@ -1053,8 +1587,13 @@ class ControlledIPCClient(ExistingIPCClient):
                 or status not in {"running", "finished", "stopping", "stopped"}
             ):
                 raise EngineIPCUnavailable("Invalid engine task state")
+            outcome = item.get("outcome")
+            if outcome is not None and (task not in {"testTelegramBot", "testDiscordBot"}
+                    or status != "finished" or outcome not in {"accepted", "failed_or_uncertain"}):
+                raise EngineIPCUnavailable("Invalid notification result")
             cleaned.append({"task_id": task_id, "task": task, "status": status,
-                            "pid": item.get("pid"), "started_at": item.get("started_at")})
+                            "pid": item.get("pid"), "started_at": item.get("started_at"),
+                            **({"outcome": outcome} if outcome is not None else {})})
         return cleaned
 
     def stop_managed_task(self, account: Account, task_id: str) -> dict[str, object]:

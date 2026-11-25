@@ -8,18 +8,22 @@ result before starting any task.
 
 from __future__ import annotations
 
+import uuid
+
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import ComboBox, PushButton, SpinBox
+from qfluentwidgets import CheckBox, ComboBox, PushButton, SpinBox
 
 _RESOURCES = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
 _MAX_AMOUNT = 1_000_000_000
@@ -60,6 +64,153 @@ def _city_picker(cities: list[dict[str, object]], label: str) -> ComboBox:
     return picker
 
 
+class IslandMonitorEditor(QWidget):
+    """Owned islands plus a bounded account-scoped external coordinate lookup."""
+
+    changed = Signal()
+    lookup_requested = Signal(int, int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.all_owned = CheckBox("Monitor all owned islands")
+        self.all_owned.setChecked(True)
+        self.all_owned.stateChanged.connect(self.changed.emit)
+        layout.addWidget(self.all_owned)
+        self.list = QListWidget()
+        self.list.setAccessibleName("Select verified islands to monitor")
+        self.list.setMinimumHeight(110)
+        self.list.setMaximumHeight(150)
+        self.list.itemChanged.connect(self._changed)
+        layout.addWidget(self.list)
+        controls = QHBoxLayout()
+        self.x, self.y = _amount(label="Island X coordinate"), _amount(label="Island Y coordinate")
+        for label, field in (("X", self.x), ("Y", self.y)):
+            field.setRange(1, 100)
+            field.setValue(50)
+            controls.addWidget(QLabel(label))
+            controls.addWidget(field)
+        self.lookup = PushButton("Verify and add island")
+        self.lookup.clicked.connect(self._lookup)
+        controls.addWidget(self.lookup)
+        self.clear_external = PushButton("Clear external islands")
+        self.clear_external.clicked.connect(self._clear_external)
+        layout.addWidget(self.clear_external)
+        layout.addLayout(controls)
+        self.note = QLabel("Select specific islands or explicitly monitor all owned islands.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self._owned = set()
+        self._external = set()
+        self._pending = None
+
+    def count(self):
+        return self.list.count()
+
+    def item(self, index):
+        return self.list.item(index)
+
+    def _changed(self, item):
+        if item.checkState() == Qt.Checked:
+            self.all_owned.setChecked(False)
+        self.changed.emit()
+
+    def _add(self, coords, label, checked=False):
+        row = QListWidgetItem(label)
+        row.setData(Qt.UserRole, coords)
+        row.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+        row.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.list.addItem(row)
+
+    def set_cities(self, cities):
+        import re
+
+        self._pending = None
+        self.lookup.setEnabled(True)
+        self._owned.clear()
+        self._external.clear()
+        with QSignalBlocker(self.list):
+            self.list.clear()
+            for city in cities:
+                coords = str(city.get("coords") or "")
+                if (not re.fullmatch(r"(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)", coords)
+                        or coords in self._owned):
+                    continue
+                self._owned.add(coords)
+                self._add(coords, f"{coords} · {city['name']}")
+        self.all_owned.setChecked(True)
+        self.changed.emit()
+
+    def _clear_external(self):
+        self._pending = None
+        self.lookup.setEnabled(True)
+        for i in reversed(range(self.count())):
+            if self.item(i).data(Qt.UserRole) in self._external:
+                self.list.takeItem(i)
+        self._external.clear()
+        self.note.setText("External island selections cleared.")
+        self.changed.emit()
+
+    def _lookup(self):
+        x, y = self.x.value(), self.y.value()
+        coords = f"{x}:{y}"
+        if coords in self._owned:
+            for i in range(self.count()):
+                row = self.item(i)
+                if row.data(Qt.UserRole) == coords:
+                    row.setCheckState(Qt.Checked)
+                    return
+        if len(self._external) >= 10 and coords not in self._external:
+            self.note.setText("Clear external islands before adding more than ten.")
+            return
+        # A failed refresh must not leave a previously verified selection usable.
+        self._external.discard(coords)
+        for i in range(self.count()):
+            if self.item(i).data(Qt.UserRole) == coords:
+                self.list.takeItem(i)
+                break
+        nonce = uuid.uuid4().hex
+        self._pending = (nonce, x, y)
+        self.all_owned.setChecked(False)
+        self.lookup.setEnabled(False)
+        self.note.setText("Verifying island coordinates…")
+        self.changed.emit()
+        self.lookup_requested.emit(x, y, nonce)
+
+    def set_external(self, result, nonce):
+        if self._pending != (nonce, result.get("x"), result.get("y")):
+            return
+        self._pending = None
+        self.lookup.setEnabled(True)
+        coords = f"{result['x']}:{result['y']}"
+        self._external.add(coords)
+        self._add(coords, f"{coords} · Verified external island", True)
+        self.all_owned.setChecked(False)
+        self.note.setText("Verified island added. Review the selected monitoring scope.")
+        self.changed.emit()
+
+    def lookup_failed(self, nonce):
+        if self._pending is not None and self._pending[0] == nonce:
+            self._pending = None
+            self.lookup.setEnabled(True)
+            self.note.setText("Island unavailable. No unverified coordinates were added.")
+            self.changed.emit()
+
+    def to_config(self):
+        if self._pending is not None:
+            raise ValueError("Finish island verification before review")
+        if self.all_owned.isChecked():
+            if not self._owned:
+                raise ValueError("Load actual owned islands before using all-owned scope")
+            return []
+        selected = [self.item(i).data(Qt.UserRole) for i in range(self.count())
+                    if self.item(i).checkState() == Qt.Checked]
+        if not selected:
+            raise ValueError("Select at least one verified island or all owned islands")
+        return selected
+
+
 class ResourceLimitsEditor(QWidget):
     """The five IkaBot consolidateResources limits; -1 means keep *all*."""
 
@@ -85,9 +236,10 @@ class ResourceLimitsEditor(QWidget):
 
 
 class ShipmentRoutesEditor(QWidget):
-    """One or more account-local routes; destination outside the account requires expert import."""
+    """Owned origins and verified owned or external destination choices."""
 
     changed = Signal()
+    lookup_requested = Signal(int, int, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -95,10 +247,31 @@ class ShipmentRoutesEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         self._cities: list[dict[str, object]] = []
+        self._external: list[dict[str, object]] = []
+        self._lookup_nonce: str | None = None
+        self._lookup_coords: tuple[int, int] | None = None
+        search = QHBoxLayout()
+        self.x = _amount(minimum=1, value=1, label="Island X coordinate")
+        self.y = _amount(minimum=1, value=1, label="Island Y coordinate")
+        for label, field in (("Island X", self.x), ("Y", self.y)):
+            field.setMaximum(100)
+            search.addWidget(QLabel(label))
+            search.addWidget(field)
+            field.valueChanged.connect(self._cancel_lookup)
+        self.lookup_button = PushButton("Find external cities")
+        self.lookup_button.clicked.connect(self._lookup)
+        search.addWidget(self.lookup_button)
+        self.clear_external_button = PushButton("Clear external cities")
+        self.clear_external_button.clicked.connect(self._invalidate_external)
+        search.addWidget(self.clear_external_button)
+        layout.addLayout(search)
+        self.lookup_note = QLabel("Optional: find another player's city by island coordinates.")
+        self.lookup_note.setWordWrap(True)
+        layout.addWidget(self.lookup_note)
         self._rows: list[tuple[ComboBox, ComboBox, list[SpinBox]]] = []
         self.table = _table(("From city", "To city", *_RESOURCES))
         self.table.setMinimumHeight(148)
-        self.table.setAccessibleName("Account-local resource routes and five resource amounts")
+        self.table.setAccessibleName("Resource routes and five resource amounts")
         layout.addWidget(self.table)
         row = QHBoxLayout()
         self.add_button = PushButton("Add route")
@@ -109,31 +282,33 @@ class ShipmentRoutesEditor(QWidget):
         row.addWidget(self.remove_button)
         row.addStretch(1)
         layout.addLayout(row)
-        note = QLabel("Only your own cities are shown. External destinations require "
-                      "a separately verified island and destination city.")
+        note = QLabel("External recipients are verified again before sending. External shipments require manual recovery.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self._controls()
 
     def _controls(self) -> None:
-        self.add_button.setEnabled(len(self._cities) >= 2 and len(self._rows) < 20)
+        self.add_button.setEnabled(bool(self._cities) and (len(self._cities) >= 2 or bool(self._external)) and len(self._rows) < 20)
         self.remove_button.setEnabled(bool(self._rows))
+        self.lookup_button.setEnabled(bool(self._cities))
+        self.clear_external_button.setEnabled(bool(self._external))
 
     def set_cities(self, cities: list[dict[str, object]]) -> None:
         # On account/session refresh the previous row IDs must be discarded.
         self.table.setRowCount(0)
         self._rows.clear()
         self._cities = list(cities)
+        self._invalidate_external()
         self._controls()
         self.changed.emit()
 
     def add_route(self) -> None:
-        if len(self._cities) < 2 or len(self._rows) >= 20:
+        if not self._cities or (len(self._cities) < 2 and not self._external) or len(self._rows) >= 20:
             return
         row = len(self._rows)
         self.table.insertRow(row)
         source = _city_picker(self._cities, f"Route {row + 1} source city")
-        destination = _city_picker(self._cities, f"Route {row + 1} destination city")
+        destination = _city_picker(self._destination_choices(), f"Route {row + 1} destination city")
         source.currentIndexChanged.connect(self.changed.emit)
         destination.currentIndexChanged.connect(self.changed.emit)
         self.table.setCellWidget(row, 0, source)
@@ -161,6 +336,7 @@ class ShipmentRoutesEditor(QWidget):
         if not self._rows:
             raise ValueError("Add at least one shipment route between your cities")
         routes: list[dict[str, object]] = []
+        external = {row["id"]: row for row in self._external}
         ids = {city["id"] for city in self._cities}
         total: dict[int, list[int]] = {}
         for source, destination, fields in self._rows:
@@ -168,7 +344,7 @@ class ShipmentRoutesEditor(QWidget):
             target = destination.currentData()
             if type(origin) is not int or origin not in ids:
                 raise ValueError("Choose a verified source city for every route")
-            if type(target) is not int or target not in ids:
+            if type(target) is not int or (target not in ids and target not in external):
                 raise ValueError("Choose a verified destination city for every route")
             if origin == target:
                 raise ValueError("A shipment cannot send resources to the same city")
@@ -178,8 +354,176 @@ class ShipmentRoutesEditor(QWidget):
             total[origin] = [x + y for x, y in zip(total.get(origin, [0] * 5), amounts)]
             if any(x > _MAX_AMOUNT for x in total[origin]):
                 raise ValueError("Combined resource amount exceeds the safe limit")
-            routes.append({"from": origin, "to": target, "resources": amounts})
+            route = {"from": origin, "to": target, "resources": amounts}
+            if target not in ids:
+                route.update(island=external[target]["island"], recipient=external[target]["recipient"])
+            routes.append(route)
         return routes
+
+    def _destination_choices(self):
+        return self._cities + [
+            {"id": row["id"], "name": f"{row['name']} — {row['owner']}",
+             "coords": row["coords"]}
+            for row in self._external if row["id"] not in {c["id"] for c in self._cities}
+        ]
+
+    def _refresh_destinations(self):
+        choices = self._destination_choices()
+        for _, picker, _ in self._rows:
+            current = picker.currentData()
+            with QSignalBlocker(picker):
+                picker.clear()
+                picker.addItem("Choose a city")
+                for city in choices:
+                    title = str(city["name"])
+                    coords = str(city.get("coords") or "")
+                    picker.addItem(f"{title} ({coords})" if coords else title, userData=city["id"])
+                picker.setCurrentIndex(next((i+1 for i,c in enumerate(choices) if c["id"] == current), 0))
+        self._controls()
+        self.changed.emit()
+
+    def _cancel_lookup(self, *_args):
+        self._lookup_nonce = None
+        self._lookup_coords = None
+        self.lookup_note.setText("Search another island; verified destinations remain available until refreshed or cleared.")
+
+    def _invalidate_external(self, *_args):
+        self._lookup_nonce = None
+        self._lookup_coords = None
+        self._external = []
+        self.lookup_note.setText("Optional: find another player's city by island coordinates.")
+        self._refresh_destinations()
+
+    def _lookup(self):
+        self._cancel_lookup()
+        coords = f"{self.x.value()}:{self.y.value()}"
+        # A refreshed island must be selected again. Other island drafts survive.
+        self._external = [r for r in self._external if r["coords"] != coords]
+        if len({r["coords"] for r in self._external}) >= 10:
+            self.lookup_note.setText("Clear external cities before searching more than ten islands.")
+            self._refresh_destinations()
+            return
+        self._refresh_destinations()
+        self._lookup_nonce = str(uuid.uuid4())
+        self._lookup_coords = (self.x.value(), self.y.value())
+        self.lookup_note.setText("Looking up cities on the selected island…")
+        self.lookup_requested.emit(*self._lookup_coords, self._lookup_nonce)
+
+    def set_external(self, result, nonce):
+        if nonce != self._lookup_nonce or self._lookup_coords != (result.get("x"), result.get("y")):
+            return
+        self._lookup_nonce = None
+        owned = {c["id"] for c in self._cities}
+        coords = f"{result['x']}:{result['y']}"
+        rows = [{**r, "coords": coords} for r in result["cities"] if r["id"] not in owned]
+        # If a city appears at a different island, never silently retarget an
+        # existing route; remove the old selection before adding the new record.
+        found = {r["id"] for r in rows}
+        self._external = [r for r in self._external if r["id"] not in found]
+        self._refresh_destinations()
+        self._external.extend(rows)
+        self.lookup_note.setText(f"{len(self._external)} eligible external cities across searched islands. Choose a destination in each route.")
+        self._refresh_destinations()
+
+    def lookup_failed(self, nonce):
+        if nonce == self._lookup_nonce:
+            self._lookup_nonce = None
+            self.lookup_note.setText("Island lookup unavailable. Check coordinates and retry.")
+
+    def summary(self):
+        self.to_config()
+        return "\n".join(
+            source.currentText() + " → " + dest.currentText() + ": " +
+            ", ".join(f"{name} {field.value():,}" for name, field in zip(_RESOURCES, fields) if field.value())
+            for source, dest, fields in self._rows
+        )
+
+
+class ExternalDestinationEditor(QWidget):
+    """A single receiving city, optionally verified on another player's island."""
+
+    changed = Signal()
+    lookup_requested = Signal(int, int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cities = []
+        self._external = []
+        self._nonce = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.picker = _city_picker([], "Receiving city")
+        self.picker.currentIndexChanged.connect(self.changed.emit)
+        layout.addWidget(self.picker)
+        search = QHBoxLayout()
+        self.x = _amount(minimum=1, value=1, label="Island X coordinate")
+        self.y = _amount(minimum=1, value=1, label="Island Y coordinate")
+        for label, field in (("X", self.x), ("Y", self.y)):
+            field.setMaximum(100)
+            field.valueChanged.connect(self._invalidate)
+            search.addWidget(QLabel(label))
+            search.addWidget(field)
+        self.lookup_button = PushButton("Find external cities")
+        self.lookup_button.clicked.connect(self._lookup)
+        search.addWidget(self.lookup_button)
+        layout.addLayout(search)
+        self.note = QLabel("External shipments require manual recovery.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+
+    def set_cities(self, cities):
+        self._cities = list(cities)
+        self._invalidate()
+
+    def _refresh(self):
+        prior = self.picker.currentData()
+        with QSignalBlocker(self.picker):
+            self.picker.clear()
+            self.picker.addItem("Choose a city")
+            for city in self._cities:
+                self.picker.addItem(str(city["name"]), userData=city["id"])
+            for city in self._external:
+                self.picker.addItem(f"{city['name']} — {city['owner']} ({self.x.value()}:{self.y.value()})",
+                                    userData=city["id"])
+            self.picker.setCurrentIndex(next((i for i in range(1,self.picker.count())
+                                              if self.picker.itemData(i) == prior), 0))
+        self.lookup_button.setEnabled(bool(self._cities))
+        self.changed.emit()
+
+    def _invalidate(self, *_args):
+        self._nonce = None
+        self._external = []
+        self.note.setText("External shipments require manual recovery.")
+        self._refresh()
+
+    def _lookup(self):
+        self._invalidate()
+        self._nonce = str(uuid.uuid4())
+        self.note.setText("Looking up cities…")
+        self.lookup_requested.emit(self.x.value(), self.y.value(), self._nonce)
+
+    def set_external(self, result, nonce):
+        if nonce != self._nonce or (result.get("x"),result.get("y")) != (self.x.value(),self.y.value()):
+            return
+        self._nonce = None
+        owned = {c["id"] for c in self._cities}
+        self._external = [r for r in result["cities"] if r["id"] not in owned]
+        self.note.setText(f"{len(self._external)} eligible external cities. Choose the receiving city.")
+        self._refresh()
+
+    def lookup_failed(self, nonce):
+        if nonce == self._nonce:
+            self._nonce = None
+            self.note.setText("Island lookup unavailable.")
+
+    def to_config(self):
+        selected = self.picker.currentData()
+        if selected in {c["id"] for c in self._cities}:
+            return {"destination_city": selected}
+        for row in self._external:
+            if row["id"] == selected:
+                return {"destination_city": selected, "island": row["island"], "recipient": row["recipient"]}
+        raise ValueError("Choose an actual receiving city")
 
 
 class DonationPoliciesEditor(QWidget):
@@ -489,6 +833,37 @@ class TrainableUnitsEditor(QWidget):
         self.city_picker.currentIndexChanged.connect(self._reset_selection)
         selector.addWidget(self.city_picker, 1)
         layout.addLayout(selector)
+        layout.addWidget(QLabel("Additional owned cities"))
+        self.additional = QListWidget()
+        self.additional.setMaximumHeight(100)
+        self.additional.setAccessibleName("Additional recruitment cities")
+        self.additional.itemChanged.connect(self.changed.emit)
+        layout.addWidget(self.additional)
+        options = QHBoxLayout()
+        all_button = PushButton("Select all cities")
+        all_button.clicked.connect(self._all_cities)
+        options.addWidget(all_button)
+        options.addWidget(QLabel("Total cycles"))
+        self.cycles = _amount(minimum=1, value=1, label="Training repetitions including first cycle")
+        self.cycles.setMaximum(10)
+        self.cycles.valueChanged.connect(self.changed.emit)
+        options.addWidget(self.cycles)
+        layout.addLayout(options)
+        self._rounds = []
+        self.round_picker = ComboBox()
+        self.round_picker.setAccessibleName("Training round")
+        self.round_picker.addItem("Round 1")
+        self._round_index = 0
+        self.round_picker.currentIndexChanged.connect(self._switch_round)
+        rounds = QHBoxLayout()
+        rounds.addWidget(self.round_picker)
+        self.add_round = PushButton("Add round")
+        self.remove_round = PushButton("Remove round")
+        self.add_round.clicked.connect(self._add_round)
+        self.remove_round.clicked.connect(self._remove_round)
+        rounds.addWidget(self.add_round)
+        rounds.addWidget(self.remove_round)
+        layout.addLayout(rounds)
         self.table = _table(("Unit", "Real per-unit costs", "Quantity"))
         self.table.setMinimumHeight(240)
         self.table.setAccessibleName("Available recruitable units and quantities")
@@ -504,6 +879,8 @@ class TrainableUnitsEditor(QWidget):
         self.set_cities([])
 
     def set_cities(self, cities: list[dict[str, object]]) -> None:
+        self._cities = list(cities)
+        self._reset_rounds()
         self._selected = None
         self._loaded = None
         self._snapshot = None
@@ -518,10 +895,85 @@ class TrainableUnitsEditor(QWidget):
                     f"{text} ({coords})" if coords else text, userData=city["id"]
                 )
             self.city_picker.setCurrentIndex(0)
+        self._populate_additional()
         self.description.setText("Choose a city with barracks or a shipyard.")
         self.changed.emit()
 
+    def _populate_additional(self):
+        with QSignalBlocker(self.additional):
+            self.additional.clear()
+            for city in self._cities:
+                if city["id"] == self.city_picker.currentData():
+                    continue
+                item = QListWidgetItem(str(city["name"]))
+                item.setData(Qt.UserRole, city["id"])
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.additional.addItem(item)
+
+    def _all_cities(self):
+        for i in range(self.additional.count()):
+            self.additional.item(i).setCheckState(Qt.Checked if i < 31 else Qt.Unchecked)
+
+    def _reset_rounds(self):
+        self._rounds = [{}]
+        self._round_index = 0
+        with QSignalBlocker(self.round_picker):
+            self.round_picker.clear()
+            self.round_picker.addItem("Round 1")
+            self.round_picker.setCurrentIndex(0)
+        self.remove_round.setEnabled(False)
+        self.add_round.setEnabled(False)
+
+    def _save_round(self):
+        if not self._snapshot:
+            return
+        self._rounds[self._round_index] = {
+            u["unit_type_id"]: self.table.cellWidget(i, 2).value()
+            for i, u in enumerate(self._snapshot["units"])}
+
+    def _load_round(self):
+        if not self._snapshot:
+            return
+        for i, unit in enumerate(self._snapshot["units"]):
+            field = self.table.cellWidget(i, 2)
+            with QSignalBlocker(field):
+                field.setValue(self._rounds[self._round_index].get(unit["unit_type_id"], 0))
+        self.changed.emit()
+
+    def _switch_round(self, index):
+        if 0 <= index < len(self._rounds):
+            self._save_round()
+            self._round_index = index
+            self._load_round()
+
+    def _add_round(self):
+        if not self._snapshot or len(self._rounds) >= 10:
+            return
+        self._save_round()
+        self._rounds.append({})
+        self.round_picker.addItem(f"Round {len(self._rounds)}")
+        self.round_picker.setCurrentIndex(len(self._rounds)-1)
+        self.add_round.setEnabled(len(self._rounds)<10)
+        self.remove_round.setEnabled(True)
+
+    def _remove_round(self):
+        if len(self._rounds) <= 1:
+            return
+        self._rounds.pop(self._round_index)
+        self._round_index = min(self._round_index, len(self._rounds)-1)
+        with QSignalBlocker(self.round_picker):
+            self.round_picker.clear()
+            for i in range(len(self._rounds)):
+                self.round_picker.addItem(f"Round {i+1}")
+            self.round_picker.setCurrentIndex(self._round_index)
+        self._load_round()
+        self.remove_round.setEnabled(len(self._rounds)>1)
+        self.add_round.setEnabled(True)
+
     def _reset_selection(self, *_args: object) -> None:
+        self._reset_rounds()
+        self._populate_additional()
         self._loaded = None
         self._snapshot = None
         self.table.setRowCount(0)
@@ -544,6 +996,8 @@ class TrainableUnitsEditor(QWidget):
         if not isinstance(units, list):
             return
         self._snapshot = snapshot
+        self._reset_rounds()
+        self.add_round.setEnabled(True)
         self._loaded = self._selected
         self.table.setRowCount(len(units))
         for row, unit in enumerate(units):
@@ -572,6 +1026,7 @@ class TrainableUnitsEditor(QWidget):
     def set_unavailable(self, city_id: int, train_troops: bool) -> None:
         if self._selected != (city_id, train_troops):
             return
+        self._reset_rounds()
         self._loaded = None
         self._snapshot = None
         self.table.setRowCount(0)
@@ -580,6 +1035,19 @@ class TrainableUnitsEditor(QWidget):
             "Check the game session, barracks or shipyard."
         )
         self.changed.emit()
+
+    def reviewed_draft(self):
+        from daedalus.training_contract import training_draft
+
+        if self._snapshot is None or self._loaded != self._selected:
+            raise ValueError("Choose a city and load its actual recruitable units")
+        self._save_round()
+        rounds = [[{"unit_type_id": uid, "cantidad": count}
+                   for uid, count in group.items() if count] for group in self._rounds]
+        return training_draft({"city_ids": [self._selected[0], *[
+            self.additional.item(i).data(Qt.UserRole) for i in range(self.additional.count())
+            if self.additional.item(i).checkState() == Qt.Checked]],
+            "train_troops": self._selected[1], "rounds": rounds, "cycles": self.cycles.value()})
 
     def to_config(self) -> dict[str, object]:
         if self._snapshot is None or self._loaded != self._selected:
@@ -837,6 +1305,11 @@ class AcademyResearchEditor(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.study_picker = ComboBox()
+        self.study_picker.setAccessibleName("Available research advisor study")
+        self.study_picker.addItem("Academy experiments")
+        self.study_picker.currentIndexChanged.connect(self.changed.emit)
+        layout.addWidget(self.study_picker)
         self.table = _table((
             "Use", "Academy city", "Crystal on hand", "Cooldown", "Ready now",
         ))
@@ -861,7 +1334,15 @@ class AcademyResearchEditor(QWidget):
         layout.addWidget(self.description)
         self._academies: list[dict[str, object]] | None = None
 
-    def set_academies(self, academies: list[dict[str, object]]) -> None:
+    def set_academies(self, academies: list[dict[str, object]], studies=None) -> None:
+        from daedalus.research_choices import validate_studies
+
+        with QSignalBlocker(self.study_picker):
+            self.study_picker.clear()
+            self.study_picker.addItem("Academy experiments")
+            for row in validate_studies(studies) or []:
+                self.study_picker.addItem("Study: " + row["name"], userData=row)
+            self.study_picker.setCurrentIndex(0)
         self._academies = list(academies)
         with QSignalBlocker(self.table):
             self.table.setRowCount(len(academies))
@@ -889,6 +1370,8 @@ class AcademyResearchEditor(QWidget):
 
     def set_unavailable(self) -> None:
         self._academies = None
+        self.study_picker.clear()
+        self.study_picker.addItem("Academy experiments")
         self.table.setRowCount(0)
         self.description.setText(
             "Academy information is unavailable for this account. "
@@ -899,6 +1382,11 @@ class AcademyResearchEditor(QWidget):
     def to_config(self) -> dict[str, object]:
         if self._academies is None:
             raise ValueError("Load actual academies for the selected account")
+        choice = self.study_picker.currentData()
+        if isinstance(choice, dict):
+            from daedalus.research_choices import validate_study_choice
+
+            return {"study_choice": validate_study_choice(choice)}
         chosen = [
             self._academies[row] for row in range(len(self._academies))
             if self.table.item(row, 0) is not None
@@ -928,6 +1416,16 @@ class TavernCitiesEditor(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.mode = ComboBox()
+        self.mode.addItems(["Equilibrium (optimize consumption)", "Set fixed serving percentage once"])
+        self.mode.setAccessibleName("Tavern operation")
+        layout.addWidget(self.mode)
+        self.percentage = _amount(label="Percentage of available maximum serving")
+        self.percentage.setRange(0, 100)
+        self.percentage.setValue(100)
+        self.percentage.setSuffix("%")
+        layout.addWidget(self.percentage)
+        self.percentage.valueChanged.connect(self.changed.emit)
         self.all_cities = CheckBox("Manage all cities with taverns")
         self.all_cities.setChecked(True)
         self.all_cities.stateChanged.connect(self._scope_changed)
@@ -963,6 +1461,15 @@ class TavernCitiesEditor(QWidget):
         self.description.setWordWrap(True)
         layout.addWidget(self.description)
         self._taverns: list[dict[str, object]] | None = None
+        self.mode.currentIndexChanged.connect(self._mode_changed)
+        self._mode_changed()
+
+    def _mode_changed(self, *_args):
+        fixed = self.mode.currentIndex() == 1
+        self.percentage.setVisible(fixed)
+        self.interval.setEnabled(not fixed)
+        self.notifications.setEnabled(not fixed)
+        self.changed.emit()
 
     def _scope_changed(self, *_args: object) -> None:
         self.table.setEnabled(not self.all_cities.isChecked())
@@ -1029,6 +1536,12 @@ class TavernCitiesEditor(QWidget):
             ]
             if not ids:
                 raise ValueError("Choose at least one city with a real tavern")
+        if self.mode.currentIndex() == 1:
+            from daedalus.tavern_choices import fixed_tavern_review
+
+            chosen = [row for row in self._taverns if row["has_tavern"]
+                      and (ids is None or str(row["city_id"]) in ids)]
+            return {"run_hours": 0, "fixed_servings": fixed_tavern_review(chosen, self.percentage.value())}
         return {
             "cities_ids": ids,
             "run_hours": self.interval.value(),
@@ -1409,4 +1922,133 @@ class PiracyMissionsEditor(QWidget):
             "maxRandomWaitingTime": self.waiting.value(),
             "piracyCities": [{"id": city["city_id"]}],
         }
+        return result
+
+
+class BarbarianWavesEditor(QWidget):
+    """Named troop inventory and editable wave columns; never display engine IDs."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.note = QLabel("Load actual troops for the origin city first.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self.table = _table(("Setting / troop", "Available"))
+        self.table.setAccessibleName("Attack wave settings and available troop quantities")
+        self.table.setMinimumHeight(185)
+        layout.addWidget(self.table)
+        self.add_button = PushButton("Add wave")
+        self.remove_button = PushButton("Remove last wave")
+        self.add_button.clicked.connect(self.add_wave)
+        self.remove_button.clicked.connect(self.remove_wave)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.remove_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+        self.units = []
+        self.waves = []
+        self.loaded = False
+        self.ship_limit = 0
+        self._controls()
+
+    def _controls(self):
+        self.add_button.setEnabled(self.loaded and bool(self.units) and len(self.waves) < 8)
+        self.remove_button.setEnabled(len(self.waves) > 1)
+
+    def clear(self):
+        self.loaded = False
+        self.units = []
+        self.waves = []
+        self.ship_limit = 0
+        self.table.setRowCount(0)
+        self.table.setColumnCount(2)
+        self.note.setText("Load actual troops for the origin city first.")
+        self._controls()
+        self.changed.emit()
+
+    def set_inventory(self, result):
+        self.clear()
+        self.loaded = True
+        self.units = result["units"]
+        self.ship_limit = result["available_ships"]
+        self.note.setText(f"Available transport ships: {self.ship_limit:,}. "
+                          "Add up to eight ordered waves. An optional looting wave must be last.")
+        self.table.setRowCount(3 + len(self.units))
+        for i, label in enumerate(("Battle round", "Loot ships", "Final looting wave")):
+            self.table.setItem(i, 0, QTableWidgetItem(label))
+        for i, unit in enumerate(self.units, 3):
+            self.table.setItem(i, 0, QTableWidgetItem(unit["name"]))
+            self.table.setItem(i, 1, QTableWidgetItem(f"{unit['available']:,}"))
+        if self.units:
+            self.add_wave()
+        self._controls()
+
+    def add_wave(self):
+        if not self.loaded or not self.units or len(self.waves) >= 8:
+            return
+        n = len(self.waves)
+        col = n + 2
+        self.table.setColumnCount(col + 1)
+        self.table.setHorizontalHeaderItem(col, QTableWidgetItem(f"Wave {n+1}"))
+        round_field = _amount(minimum=1, value=n+1, label=f"Wave {n+1} battle round")
+        round_field.setMaximum(100)
+        if not n:
+            round_field.setEnabled(False)
+        ships = _amount(label=f"Wave {n+1} loot ships")
+        ships.setMaximum(self.ship_limit)
+        loot = CheckBox()
+        loot.setAccessibleName(f"Wave {n+1} is final looting wave")
+        loot.setEnabled(n > 0)
+        for i, field in enumerate((round_field, ships, loot)):
+            self.table.setCellWidget(i, col, field)
+        round_field.valueChanged.connect(self.changed.emit)
+        ships.valueChanged.connect(self.changed.emit)
+        def loot_changed(_state):
+            if loot.isChecked():
+                ships.setValue(0)
+            ships.setEnabled(not loot.isChecked())
+            self.changed.emit()
+        loot.stateChanged.connect(loot_changed)
+        fields = []
+        for i, unit in enumerate(self.units, 3):
+            amount = _amount(label=f"Wave {n+1}: {unit['name']}")
+            amount.setMaximum(unit["available"])
+            amount.valueChanged.connect(self.changed.emit)
+            self.table.setCellWidget(i, col, amount)
+            fields.append(amount)
+        self.waves.append((round_field, ships, loot, fields))
+        self._controls()
+        self.changed.emit()
+
+    def remove_wave(self):
+        if len(self.waves) <= 1:
+            return
+        self.waves.pop()
+        self.table.setColumnCount(len(self.waves) + 2)
+        self._controls()
+        self.changed.emit()
+
+    def to_config(self):
+        if not self.loaded or not self.waves:
+            raise ValueError("Load actual troops before planning the attack")
+        result = []
+        totals = {}
+        previous = 0
+        for i, (round_field, ships, loot, fields) in enumerate(self.waves):
+            if round_field.value() <= previous or (loot.isChecked() and i != len(self.waves)-1):
+                raise ValueError("Use increasing battle rounds; looting must be the final wave")
+            previous = round_field.value()
+            units = {u["unit_id"]: w.value() for u, w in zip(self.units, fields) if w.value()}
+            if not units:
+                raise ValueError("Select at least one troop in every wave")
+            for uid, amount in units.items():
+                totals[uid] = totals.get(uid, 0) + amount
+            result.append({"round": previous, "ships": ships.value(), "loot": loot.isChecked(), "units": units})
+        if any(totals.get(u["unit_id"], 0) > u["available"] for u in self.units):
+            raise ValueError("Combined waves exceed available troops")
         return result

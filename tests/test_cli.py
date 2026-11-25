@@ -194,6 +194,7 @@ def test_combined_native_login_and_owned_worker_cli_wiring_is_safe(tmp_path, mon
     from daedalus.account_sessions import SessionPhase
     from daedalus.accounts import Account
 
+    monkeypatch.setattr("daedalus.account_sessions.default_session_state_dir", lambda: tmp_path / "session-locks")
     account = Account("alpha", "s301-en", "Fictional", "Test", True)
     token = "synthetic-backend-test-token-is-not-real-12345678"
     monkeypatch.setenv("DAEDALUS_API_TOKEN", token)

@@ -54,6 +54,7 @@ from daedalus.desktop.ssh_tunnel import (
     validate_ssh_destination,
 )
 from daedalus.desktop.task_page import TasksPage
+from daedalus.desktop.task_presentation import BATCH_TASKS
 from daedalus.gui_preferences import (
     GuiPreferenceError,
     GuiPreferences,
@@ -177,8 +178,27 @@ class APIWorker(QThread):
                     ),
                     "connected_accounts": _known_ikabot_workers(self.client),
                 }
+            elif self.action == "world_reports" and self.account_id:
+                result = self.client.world_reports(self.account_id, (self.task_payload or {}).get("report_id"))
+            elif self.action == "proxy_profiles" and self.account_id:
+                result = self.client.proxy_profiles(self.account_id, self.task_payload)
+            elif self.action == "challenge_policy" and self.account_id:
+                result = self.client.challenge_policy(self.account_id, self.task_payload)
+            elif self.action == "extension_settings" and self.account_id:
+                result = self.client.extension_settings(self.account_id, self.task_payload)
+            elif self.action == "release_status":
+                result = self.client.release_status()
             elif self.action == "accounts":
                 result = self.client.accounts()
+            elif self.action == "notification_settings" and self.account_id and self.task_payload:
+                provider = self.task_payload["provider"]
+                settings = self.task_payload.pop("settings")
+                try:
+                    result = self.client.configure_notification(self.account_id, provider, settings)
+                finally:
+                    settings.clear()
+            elif self.action == "administrative_status" and self.account_id:
+                result = self.client.administrative_status(self.account_id)
             elif self.action == "recovery_index":
                 result = self.client.recovery_index()
             elif self.action == "recovery_import" and self.account_id:
@@ -298,17 +318,64 @@ class APIWorker(QThread):
                 result = _known_ikabot_workers(self.client)
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "server_activity" and self.account_id and self.task_payload:
+                result = self.client.activity(self.account_id, before=self.task_payload["before"],
+                                              status=self.task_payload["status"])
+            elif self.action == "task_reward_distribution_preview" and self.account_id and self.task_payload:
+                result = self.client.reward_distribution_preview(self.account_id, self.task_payload["task"], self.task_payload["draft"])
+            elif self.action == "task_shipment_preview" and self.account_id and self.task_payload:
+                result = self.client.shipment_preview(self.account_id, self.task_payload["draft"])
+            elif self.action == "task_island_destinations" and self.account_id and self.task_payload:
+                result = self.client.island_destinations(self.account_id, self.task_payload["x"], self.task_payload["y"])
             elif self.action == "task_cities" and self.account_id:
                 result = {
                     "account_id": self.account_id,
                     "cities": self.client.cities(self.account_id),
                 }
+            elif self.action == "task_vacation_preview" and self.account_id and self.task_payload:
+                result = self.client.vacation_preview(self.account_id, self.task_payload["city_id"])
+            elif self.action == "task_attack_inventory" and self.account_id and self.task_payload:
+                result = self.client.attack_inventory(self.account_id, self.task_payload["city_id"])
+            elif self.action == "task_attack_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.attack_preview(self.account_id, draft["city_id"],
+                                                    {k: v for k, v in draft.items() if k != "city_id"})
+            elif self.action == "task_grind_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.grind_preview(self.account_id, draft["city_id"],
+                                                   {k: v for k, v in draft.items() if k != "city_id"})
+            elif self.action == "task_training_preview" and self.account_id and self.task_payload:
+                result = self.client.training_preview(self.account_id, self.task_payload["draft"])
+            elif self.action == "task_station_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.station_preview(self.account_id, draft["city_id"],
+                                                     {k: v for k, v in draft.items() if k != "city_id"})
+            elif self.action == "task_build_options" and self.account_id and self.task_payload:
+                result = self.client.build_options(self.account_id, self.task_payload["city_id"])
+            elif self.action == "task_build_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.build_preview(self.account_id, draft["city_id"],
+                                                   {k: v for k, v in draft.items() if k != "city_id"})
+            elif self.action == "task_layout_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.layout_preview(self.account_id, draft["city_id"], draft["template_city_id"])
+            elif self.action == "task_worker_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.worker_preview(
+                    self.account_id, draft["city_id"], self.task_payload["task"],
+                    {k: v for k, v in draft.items() if k != "city_id"},
+                )
+            elif self.action == "task_donation_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.donation_preview(
+                    self.account_id, draft["city_id"], draft["project"], draft["amount"])
             elif self.action == "task_construction_preview" and self.account_id and self.task_payload:
                 city_id = self.task_payload.get("city_id")
                 upgrades = self.task_payload.get("upgrades")
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
-                result = self.client.construction_preview(self.account_id, city_id, upgrades)
+                supply = self.task_payload.get("supply")
+                result = self.client.construction_preview(self.account_id, city_id, upgrades, supply=supply) if supply is not None else self.client.construction_preview(self.account_id, city_id, upgrades)
             elif self.action == "military_overview" and self.account_id:
                 result = self.client.military_overview(self.account_id)
             elif self.action == "military_movements" and self.account_id:
@@ -410,6 +477,9 @@ class APIWorker(QThread):
                                        "requests": data.get("requests", [])})
                     except (ValueError, APIConnectionError):
                         result.append({"account_id": aid, "error": True})
+            elif self.action == "reviewed_batch" and self.task_payload is not None:
+                from daedalus.reviewed_batch import dispatch_reviewed_batch
+                result = dispatch_reviewed_batch(self.client, self.task_payload["entries"])
             elif self.action == "task_start_batch" and self.task_payload is not None:
                 import uuid
 
@@ -421,8 +491,9 @@ class APIWorker(QThread):
                     or any(not isinstance(aid, str) for aid in ids)
                     or len(set(ids)) != len(ids)
                     or not isinstance(task, str) or not isinstance(config, dict)
+                    or task not in BATCH_TASKS
                 ):
-                    raise ValueError("Select up to 32 distinct authorized task accounts")
+                    raise ValueError("Select authorized accounts and an account-independent task")
                 # All preflights must succeed BEFORE the first game mutation.
                 blocked = []
                 for aid in ids:
@@ -578,7 +649,7 @@ class MainWindow(FluentWindow):
         self._pending_miracles: str | None = None
         self._pending_shrine: str | None = None
         self._pending_piracy: str | None = None
-        self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
+        self._pending_construction_preview: tuple[str, int, list[dict[str, int]], dict[str, object] | None] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._selenium_worker: SeleniumLoginWorker | None = None
@@ -634,6 +705,9 @@ class MainWindow(FluentWindow):
         self.operations_page = self.tasks_page.catalog_panel
         self._task_views = (self.tasks_page,)
         self.log_page = LogPage(self)
+        self.log_page.server_activity_requested.connect(
+            lambda aid, before, status: self._request_server_activity(aid, before, status)
+        )
         self.connection_page = ConnectionPage(self)
         self.appearance_page = AppearancePage(self)
         self.appearance_page.set_preferences(self._gui_preferences)
@@ -672,6 +746,22 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.world_reports_requested.connect(
+            lambda aid, rid: self._request("world_reports", account_id=aid, task_payload={"report_id": rid}))
+        self.appearance_page.proxy_profiles_requested.connect(
+            lambda aid, draft: self._request("proxy_profiles", account_id=aid, task_payload=draft))
+        self.appearance_page.challenge_policy_requested.connect(
+            lambda aid, draft: self._request("challenge_policy", account_id=aid, task_payload=draft))
+        self.appearance_page.extension_settings_requested.connect(
+            lambda aid, draft: self._request("extension_settings", account_id=aid, task_payload=draft))
+        self.appearance_page.release_status_requested.connect(lambda: self._request("release_status"))
+        self.appearance_page.notification_settings_requested.connect(
+            lambda aid, provider, settings: self._request("notification_settings", account_id=aid,
+                task_payload={"provider": provider, "settings": settings})
+        )
+        self.appearance_page.administrative_status_requested.connect(
+            lambda aid: self._request("administrative_status", account_id=aid)
+        )
         self.appearance_page.preferences_changed.connect(self._on_appearance_changed)
         self.appearance_page.connection_settings_requested.connect(
             lambda: self.switchTo(self.connection_page)
@@ -784,6 +874,17 @@ class MainWindow(FluentWindow):
         )
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
+            view.reward_distribution_preview_requested.connect(
+                lambda aid, task, draft, nonce: self._request("task_reward_distribution_preview", account_id=aid,
+                    task_payload={"task": task, "draft": draft, "nonce": nonce}))
+            view.shipment_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_shipment_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.island_destinations_requested.connect(
+                lambda aid, x, y, nonce: self._request("task_island_destinations", account_id=aid,
+                    task_payload={"x": x, "y": y, "nonce": nonce})
+            )
             view.buildings_requested.connect(self._queue_task_buildings)
             view.workshop_requested.connect(self._queue_workshop)
             view.trainable_units_requested.connect(self._queue_trainables)
@@ -794,6 +895,56 @@ class MainWindow(FluentWindow):
             view.shrine_requested.connect(self._queue_shrine)
             view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
+            view.construction_supply_preview_requested.connect(self._queue_construction_preview)
+            view.vacation_preview_requested.connect(
+                lambda aid, city, nonce: self._request("task_vacation_preview", account_id=aid,
+                    task_payload={"city_id": city, "nonce": nonce})
+            )
+            view.attack_inventory_requested.connect(
+                lambda aid, city, nonce: self._request("task_attack_inventory", account_id=aid,
+                    task_payload={"city_id": city, "nonce": nonce})
+            )
+            view.attack_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_attack_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.grind_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_grind_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.training_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_training_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.station_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_station_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.build_options_requested.connect(
+                lambda aid, city, nonce: self._request("task_build_options", account_id=aid,
+                    task_payload={"city_id": city, "nonce": nonce})
+            )
+            view.build_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_build_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
+            view.layout_preview_requested.connect(
+                lambda aid, draft, nonce: self._request(
+                    "task_layout_preview", account_id=aid, task_payload={"draft": draft, "nonce": nonce},
+                )
+            )
+            view.worker_preview_requested.connect(
+                lambda aid, task, draft, nonce: self._request(
+                    "task_worker_preview", account_id=aid,
+                    task_payload={"task": task, "draft": draft, "nonce": nonce},
+                )
+            )
+            view.donation_preview_requested.connect(
+                lambda aid, draft, nonce: self._request(
+                    "task_donation_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce},
+                )
+            )
             view.refresh_requested.connect(
                 lambda account_id: self._request("task_list", account_id=account_id)
             )
@@ -818,6 +969,9 @@ class MainWindow(FluentWindow):
                 lambda ids: self._request(
                     "task_list_batch", task_payload={"account_ids": ids},
                 )
+            )
+            view.reviewed_batch_requested.connect(
+                lambda entries: self._request("reviewed_batch", task_payload={"entries": entries})
             )
             view.batch_launch_requested.connect(
                 lambda ids, task, config: self._request(
@@ -1633,15 +1787,45 @@ class MainWindow(FluentWindow):
         if self.client is not None and self._worker is None:
             self._launch(self.client, "assistance_pending")
 
+    def _request_server_activity(self, account_id, before, status):
+        if self.client is None or self._worker is not None:
+            self.log_page.set_server_activity_unavailable(account_id, before, status)
+            return
+        self._request("server_activity", account_id=account_id,
+                      task_payload={"before": before, "status": status})
+
     def _request(
         self, action: str, *, account_id: str | None = None,
         task_payload: dict[str, object] | None = None,
     ) -> None:
-        if self.client is None:
-            self._notice("Not connected", "Connect to a Daedalus backend first.")
-            return
-        if self._worker is not None:
-            self._notice("Request in progress", "Another backend request is still running.")
+        if self.client is None or self._worker is not None:
+            if action == "task_reward_distribution_preview" and task_payload is not None:
+                for view in self._task_views:
+                    view.set_reward_distribution_unavailable(task_payload["nonce"])
+            if action == "task_island_destinations" and task_payload is not None:
+                for view in self._task_views:
+                    view.set_island_destinations_unavailable(account_id, task_payload["nonce"])
+            if action == "world_reports":
+                self.appearance_page.set_world_report_unavailable(account_id)
+            if action == "proxy_profiles":
+                self.appearance_page.set_proxy_unavailable(account_id)
+            if action == "challenge_policy":
+                self.appearance_page.set_challenge_unavailable(account_id)
+            if action == "extension_settings":
+                self.appearance_page.set_extension_unavailable(account_id)
+            if action == "release_status":
+                self.appearance_page.set_release_unavailable()
+            if action == "notification_settings" and task_payload is not None:
+                task_payload.get("settings", {}).clear()
+                self.appearance_page.set_notification_unavailable(account_id)
+            if action == "reviewed_batch":
+                for view in self._task_views:
+                    view.set_batch_launch_result({"account_ids": [], "submitted": [],
+                                                  "blocked": [{"reason": "unavailable"}]})
+            if self.client is None:
+                self._notice("Not connected", "Connect to a Daedalus backend first.")
+            else:
+                self._notice("Request in progress", "Another backend request is still running.")
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
@@ -1701,12 +1885,13 @@ class MainWindow(FluentWindow):
 
     def _queue_construction_preview(
         self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+        supply: dict[str, object] | None = None,
     ) -> None:
         """Prepare a read-only queue for the currently selected account and city."""
         if (self.client is None or self.tasks_page.selected_account_id() != account_id
                 or self.tasks_page.selected_task_name() != "constructionList"):
             return
-        self._pending_construction_preview = (account_id, city_id, upgrades)
+        self._pending_construction_preview = (account_id, city_id, upgrades, supply)
         self._run_next_construction_preview()
 
     def _run_next_construction_preview(self) -> None:
@@ -1718,7 +1903,7 @@ class MainWindow(FluentWindow):
                 and self.tasks_page.selected_task_name() == "constructionList"):
             self._launch(
                 self.client, "task_construction_preview", account_id=scope[0],
-                task_payload={"city_id": scope[1], "upgrades": scope[2]},
+                task_payload={"city_id": scope[1], "upgrades": scope[2], "supply": scope[3]},
             )
 
     def _queue_workshop(self, account_id: str, city_id: int) -> None:
@@ -2027,6 +2212,25 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "world_reports":
+            if isinstance(payload, dict) and "reports" in payload:
+                self.appearance_page.set_world_reports(payload)
+            else:
+                self.appearance_page.set_world_export(payload)
+        elif action == "proxy_profiles":
+            self.appearance_page.set_proxy_profiles(payload)
+        elif action == "challenge_policy":
+            self.appearance_page.set_challenge_policy(payload)
+        elif action == "extension_settings":
+            self.appearance_page.set_extension_status(payload)
+        elif action == "release_status":
+            self.appearance_page.set_release_status(payload)
+        elif action == "notification_settings":
+            assert isinstance(payload, dict)
+            self.appearance_page.set_notification_result(payload)
+        elif action == "administrative_status":
+            assert isinstance(payload, dict)
+            self.appearance_page.set_admin_status(payload)
         elif action == "recovery_index":
             assert isinstance(payload, dict)
             self.accounts_page.set_recovery_status(payload)
@@ -2232,6 +2436,26 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_result(account_id, action, payload)
+        elif action == "server_activity":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(payload, dict) and isinstance(request, dict):
+                self.log_page.set_server_activity(payload, request["before"], request["status"])
+        elif action == "task_reward_distribution_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_reward_distribution_preview(payload, request["nonce"])
+        elif action == "task_shipment_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_shipment_preview(payload, request["nonce"])
+        elif action == "task_island_destinations":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_island_destinations(payload, request["nonce"])
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
@@ -2263,6 +2487,56 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
                                           payload["buildings"])
+        elif action == "task_vacation_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_vacation_preview(payload, request["nonce"])
+        elif action in {"task_attack_inventory", "task_attack_preview"}:
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                if action == "task_attack_inventory":
+                    self.tasks_page.set_attack_inventory(payload, request["nonce"])
+                else:
+                    self.tasks_page.set_attack_preview(payload, request["nonce"])
+        elif action == "task_grind_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_grind_preview(payload, request["nonce"])
+        elif action == "task_training_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(payload, dict) and isinstance(request, dict):
+                self.tasks_page.set_training_preview(payload, request["nonce"])
+        elif action == "task_station_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_station_preview(payload, request["nonce"])
+        elif action in {"task_build_options", "task_build_preview"}:
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                if action == "task_build_options":
+                    self.tasks_page.set_build_options(payload, request["nonce"])
+                else:
+                    self.tasks_page.set_build_preview(payload, request["nonce"])
+        elif action == "task_layout_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_layout_preview(payload, request["nonce"])
+        elif action == "task_worker_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_worker_preview(payload, request["nonce"])
+        elif action == "task_donation_preview":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_donation_preview(payload, request["nonce"])
         elif action == "task_construction_preview":
             assert isinstance(payload, dict)
             self.tasks_page.set_construction_preview(payload)
@@ -2284,7 +2558,7 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_task_report(successful, len(payload) - successful)
             logger.info("Multi-account read-only managed task statuses refreshed")
-        elif action == "task_start_batch":
+        elif action in {"task_start_batch", "reviewed_batch"}:
             assert isinstance(payload, dict)
             for view in self._task_views:
                 view.set_batch_launch_result(payload)
@@ -2359,8 +2633,10 @@ class MainWindow(FluentWindow):
             if not account.get("email") and account.get("id") in cached_emails:
                 account["email"] = cached_emails[account["id"]]
         self.accounts_page.set_accounts(visible)
+        self.appearance_page.set_admin_accounts(visible)
         self.warehouses_page.set_accounts(visible)
         self.military_page.set_accounts(visible)
+        self.log_page.set_accounts(visible)
         self.home_page.set_accounts(visible)
         # Refresh inclusion *after* the warehouse account map is replaced.
         # This also handles accounts newly created via metadata editing.
@@ -2383,6 +2659,24 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "proxy_profiles":
+            self.appearance_page.set_proxy_unavailable(getattr(self._worker, "account_id", None))
+        if action == "world_reports":
+            self.appearance_page.set_world_report_unavailable(getattr(self._worker, "account_id", None))
+        if action == "challenge_policy":
+            self.appearance_page.set_challenge_unavailable(getattr(self._worker, "account_id", None))
+        if action == "extension_settings":
+            self.appearance_page.set_extension_unavailable(getattr(self._worker, "account_id", None))
+        if action == "release_status":
+            self.appearance_page.set_release_unavailable()
+        if action == "notification_settings":
+            aid = getattr(self._worker, "account_id", None)
+            if isinstance(aid, str):
+                self.appearance_page.set_notification_unavailable(aid)
+        if action == "administrative_status":
+            aid = getattr(self._worker, "account_id", None)
+            if isinstance(aid, str):
+                self.appearance_page.set_admin_unavailable(aid)
         # Never reuse a recovery refresh across a failed or changed backend.
         self._recovery_followup = None
         if action == "native_login_start":
@@ -2412,6 +2706,26 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_unavailable(account_id, action)
+        if action == "server_activity":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.log_page.set_server_activity_unavailable(getattr(self._worker, "account_id", None),
+                                                              request["before"], request["status"])
+        if action == "task_reward_distribution_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_reward_distribution_unavailable(request["nonce"])
+        if action == "task_shipment_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_shipment_unavailable(request["nonce"])
+        if action == "task_island_destinations":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_island_destinations_unavailable(
+                        getattr(self._worker, "account_id", None), request["nonce"])
         if action == "task_cities":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)
@@ -2470,6 +2784,42 @@ class MainWindow(FluentWindow):
             city_id = request.get("city_id") if isinstance(request, dict) else None
             if isinstance(account_id, str) and type(city_id) is int:
                 self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action == "task_vacation_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_vacation_unavailable(request["nonce"])
+        if action in {"task_attack_inventory", "task_attack_preview"}:
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_attack_unavailable(request["nonce"])
+        if action == "task_grind_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_grind_unavailable(request["nonce"])
+        if action == "task_training_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_training_unavailable(request["nonce"])
+        if action == "task_station_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_station_unavailable(request["nonce"])
+        if action in {"task_build_options", "task_build_preview"}:
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_build_unavailable(request["nonce"])
+        if action == "task_layout_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_layout_preview_unavailable(request["nonce"])
+        if action == "task_worker_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_worker_preview_unavailable(request["nonce"])
+        if action == "task_donation_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_donation_preview_unavailable(request["nonce"])
         if action == "task_construction_preview":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)
@@ -2483,10 +2833,10 @@ class MainWindow(FluentWindow):
             generation = request.get("generation") if isinstance(request, dict) else None
             if generation is None or generation == self.tasks_page._selection_generation:
                 self.tasks_page.set_preflight_unavailable()
-        if action in {"task_start_batch", "task_start"}:
+        if action in {"task_start_batch", "reviewed_batch", "task_start"}:
             for view in self._task_views:
                 view.finish_launch()
-        if action == "task_start_batch":
+        if action in {"task_start_batch", "reviewed_batch"}:
             # Failure could have happened after an irreversible request;
             # do not rerun or automatically acknowledge a task.
             self._pending_batch_status = None

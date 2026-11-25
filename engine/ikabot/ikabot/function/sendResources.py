@@ -1,16 +1,20 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import re
+from html.parser import HTMLParser
 import traceback
 
 from ikabot.config import *
 from ikabot.helpers.botComm import *
 from ikabot.helpers.decorators import configurator, task
-from ikabot.helpers.getJson import getCity, getIsland
+from ikabot.helpers.getJson import getCity, getIsland, getTransportLoadingAndTravelTime
 from ikabot.helpers.gui import *
 from ikabot.helpers.pedirInfo import *
 from ikabot.helpers.planRoutes import executeRoutes
+from ikabot.helpers.naval import getAvailableShips, getTotalShips, getAvailableFreighters, getTotalFreighters
+from ikabot.helpers import pedirInfo
 from ikabot.helpers.resources import *
 from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.taskConfig import asBool, asId, asInt, getCityById, requireOwnCity
@@ -41,6 +45,61 @@ def get_island(session, value, name):
         x, y = text.replace(" ", "").split(":")
         return getIsland(session.get("view=island&xcoord={}&ycoord={}".format(x, y)))
     return getIsland(session.get(island_url + asId(value, name)))
+
+
+def _destination_id(value):
+    if type(value) not in (str, int) or not re.fullmatch(r"[1-9][0-9]{0,11}", str(value)):
+        raise ValueError("Invalid destination identity")
+    return int(value)
+
+
+def _eligible_destinations(session, island):
+    island_id = _destination_id(island["id"])
+    rows = []
+    for city in island["cities"]:
+        if (city.get("type") != "city" or city.get("state") != ""
+                or city.get("Name") == session.username):
+            continue
+        name, owner = city.get("name"), city.get("Name")
+        if not isinstance(name, str) or not isinstance(owner, str) or not name or not owner:
+            raise ValueError("Invalid destination name")
+        rows.append({"id": _destination_id(city["id"]),
+                     "recipient": _destination_id(city["Id"]),
+                     "island": island_id,
+                     "name": decodeUnicodeEscape(name)[:120],
+                     "owner": decodeUnicodeEscape(owner)[:120]})
+    if len(rows) > 100 or len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("Invalid island inventory")
+    return rows
+
+
+def native_island_destinations(session, x, y):
+    if any(type(v) is not int or not 1 <= v <= 100 for v in (x, y)):
+        raise ValueError("Choose island coordinates between 1 and 100")
+    # Match the upstream interactive foreign-city lookup exactly.
+    import json
+    html = session.get(f"view=worldmap_iso&islandX={x}&islandY={y}&oldBackgroundView=island&islandWorldviewScale=1")
+    try:
+        data = json.loads(re.search(r"jsonData = '(.*?)';", html).group(1), strict=False)
+        island_id = _destination_id(data["data"][str(x)][str(y)][0])
+    except (ValueError, AttributeError, KeyError, IndexError, TypeError):
+        raise ValueError("No verified island at these coordinates") from None
+    island = get_island(session, island_id, "Destination island")
+    if (_destination_id(island["id"]) != island_id or
+            (int(island["x"]), int(island["y"])) != (x, y)):
+        raise ValueError("Island coordinates changed")
+    return {"x": x, "y": y, "cities": _eligible_destinations(session, island)}
+
+
+def _verify_recipient(session, route, island=None):
+    if "recipient" not in route:
+        return
+    if island is None:
+        island = get_island(session, route["island"], "Destination island")
+    destination, owner, island_id = (_destination_id(route[k]) for k in ("to", "recipient", "island"))
+    if not any(row["id"] == destination and row["recipient"] == owner and row["island"] == island_id
+               for row in _eligible_destinations(session, island)):
+        raise ValueError("Reviewed external destination changed; stop and review again")
 
 
 def resource_amounts(value, name):
@@ -75,6 +134,8 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
     """
     if not isinstance(routes, (list, tuple)) or not routes:
         raise ValueError('routes must be a list of {{"from": ..., "to": ..., "resources": [...]}}, got {!r}'.format(routes))
+    if any(isinstance(r, dict) and "recipient" in r for r in routes):
+        pedirInfo.ids_cache = None
     own_ids, _ = getIdsOfCities(session)
     checked = []
     asked = {}  # origin id -> amounts asked by all its routes
@@ -101,6 +162,11 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
                     "{}.to {} is not on island {}:{}".format(name, destination, island["x"], island["y"])
                 )
             checked_route["island"] = str(island["id"])
+            if "recipient" in route:
+                _verify_recipient(session, route, island)
+                checked_route["recipient"] = str(_destination_id(route["recipient"]))
+        elif "recipient" in route:
+            raise ValueError("Reviewed external destination is now an owned city")
         checked.append(checked_route)
         asked[origin] = [a + b for a, b in zip(asked.get(origin, [0] * len(RESOURCE_KEYS)), amounts)]
 
@@ -131,6 +197,152 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
     return result
 
 
+class _TransportIdentity(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.ids = {"currentCityId": set(), "destinationCityId": set()}
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "input" and attrs.get("name") in self.ids:
+            self.ids[attrs["name"]].add(attrs.get("value"))
+
+
+def _transport_timing(session, source, destination, cargo, freighters, *, full_cargo=None):
+    """Optional first-load estimate; never send a transport action."""
+    if not cargo:
+        return None
+    ports = [p["position"] for p in source.get("position", [])
+             if p.get("building") == "port" and not p.get("isBusy")
+             and type(p.get("position")) is int and 0 <= p["position"] <= 100]
+    if not ports:
+        return None
+    origin = str(source["id"])
+    try:
+        response = session.get(params={
+            "view": "transport", "destinationCityId": destination,
+            "position": ports[0], "currentCityId": origin, "ajax": 1,
+        })
+        data = json.loads(response)
+        # Accept only one transport view with a uniquely attested route.
+        views = []
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, list):
+                for item in value:
+                    yield from strings(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    yield from strings(item)
+        for entry in data:
+            if isinstance(entry, list) and entry and entry[0] == "changeView":
+                views.extend(v for v in strings(entry[1:]) if "'transporterSpeed':" in v)
+        if len(views) != 1:
+            return None
+        html = views[0]
+        parser = _TransportIdentity()
+        parser.feed(html)
+        if parser.ids != {"currentCityId": {origin}, "destinationCityId": {str(destination)}}:
+            return None
+        fields = ("transporterSpeed", "worldBonus", "governmentBonus", "poseidonEffect",
+                  "marineChartArchiveBonus", "minimumJourneyDuration", "distance",
+                  "fleetJourneyTime", "queueTime", "loadingSpeed")
+        if any(len(re.findall(r"'" + name + r"':", html)) != 1 for name in fields):
+            return None
+        total, loading, travel, queue = getTransportLoadingAndTravelTime(
+            html, totalResources=cargo, useFreighters=freighters)
+        if (any(type(n) is not int or not 0 <= n <= 365 * 86400
+                for n in (total, loading, travel, queue))
+                or travel <= 0 or total != loading + travel + queue):
+            return None
+        observation = {"cargo": cargo, "total_seconds": total, "loading_seconds": loading,
+                       "travel_seconds": travel, "queue_seconds": queue}
+        if full_cargo is not None and full_cargo >= cargo:
+            loads = (full_cargo + cargo - 1) // cargo
+            last_cargo = full_cargo - (loads - 1) * cargo
+            _, last_loading, last_travel, _ = getTransportLoadingAndTravelTime(
+                html, totalResources=last_cargo, useFreighters=freighters)
+            elapsed = queue + (loads - 1) * loading + last_loading + (2 * loads - 1) * travel
+            if (last_travel == travel and 0 <= last_loading <= loading
+                    and total <= elapsed <= 365 * 86400):
+                observation["full_route_model"] = {
+                    "loads": loads, "last_cargo": last_cargo,
+                    "last_loading_seconds": last_loading, "delivery_seconds": elapsed,
+                }
+        return observation
+    except (ValueError, TypeError, AttributeError, KeyError, IndexError, ArithmeticError):
+        return None
+
+
+def preview_native_shipments(session, routes, useFreighters):
+    """A read-only quote of current inventory, fleet and minimum load counts."""
+    pedirInfo.ids_cache = None
+    if type(useFreighters) is not bool or not isinstance(routes, list) or not 1 <= len(routes) <= 20:
+        raise ValueError("Invalid shipment plan")
+    own_ids, own_cities = getIdsOfCities(session)
+    owned = set(map(str, own_ids))
+    # The native surface must never accept an unverified foreign recipient.
+    for route in routes:
+        if str(route["to"]) not in owned and "recipient" not in route:
+            raise ValueError("Discover the external recipient first")
+    # Reuse the upstream validation of ownership, routes and aggregate stock.
+    checked = prepare_sendResources(session, routes, useFreighters)["routes"]
+    ship_capacity, freighter_capacity = getShipCapacity(session)
+    capacity = freighter_capacity if useFreighters else ship_capacity
+    free = getAvailableFreighters(session) if useFreighters else getAvailableShips(session)
+    total = getTotalFreighters(session) if useFreighters else getTotalShips(session)
+    if (type(capacity) is not int or not 0 <= capacity <= 10**8
+            or type(free) is not int or type(total) is not int or not 0 <= free <= total <= 10**8):
+        raise ValueError("Invalid fleet observation")
+    rows = []
+    for route, item in zip(routes, checked):
+        cargo = sum(item["resources"])
+        origin, destination = item["from"], item["to"]
+        source = getCityById(session, origin)
+        if str(source["id"]) != origin:
+            raise ValueError("Origin identity changed")
+        stock = source["availableResources"]
+        if len(stock) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in stock):
+            raise ValueError("Invalid source stock")
+        if destination in owned:
+            target = getCityById(session, destination)
+            if str(target["id"]) != destination:
+                raise ValueError("Destination identity changed")
+            space = target["freeSpaceForResources"]
+            if len(space) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in space):
+                raise ValueError("Invalid destination capacity")
+            name = decodeUnicodeEscape(own_cities[destination]["name"])[:120]
+        else:
+            island = get_island(session, item["island"], "Destination island")
+            _verify_recipient(session, item, island)
+            recipient = next(r for r in _eligible_destinations(session, island)
+                             if str(r["id"]) == destination)
+            name = f"{recipient['name']} — {recipient['owner']}"[:250]
+            space = None
+        first = min(cargo, free * capacity)
+        if space is not None:
+            first = min(first, sum(min(a, b) for a, b in zip(item["resources"], space)))
+        model_cargo = (cargo if len(routes) == 1 and free == total and first > 0
+                       and space is not None and all(a <= b for a, b in zip(item["resources"], space))
+                       else None)
+        timing = _transport_timing(session, source, destination, first, useFreighters,
+                                   full_cargo=model_cargo)
+        model = timing.pop("full_route_model", None) if timing is not None else None
+        rows.append({"from": route["from"], "to": route["to"],
+                     "origin_name": decodeUnicodeEscape(own_cities[origin]["name"])[:120],
+                     "destination_name": name, "resources": item["resources"],
+                     "stock": stock, "destination_space": space,
+                     "first_load_limit": first,
+                     "first_load_timing": timing,
+                     "full_route_model": model,
+                     "minimum_loads": (cargo + total * capacity - 1) // (total * capacity)
+                     if total and capacity else None})
+    return {"routes": rows, "useFreighters": useFreighters, "capacity": capacity,
+            "available_ships": free, "total_ships": total,
+            "ready": bool(total and capacity)}
+
+
 @task("sendResources", prepare=prepare_sendResources)
 def do_it(session, routes, useFreighters=False, transfer_id=None):
     """
@@ -155,6 +367,7 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         else:
             island = getIsland(session.get(island_url + str(route["island"])))
             island_id = island["id"]
+            _verify_recipient(session, route, island)
             destination_name = next(
                 (city["name"] for city in island["cities"] if str(city.get("id")) == destination), destination
             )
@@ -172,7 +385,11 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         checkpoint = FixedTransferJournal(
             session, transfer_id, list(routes), useFreighters,
         )
-    executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
+    if any("recipient" in route for route in routes):
+        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint,
+                      verify_recipient=lambda index: _verify_recipient(session, routes[index]))
+    else:
+        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
 
 
 @configurator

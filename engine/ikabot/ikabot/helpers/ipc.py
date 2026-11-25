@@ -772,8 +772,62 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action in {"preview_distribution_existing", "preview_daily_rewards_existing", "preview_market_existing", "preview_recurring_existing", "preview_fill_existing"}:
+                    try:
+                        session = self._existing_session(request)
+                        if action == "preview_distribution_existing":
+                            from ikabot.function.distributeResources import preview_distribution
+                            result = preview_distribution(session, request["draft"])
+                        elif action == "preview_fill_existing":
+                            from ikabot.function.fillCityWarehouse import preview_fill
+                            result = preview_fill(session, request["draft"])
+                        elif action == "preview_recurring_existing":
+                            from ikabot.helpers.nativePolicyReview import preview_recurring
+                            result = preview_recurring(session, request["task"], request["draft"])
+                        elif action == "preview_market_existing":
+                            from ikabot.function.nativeMarket import preview_native_market
+                            result = preview_native_market(session, request["task"], request["draft"])
+                        else:
+                            from ikabot.function.loginDaily import preview_daily_rewards
+                            result = preview_daily_rewards(session, request["draft"])
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Operation preview unavailable"}
+                if action == "preview_shipments_existing":
+                    from ikabot.function.sendResources import preview_native_shipments
+                    session = self._existing_session(request)
+                    plan = preview_native_shipments(session, request.get("routes"), request.get("useFreighters"))
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, "plan": plan}
+                if action == "island_destinations_existing":
+                    from ikabot.function.sendResources import native_island_destinations
+                    session = self._existing_session(request)
+                    result = native_island_destinations(session, request.get("x"), request.get("y"))
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, **result}
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_vacation_existing":
+                    return self._preview_vacation_existing(request)
+                if action == "list_attack_units_existing":
+                    return self._attack_units_existing(request)
+                if action == "preview_attack_existing":
+                    return self._preview_attack_existing(request)
+                if action == "preview_grind_existing":
+                    return self._preview_grind_existing(request)
+                if action == "preview_station_existing":
+                    return self._preview_station_existing(request)
+                if action == "list_build_options_existing":
+                    return self._build_options_existing(request)
+                if action == "preview_build_existing":
+                    return self._preview_build_existing(request)
+                if action == "preview_layout_existing":
+                    return self._preview_layout_existing(request)
+                if action == "preview_workers_existing":
+                    return self._preview_workers_existing(request)
+                if action == "preview_donation_existing":
+                    return self._preview_donation_existing(request)
                 if action == "preview_construction_existing":
                     return self._preview_construction_existing(request)
                 if action == "list_workshop_upgrades_existing":
@@ -788,6 +842,81 @@ class IPCServer:
                     return self._list_taverns_existing(request)
                 if action == "list_miracles_existing":
                     return self._list_miracles_existing(request)
+                if action in {"notification_settings_begin_existing", "notification_settings_complete_existing"}:
+                    # These narrow encrypted operations must not log exception
+                    # traces or provider responses, even on a persistence error.
+                    try:
+                        from ikabot.helpers import nativeNotificationSettings
+
+                        session = self._existing_session(request)
+                        account, provider = request.get("account_id"), request.get("provider")
+                        if action == "notification_settings_begin_existing":
+                            if request.get("confirmed_global") is not True:
+                                raise ValueError("Explicit worker-global consent required")
+                            result = nativeNotificationSettings.begin(session, account, provider)
+                        else:
+                            result = nativeNotificationSettings.complete(session, account, provider, request.get("envelope"))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Provider configuration unavailable or outcome uncertain"}
+                if action in {"proxy_profiles_existing", "configure_proxy_profile_existing"}:
+                    try:
+                        from ikabot.helpers import nativeProxyProfiles
+
+                        session = self._existing_session(request)
+                        world, player = self._task_entry(request)
+                        busy = any(entry["world"].casefold() == world
+                                   and entry["player"].casefold() == player
+                                   and entry["process"].is_alive()
+                                   for entry in self._daedalus_tasks.values())
+                        result = (nativeProxyProfiles.status(session) if action == "proxy_profiles_existing"
+                                  else nativeProxyProfiles.configure(session, request.get("draft"), managed_busy=busy))
+                        result["busy"] = result["busy"] or busy
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Approved network profile unavailable or outcome uncertain"}
+                if action in {"extension_status_existing", "extension_registration_existing"}:
+                    try:
+                        from ikabot.helpers import nativeExtensions
+
+                        session = self._existing_session(request)
+                        result = (nativeExtensions.status(session) if action == "extension_status_existing"
+                                  else nativeExtensions.set_registration(session, request.get("draft")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Protected extension registration unavailable"}
+                if action in {"challenge_policy_existing", "set_challenge_policy_existing"}:
+                    try:
+                        from ikabot.helpers import nativeChallengePolicy
+
+                        session = self._existing_session(request)
+                        result = (nativeChallengePolicy.status(session) if action == "challenge_policy_existing"
+                                  else nativeChallengePolicy.configure(session, request.get("draft")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Human challenge policy unavailable"}
+                if action in {"world_reports_existing", "world_report_page_existing"}:
+                    try:
+                        from ikabot.helpers import nativeWorldReports
+
+                        session = self._existing_session(request)
+                        result = ({"reports": nativeWorldReports.list_reports(session)}
+                                  if action == "world_reports_existing" else
+                                  nativeWorldReports.read_report(session, request.get("report_id"), request.get("offset")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Aggregate world reports unavailable"}
+                if action == "administrative_status_existing":
+                    from ikabot.helpers.nativeAdminStatus import administrative_status
+
+                    session = self._existing_session(request)
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, "settings": administrative_status(session)}
                 if action == "shrine_status_existing":
                     return self._shrine_status_existing(request)
                 if action == "list_pirate_fortresses_existing":
@@ -899,6 +1028,93 @@ class IPCServer:
             "buildings": buildings,
         }
 
+    def _preview_vacation_existing(self, request):
+        from ikabot.function.vacationMode import preview_native_vacation
+
+        session = self._existing_session(request)
+        plan = preview_native_vacation(session, request.get("city_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _attack_units_existing(self, request):
+        from ikabot.function.attackBarbarians import native_attack_inventory
+
+        session = self._existing_session(request)
+        inventory = native_attack_inventory(session, request.get("city_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "inventory": inventory}
+
+    def _preview_attack_existing(self, request):
+        from ikabot.function.attackBarbarians import preview_native_attack
+
+        session = self._existing_session(request)
+        plan = preview_native_attack(session, request.get("city_id"), request.get("target_city_id"),
+                                     request.get("waves"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _preview_grind_existing(self, request):
+        from ikabot.function.autoBarbarians import preview_native_grind
+
+        session = self._existing_session(request)
+        plan = preview_native_grind(session, request.get("city_id"), request.get("target_city_id"),
+                                    request.get("send_notifications"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _preview_station_existing(self, request):
+        from ikabot.function.stationArmy import preview_native_station
+
+        session = self._existing_session(request)
+        plan = preview_native_station(session, request.get("city_id"),
+                                      request.get("destination_city_id"), request.get("ground"),
+                                      request.get("all_origins", False), request.get("both", False))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _build_options_existing(self, request):
+        from ikabot.function.constructBuilding import native_build_options
+
+        session = self._existing_session(request)
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "inventory": native_build_options(session, request.get("city_id"))}
+
+    def _preview_build_existing(self, request):
+        from ikabot.function.constructBuilding import preview_native_build
+
+        session = self._existing_session(request)
+        plan = preview_native_build(session, request.get("city_id"), request.get("position"), request.get("building_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _preview_layout_existing(self, request):
+        from ikabot.function.reorganizeCityBuildings import preview_native_layout
+
+        session = self._existing_session(request)
+        plan = preview_native_layout(session, request.get("city_id"), request.get("template_city_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _preview_workers_existing(self, request):
+        from ikabot.function.modifyProduction import preview_native_workers
+
+        session = self._existing_session(request)
+        plan = preview_native_workers(session, request.get("task"), request.get("city_id"),
+                                      request.get("percentage"), request.get("project"),
+                                      request.get("overcharge", False), request.get("additional_city_ids"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
+    def _preview_donation_existing(self, request):
+        from ikabot.function.donate import preview_native_donation
+
+        session = self._existing_session(request)
+        plan = preview_native_donation(
+            session, request.get("city_id"), request.get("project"), request.get("amount"),
+        )
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
+
     def _preview_construction_existing(self, request):
         """Read-only construction cost/queue preparation for a verified owned city.
 
@@ -924,7 +1140,8 @@ class IPCServer:
             reviewed.append({
                 "position": item["position"], "target_level": item["target_level"]
             })
-        result = preview_native_construction(session, city_id, reviewed)
+        result = (preview_native_construction(session, city_id, reviewed, request["supply"])
+                  if "supply" in request else preview_native_construction(session, city_id, reviewed))
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,
@@ -1030,7 +1247,7 @@ class IPCServer:
     def _list_academies_existing(self, request):
         """Return owned academy buildings, real crystal stock and cooldown state."""
         from ikabot.config import actionRequest, city_url
-        from ikabot.function.research import find_academy_cities
+        from ikabot.function.research import find_academy_cities, get_studies, native_study_choices
         from ikabot.helpers.getJson import getCity
         from ikabot.helpers.pedirInfo import getIdsOfCities
 
@@ -1080,15 +1297,21 @@ class IPCServer:
                     stock[3] >= 300000 and "experimentCooldown" not in cooldown_html
                 ),
             })
+        studies = None
+        try:
+            studies = native_study_choices(get_studies(session))
+        except (ValueError, KeyError, IndexError, TypeError):
+            # Advisor failure does not disable verified experiment controls.
+            pass
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
-            "username": session.username, "academies": academies,
+            "username": session.username, "academies": academies, "studies": studies,
         }
 
     def _list_taverns_existing(self, request):
         """Read-only city wine, tavern servings and population state."""
         from ikabot.config import city_url
-        from ikabot.function.tavernManager import TavernManager
+        from ikabot.function.tavernManager import TavernManager, native_serving_options
         from ikabot.helpers.getJson import getCity
         from ikabot.helpers.pedirInfo import getIdsOfCities
 
@@ -1129,6 +1352,7 @@ class IPCServer:
                 "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
                 "wine": stock[1], "has_tavern": tavern is not None,
                 "serving_level": current, "wine_per_hour": wine_hour,
+                "serving_options": native_serving_options(info),
                 "satisfaction": (
                     hall.get("total_satisfaction") if isinstance(hall, dict) else None
                 ),
@@ -1546,6 +1770,9 @@ class IPCServer:
             rows.append({
                 "task_id": task_id, "task": entry["task"], "pid": entry["pid"],
                 "status": entry["status"], "started_at": entry["started_at"],
+                **({"outcome": "accepted" if proc.exitcode == 0 else "failed_or_uncertain"}
+                   if entry["task"] in {"testTelegramBot", "testDiscordBot"}
+                   and entry["status"] == "finished" and proc.exitcode is not None else {}),
             })
         return {"status": "ok", "tasks": rows, "world": request["world"],
                 "player": request["player"]}
@@ -1596,8 +1823,12 @@ class IPCServer:
             raise ValueError("Unknown built-in task")
         requires_notifications = canonical in {
             "alertAttacks", "alertLowWine", "searchForIslandSpaces",
+            "testTelegramBot", "testDiscordBot",
         }
-        if requires_notifications:
+        if canonical in {"testTelegramBot", "testDiscordBot"}:
+            from ikabot.helpers.botComm import native_notification_ready
+            ready = native_notification_ready(session, "telegram" if canonical == "testTelegramBot" else "discord")
+        elif requires_notifications:
             from ikabot.helpers.botComm import discordDataIsValid, telegramDataIsValid
 
             ready = bool(
@@ -1668,6 +1899,10 @@ class IPCServer:
         canonical_name, task_func = _resolve_task(task_name)
         if existing_only and task_func.__module__ != f"ikabot.function.{canonical_name}":
             raise ValueError("Only built-in IkaBot task implementations are allowed")
+        if existing_only and canonical_name == "autoPirate":
+            # The remote controller never invokes automated challenge solvers,
+            # even if a legacy local provider is configured.
+            config_dict = {**config_dict, "manual_challenge": True}
         try:
             clean_config = _validate_task_config(canonical_name, task_func, config_dict)
         except (ValueError, TypeError):
@@ -1685,6 +1920,29 @@ class IPCServer:
                 and entry["process"].is_alive()
                 for entry in self._daedalus_tasks.values()
             )
+            if ((canonical_name == "vacationMode" and active_same_account)
+                    or any(entry["world"].casefold() == fingerprint[0]
+                           and entry["player"].casefold() == fingerprint[1]
+                           and entry["task"] == "vacationMode" and entry["process"].is_alive()
+                           for entry in self._daedalus_tasks.values())):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            transport_tasks = {"fillCityWarehouse", "sendResources", "distributeResources", "consolidateResources",
+                               "resourceTransportManager", "constructionList", "buyResources", "sellResources", "alertLowWine"}
+            if canonical_name in transport_tasks and any(
+                    entry["world"].casefold() == fingerprint[0]
+                    and entry["player"].casefold() == fingerprint[1]
+                    and entry["process"].is_alive()
+                    and entry["task"] in transport_tasks
+                    and (canonical_name == "fillCityWarehouse" or entry["task"] == "fillCityWarehouse")
+                    for entry in self._daedalus_tasks.values()):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            if canonical_name in {"testTelegramBot", "testDiscordBot"} and any(
+                    entry["world"].casefold() == fingerprint[0]
+                    and entry["player"].casefold() == fingerprint[1]
+                    and entry["task"] == canonical_name
+                    and (entry["process"].is_alive() or time.time() - entry["started_at"] < 30)
+                    for entry in self._daedalus_tasks.values()):
+                return {"status": "rejected", "reason": "invalid_configuration"}
             if active_same_account >= 16:
                 raise ValueError("Account has reached the active task safety limit")
             if len(self._daedalus_tasks) >= 256:
@@ -1701,9 +1959,34 @@ class IPCServer:
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log
-            prepared = prepare(session, **clean_config)
+            try:
+                prepared = prepare(session, **clean_config)
+            except ValueError:
+                if existing_only and canonical_name in {
+                    "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research", "tavernManager", "searchForIslandSpaces", "distributeResources", "loginDaily", "buyResources", "sellResources",
+                    "fillCityWarehouse", "consolidateResources", "resourceTransportManager", "donationBot", "dumpWorld", "autoPirate", "activateMiracle", "activateShrine", "UpgradeUnits",
+                }:
+                    return {"status": "rejected", "reason": "invalid_configuration"}
+                raise
             if prepared is not None:
                 clean_config = _validate_task_config(canonical_name, task_func, prepared)
+
+        task_id = secrets.token_hex(12) if existing_only else None
+        if existing_only and canonical_name == "dumpWorld":
+            from ikabot.helpers.nativeWorldReports import ensure_capacity
+
+            if "managed_report_id" in config_dict or any(
+                    entry["world"].casefold() == fingerprint[0]
+                    and entry["player"].casefold() == fingerprint[1]
+                    and entry["task"] == canonical_name and entry["process"].is_alive()
+                    for entry in self._daedalus_tasks.values()):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            try:
+                ensure_capacity(session)
+            except (OSError, ValueError):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            clean_config["managed_report_id"] = task_id
 
         started = multiprocessing.Event()
         proc = multiprocessing.Process(
@@ -1745,7 +2028,6 @@ class IPCServer:
             "username": session.username, "host_pid": os.getpid(),
         }
         if existing_only:
-            task_id = secrets.token_hex(12)
             self._daedalus_tasks[task_id] = {
                 "process": proc, "pid": proc.pid, "task": canonical_name,
                 "world": response["world"], "player": session.username,

@@ -45,7 +45,7 @@ def getBuildingInfo(session, city, trainTroops):
     return json.loads(data, strict=False)
 
 
-def train(session, city, trainings, trainTroops):
+def train(session, city, trainings, trainTroops, *, reviewed=False):
     """
     Parameters
     ----------
@@ -69,7 +69,9 @@ def train(session, city, trainings, trainTroops):
     }
     for training in trainings:
         payload[training["unit_type_id"]] = training["train"]
-    session.post(params=payload)
+    if reviewed:
+        return session.post(params=payload, retry_on_failure=False)
+    return session.post(params=payload)
 
 
 def waitForTraining(session, city, trainTroops):
@@ -251,9 +253,131 @@ def available_trainable_units(session, city_id, train_troops):
     }
 
 
+def _reviewed_training_round(session, job, round_index, train_troops):
+    """Check exact reviewed identity, unit costs and affordability from the game."""
+    from ikabot.helpers import pedirInfo
+
+    pedirInfo.ids_cache = None
+    catalog = available_trainable_units(session, job["city"]["id"], train_troops)
+    if job["city"] != catalog["city"]:
+        raise ValueError("Reviewed training city or building changed")
+    available = {u["unit_type_id"]: u for u in catalog["units"]}
+    resources = ("wood", "wine", "marble", "crystal", "sulfur", "citizens")
+    budget = dict(zip(resources, [*catalog["available"], catalog["free_citizens"]]))
+    selected = job["rounds"][round_index]
+    for unit in selected:
+        current = available.get(unit["unit_type_id"])
+        if (current is None or current["local_name"] != unit["local_name"]
+                or current["costs"] != unit["costs"]):
+            raise ValueError("Reviewed training catalog changed")
+        for key in resources:
+            budget[key] -= unit["costs"].get(key, 0) * unit["cantidad"]
+    if any(v < 0 for v in budget.values()):
+        raise ValueError("Insufficient resources or citizens for reviewed training")
+    return [{"unit_type_id": u["unit_type_id"], "train": u["cantidad"]} for u in selected]
+
+
+def _validate_reviewed_training(session, reviewed, train_troops):
+    """Bounded internal ticket payload. Never trust arbitrary unit metadata."""
+    import math
+
+    if (not isinstance(reviewed, dict) or set(reviewed) != {"cycles", "jobs"}
+            or type(reviewed["cycles"]) is not int or not 1 <= reviewed["cycles"] <= 10
+            or not isinstance(reviewed["jobs"], list) or not 1 <= len(reviewed["jobs"]) <= 32
+            or type(train_troops) is not bool):
+        raise ValueError("Invalid reviewed training plan")
+    cities = set()
+    total_rounds = 0
+    shapes = []
+    for job in reviewed["jobs"]:
+        if not isinstance(job, dict) or set(job) != {"city", "rounds"}:
+            raise ValueError("Invalid reviewed training city")
+        city = job["city"]
+        if (not isinstance(city, dict) or set(city) != {"id", "pos", "cityName"}
+                or not isinstance(city["id"], str) or not re.fullmatch(r"[1-9][0-9]{0,11}", city["id"])
+                or city["id"] in cities or not isinstance(city["pos"], str)
+                or not re.fullmatch(r"[0-9]{1,2}", city["pos"]) or int(city["pos"]) > 80
+                or not isinstance(city["cityName"], str) or not 0 < len(city["cityName"]) <= 100
+                or not isinstance(job["rounds"], list) or not 1 <= len(job["rounds"]) <= 10):
+            raise ValueError("Invalid reviewed training city")
+        cities.add(city["id"])
+        total_rounds += len(job["rounds"])
+        shape = []
+        for group in job["rounds"]:
+            if not isinstance(group, list) or not 1 <= len(group) <= 50:
+                raise ValueError("Invalid reviewed training round")
+            seen = set()
+            row = []
+            for unit in group:
+                if (not isinstance(unit, dict) or set(unit) != {"unit_type_id", "cantidad", "costs", "local_name"}
+                        or type(unit["unit_type_id"]) is not int or not 0 < unit["unit_type_id"] < 10**7
+                        or unit["unit_type_id"] in seen or type(unit["cantidad"]) is not int
+                        or not 1 <= unit["cantidad"] <= 100000
+                        or not isinstance(unit["local_name"], str) or not 0 < len(unit["local_name"]) <= 100
+                        or not isinstance(unit["costs"], dict)
+                        or not set(unit["costs"]) <= {"wood", "wine", "marble", "crystal", "sulfur",
+                                                      "citizens", "upkeep", "completiontime"}
+                        or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 10**9
+                               for v in unit["costs"].values())):
+                    raise ValueError("Invalid reviewed training unit")
+                seen.add(unit["unit_type_id"])
+                row.append((unit["unit_type_id"], unit["cantidad"]))
+            shape.append(row)
+        shapes.append(shape)
+    if total_rounds * reviewed["cycles"] > 200 or any(s != shapes[0] for s in shapes):
+        raise ValueError("Training plan exceeds the reviewed batch limit")
+    # Check every selected unit in every city before any mutation. The first
+    # round must be affordable now; later rounds are rechecked after waiting.
+    for job in reviewed["jobs"]:
+        for index, group in enumerate(job["rounds"]):
+            if index == 0:
+                _reviewed_training_round(session, job, index, train_troops)
+            else:
+                catalog = available_trainable_units(session, job["city"]["id"], train_troops)
+                actual = {u["unit_type_id"]: u for u in catalog["units"]}
+                if catalog["city"] != job["city"] or any(
+                    u["unit_type_id"] not in actual or any(
+                        actual[u["unit_type_id"]][k] != u[k] for k in ("local_name", "costs")
+                    ) for u in group
+                ):
+                    raise ValueError("Reviewed training catalog changed")
+    return reviewed
+
+
+def _run_reviewed_training(session, reviewed, train_troops):
+    _validate_reviewed_training(session, reviewed, train_troops)
+    remaining = reviewed["cycles"] * sum(len(job["rounds"]) for job in reviewed["jobs"])
+    for _ in range(reviewed["cycles"]):
+        for job in reviewed["jobs"]:
+            for index in range(len(job["rounds"])):
+                waitForTraining(session, job["city"], train_troops)
+                units = _reviewed_training_round(session, job, index, train_troops)
+                session.setStatus("Submitting reviewed recruitment round")
+                train(session, job["city"], units, train_troops, reviewed=True)
+                remaining -= 1
+                # Do not continue with repeated writes unless the game shows
+                # that the submitted batch entered the training queue.
+                if remaining:
+                    response = getBuildingInfo(session, job["city"], train_troops)
+                    if not re.search(r"'buildProgress', (\d+),", response[1][1][1]):
+                        raise ValueError("Training submission not observed; stop remaining rounds")
+    session.setStatus("Recruitment submitted; verify training queues")
+
+
 def prepare_trainArmy(session, city, tranings, trainTroops, replicate,
-                      countRepeat, cityTrainings, units):
+                      countRepeat, cityTrainings, units, reviewed_jobs=None):
     """Rebuild non-replicated native training from real game costs before launch."""
+    if reviewed_jobs is not None:
+        if replicate != "n" or countRepeat != 0 or cityTrainings != [] or units != []:
+            raise ValueError("Invalid reviewed recruitment envelope")
+        plan = _validate_reviewed_training(session, reviewed_jobs, trainTroops)
+        if city != plan["jobs"][0]["city"] or tranings != [[
+            {k: u[k] for k in ("unit_type_id", "cantidad")}
+            for u in plan["jobs"][0]["rounds"][0]
+        ]]:
+            raise ValueError("Reviewed recruitment envelope changed")
+        return {"city": city, "tranings": tranings, "trainTroops": trainTroops, "replicate": "n",
+                "countRepeat": 0, "cityTrainings": [], "units": [], "reviewed_jobs": plan}
     if (not isinstance(city, dict) or not isinstance(tranings, list)
             or len(tranings) != 1 or not isinstance(tranings[0], list)
             or not 0 < len(tranings[0]) <= 50
@@ -307,7 +431,11 @@ def prepare_trainArmy(session, city, tranings, trainTroops, replicate,
 
 
 @task("trainArmy", prepare=prepare_trainArmy)
-def do_trainArmy(session, city, tranings, trainTroops, replicate, countRepeat, cityTrainings, units):
+def do_trainArmy(session, city, tranings, trainTroops, replicate, countRepeat, cityTrainings, units,
+                 reviewed_jobs: dict = None):
+    if reviewed_jobs is not None:
+        _run_reviewed_training(session, reviewed_jobs, trainTroops)
+        return
     if replicate == "y":
         countRepeat = countRepeat + 1
         while countRepeat > 0:

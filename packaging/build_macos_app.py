@@ -16,6 +16,7 @@ import argparse
 import importlib.util
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -96,10 +97,13 @@ def build_command(
     ]
 
 
-def launcher_source() -> str:
+def launcher_source(build_sha: str = "") -> str:
     """The package entrypoint is all that is needed in the frozen GUI."""
+    stamp = build_sha if re.fullmatch(r"[0-9a-f]{40}", build_sha) else ""
     return (
         "from __future__ import annotations\n"
+        "from daedalus.release_catalog import set_frozen_build_revision\n"
+        f"set_frozen_build_revision({stamp!r})\n"
         "import multiprocessing\n"
         "import sys\n"
         "if __name__ == '__main__':\n"
@@ -142,7 +146,7 @@ def build(
     with tempfile.TemporaryDirectory(prefix="daedalus-packaging-") as temporary:
         workspace = Path(temporary)
         launcher = workspace / "launcher.py"
-        launcher.write_text(launcher_source(), encoding="utf-8")
+        launcher.write_text(launcher_source(os.environ.get("GITHUB_SHA", "")), encoding="utf-8")
         command = build_command(
             launcher,
             output_dir=output_dir,

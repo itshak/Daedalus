@@ -161,7 +161,7 @@ def market_snapshot(session, city_id, resource_type, side):
     }
 
 
-def prepare_buyResources(session, city, offers, amount_to_buy):
+def prepare_buyResources(session, city, offers, amount_to_buy, reviewed_market=False):
     """Require game-matched quotes, exact prices and enough units before purchase."""
     if (not isinstance(city, dict) or not isinstance(offers, list)
             or not 0 < len(offers) <= 50):
@@ -188,12 +188,13 @@ def prepare_buyResources(session, city, offers, amount_to_buy):
         "city": snapshot["city"],
         "offers": sorted(found, key=lambda offer: offer["precio"]),
         "amount_to_buy": qty,
+        **({"reviewed_market": True} if reviewed_market is True else {}),
     }
 
 
 def prepare_sellResources(
     session, mode, amount_to_sell=None, offers=None, resource_type=None,
-    city_to_buy_from=None, price=None, sell_market_capacity=None, city=None,
+    city_to_buy_from=None, price=None, sell_market_capacity=None, city=None, reviewed_market=False,
 ):
     """Read market again and reject outdated buyer offers or listing prices."""
     if mode not in {"sell_to_offers", "create_offer"}:
@@ -223,6 +224,7 @@ def prepare_sellResources(
         return {
             "mode": mode, "amount_to_sell": amount, "offers": chosen,
             "resource_type": resource, "city_to_buy_from": snapshot["city"],
+            **({"reviewed_market": True} if reviewed_market is True else {}),
         }
 
     if not isinstance(city, dict):
@@ -236,9 +238,47 @@ def prepare_sellResources(
         raise ValueError("Not enough game resources to list that amount")
     if sell_market_capacity is not None and sell_market_capacity != snapshot["sell_market_capacity"]:
         raise ValueError("The market capacity has changed; refresh before listing")
+    if reviewed_market is True:
+        from ikabot.function.sellResources import getMarketInfo
+        from ikabot.helpers.market import onSellInMarket
+
+        if (snapshot["currently_on_sale"] != 0 or amount > snapshot["sell_market_capacity"]
+                or any(onSellInMarket(getMarketInfo(session, snapshot["city"])))):
+            raise ValueError("Reviewed listing requires empty market and immediate capacity")
     return {
         "mode": mode, "amount_to_sell": amount, "price": asking,
         "resource_type": resource,
         "sell_market_capacity": snapshot["sell_market_capacity"],
         "city": snapshot["city"],
+        **({"reviewed_market": True} if reviewed_market is True else {}),
     }
+
+def preview_native_market(session, task, draft):
+    from ikabot.helpers.market import getGold
+
+    if task == "buyResources":
+        prepared = prepare_buyResources(session, **draft, reviewed_market=True)
+        amount = prepared["amount_to_buy"]
+        offers = [(r["ciudadDestino"], r["jugadorAComprar"], r["amountAvailable"], r["precio"])
+                  for r in prepared["offers"]]
+        mode = "buy"
+        gold = getGold(session, prepared["city"])[0]
+    elif task == "sellResources":
+        prepared = prepare_sellResources(session, **draft, reviewed_market=True)
+        amount = prepared["amount_to_sell"]
+        mode = prepared["mode"]
+        gold = None
+        offers = ([(prepared["city"]["name"], "", amount, prepared["price"])] if mode == "create_offer"
+                  else [tuple(r[:4]) for r in prepared["offers"]])
+    else:
+        raise ValueError("Unsupported market operation")
+    rows = []
+    for city, player, available, price in offers:
+        qty = min(amount, available)
+        if qty:
+            rows.append({"city":city,"player":player,"amount":qty,"unit_price":price})
+            amount -= qty
+    total = sum(r["amount"]*r["unit_price"] for r in rows)
+    if amount or not 0 < total <= 2**53-1 or (mode == "buy" and (type(gold) is not int or gold < total)):
+        raise ValueError("Market allocation or gold unavailable")
+    return {"rows": rows, "gold_total": total, "gold_available": gold, "mode":mode}

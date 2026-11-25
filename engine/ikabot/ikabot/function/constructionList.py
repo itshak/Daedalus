@@ -221,7 +221,7 @@ def waitForConstruction(session, city_id, final_lvl, construction_queue=None):
     return city
 
 
-def expandBuilding(session, cityId, building, waitForResources, construction_queue=None):
+def expandBuilding(session, cityId, building, waitForResources, construction_queue=None, *, reviewed=False):
     """
     Parameters
     ----------
@@ -230,6 +230,7 @@ def expandBuilding(session, cityId, building, waitForResources, construction_que
     building : dict
     waitForResources : bool
     """
+    reviewed_building = building["building"] if reviewed else None
     current_level = building["level"]
     if building["isBusy"]:
         current_level += 1
@@ -242,7 +243,15 @@ def expandBuilding(session, cityId, building, waitForResources, construction_que
 
     for lv in range(levels_to_upgrade):
         city = waitForConstruction(session, cityId, upgradeTo, construction_queue)
-        building = city["position"][position]
+        if reviewed:
+            if str(city["id"]) != str(cityId):
+                raise ValueError("Construction destination changed")
+            building = next((b for b in city["position"] if b["position"] == position), None)
+            if (building is None or building.get("building") != reviewed_building
+                    or building.get("level") != current_level + lv or building.get("isBusy") is True):
+                raise ValueError("Reviewed construction level or building changed")
+        else:
+            building = city["position"][position]
 
         if building["canUpgrade"] is False and waitForResources is True:
             while building["canUpgrade"] is False:
@@ -257,6 +266,8 @@ def expandBuilding(session, cityId, building, waitForResources, construction_que
                 wait(seconds + 5)
 
         if building["canUpgrade"] is False:
+            if reviewed:
+                raise ValueError("Reviewed construction no longer affordable")
             msg = "City:{}\n".format(city["cityName"])
             msg += "Building:{}\n".format(building["name"])
             msg += "The building could not be completed due to lack of resources.\n"
@@ -272,10 +283,18 @@ def expandBuilding(session, cityId, building, waitForResources, construction_que
             cityId,
             building["building"],
         )
-        resp = session.post(url)
+        resp = session.post(url, retry_on_failure=False) if reviewed else session.post(url)
         html = session.get(city_url + cityId)
         city = getCity(html)
-        building = city["position"][position]
+        if reviewed:
+            if str(city["id"]) != str(cityId):
+                raise ValueError("Construction destination changed")
+            building = next((b for b in city["position"] if b["position"] == position), None)
+            if (building is None or building.get("building") != reviewed_building
+                    or building.get("level") != current_level + lv or building.get("isBusy") is not True):
+                raise ValueError("Reviewed upgrade submission not observed")
+        else:
+            building = city["position"][position]
         if building["isBusy"] is False:
             msg = "{}: The building {} was not extended".format(
                 city["cityName"], building["name"]
@@ -292,7 +311,10 @@ def expandBuilding(session, cityId, building, waitForResources, construction_que
         sendToBotDebug(session, msg, debugON_constructionList)
 
     city = waitForConstruction(session, cityId, upgradeTo, construction_queue)
-    building = city["position"][position]
+    building = (next((b for b in city["position"] if b["position"] == position), None)
+                if reviewed else city["position"][position])
+    if reviewed and (building is None or building.get("level") != upgradeTo or building.get("building") != reviewed_building):
+        raise ValueError("Reviewed upgrade completion not observed")
     msg = "{}: The building {} finished extending to level: {:d}.".format(
         city["cityName"], building["name"], building["level"]
     )
@@ -771,14 +793,13 @@ def checkhash(url):
     return material
 
 
-def preview_native_construction(session, city_id, upgrades):
+def preview_native_construction(session, city_id, upgrades, supply=None):
     """Read and prepare a city-specific construction queue without game mutations.
 
     Upgrade planning delegates actual resource and duration calculation to
     getResourcesNeeded (the same upstream routine as the original CLI).
-    External transport orchestration is intentionally excluded: the caller
-    must already have all required resources. At dispatch, the engine prepares
-    the same plan again to reject stale building levels and cost assumptions.
+    Optional owned-city supply uses exact reviewed cargo and the existing
+    shipment engine. At dispatch, re-read building levels, costs and routes.
     """
     from ikabot.helpers.taskConfig import requireOwnCity
 
@@ -787,6 +808,10 @@ def preview_native_construction(session, city_id, upgrades):
     if not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12:
         raise ValueError("Choose 1 to 12 actual building upgrades")
 
+    from ikabot.helpers import pedirInfo
+
+    if supply is not None:
+        pedirInfo.ids_cache = None
     owned = requireOwnCity(session, city_id, "city_id")
     city = getCity(session.get(city_url + str(owned)))
     if int(city["id"]) != city_id:
@@ -854,19 +879,68 @@ def preview_native_construction(session, city_id, upgrades):
         "wait_resources": False, "construction_queue": queue,
         "total_time": total_seconds,
     }
-    return {
+    result = {
         "config": config, "costs": costs, "available": list(resources),
         "missing": missing, "estimated_seconds": total_seconds,
         "ready": all(amount == 0 for amount in missing),
     }
+    if supply is not None:
+        result = _construction_supply(session, city, result, supply)
+    return result
+
+
+def _construction_supply(session, city, result, supply):
+    from ikabot.helpers.taskConfig import getCityById, requireOwnCity
+    from ikabot.function.sendResources import preview_native_shipments
+
+    city_id = int(city["id"])
+    if (not isinstance(supply, dict) or set(supply) != {"source_ids", "useFreighters", "round_up", "supply_only"}
+            or any(type(supply[k]) is not bool for k in ("useFreighters", "round_up", "supply_only"))
+            or not isinstance(supply["source_ids"], list) or not 1 <= len(supply["source_ids"]) <= 20
+            or any(type(v) is not int or not 0 < v < 10**12 or v == city_id for v in supply["source_ids"])
+            or len(set(supply["source_ids"])) != len(supply["source_ids"])):
+        raise ValueError("Choose distinct owned construction suppliers")
+    space = city.get("freeSpaceForResources")
+    if not isinstance(space, list) or len(space) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in space):
+        raise ValueError("Destination storage unavailable")
+    missing = result["missing"]
+    target = [min(space[i], _round_up_resources(n) if supply["round_up"] else n)
+              for i, n in enumerate(missing)]
+    remaining = target.copy()
+    routes = []
+    for source_id in supply["source_ids"]:
+        source = getCityById(session, requireOwnCity(session, source_id, "supplier"))
+        stock = source.get("availableResources")
+        if (str(source.get("id")) != str(source_id) or not isinstance(stock, list)
+                or len(stock) != 5 or any(type(v) is not int or not 0 <= v <= 10**15 for v in stock)):
+            raise ValueError("Supplier inventory unavailable")
+        cargo = [min(n, available, 10**9) for n, available in zip(remaining, stock)]
+        remaining = [n - a for n, a in zip(remaining, cargo)]
+        if any(cargo):
+            routes.append({"from": source_id, "to": city_id, "resources": cargo})
+    totals = [a-b for a,b in zip(target, remaining)]
+    short = [max(0, a-b) for a,b in zip(missing, totals)]
+    shipment = preview_native_shipments(session, routes, supply["useFreighters"]) if routes else None
+    if shipment is not None and any(row["destination_space"] != space for row in shipment["routes"]):
+        raise ValueError("Destination storage changed during supply review")
+    ready = not any(short) and bool(shipment and shipment["ready"])
+    # A supply-only task requires actual cargo; a no-shortage build can use
+    # the existing self-funded workflow instead of a redundant supply review.
+    result["ready"] = ready
+    result["supply"] = {"options": supply, "target": target, "remaining": short,
+                        "shipment": shipment, "destination_space": space}
+    result["config"].update(shipments=routes, expand_overall=not supply["supply_only"],
+                            wait_resources=not supply["supply_only"],
+                            supply_review={"options": supply, "costs": result["costs"]})
+    return result
 
 
 def prepare_constructionList(session, city_id, city_name, buildings, shipments,
-                             expand_overall, wait_resources, construction_queue, total_time):
+                             expand_overall, wait_resources, construction_queue, total_time, supply_review=None):
     """Independently recompute a UI-prepared plan immediately before task launch."""
     if (not isinstance(buildings, list) or not 0 < len(buildings) <= 12
-            or not isinstance(shipments, list) or shipments
-            or expand_overall is not True or wait_resources is not False):
+            or not isinstance(shipments, list)
+            or (supply_review is None and (shipments or expand_overall is not True or wait_resources is not False))):
         raise ValueError("Construction needs an engine-reviewed, self-funded plan")
     try:
         upgrades = [
@@ -875,7 +949,11 @@ def prepare_constructionList(session, city_id, city_name, buildings, shipments,
         ]
     except (TypeError, KeyError) as exc:
         raise ValueError("Invalid construction building records") from exc
-    result = preview_native_construction(session, city_id, upgrades)
+    if supply_review is not None and (not isinstance(supply_review, dict)
+                                      or set(supply_review) != {"options", "costs"}):
+        raise ValueError("Invalid construction supply review")
+    result = preview_native_construction(session, city_id, upgrades,
+                                         supply_review["options"]) if supply_review is not None else preview_native_construction(session, city_id, upgrades)
     if not result["ready"]:
         raise ValueError("Construction resources changed; review the shortage and preview again")
     expected = result["config"]
@@ -884,6 +962,8 @@ def prepare_constructionList(session, city_id, city_name, buildings, shipments,
         "shipments": shipments, "expand_overall": expand_overall,
         "wait_resources": wait_resources, "construction_queue": construction_queue,
     }
+    if supply_review is not None:
+        supplied["supply_review"] = supply_review
     check = {key: val for key, val in expected.items() if key != "total_time"}
     if supplied != check or type(total_time) is not int or abs(
         total_time - expected["total_time"]
@@ -892,9 +972,72 @@ def prepare_constructionList(session, city_id, city_name, buildings, shipments,
     return expected
 
 
+def _run_supplied_construction(session, config):
+    """Never replay a supply dispatch. Wait for observed resources before building."""
+    from ikabot.helpers import pedirInfo
+    from ikabot.helpers.taskConfig import getCityById, requireOwnCity
+
+    prepared = prepare_constructionList(session, **config)
+    routes = prepared["shipments"]
+    city_id = prepared["city_id"]
+    target = getCityById(session, city_id)
+    island = str(target["islandId"])
+    shipments = []
+    for route in routes:
+        source = getCityById(session, route["from"])
+        shipments.append(({"id": str(source["id"]), "name": str(source["name"])},
+                          {"id": str(city_id), "name": prepared["city_name"]},
+                          island, *route["resources"]))
+
+    def verify_owned(index):
+        pedirInfo.ids_cache = None
+        requireOwnCity(session, city_id, "destination")
+        requireOwnCity(session, routes[index]["from"], "supplier")
+        observed = getCityById(session, city_id)
+        if str(observed["id"]) != str(city_id) or str(observed["islandId"]) != island:
+            raise ValueError("Construction destination changed")
+
+    session.setStatus("Dispatching exact reviewed construction supply")
+    executeRoutes(session, shipments, prepared["supply_review"]["options"]["useFreighters"],
+                  verify_recipient=verify_owned)
+    if not prepared["expand_overall"]:
+        session.setStatus("Construction supply dispatched; verify arrivals")
+        return
+    # Do not infer arrival from dispatch acceptance. Observe sufficient
+    # destination stock and unchanged targets/costs before any upgrade.
+    upgrades = [{"position": b["position"], "target_level": b["upgradeTo"]} for b in prepared["buildings"]]
+    deadline = time.monotonic() + 24 * 60 * 60
+    while True:
+        pedirInfo.ids_cache = None
+        fresh = preview_native_construction(session, city_id, upgrades)
+        if (fresh["config"]["buildings"] != prepared["buildings"]
+                or fresh["costs"] != prepared["supply_review"]["costs"]):
+            raise ValueError("Construction review changed after supply dispatch")
+        if fresh["ready"]:
+            break
+        if time.monotonic() >= deadline:
+            raise ValueError("Supplied resources not observed within 24 hours; reconcile manually")
+        session.setStatus("Waiting for reviewed construction supplies to arrive")
+        wait(60)
+    queue = list(prepared["construction_queue"])
+    for building in prepared["buildings"]:
+        expandBuilding(session, str(city_id), building, False, queue, reviewed=True)
+        city = getCityById(session, city_id)
+        observed = next((b for b in city["position"] if b["position"] == building["position"]), None)
+        if (observed is None or observed.get("building") != building["building"]
+                or observed.get("level") != building["upgradeTo"] or observed.get("isBusy") is True):
+            raise ValueError("Construction result not verified; stop remaining upgrades")
+
+
 @task("constructionList", prepare=prepare_constructionList)
 def do_it(session, city_id, city_name, buildings, shipments, expand_overall, wait_resources,
-          construction_queue, total_time):
+          construction_queue, total_time, supply_review: dict = None):
+    if supply_review is not None:
+        _run_supplied_construction(session, {"city_id": city_id, "city_name": city_name,
+            "buildings": buildings, "shipments": shipments, "expand_overall": expand_overall,
+            "wait_resources": wait_resources, "construction_queue": construction_queue,
+            "total_time": total_time, "supply_review": supply_review})
+        return
     session.setStatus(
         "{}: queued {} upgrades | total {}".format(
             city_name, len(construction_queue), _formatRemainingTime(total_time)

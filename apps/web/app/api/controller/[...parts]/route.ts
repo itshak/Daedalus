@@ -1,22 +1,28 @@
+import {validRewardDistributionRequest} from "@/lib/reward-distribution-review";
+import {proxyProfileRoute,validProxyDraft} from "@/lib/proxy-profiles";
+import {challengeRoute,validChallengeDraft} from "@/lib/challenge-policy";
+import {extensionRoute,validExtensionDraft} from "@/lib/extension-settings";
+import {notificationRoute,notificationOwnerAllowed,validNotificationEnvelope} from "@/lib/notification-settings";
+import {validSupply} from "@/lib/construction-contract";
+import {validTrainingDraft} from "@/lib/training-contract";
+import {REVIEW_START_ROUTES} from "@/lib/generated-operation-contract";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
+import { validReviewBatch } from "@/lib/reviewed-batch";
+import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 const responseHeaders = { "Cache-Control": "private, no-store, max-age=0", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff" };
-const taskLaunch = z.object({
-  task: z.string().min(1).max(96),
-  config: z.record(z.string(), z.unknown()),
-  request_id: z.uuid(),
-  confirmed: z.literal(true)
-}).strict();
 const buildingTargets = z.object({ upgrades: z.array(z.object({
   position: z.number().int().min(0).max(80),
   target_level: z.number().int().min(1).max(150)
-}).strict()).min(1).max(12) }).strict();
+}).strict()).min(1).max(12), supply: z.unknown().optional() }).strict();
 
+const donationDraft = z.object({project:z.enum(["resource","tradegood"]),amount:z.number().int().min(1).max(1_000_000_000)}).strict();
+const constructionStart = z.object({ preview_id: z.string().regex(/^[A-Za-z0-9_-]{43}$/), request_id: z.uuid(), confirmed: z.literal(true) }).strict();
 const confirmedOnly = z.object({ confirmed: z.literal(true) }).strict();
 const recoveryPolicy = z.object({
   confirmed: z.literal(true), enabled: z.boolean(), auto_resume: z.boolean(),
@@ -39,6 +45,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const { parts } = await context.params;
   const url = new URL(request.url);
   if (!allowedRequest(request.method, parts, url.searchParams)) return NextResponse.json({ error: "Operation unavailable in web control center" }, { status: 404, headers: responseHeaders });
+  if (((extensionRoute(parts)||challengeRoute(parts)||proxyProfileRoute(parts))&&request.method==="POST"&&operator.role!=="owner")||!notificationOwnerAllowed(operator.role,parts)) return NextResponse.json({error:"Owner authorization required"},{status:403,headers:responseHeaders});
   if (request.method !== "GET" && operator.role === "viewer") return NextResponse.json({ error: "Read-only administrator" }, { status: 403, headers: responseHeaders });
   if (request.method !== "GET" && request.headers.get("origin") !== url.origin)
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403, headers: responseHeaders });
@@ -52,10 +59,52 @@ async function proxy(request: NextRequest, context: RouteContext) {
     if (raw.length > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
-    if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !taskLaunch.safeParse(value).success)
+    if (proxyProfileRoute(parts)&&!validProxyDraft(value))return NextResponse.json({error:"Invalid network profile review"},{status:422,headers:responseHeaders});
+    if (challengeRoute(parts)&&!validChallengeDraft(value))return NextResponse.json({error:"Invalid human challenge policy"},{status:422,headers:responseHeaders});
+    if (extensionRoute(parts)&&!validExtensionDraft(value))return NextResponse.json({error:"Invalid extension registration"},{status:422,headers:responseHeaders});
+    if (notificationRoute(parts) && (parts[4]==="begin"?JSON.stringify(value)!=='{"confirmed_global":true}':!validNotificationEnvelope(value)))
+      return NextResponse.json({error:"Invalid encrypted provider configuration"},{status:422,headers:responseHeaders});
+    if (parts.join("/") === "tasks/reviewed-batch-check" && !validReviewBatch(value))
+      return NextResponse.json({error:"Invalid independent reviews"},{status:422,headers:responseHeaders});
+    if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
-    if (parts.at(-1) === "construction-preview" && !buildingTargets.safeParse(value).success)
-      return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) === "construction-plan") {
+      const parsed=buildingTargets.safeParse(value);
+      if(!parsed.success||(parsed.data.supply!==undefined&&!validSupply(parsed.data.supply,Number(parts[3]))))
+        return NextResponse.json({ error: "Invalid construction targets or suppliers" }, { status: 422, headers: responseHeaders });
+    }
+    if (parts.at(-1) === "training-plan" && !validTrainingDraft(value,Number(parts[3])))
+      return NextResponse.json({error:"Invalid recruitment draft"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "worker-plan") {
+      const item=value as {task?:unknown;draft?:unknown}|null;
+      if(!item || typeof item!=="object" || Object.keys(item).length!==2 || !validWorkerDraft(item.task,item.draft))
+        return NextResponse.json({error:"Invalid worker draft"},{status:422,headers:responseHeaders});
+    }
+    if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
+      return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if(parts.at(-1)==="reward-distribution-plan"&&!validRewardDistributionRequest(value))return NextResponse.json({error:"Invalid operation preview"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "shipment-plan" && !validNativeConfig("sendResources",value))
+      return NextResponse.json({error:"Invalid shipment draft"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "vacation-plan" && !z.object({}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid vacation review"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "attack-plan") {
+      const wave=z.object({round:z.number().int().min(1).max(100),loot:z.boolean(),ships:z.number().int().min(0).max(1e9),units:z.record(z.string().regex(/^[0-9]{1,6}$/),z.number().int().positive().max(1e9))}).strict();
+      const draft=z.object({target_city_id:z.number().int().positive().max(999_999_999_999),waves:z.array(wave).min(1).max(8)}).strict().safeParse(value);
+      if(!draft.success||draft.data.waves.some((w,i,a)=>!Object.keys(w.units).length||Object.keys(w.units).length>100||(i===0?w.round!==1:w.round<=a[i-1].round)||(w.loot&&(i===0||i!==a.length-1||w.ships!==0))))
+        return NextResponse.json({error:"Invalid manual attack draft"},{status:422,headers:responseHeaders});
+    }
+    if (parts.at(-1) === "grind-plan" && !z.object({target_city_id:z.number().int().positive().max(999_999_999_999),send_notifications:z.boolean()}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid automatic attack draft"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "station-plan" && !z.object({destination_city_id:z.number().int().positive().max(999_999_999_999),ground:z.boolean(),all_origins:z.literal(true).optional(),both:z.literal(true).optional()}).strict().refine(v=>!v.both||v.ground).safeParse(value).success)
+      return NextResponse.json({error:"Invalid deployment choice"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "build-plan" && !z.object({position:z.number().int().min(0).max(80),building_id:z.number().int().positive().max(999999)}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid new building choice"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "layout-plan" && !z.object({template_city_id:z.number().int().positive().max(999_999_999_999)}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
+      return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) !== "worker-start" && REVIEW_START_ROUTES.includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+      return NextResponse.json({ error: "Explicit operation review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });
     if (parts[0] === "recovery" && parts[1] === "policy" && parts[2] === "bulk" && !recoveryBulk.safeParse(value).success)
@@ -71,6 +120,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     body = JSON.stringify(value);
   }
   const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "")
+    : parts.at(-1) === "activity" ? "?" + url.searchParams.toString()
+    : parts.at(-1) === "island-destinations" ? "?x=" + encodeURIComponent(url.searchParams.get("x") ?? "") + "&y=" + encodeURIComponent(url.searchParams.get("y") ?? "")
     : parts.at(-1) === "market-quotes" ? "?resource_type=" + encodeURIComponent(url.searchParams.get("resource_type") ?? "") + "&side=" + encodeURIComponent(url.searchParams.get("side") ?? "")
     : parts.at(-1) === "trainable-units" && url.searchParams.has("train_troops") ? "?train_troops=" + encodeURIComponent(url.searchParams.get("train_troops") ?? "") : "";
   try {

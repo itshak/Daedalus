@@ -13,6 +13,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 
@@ -39,9 +40,21 @@ from daedalus.login_vault import (
     write_login_vault,
 )
 from daedalus.native_browser_handoff import NativeBrowserHandoff, NativeHandoffUnavailable
+from daedalus.operation_manifest import MANIFEST_VERSION, operation_workflow
+from daedalus.operation_previews import OperationPreviews, PreviewUnavailable
 from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentialsUnavailable
 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore
+from daedalus.reviewed_operations import (
+    WORKER_TASKS,
+    validated_attack_draft,
+    validated_build_draft,
+    validated_grind_draft,
+    validated_layout_draft,
+    validated_shipment_draft,
+    validated_station_draft,
+    validated_worker_draft,
+)
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
 from daedalus.saved_worker import SavedCookieWorker
 from daedalus.session_monitor import ExistingSessionRecoveryMonitor, MonitoringUnavailable
@@ -99,6 +112,7 @@ def create_app(
     else:
         configured_accounts = load_accounts(accounts_path)
     account_by_id = {account.id: account for account in configured_accounts}
+    operation_previews = OperationPreviews()
     owner = session_coordinator or AccountSessionCoordinator(configured_accounts)
     if not owner.matches_accounts(configured_accounts):
         raise ValueError("Session coordinator and configuration must contain the same accounts")
@@ -247,6 +261,12 @@ def create_app(
                 for account in configured_accounts
             ),
         }
+
+    @app.get("/api/v1/release-status", dependencies=[Depends(authorized)])
+    def available_release() -> dict[str, object]:
+        from daedalus.release_catalog import release_status
+
+        return release_status(offline=demo_mode)
 
     @app.get("/api/v1/login-vaults", dependencies=[Depends(authorized)])
     def login_vaults() -> dict[str, object]:
@@ -578,7 +598,9 @@ def create_app(
     def capabilities() -> dict[str, object]:
         operations = inspect_engine()
         return {
-            "operations": [item.to_dict() for item in operations],
+            "operations": [{**item.to_dict(), "workflow": operation_workflow(item.name)}
+                           for item in operations],
+            "operation_manifest_version": MANIFEST_VERSION,
             "structured_engine_dispatch": task_controller is not None,
             "session_monitoring": recovery_monitor is not None,
             "synthetic_demo": demo_mode,
@@ -622,6 +644,86 @@ def create_app(
         except (EngineIPCUnavailable, ValueError) as exc:
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
+
+    @app.post("/api/v1/accounts/{account_id}/reward-distribution-plan", dependencies=[Depends(authorized)])
+    def reward_distribution_plan(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_daily,
+            validate_distribution,
+        )
+        from daedalus.market_review import market_draft, validate_market_observation
+        from daedalus.native_policy_review import POLICY_TASKS, observe_policy, policy_draft
+
+        controller = require_task_controller(account_id)
+        task = payload.get("task")
+        if set(payload) != {"task", "draft"} or not isinstance(task, str) or task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
+            raise HTTPException(status_code=422, detail="Invalid operation preview")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Operation preview unavailable")
+        try:
+            draft = (daily_draft(payload["draft"]) if task == "loginDaily" else distribution_draft(payload["draft"])
+                     if task == "distributeResources" else policy_draft(task, payload["draft"]) if task in POLICY_TASKS
+                     else market_draft(task, payload["draft"]))
+            preflight = controller.preflight(account_id, task)
+            if preflight.get("ready") is not True or preflight.get("unresolved_request") is not False:
+                raise ValueError("Prerequisites unavailable")
+            account = account_by_id[account_id]
+            observed = (observe_policy(ipc_client, account, task, draft) if task in POLICY_TASKS
+                        else ipc_client.native_reward_distribution_preview(account, task, draft))
+            config = dict(draft)
+            if task == "fillCityWarehouse":
+                config["reviewed_sources"] = [{"city_id": r["city_id"], "amount": r["amount"]}
+                                              for r in observed["sources"] if r["amount"]]
+            elif task == "loginDaily":
+                validate_daily(draft, observed)
+            elif task == "distributeResources":
+                config["reviewed_routes"] = validate_distribution(draft, observed)
+                if observed["ready"] is not True:
+                    raise ValueError("No usable fleet")
+            elif task in {"buyResources", "sellResources"}:
+                validate_market_observation(task, draft, observed)
+                config["reviewed_market"] = True
+            ticket = operation_previews.issue(account_id, task, config)
+            return {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
+                    "preview_id": ticket, "expires_in": operation_previews.ttl}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Operation preview rejected") from exc
+        except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Operation preview unavailable") from exc
+
+    @app.post("/api/v1/accounts/{account_id}/shipment-plan", dependencies=[Depends(authorized)])
+    def shipment_plan(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        require_task_controller(account_id)
+        account = account_by_id[account_id]
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Shipment planner unavailable")
+        try:
+            draft = validated_shipment_draft(payload)
+            plan = ipc_client.shipment_preview(account, draft)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Shipment draft or stock rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Shipment preview unavailable") from exc
+        ticket = operation_previews.issue(account_id, "sendResources", draft) if plan["ready"] else None
+        return {**plan, "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.get("/api/v1/accounts/{account_id}/island-destinations", dependencies=[Depends(authorized)])
+    def island_destinations(account_id: str, x: int, y: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 1 <= x <= 100 or not 1 <= y <= 100:
+            raise HTTPException(status_code=422, detail="Invalid coordinates")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Island lookup unavailable")
+        try:
+            return ipc_client.island_destinations(account, x, y)
+        except (ValueError, EngineIPCUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="Island lookup unavailable") from exc
 
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/buildings", dependencies=[Depends(authorized)])
     def account_buildings(account_id: str, city_id: int) -> dict[str, object]:
@@ -667,7 +769,7 @@ def create_app(
         if demo_mode or ipc_client is None:
             raise HTTPException(status_code=503, detail="Real construction planner unavailable")
         upgrades = payload.get("upgrades")
-        if (set(payload) != {"upgrades"}
+        if (set(payload) not in ({"upgrades"}, {"upgrades", "supply"})
                 or not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12):
             raise HTTPException(status_code=422, detail="Choose valid building targets")
         for upgrade in upgrades:
@@ -679,7 +781,17 @@ def create_app(
                     or not 1 <= upgrade["target_level"] <= 150):
                 raise HTTPException(status_code=422, detail="Invalid building target")
         try:
-            return ipc_client.construction_preview(account, city_id, upgrades)
+            if "supply" in payload:
+                from daedalus.reviewed_operations import validated_construction_supply
+
+                supply = validated_construction_supply(city_id, payload["supply"])
+                plan = ipc_client.construction_preview(account, city_id, upgrades, supply=supply)
+            else:
+                plan = ipc_client.construction_preview(account, city_id, upgrades)
+            ticket = (operation_previews.issue(account_id, "constructionList", plan["config"])
+                      if plan.get("ready") is True and task_controller is not None else None)
+            return {**plan, "preview_id": ticket,
+                    "expires_in": operation_previews.ttl if ticket else None}
         except ValueError as exc:
             raise HTTPException(
                 status_code=422, detail="Construction preview rejected invalid city or targets"
@@ -688,6 +800,275 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/vacation-plan",
+              dependencies=[Depends(authorized)])
+    def vacation_plan(account_id: str, city_id: int,
+                      payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if payload:
+            raise HTTPException(status_code=422, detail="Unexpected vacation parameters")
+        if demo_mode or ipc_client is None or task_controller is None:
+            raise HTTPException(status_code=503, detail="Vacation planner unavailable")
+        try:
+            plan = ipc_client.vacation_preview(account, city_id)
+            managed_active = any(row.get("status") in {"running", "stopping"}
+                                 for row in task_controller.list_tasks(account_id)["engine_tasks"])
+            recovery_disabled = recovery_store is None or not recovery_store.policy(account)["enabled"]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Vacation preview rejected") from exc
+        except (EngineIPCUnavailable, TaskUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="Vacation preview unavailable") from exc
+        config = plan.pop("config")
+        plan["managed_active"] = managed_active
+        plan["recovery_disabled"] = recovery_disabled
+        plan["ready"] = plan["ready"] and not managed_active and recovery_disabled
+        ticket = operation_previews.issue(account_id, "vacationMode", config) if plan["ready"] else None
+        return {**plan, "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/attack-options",
+             dependencies=[Depends(authorized)])
+    def attack_options(account_id: str, city_id: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real troop inventory unavailable")
+        try:
+            return ipc_client.attack_inventory(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Troop inventory rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Troop inventory unavailable") from exc
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/attack-plan",
+              dependencies=[Depends(authorized)])
+    def attack_plan(account_id: str, city_id: int,
+                     payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real manual attack planner unavailable")
+        try:
+            plan = ipc_client.attack_preview(account, city_id, validated_attack_draft(city_id, payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Manual attack preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Manual attack preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "attackBarbarians", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/grind-plan",
+              dependencies=[Depends(authorized)])
+    def grind_plan(account_id: str, city_id: int,
+                     payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real automatic attack planner unavailable")
+        try:
+            plan = ipc_client.grind_preview(account, city_id, validated_grind_draft(city_id, payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Automatic attack preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Automatic attack preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "autoBarbarians", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/station-plan",
+              dependencies=[Depends(authorized)])
+    def station_plan(account_id: str, city_id: int,
+                     payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real deployment planner unavailable")
+        try:
+            plan = ipc_client.station_preview(account, city_id, validated_station_draft(city_id, payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Deployment preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Deployment preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "stationArmy", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/build-options",
+             dependencies=[Depends(authorized)])
+    def build_options(account_id: str, city_id: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real building options unavailable")
+        try:
+            return ipc_client.build_options(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Building inventory rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Building inventory unavailable") from exc
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/build-plan",
+              dependencies=[Depends(authorized)])
+    def build_plan(account_id: str, city_id: int,
+                   payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real building planner unavailable")
+        try:
+            plan = ipc_client.build_preview(account, city_id, validated_build_draft(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Building preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Building preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "constructBuilding", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/layout-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def layout_plan(account_id: str, city_id: int,
+                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real layout planner unavailable")
+        try:
+            template = validated_layout_draft(city_id, payload)
+            plan = ipc_client.layout_preview(account, city_id, template)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Layout preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Layout preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "reorganizeCityBuildings", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/worker-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def worker_plan(account_id: str, city_id: int,
+                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real worker planner unavailable")
+        if set(payload) != {"task", "draft"} or not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid worker draft")
+        task = payload["task"]
+        try:
+            clean = validated_worker_draft(task, payload["draft"])
+            plan = ipc_client.worker_preview(account, city_id, task, clean)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Worker preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Worker preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = None
+        if plan["ready"] and task_controller is not None:
+            ticket = operation_previews.issue(account_id, task, config)
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/donation-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def donation_plan(account_id: str, city_id: int,
+                      payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real donation planner unavailable")
+        project, amount = payload.get("project"), payload.get("amount")
+        if (set(payload) != {"project", "amount"} or project not in ("resource", "tradegood")
+                or type(amount) is not int or not 1 <= amount <= 10**9
+                or not 0 < city_id < 10**12):
+            raise HTTPException(status_code=422, detail="Invalid donation draft")
+        try:
+            plan = ipc_client.donation_preview(account, city_id, project, amount)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Donation preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Donation preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = None
+        if plan["ready"] and task_controller is not None:
+            ticket = operation_previews.issue(account_id, "donate", config)
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/construction-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def construction_plan(
+        account_id: str, city_id: int,
+        payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        """Return display data and a short-lived opaque review ticket, not a task payload."""
+        plan = preview_construction(account_id, city_id, payload)
+        config = plan.get("config")
+        if not isinstance(config, dict):
+            raise HTTPException(status_code=503, detail="Construction plan unavailable")
+        buildings = config.get("buildings")
+        if not isinstance(buildings, list) or not buildings:
+            raise HTTPException(status_code=503, detail="Construction targets unavailable")
+        ticket = plan.get("preview_id")
+        return {
+            "account_id": account_id, "city_id": city_id,
+            "city_name": config.get("city_name"),
+            "ready": plan.get("ready") is True,
+            "costs": plan.get("costs"), "available": plan.get("available"),
+            "missing": plan.get("missing"), "estimated_seconds": plan.get("estimated_seconds"),
+            "buildings": [
+                {"name": row["name"], "current_level": row["level"],
+                 "target_level": row["upgradeTo"], "position": row["position"]}
+                for row in buildings
+            ],
+            **({"supply": plan["supply"]} if "supply" in plan else {}),
+            "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None,
+        }
 
     @app.get(
         "/api/v1/accounts/{account_id}/cities/{city_id}/workshop-upgrades",
@@ -712,6 +1093,37 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Authenticated workshop inventory unavailable"
             ) from exc
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/training-plan",
+              dependencies=[Depends(authorized)])
+    def training_plan(account_id: str, city_id: int,
+                      payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.training_contract import build_training_review, training_draft
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Recruitment inventory unavailable")
+        try:
+            draft = training_draft(payload)
+            if draft["city_ids"][0] != city_id:
+                raise ValueError("Recruitment origin mismatch")
+            owned = {r["id"] for r in ipc_client.cities(account)}
+            if not set(draft["city_ids"]) <= owned:
+                raise ValueError("Recruitment city not owned")
+            catalogs = [ipc_client.trainable_units(account, cid, train_troops=draft["train_troops"])
+                        for cid in draft["city_ids"]]
+            plan = build_training_review(account_id, draft, catalogs)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Recruitment preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Recruitment preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "trainArmy", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None}
 
     @app.get(
         "/api/v1/accounts/{account_id}/cities/{city_id}/trainable-units",
@@ -828,6 +1240,189 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Authenticated wonder inventory unavailable"
             ) from exc
+
+    @app.get("/api/v1/accounts/{account_id}/administrative-status",
+             dependencies=[Depends(authorized)])
+    def administrative_status(account_id: str) -> dict[str, object]:
+        """No provider keys, endpoints, cookie data or custom module paths."""
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Administrative status unavailable")
+        try:
+            from daedalus.admin_status import validate_admin_status
+
+            response = ipc_client.administrative_status(account)
+            if response.get("account_id") != account_id:
+                raise ValueError("Account changed")
+            return {"account_id": account_id,
+                    "settings": validate_admin_status(response.get("settings"))}
+        except (ValueError, EngineIPCUnavailable):
+            raise HTTPException(status_code=503, detail="Administrative status unavailable") from None
+
+    def scoped_world_reports(account_id, report_id=None, offset=0):
+        from daedalus.world_reports import validate_world_page, validate_world_reports
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Aggregate map report unavailable")
+        try:
+            value = ipc_client.world_reports(account, report_id, offset)
+            return (validate_world_reports(value, account_id) if report_id is None else
+                    validate_world_page(value, account_id, report_id, offset))
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Aggregate map report unavailable") from None
+
+    @app.get("/api/v1/accounts/{account_id}/world-reports", dependencies=[Depends(authorized)])
+    def list_world_reports(account_id: str):
+        return scoped_world_reports(account_id)
+
+    @app.get("/api/v1/accounts/{account_id}/world-reports/{report_id}", dependencies=[Depends(authorized)])
+    def read_world_report(account_id: str, report_id: str, offset: int = 0):
+        from daedalus.world_reports import REPORT_ID
+
+        if not REPORT_ID.fullmatch(report_id) or not 0 <= offset <= 10201:
+            raise HTTPException(status_code=422, detail="Invalid map report request")
+        return scoped_world_reports(account_id, report_id, offset)
+
+    def reviewed_proxy_profiles(account_id, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_result
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None or (draft is not None and task_controller is None):
+            raise HTTPException(status_code=503, detail="Approved network profiles unavailable")
+        try:
+            return validate_proxy_result(ipc_client.proxy_profiles(account, draft), account_id, draft)
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Network profile unavailable or outcome uncertain") from None
+
+    @app.get("/api/v1/accounts/{account_id}/proxy-settings", dependencies=[Depends(authorized)])
+    def get_proxy_profiles(account_id: str):
+        return reviewed_proxy_profiles(account_id)
+
+    @app.post("/api/v1/accounts/{account_id}/proxy-settings", dependencies=[Depends(authorized)])
+    def set_proxy_profile(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.proxy_profiles import validate_proxy_draft
+
+        try:
+            draft = validate_proxy_draft(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid network profile review") from None
+        return reviewed_proxy_profiles(account_id, draft)
+
+    def human_challenge_policy(account_id, draft=None):
+        from daedalus.challenge_policy import validate_challenge_policy
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None or (draft is not None and task_controller is None):
+            raise HTTPException(status_code=503, detail="Human challenge policy unavailable")
+        try:
+            return validate_challenge_policy(ipc_client.challenge_policy(account, draft), account_id)
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Human challenge policy unavailable or changed") from None
+
+    @app.get("/api/v1/accounts/{account_id}/challenge-policy", dependencies=[Depends(authorized)])
+    def get_human_challenge_policy(account_id: str):
+        return human_challenge_policy(account_id)
+
+    @app.post("/api/v1/accounts/{account_id}/challenge-policy", dependencies=[Depends(authorized)])
+    def set_human_challenge_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.challenge_policy import validate_challenge_policy_draft
+
+        try:
+            draft = validate_challenge_policy_draft(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid human challenge policy") from None
+        return human_challenge_policy(account_id, draft)
+
+    def reviewed_extensions(account_id, draft=None):
+        from daedalus.extension_settings import validate_extension_status
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None or (draft is not None and task_controller is None):
+            raise HTTPException(status_code=503, detail="Protected extension settings unavailable")
+        try:
+            return validate_extension_status(ipc_client.extension_settings(account, draft), account_id)
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Extension settings unavailable or changed") from None
+
+    @app.get("/api/v1/accounts/{account_id}/extensions", dependencies=[Depends(authorized)])
+    def extension_status(account_id: str):
+        return reviewed_extensions(account_id)
+
+    @app.post("/api/v1/accounts/{account_id}/extensions", dependencies=[Depends(authorized)])
+    def extension_registration(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.extension_settings import validate_extension_draft
+
+        try:
+            draft = validate_extension_draft(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid extension registration") from None
+        return reviewed_extensions(account_id, draft)
+
+    def notification_account(account_id, provider):
+        from daedalus.notification_settings import PROVIDERS
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if provider not in PROVIDERS:
+            raise HTTPException(status_code=404, detail="Unsupported notification provider")
+        if demo_mode or ipc_client is None or task_controller is None:
+            raise HTTPException(status_code=503, detail="Protected provider configuration unavailable")
+        return account
+
+    @app.post("/api/v1/accounts/{account_id}/notifications/{provider}/begin",
+              dependencies=[Depends(authorized)])
+    def notification_settings_begin(account_id: str, provider: str,
+                                    payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.notification_settings import validate_challenge
+
+        account = notification_account(account_id, provider)
+        if set(payload) != {"confirmed_global"} or payload["confirmed_global"] is not True:
+            raise HTTPException(status_code=422, detail="Explicit worker-global consent required")
+        try:
+            return validate_challenge(ipc_client.notification_settings_begin(account, provider), account_id, provider)
+        except Exception:  # noqa: BLE001 - redact all provider/IPC failures
+            raise HTTPException(status_code=503, detail="Protected provider configuration unavailable") from None
+
+    @app.post("/api/v1/accounts/{account_id}/notifications/{provider}/complete",
+              dependencies=[Depends(authorized)])
+    def notification_settings_complete(account_id: str, provider: str,
+                                       payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.notification_settings import validate_envelope, validate_receipt
+
+        account = notification_account(account_id, provider)
+        try:
+            envelope = validate_envelope(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid encrypted provider configuration") from None
+        try:
+            return validate_receipt(ipc_client.notification_settings_complete(account, provider, envelope),
+                                    account_id, provider)
+        except Exception:  # noqa: BLE001 - redact all provider/IPC failures
+            raise HTTPException(status_code=503, detail="Provider configuration unavailable or outcome uncertain") from None
 
     @app.get(
         "/api/v1/accounts/{account_id}/shrine-status",
@@ -1105,6 +1700,17 @@ def create_app(
         except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
             raise HTTPException(status_code=503, detail="Task prerequisites unavailable") from exc
 
+    @app.get("/api/v1/accounts/{account_id}/activity", dependencies=[Depends(authorized)])
+    def account_activity(account_id: str, before: int | None = None,
+                         limit: int = 50, status: str = "all") -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.activity(account_id, before=before, limit=limit, status=status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid activity filter") from exc
+        except (TaskUnavailable, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Activity unavailable") from exc
+
     @app.get("/api/v1/accounts/{account_id}/tasks", dependencies=[Depends(authorized)])
     def list_account_tasks(account_id: str) -> dict[str, object]:
         controller = require_task_controller(account_id)
@@ -1117,6 +1723,30 @@ def create_app(
     def start_account_task(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
+        from daedalus.reviewed_batch import BATCH_REVIEW_TASKS
+
+        if isinstance(payload.get("task"), str) and payload["task"] in BATCH_REVIEW_TASKS - {"constructionList", "sendResources"}:
+            raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
+        if payload.get("task") == "constructionList":
+            config = payload.get("config")
+            if isinstance(config, dict) and ("supply_review" in config or config.get("shipments")):
+                raise HTTPException(status_code=422, detail="Review construction supplies first")
+        if payload.get("task") == "sendResources":
+            config = payload.get("config")
+            routes = config.get("routes") if isinstance(config, dict) else None
+            if isinstance(routes, list) and any(isinstance(r, dict) and
+                    ("island" in r or "recipient" in r) for r in routes):
+                raise HTTPException(status_code=422, detail="Review external shipments first")
+        if payload.get("task") == "resourceTransportManager":
+            config = payload.get("config")
+            if (isinstance(config, dict) and ("recipient" in config or "island" in config)
+                    and (config.get("mode") != "consolidate" or any(
+                        type(config.get(k)) is not int or not 0 < config[k] < 10**12
+                        for k in ("recipient", "island", "destination_city")))):
+                raise HTTPException(status_code=422, detail="Choose a verified external recipient")
+        return dispatch_account_task(account_id, payload)
+
+    def dispatch_account_task(account_id: str, payload: dict[str, object]) -> dict[str, object]:
         controller = require_task_controller(account_id)
         try:
             confirmed = payload.get("confirmed") is True
@@ -1136,6 +1766,206 @@ def create_app(
             raise HTTPException(status_code=503, detail="Existing authenticated task worker unavailable") from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
+
+    @app.post("/api/v1/tasks/reviewed-batch-check", dependencies=[Depends(authorized)])
+    def reviewed_batch_check(payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.reviewed_batch import validated_batch_entries
+
+        if set(payload) != {"entries"}:
+            raise HTTPException(status_code=422, detail="Invalid independent reviews")
+        try:
+            entries = validated_batch_entries(payload["entries"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid independent reviews") from exc
+        blocked = []
+        for row in entries:
+            aid, task = row["account_id"], row["task"]
+            try:
+                operation_previews.check_unused(row["preview_id"], aid, task)
+                controller = require_task_controller(aid)
+                readiness = controller.preflight(aid, task)
+                if readiness.get("ready") is not True or readiness.get("unresolved_request") is not False:
+                    blocked.append({"account_id": aid, "reason": "prerequisites"})
+            except PreviewUnavailable:
+                blocked.append({"account_id": aid, "reason": "review_unavailable"})
+            except (HTTPException, ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError):
+                blocked.append({"account_id": aid, "reason": "unavailable"})
+        # A long preflight must not silently leave earlier tickets expired.
+        blocked_ids = {row["account_id"] for row in blocked}
+        for row in entries:
+            if row["account_id"] not in blocked_ids:
+                try:
+                    operation_previews.check_unused(row["preview_id"], row["account_id"], row["task"])
+                except PreviewUnavailable:
+                    blocked.append({"account_id": row["account_id"], "reason": "review_unavailable"})
+        # No claims or game writes. Every eventual start still claims its own
+        # ticket, checks prerequisites and revalidates its game data.
+        return {"account_ids": [r["account_id"] for r in entries], "blocked": blocked}
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/construction-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_construction(
+        account_id: str, payload: Annotated[dict[str, object], Body()],
+    ) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "constructionList", payload)
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/donation-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_donation(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/fill-warehouse-start", dependencies=[Depends(authorized)])
+    def start_fill_warehouse(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "fillCityWarehouse", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/consolidate-start", dependencies=[Depends(authorized)])
+    def start_reviewed_consolidate(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "consolidateResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/transport-policy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_transport_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "resourceTransportManager", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/donation-policy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_donation_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "donationBot", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/island-monitor-start", dependencies=[Depends(authorized)])
+    def start_reviewed_island_monitor(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "searchForIslandSpaces", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/world-report-start", dependencies=[Depends(authorized)])
+    def start_reviewed_world_report(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "dumpWorld", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/piracy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_piracy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "autoPirate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/research-start", dependencies=[Depends(authorized)])
+    def start_reviewed_research(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "research", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/tavern-start", dependencies=[Depends(authorized)])
+    def start_reviewed_tavern(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "tavernManager", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/miracle-start", dependencies=[Depends(authorized)])
+    def start_reviewed_miracle(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "activateMiracle", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/shrine-start", dependencies=[Depends(authorized)])
+    def start_reviewed_shrine(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "activateShrine", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/workshop-start", dependencies=[Depends(authorized)])
+    def start_reviewed_workshop(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "UpgradeUnits", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/buy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_buy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "buyResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/sell-start", dependencies=[Depends(authorized)])
+    def start_reviewed_sell(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "sellResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/distribution-start", dependencies=[Depends(authorized)])
+    def start_distribution(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "distributeResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/daily-start", dependencies=[Depends(authorized)])
+    def start_daily(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "loginDaily", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/shipment-start", dependencies=[Depends(authorized)])
+    def start_reviewed_shipment(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "sendResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/vacation-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_vacation(account_id: str,
+                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "vacationMode", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/attack-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_attack(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "attackBarbarians", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/grind-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_grind(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "autoBarbarians", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/training-start", dependencies=[Depends(authorized)])
+    def start_reviewed_training(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "trainArmy", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/station-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_station(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "stationArmy", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/build-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_build(account_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "constructBuilding", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/layout-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_layout(account_id: str,
+                              payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "reorganizeCityBuildings", payload)
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/worker-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_worker(account_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        task = payload.get("task")
+        if not isinstance(task, str) or task not in WORKER_TASKS:
+            raise HTTPException(status_code=422, detail="Invalid worker operation")
+        return start_reviewed_operation(
+            account_id, task, {k: v for k, v in payload.items() if k != "task"},
+        )
+
+    def start_reviewed_operation(account_id: str, task: str,
+                                 payload: dict[str, object]) -> dict[str, object]:
+        require_task_controller(account_id)
+        key, request_id = payload.get("preview_id"), payload.get("request_id")
+        if (
+            set(payload) != {"preview_id", "request_id", "confirmed"}
+            or payload.get("confirmed") is not True
+            or not isinstance(key, str) or len(key) != 43
+            or not isinstance(request_id, str)
+        ):
+            raise HTTPException(status_code=422, detail="Explicit operation review required")
+        try:
+            parsed = UUID(request_id)
+            if parsed.version != 4 or str(parsed) != request_id:
+                raise ValueError
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Valid request ID required") from exc
+        try:
+            config = operation_previews.claim(key, account_id, task, request_id)
+        except PreviewUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return dispatch_account_task(account_id, {
+            "task": task, "config": config,
+            "request_id": request_id, "confirmed": True,
+        })
 
     @app.post(
         "/api/v1/accounts/{account_id}/tasks/{task_id}/stop",

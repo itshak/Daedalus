@@ -1651,7 +1651,7 @@ class Session:
                 time.sleep(ConnectionError_wait)
 
     def post(
-        self, url='', payloadPost={}, params={}, ignoreExpire=False, noIndex=False, fullResponse = False, noQuery=False, **kwargs
+        self, url='', payloadPost={}, params={}, ignoreExpire=False, noIndex=False, fullResponse = False, noQuery=False, retry_on_failure=True, **kwargs
     ):
         """Sends post request to ikariam
         Parameters
@@ -1672,6 +1672,8 @@ class Session:
         html : str
             response from the server
         """
+        if not retry_on_failure:
+            kwargs["allow_redirects"] = False
         url_original = url
         payloadPost_original = payloadPost
         params_original = params
@@ -1723,6 +1725,8 @@ class Session:
                     "text": response.text,
                 }
                 resp = response.text
+                if not retry_on_failure and response.status_code != 200:
+                    raise RuntimeError("Game request outcome is uncertain; do not retry")
 
                 #  modifica redirect 302
                 if response.status_code == 302:
@@ -1754,6 +1758,8 @@ class Session:
                         return response if fullResponse else resp
 
                 if self.__test_server_maintenace(resp):
+                    if not retry_on_failure:
+                        raise RuntimeError("Game request outcome is uncertain; do not retry")
                     self.logger.warning("Ikariam world backup is in progress, waiting 10 mins.")
                     time.sleep(10 * 60)
                     raise requests.exceptions.ConnectionError  # repeat after 10 minutes
@@ -1770,6 +1776,8 @@ class Session:
                     self.__printSessionRotated()
                     sys.exit(1)
                 if "TXT_ERROR_WRONG_REQUEST_ID" in resp:
+                    if not retry_on_failure:
+                        raise RuntimeError("Game request rejected; prepare a new review")
                     self.logger.info("got TXT_ERROR_WRONG_REQUEST_ID, bad actionRequest")
                     sessionData = self.getSessionData()
                     if sessionData.pop("actionRequestToken", None) is not None:
@@ -1810,8 +1818,12 @@ class Session:
 
                 return resp if not fullResponse else response
             except AssertionError:
+                if not retry_on_failure:
+                    raise RuntimeError("Game request outcome is uncertain; do not retry") from None
                 self.__sessionExpired()
             except requests.exceptions.ConnectionError:
+                if not retry_on_failure:
+                    raise RuntimeError("Game request outcome is uncertain; do not retry") from None
                 if self._warmer is not None and not warm_retried:
                     # Ikariam can close a connection opened in advance just as it is used, try again at once
                     warm_retried = True
@@ -1819,6 +1831,8 @@ class Session:
                 self.logger.warning(f"Connection error occured, retrying in {ConnectionError_wait}s\n{str(params) + ' --> ' + url}")
                 time.sleep(ConnectionError_wait)
             except requests.exceptions.Timeout:
+                if not retry_on_failure:
+                    raise RuntimeError("Game request outcome is uncertain; do not retry") from None
                 self.logger.warning(f"5 minute timeout occured on request, retrying in {ConnectionError_wait}s\n{str(params) + ' --> ' + url}")
                 time.sleep(ConnectionError_wait)
 

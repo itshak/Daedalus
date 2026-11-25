@@ -861,3 +861,225 @@ def test_shrine_task_uses_verified_olympus_snapshot_not_fake_gods(page):
     page.set_shrine_unavailable("alpha")
     with pytest.raises(ValueError, match="actual owned Shrine"):
         page._form_config()
+
+
+def test_external_city_selection_rejects_stale_lookup_and_preserves_own_origins(app):
+    editor = ShipmentRoutesEditor()
+    editor.set_cities([{"id": 101, "name": "Home"}])
+    editor.x.setValue(50)
+    editor.y.setValue(60)
+    calls = []
+    editor.lookup_requested.connect(lambda *args: calls.append(args))
+    editor._lookup()
+    result = {"x": 50, "y": 60, "cities": [
+        {"id": 999, "recipient": 888, "island": 44, "name": "Town", "owner": "Other"}
+    ]}
+    editor.set_external(result, "stale")
+    assert not editor.add_button.isEnabled()
+    editor.set_external(result, calls[0][2])
+    assert editor.add_button.isEnabled()
+    editor.add_route()
+    source, target = editor.table.cellWidget(0, 0), editor.table.cellWidget(0, 1)
+    assert source.count() == 2 and target.count() == 3
+    source.setCurrentIndex(1)
+    target.setCurrentIndex(2)
+    editor.table.cellWidget(0, 2).setValue(50)
+    assert editor.to_config() == [{"from": 101, "to": 999, "recipient": 888, "island": 44,
+                                   "resources": [50, 0, 0, 0, 0]}]
+    assert "Town — Other" in editor.summary()
+    editor.x.setValue(51)
+    assert target.currentData() == 999
+    assert "50:60" in target.currentText()
+    editor._lookup()
+    editor.set_external(result, calls[0][2])
+    assert target.currentData() == 999
+    editor.set_external({"x": 51, "y": 60, "cities": [
+        {"id": 1000, "recipient": 777, "island": 45, "name": "Second", "owner": "Another"}
+    ]}, calls[-1][2])
+    editor.add_route()
+    editor.table.cellWidget(1, 0).setCurrentIndex(1)
+    editor.table.cellWidget(1, 1).setCurrentIndex(3)
+    editor.table.cellWidget(1, 2).setValue(20)
+    assert [r["island"] for r in editor.to_config()] == [44,45]
+    assert "51:60" in editor.table.cellWidget(1, 1).currentText()
+    editor._lookup()
+    assert target.currentData() == 999
+    assert editor.table.cellWidget(1, 1).currentIndex() == 0
+    editor.set_external({"x": 51, "y": 60, "cities": [
+        {"id": 999, "recipient": 555, "island": 45, "name": "Moved", "owner": "Changed"}
+    ]}, calls[-1][2])
+    assert target.currentIndex() == 0
+    with pytest.raises(ValueError):
+        editor.to_config()
+    editor.clear_external_button.click()
+    assert target.count() == 2
+    editor.close()
+
+
+def test_shipment_requires_current_capacity_ticket(page, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    set_native(page, "sendResources", [field("routes", required=True), field("useFreighters", "boolean", default=False)])
+    page.set_preflight({"account_id": "alpha", "task": "sendResources", "ready": True, "reason": "none"})
+    editor = page._form_inputs["routes"]
+    editor.add_route()
+    editor.table.cellWidget(0,0).setCurrentIndex(1)
+    editor.table.cellWidget(0,1).setCurrentIndex(2)
+    editor.table.cellWidget(0,2).setValue(50)
+    calls = []
+    page.shipment_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert not page.start_button.isEnabled()
+    draft = calls[0][1]
+    result = {"account_id": "alpha", "draft": draft, "ready": True, "preview_id": "a"*43,
+              "expires_in": 120, "available_ships": 1, "total_ships": 2, "capacity": 100,
+              "routes": [{"origin_name": "Athens", "destination_name": "Sparta",
+                          "resources": [50,0,0,0,0], "stock": [100]*5,
+                          "first_load_limit": 50, "minimum_loads": 1,
+                          "destination_space": [100]*5}]}
+    page.set_shipment_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_shipment_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    launches = []
+    page.launch_requested.connect(lambda *args: launches.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launches[0][:3] == ("alpha", "sendResources", {"preview_id": "a"*43})
+
+
+def test_recurring_external_destination_editor(page):
+    from daedalus.engine_registry import inspect_engine
+    task = "resourceTransportManager"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", CITIES)
+    editor = page._form_inputs["destination_city"]
+    page._form_inputs["mode"].setCurrentIndex(0)
+    calls = []
+    page.island_destinations_requested.connect(lambda *args:calls.append(args))
+    editor.x.setValue(50)
+    editor.y.setValue(60)
+    editor._lookup()
+    assert calls[-1][:3] == ("alpha", 50, 60)
+    result = {"account_id":"alpha","x":50,"y":60,"cities":[
+        {"id":999,"recipient":888,"island":44,"name":"Town","owner":"Other"}
+    ]}
+    page.set_island_destinations(result, "stale")
+    assert editor.picker.count() == 4
+    page.set_island_destinations(result, calls[-1][3])
+    editor.picker.setCurrentIndex(4)
+    assert editor.to_config() == {"destination_city":999,"island":44,"recipient":888}
+    page._form_inputs["origin_cities"].item(0).setCheckState(Qt.Checked)
+    page._form_inputs["send_mode"].setCurrentIndex(0)
+    page._form_inputs["resource_config"].values[0].setValue(50)
+    config = page._form_config()
+    assert config["origin_cities"] == [101]
+    assert config["recipient"] == 888
+    editor.x.setValue(51)
+    with pytest.raises(ValueError):
+        editor.to_config()
+
+
+def test_reviewed_recruitment_widget_rounds_and_selected_cities(app):
+    editor = TrainableUnitsEditor()
+    try:
+        editor.set_cities(CITIES)
+        editor.city_picker.setCurrentIndex(1)
+        editor.set_trainables(TRAINABLE)
+        editor.table.cellWidget(0, 2).setValue(4)
+        editor.add_round.click()
+        editor.table.cellWidget(1, 2).setValue(2)
+        editor.additional.item(0).setCheckState(Qt.Checked)
+        editor.cycles.setValue(2)
+        draft = editor.reviewed_draft()
+        assert draft == {"city_ids": [101, 102], "train_troops": True, "cycles": 2,
+                         "rounds": [[{"unit_type_id": 301, "cantidad": 4}],
+                                    [{"unit_type_id": 302, "cantidad": 2}]]}
+        editor.round_picker.setCurrentIndex(0)
+        assert editor.table.cellWidget(0, 2).value() == 4
+        assert editor.table.cellWidget(1, 2).value() == 0
+        editor.remove_round.click()
+        assert editor.reviewed_draft()["rounds"] == [[{"unit_type_id": 302, "cantidad": 2}]]
+        editor.mode.setCurrentIndex(1)
+        with pytest.raises(ValueError):
+            editor.reviewed_draft()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_study_uses_named_verified_choice_and_resets_on_refresh(app):
+    editor = AcademyResearchEditor()
+    choice = {"index": 0, "name": "Navigation", "research_type": "seafaring"}
+    try:
+        editor.set_academies(ACADEMIES, [choice])
+        editor.study_picker.setCurrentIndex(1)
+        assert editor.to_config() == {"study_choice": choice}
+        editor.set_academies(ACADEMIES, [])
+        assert editor.study_picker.count() == 1
+        with pytest.raises(ValueError, match="Choose at least"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_fixed_tavern_editor_requires_observed_serving_choices(app):
+    editor = TavernCitiesEditor()
+    try:
+        row = {**TAVERNS[0], "serving_level": 1, "wine_per_hour": 5,
+               "serving_options": [[0, 0], [1, 5], [2, 12], [3, 20], [4, 30]]}
+        editor.set_taverns([row])
+        editor.mode.setCurrentIndex(1)
+        editor.percentage.setValue(75)
+        config = editor.to_config()
+        assert config["run_hours"] == 0
+        assert config["fixed_servings"]["rows"][0]["target_wine"] == 20
+        editor.set_taverns([TAVERNS[0]])
+        with pytest.raises(ValueError, match="Serving choices unavailable"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_external_island_monitor_requires_matching_verified_response(page):
+    set_native(page, "searchForIslandSpaces", [
+        field("time", "integer", required=True),
+        field("islandList"), field("fights", "text", default="n"),
+    ])
+    editor = page._form_inputs["islandList"]
+    requests = []
+    page.island_destinations_requested.connect(lambda *args: requests.append(args))
+    editor.x.setValue(60)
+    editor.y.setValue(70)
+    editor._lookup()
+    account, x, y, nonce = requests[-1]
+    assert (account, x, y) == ("alpha", 60, 70)
+    with pytest.raises(ValueError, match="Finish island verification"):
+        editor.to_config()
+    page.set_island_destinations({"account_id": "beta", "x": 60, "y": 70, "cities": []}, nonce)
+    assert editor.count() == 2
+    page.set_island_destinations({"account_id": "alpha", "x": 60, "y": 70, "cities": []}, nonce)
+    assert editor.to_config() == ["60:70"]
+    editor._lookup()
+    page.set_island_destinations_unavailable("alpha", requests[-1][3])
+    with pytest.raises(ValueError, match="Select at least one"):
+        editor.to_config()
+    editor.all_owned.setChecked(True)
+    assert editor.to_config() == []
+
+
+def test_fill_city_warehouse_has_native_city_and_resource_selectors(page):
+    set_native(page, "fillCityWarehouse", [
+        field("destination_city", required=True),
+        field("resource", required=True),
+        field("useFreighters", "boolean", default=False),
+        field("reviewed_sources"),
+    ])
+    page._form_inputs["destination_city"].setCurrentIndex(2)
+    page._form_inputs["resource"].setCurrentIndex(2)
+    assert page._form_config() == {"destination_city": 102, "resource": "marble", "useFreighters": False}
+    assert "reviewed_sources" not in page._form_inputs

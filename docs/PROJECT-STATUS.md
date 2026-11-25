@@ -1,6 +1,14 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-22** (limited field smoke; acceptance still open). The public repository's default branch is `main`.
+Last reviewed: **2026-11-25** (offline implementation review; live acceptance still open). The public repository's default branch is `main`.
+
+## Cross-platform native automation parity (active)
+
+The `complete-cross-platform-automation-parity` implemented baseline is **ARCHIVED in PR #97**, with [implementation evidence](../openspec/changes/archive/2026-11-25-complete-cross-platform-automation-parity/implementation-status.md) and updated canonical specifications. The expanded `finish-cross-platform-operation-parity` implementation is **ARCHIVED in PR #97** ([evidence](../openspec/changes/archive/2026-11-25-finish-cross-platform-operation-parity/implementation-status.md)); the active [`verify-and-release-cross-platform-parity`](../openspec/changes/verify-and-release-cross-platform-parity/proposal.md) change retains all outstanding option parity, protected administrative boundaries, verification and rollout requirements. All eligible native background operations now have independent account reviews or account-independent alert batch controls; fixed provider test messages remain single-account. This is not full parity, live acceptance, or production approval; required CI and merge remain release gates.
+
+## Fill city warehouse (active)
+
+The `fill-city-warehouse` change implements a one-time, capacity-capped transfer of a selected resource from all other owned cities. Current inbound cargo is accounted for, and the worker revalidates each shipment. Focused offline tests passed; final CI and owner-operated live acceptance remain outstanding.
 
 ## Automatic recovery implementation (active OpenSpec; approval pending)
 
@@ -33,8 +41,7 @@ The `native-automation-workflows` OpenSpec change is **ACTIVE and UNFINISHED**.
 It implements category tabs, actual authenticated city pickers, a bounded read-only
 IkaBot IPC/API for real owned-city building levels, a construction building table
 with draft upgrade targets, and safe rejection of cross-account city/plan reuse.
-Raw construction planner JSON is hidden from the normal UI, with expert import
-retained for previously prepared engine plans. Resource distribution has native
+Raw construction planner JSON and expert import are removed from the automation UI in the cross-platform implementation. Resource distribution has native
 resource/mode choices and source-backed participating-city multi-selection;
 research and tavern management have account-bound city subsets. Daily reward collection has native wine/wood/luxury city destinations and verified favour-task choices.
 
@@ -68,6 +75,8 @@ The following changes have implemented and archived OpenSpec requirements. The h
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
+| `complete-cross-platform-automation-parity` | Reviewed native workflow baseline; unfinished original requirements retained in the active successor; no live acceptance | [#97](https://github.com/itshak/Daedalus/pull/97) |
+| `finish-cross-platform-operation-parity` | Delivered expanded reviewed operation workflows; detailed parity and release gates remain active | [#97](https://github.com/itshak/Daedalus/pull/97) |
 | `observable-selenium-login-and-connection` | Visible Chrome recovery after headless failure, sanitized live Activity stages and Fluent backend-success/masked-token feedback | [#85](https://github.com/itshak/Daedalus/pull/85) |
 | `persistent-login-identity-status` | Encrypted Mac-bound server login backups, protected email identities, Russian world flags and accessible account/session/worker status indicators | Pending PR for this change |
 | `bootstrap-public-monorepo` | Clean open-source package, CI, OpenSpec, license and security boundaries | [Initial foundation](https://github.com/itshak/Daedalus/commits/main/) |
@@ -100,7 +109,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 | `persist-headless-credentials` | Host-encrypted persistent credential collection, receipt reconciliation and service restart/startup-order regression | [#59](https://github.com/itshak/Daedalus/pull/59) |
 | `validate-live-authentication` | Offline/field-preflight implementation archived; **unperformed owner-only acceptance is still open in [issue #60](https://github.com/itshak/Daedalus/issues/60)** | [archive record](https://github.com/itshak/Daedalus/tree/main/openspec/changes/archive/2026-11-19-validate-live-authentication) |
 
-The archive folders are dated `2026-11-18` through `2026-11-22`. Archive
+The archive folders are dated `2026-11-18` through `2026-11-25`. Archive
 checkboxes reflect completed implementation and local validation, not owner
 real-game certification. The outstanding manual gates were transferred
 explicitly to [issue #60](https://github.com/itshak/Daedalus/issues/60),

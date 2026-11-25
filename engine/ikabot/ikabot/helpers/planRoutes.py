@@ -15,7 +15,7 @@ from ikabot.helpers.varios import wait
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
-def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None):
+def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None, before_send=None):
     """This function will execute one route
     Parameters
     ----------
@@ -85,31 +85,53 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             shiptype = "usedFreightersShips"
             data[shiptype] = ships
             data["transporters"] = "0"
-        # add amounts of resources to send
-        for i in range(len(send)):
-            if city["availableResources"][i] > 0:
+        if verify_recipient is not None:
+            verify_recipient(route_index)
+        # Re-read after changing the selected city and recipient verification.
+        # Never silently omit a resource that vanished after the route planner
+        # chose the chunk: its checkpoint would otherwise record phantom cargo.
+        city = getCity(session.get(city_url + originCityId))
+        if (str(city.get("id")) != str(originCityId)
+                or not isinstance(send, (list, tuple)) or len(send) != 5
+                or any(type(n) is not int or n < 0 for n in send)
+                or not any(send)
+                or not isinstance(city.get("availableResources"), list)
+                or len(city["availableResources"]) != 5
+                or any(type(n) is not int or n < wanted
+                       for n, wanted in zip(city["availableResources"], send))):
+            raise RuntimeError("Transport source changed; review remaining cargo before retrying")
+        for i, amount in enumerate(send):
+            if amount:
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
-                data[key] = send[i]
+                data[key] = amount
 
+        if before_send is not None:
+            before_send()
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
-        resp = session.post(params=data)
-        resp = json.loads(resp, strict=False)
-        outcome = resp[3][1][0]["type"]
+        # The server may have accepted the cargo before a response was lost.
+        # Never replay this non-idempotent POST at the transport layer.
+        resp = session.post(params=data, retry_on_failure=False)
+        try:
+            outcome = json.loads(resp, strict=False)[3][1][0]["type"]
+        except (ValueError, TypeError, KeyError, IndexError):
+            raise RuntimeError("Unrecognized transport outcome needs manual reconciliation") from None
         if outcome == 10:
             if checkpoint:
                 checkpoint.confirmed(chunk_id, send)
             break
         if outcome == 11:
+            if before_send is not None:
+                raise RuntimeError("Reviewed transport rejected; review before retrying")
             if checkpoint:
                 checkpoint.rejected(chunk_id, send)
             wait(getMinimumWaitingTime(session))
-        elif checkpoint:
+        else:
             raise RuntimeError("Unrecognized transport outcome needs manual reconciliation")
         time.sleep(5)
 
 
-def executeRoutes(session, routes, useFreighters=False, checkpoint=None):
+def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_recipient=None):
     """This function will execute all the routes passed to it, regardless if there are enough ships available to do so
     Parameters
     ----------
@@ -187,6 +209,7 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None):
                 send,
                 useFreighters,
                 checkpoint=checkpoint, route_index=route_index,
+                **({"verify_recipient": verify_recipient} if verify_recipient is not None else {}),
             )
             if checkpoint:
                 toSend = [remaining - transferred

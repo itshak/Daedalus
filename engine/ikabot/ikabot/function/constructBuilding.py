@@ -1,4 +1,7 @@
-from ikabot.helpers.decorators import configurator
+from ikabot.helpers.decorators import configurator, task
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
+import hashlib
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -43,6 +46,117 @@ def splitBuildingBlocks(html):
     for match in re.finditer(pattern, html, re.DOTALL):
         blocks.append({"type": match.group(1), "html": match.group(2)})
     return blocks
+
+
+def _native_build_options(session, city_id, only_position=None):
+    """Read the actual building-ground view for each eligible empty slot."""
+    if type(city_id) is not int or not 0 < city_id < 10**12:
+        raise ValueError("Invalid city")
+    pedirInfo.ids_cache = None
+    own = requireOwnCity(session, city_id, "Construction city")
+    city = getCityById(session, own)
+    if str(city["id"]) != own:
+        raise ValueError("City identity changed")
+    stock = city["availableResources"]
+    if not isinstance(stock, list) or len(stock) != 5 or any(
+            type(n) is not int or not 0 <= n <= 10**15 for n in stock):
+        raise ValueError("Invalid construction stock")
+    slots = city["position"]
+    if not isinstance(slots, list) or len(slots) > 81:
+        raise ValueError("Invalid city slots")
+    busy = any(row.get("isBusy") is True for row in slots)
+    options = []
+    action_token = actionRequest
+    for slot in slots:
+        position = slot.get("position")
+        surface = slot.get("type")
+        if (slot.get("building") != "empty" or type(position) is not int
+                or not 0 <= position <= 80 or surface not in ("sea", "land", "shore", "wall", "dockyard")
+                or (only_position is not None and position != only_position)):
+            continue
+        response = json.loads(session.post(params={
+            "view": "buildingGround", "cityId": own, "position": position,
+            "backgroundView": "city", "currentCityId": own,
+            "actionRequest": actionRequest, "ajax": "1",
+        }, noIndex=True), strict=False)
+        for item in response:
+            if item[0] == "updateGlobalData":
+                action_token = item[1].get("actionRequest", actionRequest)
+        if response[1][1] == "":
+            continue
+        markup = response[1][1][1]
+        seen = set()
+        for block in splitBuildingBlocks(markup):
+            info = re.search(
+                r'<div title="(.+?)"\s*class="buildingimg .+?"\s*onclick="ajaxHandlerCall\(\'.*?buildingId=(\d+)&',
+                block["html"],
+            )
+            if not info:
+                continue
+            building_id = int(info.group(2))
+            if not 0 < building_id < 10**6 or building_id in seen:
+                continue
+            seen.add(building_id)
+            costs = parseBuildingCosts(block["html"])
+            # Do not present an unparsed price as free construction.
+            if len(costs) != 5 or not any(costs) or any(type(n) is not int or not 0 <= n <= 10**12 for n in costs):
+                continue
+            name = info.group(1)[:100]
+            options.append({"position": position, "surface": surface, "building_id": building_id,
+                            "name": name, "costs": costs,
+                            "ready": not busy and all(a >= b for a, b in zip(stock, costs))})
+            if len(options) > 500:
+                raise ValueError("Too many building options")
+    return {"city_id": city_id, "city_name": str(city["cityName"])[:100],
+            "available": stock, "busy": busy, "options": options}, action_token
+
+
+def native_build_options(session, city_id):
+    return _native_build_options(session, city_id)[0]
+
+
+def _native_build_plan(session, city_id, position, building_id):
+    if type(position) is not int or not 0 <= position <= 80 or type(building_id) is not int or not 0 < building_id < 10**6:
+        raise ValueError("Invalid building choice")
+    data, action_token = _native_build_options(session, city_id, position)
+    option = next((row for row in data["options"] if row["position"] == position and row["building_id"] == building_id), None)
+    if option is None:
+        raise ValueError("Building no longer available in the selected slot")
+    expected = hashlib.sha256(json.dumps(
+        {k: option[k] for k in ("position", "surface", "building_id", "costs")},
+        sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    return {"city_id": city_id, "city_name": data["city_name"], "available": data["available"],
+            "busy": data["busy"], **option,
+            "missing": [max(0, n - a) for n, a in zip(option["costs"], data["available"])],
+            "config": {"city_id": city_id, "position": position, "building_id": building_id,
+                       "expected": expected}}, action_token
+
+
+def preview_native_build(session, city_id, position, building_id):
+    return _native_build_plan(session, city_id, position, building_id)[0]
+
+
+def prepare_native_build(session, city_id, position, building_id, expected):
+    plan = preview_native_build(session, city_id, position, building_id)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Building review is stale or unaffordable")
+    return plan["config"]
+
+
+@task("constructBuilding", prepare=prepare_native_build)
+def native_build(session, city_id: int, position: int, building_id: int, expected: str):
+    plan, action_token = _native_build_plan(session, city_id, position, building_id)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Building review is stale or unaffordable")
+    city = str(city_id)
+    session.setStatus("Submitting reviewed building construction")
+    session.post(params={
+        "action": "BuildNewBuilding", "cityId": city, "position": position,
+        "building": str(building_id), "backgroundView": "city", "currentCityId": city,
+        "templateView": "buildingGround", "actionRequest": action_token, "ajax": "1",
+    }, noIndex=True, retry_on_failure=False)
+    session.setStatus("Construction submitted; verify the city")
 
 
 @configurator
