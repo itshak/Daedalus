@@ -1,7 +1,7 @@
 // Pure allowlist — safe to exercise outside the Next.js runtime.
 const simpleRead = new Set(["health", "accounts", "capabilities", "task-control", "account-config", "recovery"]);
 const accountResources = new Set(["session", "cities", "academies", "taverns", "miracles", "shrine-status", "pirate-fortresses", "military", "ship-movements", "tasks"]);
-const cityResources = new Set(["buildings", "trainable-units", "workshop-upgrades", "market-quotes"]);
+const cityResources = new Set(["buildings", "build-options", "trainable-units", "workshop-upgrades", "market-quotes"]);
 const safePart = /^[a-zA-Z0-9_-]{1,72}$/;
 const safeNumber = /^[1-9][0-9]{0,11}$/;
 
@@ -27,8 +27,8 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery"
       && ["pause","unpause","resume-now","import-saved-token"].includes(parts[3])) return true;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "tasks") return true;
-    if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "cities" && safeNumber.test(parts[3]) && ["construction-plan","donation-plan","worker-plan","layout-plan"].includes(parts[4]) && params.size === 0) return true;
-    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && ["construction-start","donation-start","worker-start","layout-start"].includes(parts[3]) && params.size === 0) return true;
+    if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "cities" && safeNumber.test(parts[3]) && ["construction-plan","donation-plan","worker-plan","layout-plan","build-plan"].includes(parts[4]) && params.size === 0) return true;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && ["construction-start","donation-start","worker-start","layout-start","build-start"].includes(parts[3]) && params.size === 0) return true;
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "tasks" && parts[4] === "stop") return true;
     if (parts.length === 6 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "requests" && parts[5] === "acknowledge") return true;
   }

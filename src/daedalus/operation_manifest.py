@@ -31,7 +31,7 @@ _LOCAL_BOUNDARIES = frozenset({
     "show_proxy",
 })
 _PENDING = frozenset({
-    "attackBarbarians", "autoBarbarians", "constructBuilding",
+    "attackBarbarians", "autoBarbarians",
     "stationArmy", "vacationMode",
 })
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})

@@ -70,3 +70,10 @@ test("layout plans require the two-city ticket workflow",()=>{
   assert.equal(allowedRequest("POST","accounts/a/cities/0/layout-plan".split("/"),params()),false);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/layout-plan".split("/"),params("raw=true")),false);
 });
+
+test("new building uses live options and reviewed tickets",()=>{
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/build-options".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/build-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/build-start".split("/"),params()),true);
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/build-options".split("/"),params("raw=true")),false);
+});

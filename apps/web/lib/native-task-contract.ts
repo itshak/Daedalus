@@ -200,7 +200,7 @@ export function scopedCities(value: unknown, account: string): City[] {
   }
   return result;
 }
-export function readyPreflight(value:unknown,account:string,task:NativeTask|"donate"|"reorganizeCityBuildings"|WorkerTask):boolean {
+export function readyPreflight(value:unknown,account:string,task:NativeTask|"donate"|"reorganizeCityBuildings"|"constructBuilding"|WorkerTask):boolean {
   return obj(value) && value.account_id===account && value.task===task && value.ready===true
     && value.unresolved_request===false;
 }

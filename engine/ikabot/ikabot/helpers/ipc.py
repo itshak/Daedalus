@@ -774,6 +774,10 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "list_build_options_existing":
+                    return self._build_options_existing(request)
+                if action == "preview_build_existing":
+                    return self._preview_build_existing(request)
                 if action == "preview_layout_existing":
                     return self._preview_layout_existing(request)
                 if action == "preview_workers_existing":
@@ -904,6 +908,21 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _build_options_existing(self, request):
+        from ikabot.function.constructBuilding import native_build_options
+
+        session = self._existing_session(request)
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "inventory": native_build_options(session, request.get("city_id"))}
+
+    def _preview_build_existing(self, request):
+        from ikabot.function.constructBuilding import preview_native_build
+
+        session = self._existing_session(request)
+        plan = preview_native_build(session, request.get("city_id"), request.get("position"), request.get("building_id"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _preview_layout_existing(self, request):
         from ikabot.function.reorganizeCityBuildings import preview_native_layout
@@ -1740,7 +1759,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings",
+                    "reorganizeCityBuildings", "constructBuilding",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

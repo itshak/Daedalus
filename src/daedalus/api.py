@@ -48,6 +48,7 @@ from daedalus.recovery_state import RecoveryConflict, RecoveryStore
 from daedalus.reviewed_operations import (
     CITY_REVIEW_TASKS,
     WORKER_TASKS,
+    validated_build_draft,
     validated_layout_draft,
     validated_worker_draft,
 )
@@ -701,6 +702,45 @@ def create_app(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
 
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/build-options",
+             dependencies=[Depends(authorized)])
+    def build_options(account_id: str, city_id: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real building options unavailable")
+        try:
+            return ipc_client.build_options(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Building inventory rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Building inventory unavailable") from exc
+
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/build-plan",
+              dependencies=[Depends(authorized)])
+    def build_plan(account_id: str, city_id: int,
+                   payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real building planner unavailable")
+        try:
+            plan = ipc_client.build_preview(account, city_id, validated_build_draft(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Building preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Building preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "constructBuilding", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
     @app.post(
         "/api/v1/accounts/{account_id}/cities/{city_id}/layout-plan",
         dependencies=[Depends(authorized)],
@@ -1289,6 +1329,12 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/build-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_build(account_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "constructBuilding", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/layout-start",
               dependencies=[Depends(authorized)])

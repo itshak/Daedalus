@@ -748,3 +748,42 @@ def test_layout_editor_two_owned_cities_and_review(page, monkeypatch):
     page.confirm_box.setChecked(True)
     page._start()
     assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_new_building_editor_inventory_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "constructBuilding"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Other"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    calls = []
+    page.build_options_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "options": [
+        {"position": 1, "building_id": 4, "name": "Academy", "surface": "land",
+         "costs": [20, 0, 0, 0, 0], "ready": True}]}
+    page.set_build_options(result, "wrong")
+    assert page._form_inputs["position"].count() == 1
+    page.set_build_options(result, calls[0][2])
+    page._form_inputs["position"].setCurrentIndex(1)
+    reviews = []
+    page.build_preview_requested.connect(lambda *args: reviews.append(args))
+    page._request_native_preview()
+    assert reviews[0][:2] == ("alpha", {"city_id": 1, "position": 1, "building_id": 4})
+    assert not page.start_button.isEnabled()
+    plan = {"account_id": "alpha", "city_id": 1, **result["options"][0],
+            "preview_id": "a" * 43, "expires_in": 120}
+    page.set_build_preview(plan, reviews[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert page._form_inputs["position"].count() == 1

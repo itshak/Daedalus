@@ -15,6 +15,8 @@ import httpx
 
 from daedalus.reviewed_operations import (
     WORKER_TASKS,
+    validate_build_inventory,
+    validated_build_draft,
     validated_layout_draft,
     validated_worker_draft,
 )
@@ -183,6 +185,13 @@ class DaedalusClient:
             return self._write(f"accounts/{account_id}/tasks/worker-start", {
                 "task": task, "preview_id": config["preview_id"],
                 "request_id": request_id, "confirmed": confirmed,
+            })
+        if task == "constructBuilding":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the building first")
+            return self._write(f"accounts/{account_id}/tasks/build-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
             })
         if task == "reorganizeCityBuildings":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
@@ -633,6 +642,35 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def build_options(self, account_id: str, city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/build-options")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Building inventory scope mismatch")
+        try:
+            return {"account_id": account_id, **validate_build_inventory(city_id, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid building inventory") from exc
+
+    def build_preview(self, account_id: str, city_id: int, draft: dict[str, int]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid building review scope")
+        clean = validated_build_draft(draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/build-plan", clean)
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or any(data.get(k) != v for k, v in clean.items())
+                or not isinstance(data.get("name"), str) or type(data.get("ready")) is not bool
+                or any(not isinstance(data.get(k), list) or len(data[k]) != 5
+                       or any(type(n) is not int or not 0 <= n <= 10**15 for n in data[k])
+                       for k in ("costs", "available", "missing"))
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Invalid building preview")
         return data
 
     def layout_preview(self, account_id: str, city_id: int, template_city_id: int) -> dict[str, object]:

@@ -84,6 +84,7 @@ _TASK_LABELS = {
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
     "loginDaily": "Daily login", "dumpWorld": "Export world data",
+    "constructBuilding": "Build new building",
     "reorganizeCityBuildings": "Copy city building layout",
     "modifyProduction": "Production workers", "modifyAcademyWorkers": "Academy scientists",
     "modifyTempleWorkers": "Temple priests",
@@ -102,7 +103,7 @@ _TASK_CATEGORIES = {
                           "distributeResources", "donationBot", "donate"},
     "City management": {"constructionList", "tavernManager", "research",
                         "loginDaily", "activateMiracle", "activateShrine",
-                        "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers", "reorganizeCityBuildings"},
+                        "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers", "reorganizeCityBuildings", "constructBuilding"},
     "Military & missions": {"trainArmy", "UpgradeUnits", "attackBarbarians",
                             "autoBarbarians", "autoPirate"},
 }
@@ -133,6 +134,8 @@ class TasksPage(QWidget):
     donation_preview_requested = Signal(str, object, str)
     worker_preview_requested = Signal(str, str, object, str)
     layout_preview_requested = Signal(str, object, str)
+    build_options_requested = Signal(str, int, str)
+    build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
     trainable_units_requested = Signal(str, int, bool)
     market_quotes_requested = Signal(str, int, int, str)
@@ -739,6 +742,8 @@ class TasksPage(QWidget):
                     self._populate_city_picker(input_widget, optional=not
                                                self._field_is_required(key))
                     self._invalidate_review()
+                    if self.selected_task_name() == "constructBuilding" and key == "city_id":
+                        self._clear_build_options()
                 elif isinstance(input_widget, (
                     ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
@@ -847,6 +852,19 @@ class TasksPage(QWidget):
         account = self.selected_account_id()
         if account is None:
             return
+        if task == "constructBuilding":
+            picker = self._form_inputs.get("city_id")
+            choice = self._form_inputs.get("position")
+            cities = self._cities_by_account.get(account, [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if not 1 <= index <= len(cities):
+                QMessageBox.warning(self, "Choose construction city", "Choose an actual city first.")
+                return
+            if not isinstance(choice, ComboBox) or choice.currentIndex() <= 0:
+                self._city_review_nonce = str(uuid.uuid4())
+                self.building_note.setText("Loading current empty slots and building options…")
+                self.build_options_requested.emit(account, cities[index-1]["id"], self._city_review_nonce)
+                return
         try:
             draft = self._form_config()
             if task in WORKER_TASKS:
@@ -860,6 +878,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "constructBuilding":
+            self.building_note.setText("Checking selected building and actual costs…")
+            self.build_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "reorganizeCityBuildings":
             self.building_note.setText("Comparing the actual city layouts…")
             self.layout_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -894,6 +915,68 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def _clear_build_options(self, *_args: object) -> None:
+        choice = self._form_inputs.get("position")
+        if self.selected_task_name() == "constructBuilding" and isinstance(choice, ComboBox):
+            with QSignalBlocker(choice):
+                choice.clear()
+                choice.addItem("Load actual building options first…")
+            self._mark_form_dirty()
+
+    def set_build_options(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "constructBuilding" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        picker = self._form_inputs.get("city_id")
+        choice = self._form_inputs.get("position")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        if (not isinstance(choice, ComboBox) or not 1 <= index <= len(cities)
+                or result.get("city_id") != cities[index-1]["id"]):
+            return
+        with QSignalBlocker(choice):
+            choice.clear()
+            choice.addItem("Choose an actual building and slot…")
+            for row in result["options"]:
+                label = f"{row['name']} · slot {row['position']} ({row['surface']})"
+                if not row["ready"]:
+                    label += " — not ready"
+                choice.addItem(label, userData={"position": row["position"], "building_id": row["building_id"]})
+            choice.setCurrentIndex(0)
+        self._city_review_nonce = None
+        self._city_review_plan = None
+        self.building_note.setText(
+            f"{len(result['options'])} actual building choices. Select one and preview the cost."
+        )
+        self._invalidate_review()
+
+    def set_build_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "constructBuilding" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        costs = ", ".join(f"{r}: {n:,}" for r, n in zip(("wood", "wine", "marble", "crystal", "sulfur"), result["costs"]))
+        self.building_note.setText(
+            f"{result['name']} · slot {result['position']}. Cost: {costs}. "
+            + ("Ready for review." if self._city_review_plan else "City is busy or materials are missing.")
+        )
+        self._invalidate_review()
+
+    def set_build_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "constructBuilding" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Building inventory or preview unavailable. Retry after refresh.")
             self._invalidate_review()
 
     def set_layout_preview(self, result: dict[str, object], nonce: str) -> None:
@@ -1610,7 +1693,8 @@ class TasksPage(QWidget):
         self.construction_preview_button.setText(
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
-            "Preview layout changes…" if name == "reorganizeCityBuildings" else "Calculate actual upgrade costs & queue…")
+            "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
         if name in CITY_REVIEW_TASKS:
             self.building_note.setText("Choose a city and settings, then preview.")
@@ -1728,12 +1812,18 @@ class TasksPage(QWidget):
                     item.setCheckState(Qt.Unchecked)
                     widget.addItem(item)
                 widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "build_choice":
+                widget = ComboBox()
+                widget.addItem("Load actual building options first…")
+                widget.currentIndexChanged.connect(self._mark_form_dirty)
             elif kind == "city_picker":
                 widget = ComboBox()
                 widget.setProperty("city_picker", True)
                 widget.setAccessibleName(f"Choose actual city for {label}")
                 self._populate_city_picker(widget, optional=not field["required"])
                 widget.currentIndexChanged.connect(self._mark_form_dirty)
+                if name == "constructBuilding" and key == "city_id":
+                    widget.currentIndexChanged.connect(self._clear_build_options)
             elif name == "constructionList" and key == "city_id":
                 widget = ComboBox()
                 widget.setAccessibleName("Choose a real city for construction")
@@ -2030,6 +2120,12 @@ class TasksPage(QWidget):
                     raise ValueError("Choose at least two cities to distribute resources")
                 config[key] = ([str(city) for city in chosen] if kind == "city_list"
                                else chosen)
+                continue
+            if kind == "build_choice" and isinstance(widget, ComboBox):
+                selected = widget.currentData()
+                if not isinstance(selected, dict) or set(selected) != {"position", "building_id"}:
+                    raise ValueError("Choose a verified building option")
+                config.update(selected)
                 continue
             if kind == "city_picker" and isinstance(widget, ComboBox):
                 cities = self._cities_by_account.get(self.selected_account_id() or "", [])

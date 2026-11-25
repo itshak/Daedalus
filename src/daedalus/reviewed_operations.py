@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -95,3 +95,60 @@ def validate_layout_plan(city_id: int, template_id: int, plan: object) -> dict[s
         raise ValueError("Invalid layout fingerprint")
     return {k: plan[k] for k in ("city_id", "template_city_id", "city_name", "template_name",
                                  "moves", "ready", "config")}
+
+def validated_build_draft(draft: object) -> dict[str, int]:
+    if (not isinstance(draft, dict) or set(draft) != {"position", "building_id"}
+            or type(draft["position"]) is not int or not 0 <= draft["position"] <= 80
+            or type(draft["building_id"]) is not int or not 0 < draft["building_id"] < 10**6):
+        raise ValueError("Invalid new building choice")
+    return dict(draft)
+
+
+def _resources(value: object) -> bool:
+    return isinstance(value, list) and len(value) == 5 and all(
+        type(n) is int and 0 <= n <= 10**15 for n in value
+    )
+
+
+def _valid_build_option(option: object, available: list[int], busy: bool) -> bool:
+    return (isinstance(option, dict) and type(option.get("position")) is int
+            and 0 <= option["position"] <= 80 and type(option.get("building_id")) is int
+            and 0 < option["building_id"] < 10**6
+            and option.get("surface") in ("sea", "land", "shore", "wall", "dockyard")
+            and isinstance(option.get("name"), str) and 0 < len(option["name"]) <= 100
+            and _resources(option.get("costs")) and any(option["costs"])
+            and option.get("ready") is (not busy and all(a >= n for a, n in zip(available, option["costs"]))))
+
+
+def validate_build_inventory(city_id: int, data: object) -> dict[str, object]:
+    if (not isinstance(data, dict) or data.get("city_id") != city_id
+            or not isinstance(data.get("city_name"), str) or not 0 < len(data["city_name"]) <= 100
+            or not _resources(data.get("available")) or type(data.get("busy")) is not bool
+            or not isinstance(data.get("options"), list) or len(data["options"]) > 500
+            or any(not _valid_build_option(o, data["available"], data["busy"]) for o in data["options"])):
+        raise ValueError("Invalid building inventory")
+    keys = [(o["position"], o["building_id"]) for o in data["options"]]
+    if len(keys) != len(set(keys)):
+        raise ValueError("Duplicate building option")
+    return {"city_id": city_id, "city_name": data["city_name"], "available": data["available"],
+            "busy": data["busy"], "options": [{k: o[k] for k in (
+                "position", "building_id", "name", "surface", "costs", "ready")} for o in data["options"]]}
+
+
+def validate_build_plan(city_id: int, draft: dict[str, int], plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or any(plan.get(k) != v for k, v in draft.items())
+            or not isinstance(plan.get("city_name"), str) or not 0 < len(plan["city_name"]) <= 100
+            or not _resources(plan.get("available")) or type(plan.get("busy")) is not bool
+            or not _valid_build_option(plan, plan["available"], plan["busy"])
+            or plan.get("missing") != [max(0, n - a) for n, a in zip(plan["costs"], plan["available"])]):
+        raise ValueError("Invalid building plan")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", "position", "building_id", "expected"}
+            or config["city_id"] != city_id or any(config.get(k) != v for k, v in draft.items())
+            or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid building fingerprint")
+    return {k: plan[k] for k in ("city_id", "city_name", "position", "building_id", "name", "surface",
+                                 "available", "costs", "missing", "busy", "ready", "config")}
