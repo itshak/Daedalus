@@ -93,9 +93,13 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
 
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
-        resp = session.post(params=data)
-        resp = json.loads(resp, strict=False)
-        outcome = resp[3][1][0]["type"]
+        # The server may have accepted the cargo before a response was lost.
+        # Never replay this non-idempotent POST at the transport layer.
+        resp = session.post(params=data, retry_on_failure=False)
+        try:
+            outcome = json.loads(resp, strict=False)[3][1][0]["type"]
+        except (ValueError, TypeError, KeyError, IndexError):
+            raise RuntimeError("Unrecognized transport outcome needs manual reconciliation") from None
         if outcome == 10:
             if checkpoint:
                 checkpoint.confirmed(chunk_id, send)
@@ -104,7 +108,7 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             if checkpoint:
                 checkpoint.rejected(chunk_id, send)
             wait(getMinimumWaitingTime(session))
-        elif checkpoint:
+        else:
             raise RuntimeError("Unrecognized transport outcome needs manual reconciliation")
         time.sleep(5)
 

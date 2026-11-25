@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
-from ikabot.helpers.planRoutes import splitCargoBetweenFleets
+from ikabot.helpers.planRoutes import sendGoods, splitCargoBetweenFleets
 
 
 class TestSplitCargoBetweenFleets(unittest.TestCase):
@@ -93,6 +93,54 @@ class TestSplitCargoBetweenFleets(unittest.TestCase):
 
         self.assertEqual(tradeShipCargo, [0, 0, 0, 0, 0])
         self.assertEqual(freighterCargo, [10000, 0, 0, 0, 0])
+
+
+class TestShipmentOutcome(unittest.TestCase):
+    def setUp(self):
+        self.session = Mock()
+        self.session.get.return_value = "city"
+        self.checkpoint = Mock()
+        self.checkpoint.reserve.return_value = "chunk"
+
+    def run_shipment(self, checkpoint=None):
+        with patch("ikabot.helpers.planRoutes.getCity", return_value={
+            "id": "1", "availableResources": [100, 100, 100, 100, 100]
+        }):
+            sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0],
+                      checkpoint=checkpoint, route_index=0)
+
+    def assert_single_cargo(self):
+        calls = self.session.post.call_args_list
+        cargo = [c for c in calls if c.kwargs["params"]["function"] == "loadTransportersWithFreight"]
+        self.assertEqual(len(cargo), 1)
+        self.assertIs(cargo[0].kwargs["retry_on_failure"], False)
+
+    def test_ambiguous_response_never_replays_and_leaves_checkpoint_unresolved(self):
+        self.session.post.side_effect = ["ok", RuntimeError("lost reply")]
+        with self.assertRaises(RuntimeError):
+            self.run_shipment(self.checkpoint)
+        self.assert_single_cargo()
+        self.checkpoint.reserve.assert_called_once_with(0, [10, 0, 0, 0, 0])
+        self.checkpoint.confirmed.assert_not_called()
+        self.checkpoint.rejected.assert_not_called()
+
+    def test_unknown_outcome_stops_even_without_checkpoint(self):
+        self.session.post.side_effect = ["ok", '[null,null,null,[null,[{"type":99}]]]']
+        with self.assertRaisesRegex(RuntimeError, "manual reconciliation"):
+            self.run_shipment()
+        self.assert_single_cargo()
+
+    def test_invalid_reply_stops_even_without_checkpoint(self):
+        self.session.post.side_effect = ["ok", "not a game response"]
+        with self.assertRaisesRegex(RuntimeError, "manual reconciliation"):
+            self.run_shipment()
+        self.assert_single_cargo()
+
+    def test_confirmed_shipment_records_exact_cargo(self):
+        self.session.post.side_effect = ["ok", '[null,null,null,[null,[{"type":10}]]]']
+        self.run_shipment(self.checkpoint)
+        self.assert_single_cargo()
+        self.checkpoint.confirmed.assert_called_once_with("chunk", [10, 0, 0, 0, 0])
 
 
 if __name__ == '__main__':

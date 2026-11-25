@@ -68,3 +68,7 @@ Focused vacation tests (engine/API/Qt) passed. Live vacation behavior and policy
 ## Still open
 
 The engine web-service and other protected administrative workflows need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.
+
+### Shipment outcome hardening
+
+The shared cargo POST now disables automatic HTTP retries for both checkpointed and ordinary shipments. Only the existing explicit game rejection outcome permits a new attempt; malformed or unknown replies halt for manual reconciliation, and ambiguous checkpoint entries remain unresolved. Focused transport suite: 21 tests and 6 subtests passed. This does not implement the outstanding external-city UI or certify live shipment behavior.
