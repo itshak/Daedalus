@@ -1172,11 +1172,17 @@ class TasksPage(QWidget):
         self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
         capacity = (f" Cargo weight {result['weight']:,} / capacity {result['capacity']:,}."
                     if result["ground"] else "")
-        self.building_note.setText(
-            f"{result['city_name']} → {result['destination_name']}: all {result['total']:,} "
-            + ("available ground units." if result["ground"] else "available fleet units.")
-            + capacity + (" Ready for review." if self._city_review_plan else " No units or insufficient capacity.")
-        )
+        if result.get("deployments"):
+            description = "\n".join(
+                f"{row['city_name']} → {result['destination_name']}: {row['total']:,} "
+                + ("ground units" if row["ground"] else "fleet units")
+                for row in result["deployments"])
+            description += "\nTotal: " + f"{result['total']:,} units." + capacity
+        else:
+            description = (f"{result['city_name']} → {result['destination_name']}: all {result['total']:,} "
+                           + ("available ground units." if result["ground"] else "available fleet units.") + capacity)
+        self.building_note.setText(description + (" Ready for review." if self._city_review_plan else
+                                                " No units or insufficient shared capacity."))
         self._invalidate_review()
 
     def set_station_unavailable(self, nonce: str) -> None:
@@ -2598,6 +2604,12 @@ class TasksPage(QWidget):
             )
         if len(json.dumps(config, allow_nan=False).encode("utf-8")) > 16384:
             raise ValueError("Task configuration exceeds the safe size limit")
+        if name == "stationArmy":
+            for option in ("all_origins", "both"):
+                if not config.get(option):
+                    config.pop(option, None)
+            if config.get("both"):
+                config["ground"] = True
         return config
 
     def set_tasks(self, data: dict[str, object]) -> None:
@@ -2754,7 +2766,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params[:6000] if task == 'sendResources' else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy'} else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

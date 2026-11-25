@@ -976,7 +976,8 @@ class IPCServer:
 
         session = self._existing_session(request)
         plan = preview_native_station(session, request.get("city_id"),
-                                      request.get("destination_city_id"), request.get("ground"))
+                                      request.get("destination_city_id"), request.get("ground"),
+                                      request.get("all_origins", False), request.get("both", False))
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "plan": plan}
 

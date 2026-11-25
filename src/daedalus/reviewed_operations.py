@@ -154,39 +154,87 @@ def validate_build_plan(city_id: int, draft: dict[str, int], plan: object) -> di
                                  "available", "costs", "missing", "busy", "ready", "config")}
 
 def validated_station_draft(city_id: object, draft: object) -> dict[str, object]:
-    if (not isinstance(draft, dict) or set(draft) != {"destination_city_id", "ground"}
-            or type(draft["ground"]) is not bool):
+    required = {"destination_city_id", "ground"}
+    if (not isinstance(draft, dict) or not required <= set(draft) <= required | {"all_origins", "both"}
+            or type(draft["ground"]) is not bool
+            or any(draft[k] is not True for k in set(draft) - required)
+            or (draft.get("both") and not draft["ground"])):
         raise ValueError("Invalid deployment draft")
     validated_layout_draft(city_id, {"template_city_id": draft["destination_city_id"]})
     return dict(draft)
 
 
-def validate_station_plan(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
-    import re
-
+def validate_station_observation(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
+    """Validate the same safe projection at worker and client boundaries."""
+    keys = ("city_id", "destination_city_id", "ground", "city_name",
+            "destination_name", "total", "weight", "capacity", "ready")
     if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or type(plan.get("city_id")) is not int
             or plan.get("destination_city_id") != draft["destination_city_id"]
+            or type(plan.get("destination_city_id")) is not int
             or plan.get("ground") is not draft["ground"]
             or any(not isinstance(plan.get(k), str) or not 0 < len(plan[k]) <= 100
                    for k in ("city_name", "destination_name"))
             or type(plan.get("total")) is not int or not 0 <= plan["total"] <= 10**12):
         raise ValueError("Invalid deployment preview")
-    if draft["ground"]:
-        if any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 10**16
-               for k in ("weight", "capacity")):
-            raise ValueError("Invalid transport capacity")
-    elif plan.get("weight") is not None or plan.get("capacity") is not None:
-        raise ValueError("Unexpected fleet cargo capacity")
+
+    def valid_capacity(row):
+        if row["ground"]:
+            return all(type(row.get(k)) is int and 0 <= row[k] <= 10**16 for k in ("weight", "capacity"))
+        return row.get("weight") is None and row.get("capacity") is None
+
+    if not valid_capacity(plan):
+        raise ValueError("Invalid transport capacity")
     if plan.get("ready") is not (plan["total"] > 0 and (
             not draft["ground"] or plan["weight"] <= plan["capacity"])):
         raise ValueError("Invalid deployment readiness")
+    extras = set(draft) - {"destination_city_id", "ground"}
+    if any(plan.get(k) is not True for k in extras):
+        raise ValueError("Deployment options changed")
+    if extras:
+        rows = plan.get("deployments")
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 64:
+            raise ValueError("Invalid deployment routes")
+        seen = set()
+        names = {}
+        for row in rows:
+            if (not isinstance(row, dict) or set(row) != {"city_id", "city_name", "ground", "total", "weight", "capacity"}
+                    or type(row["city_id"]) is not int or not 0 < row["city_id"] < 10**12
+                    or row["city_id"] == draft["destination_city_id"] or type(row["ground"]) is not bool
+                    or not isinstance(row["city_name"], str) or not 0 < len(row["city_name"]) <= 100
+                    or type(row["total"]) is not int or not 0 <= row["total"] <= 10**12
+                    or not valid_capacity(row) or (row["city_id"], row["ground"]) in seen
+                    or (row["city_id"] in names and names[row["city_id"]] != row["city_name"])):
+                raise ValueError("Invalid deployment route")
+            seen.add((row["city_id"], row["ground"]))
+            names[row["city_id"]] = row["city_name"]
+        modes = {True, False} if draft.get("both") else {draft["ground"]}
+        if (city_id not in names or names[city_id] != plan["city_name"] or len(names) > 32
+                or (not draft.get("all_origins") and set(names) != {city_id})
+                or seen != {(cid, mode) for cid in names for mode in modes}
+                or sum(r["total"] for r in rows) != plan["total"]):
+            raise ValueError("Invalid deployment coverage")
+        ground_rows = [r for r in rows if r["ground"]]
+        if ground_rows and (sum(r["weight"] for r in ground_rows) != plan["weight"]
+                            or min(r["capacity"] for r in ground_rows) != plan["capacity"]):
+            raise ValueError("Invalid shared fleet capacity")
+        keys += ("deployments", *sorted(extras))
+    elif "deployments" in plan or any(k in plan for k in ("all_origins", "both")):
+        raise ValueError("Unexpected deployment routes")
+    return {k: plan[k] for k in keys}
+
+
+def validate_station_plan(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
+    import re
+
+    observation = validate_station_observation(city_id, draft, plan)
     config = plan.get("config")
     if (not isinstance(config, dict) or set(config) != {"city_id", *draft, "expected"}
             or config["city_id"] != city_id or any(config.get(k) != v for k, v in draft.items())
             or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
         raise ValueError("Invalid deployment fingerprint")
-    return {k: plan[k] for k in ("city_id", "destination_city_id", "ground", "city_name",
-                                 "destination_name", "total", "weight", "capacity", "ready", "config")}
+    return {**observation, "config": config}
+
 
 def validated_grind_draft(city_id: object, draft: object) -> dict[str, object]:
     if (type(city_id) is not int or not 0 < city_id < 10**12

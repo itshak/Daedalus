@@ -81,9 +81,11 @@ def test_station_ticket_scope_and_no_generic_start(monkeypatch, tmp_path):
     owner = AccountSessionCoordinator(accounts, state_dir=tmp_path / "locks")
     ipc = ControlledIPCClient()
     monkeypatch.setattr(ipc, "cities", lambda _a: [{"id": 1}, {"id": 2}])
+    monkeypatch.setattr(station, "getIdsOfCities", lambda _s: (["1", "2"], {}))
     monkeypatch.setattr(ipc, "_exchange", lambda p, **kw: {
         "status": "ok", "world": p["world"], "username": p["player"],
-        "plan": station.preview_native_station(session, p["city_id"], p["destination_city_id"], p["ground"]),
+        "plan": station.preview_native_station(session, p["city_id"], p["destination_city_id"], p["ground"],
+                                               p.get("all_origins", False), p.get("both", False)),
     })
     monkeypatch.setattr(ipc, "preflight_task", lambda _a, task: {
         "task": task, "ready": True, "reason": "none", "notifications_required": False, "checked": [],
@@ -104,6 +106,11 @@ def test_station_ticket_scope_and_no_generic_start(monkeypatch, tmp_path):
         draft = {"destination_city_id": 2, "ground": True}
         assert client.post(path, headers=auth, json={**draft, "destination_city_id": 3}).status_code == 422
         assert client.post(path, headers=auth, json={**draft, "ground": 1}).status_code == 422
+        assert client.post(path, headers=auth, json={**draft, "both": True, "ground": False}).status_code == 422
+        assert client.post(path, headers=auth, json={**draft, "all_origins": 1}).status_code == 422
+        aggregate = client.post(path, headers=auth, json={**draft, "all_origins": True, "both": True})
+        assert aggregate.status_code == 200, aggregate.text
+        assert aggregate.json()["total"] == 10 and len(aggregate.json()["deployments"]) == 2
         response = client.post(path, headers=auth, json=draft)
         assert response.status_code == 200, response.text
         plan = response.json()
@@ -121,3 +128,53 @@ def test_station_ticket_scope_and_no_generic_start(monkeypatch, tmp_path):
         assert len(starts) == 1
     finally:
         controller.close()
+
+
+def test_all_city_combined_deployment_checks_shared_capacity_and_staleness(monkeypatch):
+    session, quantities, capacity = fixture(monkeypatch)
+    origin2 = {"id": "3", "cityName": "Another source", "islandId": "30"}
+    original_get = station.getCityById
+    original_own = station.requireOwnCity
+    monkeypatch.setattr(station, "getCityById", lambda s, cid:
+                        origin2 if int(cid) == 3 else original_get(s, cid))
+    monkeypatch.setattr(station, "requireOwnCity", lambda s, cid, n:
+                        "3" if cid == 3 else original_own(s, cid, n))
+    monkeypatch.setattr(station, "getIdsOfCities", lambda _s: (["1", "2", "3"], {}))
+    draft = {"destination_city_id": 2, "ground": True, "all_origins": True, "both": True}
+    plan = station.preview_native_station(session, 1, **draft)
+    assert plan["total"] == 20 and plan["weight"] == plan["capacity"] == 20
+    assert len(plan["deployments"]) == 4 and plan["ready"]
+    assert validate_station_plan(1, draft, plan)["config"] == plan["config"]
+    capacity[0] = 9
+    assert not station.preview_native_station(session, 1, **draft)["ready"]
+    capacity[0] = 10
+    quantities[0] = 6
+    with pytest.raises(ValueError, match="stale"):
+        station.prepare_native_station(session, **plan["config"])
+    quantities[0] = 5
+    assert not any("action" in c.kwargs["params"] for c in session.post.call_args_list)
+    station.native_station(session, **plan["config"])
+    writes = [c.kwargs for c in session.post.call_args_list if "action" in c.kwargs["params"]]
+    assert [(w["params"]["currentCityId"], w["params"]["function"]) for w in writes] == [
+        ("1", "deployArmy"), ("1", "deployFleet"), ("3", "deployArmy"), ("3", "deployFleet")]
+    assert all(w["retry_on_failure"] is False for w in writes)
+
+
+def test_combined_deployment_stops_remaining_routes_on_change(monkeypatch):
+    session, quantities, _ = fixture(monkeypatch)
+    draft = {"destination_city_id": 2, "ground": True, "both": True}
+    plan = station.preview_native_station(session, 1, **draft)
+    original_post = session.post.side_effect
+
+    def post(**kwargs):
+        reply = original_post(**kwargs)
+        if kwargs["params"].get("action") == "transportOperations":
+            quantities[0] = 4
+        return reply
+
+    session.post.side_effect = post
+    # Exercise the underlying task function: the decorator handles task errors.
+    with pytest.raises(ValueError, match="changed"):
+        station.native_station.__wrapped__(session, **plan["config"])
+    writes = [c.kwargs for c in session.post.call_args_list if "action" in c.kwargs["params"]]
+    assert len(writes) == 1

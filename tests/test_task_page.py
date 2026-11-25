@@ -1005,3 +1005,40 @@ def test_construction_review_queue_uses_ticket_and_explicit_batch_confirmation(p
     page._start_reviewed_batch()
     assert emitted == [[{"account_id": "alpha", "task": "constructionList", "preview_id": "a" * 43}]]
     assert page.review_queue_table.rowCount() == 0
+
+
+def test_station_editor_all_origins_and_both_categories(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "stationArmy"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}, {"id": 3, "name": "Another"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["destination_city_id"].setCurrentIndex(2)
+    page._form_inputs["ground"].setChecked(False)
+    page._form_inputs["all_origins"].setChecked(True)
+    page._form_inputs["both"].setChecked(True)
+    calls = []
+    page.station_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "destination_city_id": 2, "ground": True, "all_origins": True, "both": True})
+    assert not page.start_button.isEnabled()
+    result = {"account_id": "alpha", **calls[0][1], "city_name": "Origin", "destination_name": "Target",
+              "total": 20, "weight": 20, "capacity": 20, "ready": True,
+              "deployments": [{"city_id": i, "city_name": name, "ground": g, "total": 5,
+                               "weight": 10 if g else None, "capacity": 20 if g else None}
+                              for i, name in [(1, "Origin"), (3, "Another")] for g in (True, False)],
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_station_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_station_preview(result, calls[0][2])
+    assert page.start_button.isEnabled()
+    assert "Another → Target" in page.building_note.text()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})

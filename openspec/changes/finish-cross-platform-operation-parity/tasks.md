@@ -18,3 +18,5 @@
 
 - [x] Preserve verified destinations across multiple island lookups in one-time shipment editors; invalidate refreshed, moved or cleared recipient selections, retain authoritative worker revalidation and limit lookup inventory to ten islands.
 - [x] Generate the versioned web native launch inventory, reviewed ticket endpoints, batch size and ticket syntax from the Python contract; consume the shared endpoint mapping in the desktop client and BFF and enforce drift in pytest.
+
+- [x] Add reviewed all-owned-city and combined ground/fleet deployment choices to both native clients; verify exact route coverage, shared ship capacity, stale-state halt and manual-only recovery.

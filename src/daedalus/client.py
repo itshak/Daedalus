@@ -777,21 +777,18 @@ class DaedalusClient:
             raise ValueError("Invalid account")
         clean = validated_station_draft(city_id, draft)
         data = self._write(f"accounts/{account_id}/cities/{city_id}/station-plan", clean)
-        if (data.get("account_id") != account_id or data.get("city_id") != city_id
-                or data.get("destination_city_id") != clean["destination_city_id"]
-                or data.get("ground") is not clean["ground"]
-                or any(not isinstance(data.get(k), str) for k in ("city_name", "destination_name"))
-                or type(data.get("total")) is not int or not 0 <= data["total"] <= 10**12
-                or (clean["ground"] and any(type(data.get(k)) is not int or not 0 <= data[k] <= 10**16
-                                           for k in ("weight", "capacity")))
-                or (not clean["ground"] and (data.get("weight") is not None or data.get("capacity") is not None))
-                or data.get("ready") is not (data["total"] > 0 and (
-                    not clean["ground"] or data["weight"] <= data["capacity"]))
-                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
-                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
-                                       or type(data.get("expires_in")) is not int
-                                       or not 1 <= data["expires_in"] <= 120))):
-            raise APIConnectionError("Invalid deployment preview")
+        from daedalus.reviewed_operations import validate_station_observation
+
+        try:
+            if data.get("account_id") != account_id:
+                raise ValueError("Invalid account scope")
+            validate_station_observation(city_id, clean, data)
+            if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                    or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise ValueError("Invalid deployment ticket")
+        except ValueError as exc:
+            raise APIConnectionError("Invalid deployment preview") from exc
         return data
 
     def build_options(self, account_id: str, city_id: int) -> dict[str, object]:

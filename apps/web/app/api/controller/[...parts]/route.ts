@@ -76,7 +76,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "grind-plan" && !z.object({target_city_id:z.number().int().positive().max(999_999_999_999),send_notifications:z.boolean()}).strict().safeParse(value).success)
       return NextResponse.json({error:"Invalid automatic attack draft"},{status:422,headers:responseHeaders});
-    if (parts.at(-1) === "station-plan" && !z.object({destination_city_id:z.number().int().positive().max(999_999_999_999),ground:z.boolean()}).strict().safeParse(value).success)
+    if (parts.at(-1) === "station-plan" && !z.object({destination_city_id:z.number().int().positive().max(999_999_999_999),ground:z.boolean(),all_origins:z.literal(true).optional(),both:z.literal(true).optional()}).strict().refine(v=>!v.both||v.ground).safeParse(value).success)
       return NextResponse.json({error:"Invalid deployment choice"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "build-plan" && !z.object({position:z.number().int().min(0).max(80),building_id:z.number().int().positive().max(999999)}).strict().safeParse(value).success)
       return NextResponse.json({error:"Invalid new building choice"},{status:422,headers:responseHeaders});

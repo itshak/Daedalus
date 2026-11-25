@@ -2,6 +2,11 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Shared transport capacity; dispatch stops if a route changes.": "Общая вместимость транспорта; при изменении маршрута отправка прекращается.",
+  "Fleet units": "Боевые корабли",
+  "Ground troops": "Сухопутные войска",
+  "All available ground troops and fleet": "Все доступные сухопутные войска и флот",
+  "Include all other owned cities": "Включить все остальные свои города",
   "Clear external cities before searching more than ten islands.": "Очистите чужие города перед поиском более десяти островов.",
   "Search another island to add destinations.": "Найдите другой остров, чтобы добавить города назначения.",
   "Verified external cities": "Проверенные чужие города",

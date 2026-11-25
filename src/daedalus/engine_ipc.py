@@ -511,7 +511,10 @@ class ExistingIPCClient:
                 or str(data.get("username", "")).casefold() != account.player.casefold()):
             raise EngineIPCUnavailable("Invalid deployment preview scope")
         try:
-            return {"account_id": account.id, **validate_station_plan(city_id, clean, data.get("plan"))}
+            plan = validate_station_plan(city_id, clean, data.get("plan"))
+            if clean.get("all_origins") and {r["city_id"] for r in plan["deployments"]} != owned - {clean["destination_city_id"]}:
+                raise ValueError("Owned city inventory changed")
+            return {"account_id": account.id, **plan}
         except ValueError as exc:
             raise EngineIPCUnavailable("Invalid deployment plan") from exc
 

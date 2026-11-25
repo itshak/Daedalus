@@ -10,3 +10,15 @@ The controller and both clients SHALL complete the outstanding reviewed operatio
 #### Scenario: Full parity release is requested
 - **WHEN** release acceptance is evaluated
 - **THEN** every original criterion has verified evidence or an explicitly approved protected alternative, and required CI and owner-operated acceptance are complete
+
+
+### Requirement: Reviewed multi-city military deployment
+Supported owned-city deployment SHALL support a single origin or all other owned origins and ground, fleet or combined categories. A reviewed plan SHALL identify all covered routes, account for shared transport capacity once, and revalidate each route before dispatch.
+
+#### Scenario: Shared capacity is insufficient
+- **WHEN** aggregate ground cargo exceeds observed available transport capacity
+- **THEN** no deployment ticket is issued
+
+#### Scenario: A route becomes stale
+- **WHEN** a reviewed route changes before its submission
+- **THEN** remaining submissions stop and previously submitted routes are not automatically retried or rolled back
