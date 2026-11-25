@@ -109,8 +109,8 @@ def test_guided_form_start_is_disabled_until_safe_readiness_reply(app):
         page.set_accounts([_accounts()[1]])
         page.set_capabilities([{ "name": "alertAttacks", "kind": "background_task",
             "config_fields": [{"name": "minutes", "type": "integer", "default": 20}] }], enabled=True)
-        assert not page._advanced_visible
-        assert page.config_editor.isHidden()
+        assert not hasattr(page, "config_editor")
+        assert not hasattr(page, "advanced_toggle")
         assert page._form_inputs["minutes"].value() == 20
         assert not page.start_button.isEnabled()
         page.set_preflight({"account_id": "beta", "task": "alertAttacks",
