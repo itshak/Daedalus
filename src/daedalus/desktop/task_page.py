@@ -1298,13 +1298,15 @@ class TasksPage(QWidget):
         self._city_review_nonce = None
         self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
         self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
-        current = result["current"] if result["current"] is not None else "not reported"
-        self.building_note.setText(
-            f"{result['city_name']} · current: {current}; maximum: {result['maximum']}; "
-            f"extra capacity: {result['extra']}. Set to {result['target']} workers once. "
-            "The game may reject the assignment if population is insufficient. "
-            "Review and approve before starting."
-        )
+        rows = result.get("assignments") or [result]
+        lines = []
+        for row in rows:
+            current = row["current"] if row["current"] is not None else "not reported"
+            project = {"resource": "forest", "tradegood": "luxury resource"}.get(row.get("project"), task)
+            lines.append(f"{row['city_name']} · {project}: current {current}; maximum {row['maximum']}; "
+                         f"extra {row['extra']}; set to {row['target']} workers.")
+        self.building_note.setText("\n".join(lines) +
+            "\nThe game may reject assignments if population is insufficient. Review and approve before starting.")
         self._invalidate_review()
 
     def set_worker_preview_unavailable(self, nonce: str) -> None:
@@ -2610,6 +2612,11 @@ class TasksPage(QWidget):
                     config.pop(option, None)
             if config.get("both"):
                 config["ground"] = True
+        if name in WORKER_TASKS and "additional_city_ids" in config:
+            config["additional_city_ids"] = [int(cid) for cid in config["additional_city_ids"]
+                                             if int(cid) != config["city_id"]]
+            if not config["additional_city_ids"]:
+                config.pop("additional_city_ids")
         return config
 
     def set_tasks(self, data: dict[str, object]) -> None:
@@ -2766,7 +2773,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy'} else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy'} | WORKER_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

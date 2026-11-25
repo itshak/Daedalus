@@ -252,10 +252,12 @@ export function isWorkerTask(task:unknown):task is WorkerTask {
 }
 export function validWorkerDraft(task:unknown,draft:unknown):boolean {
   if(!isWorkerTask(task)||!obj(draft)||!integer(draft.percentage,0,100))return false;
+  const extra=Object.hasOwn(draft,"additional_city_ids")?["additional_city_ids"]:[];
+  if(extra.length&&(!ids(draft.additional_city_ids,1)||draft.additional_city_ids.length>31))return false;
   return task==="modifyProduction"
-    ? exact(draft,["percentage","project","overcharge"])&&["resource","tradegood"].includes(String(draft.project))
+    ? exact(draft,["percentage","project","overcharge",...extra])&&["resource","tradegood","both"].includes(String(draft.project))
       &&typeof draft.project==="string"&&typeof draft.overcharge==="boolean"&&(!draft.overcharge||draft.percentage===100)
-    : exact(draft,["percentage"]);
+    : exact(draft,["percentage",...extra]);
 }
 export function validWorkerLaunch(value:unknown):boolean {
   return obj(value)&&exact(value,["task","preview_id","request_id","confirmed"])&&isWorkerTask(value.task)

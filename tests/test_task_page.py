@@ -1042,3 +1042,37 @@ def test_station_editor_all_origins_and_both_categories(page, monkeypatch):
     page.confirm_box.setChecked(True)
     page._start()
     assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_worker_editor_reviews_both_projects_in_selected_cities(page):
+    from PySide6.QtCore import Qt
+
+    from daedalus.engine_registry import inspect_engine
+
+    task = "modifyProduction"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}, {"id": 2, "name": "Another"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["project"].setCurrentIndex(2)
+    page._form_inputs["percentage"].setValue(50)
+    page._form_inputs["additional_city_ids"].item(1).setCheckState(Qt.Checked)
+    calls = []
+    page.worker_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    _, _, draft, nonce = calls[-1]
+    assert draft == {"city_id": 1, "percentage": 50, "project": "both", "overcharge": False,
+                     "additional_city_ids": [2]}
+    rows = [{"city_id": cid, "city_name": name, "project": project,
+             "current": 25, "maximum": 100, "extra": 20, "target": 50}
+            for cid, name in ((1, "Town"), (2, "Another"))
+            for project in ("resource", "tradegood")]
+    page.set_worker_preview({"account_id": "alpha", "task": task, **draft, "city_name": "Town",
+                             "current": 100, "maximum": 400, "extra": 80, "target": 200,
+                             "assignments": rows, "ready": True,
+                             "preview_id": "a"*43, "expires_in": 120}, nonce)
+    assert page.start_button.isEnabled()
+    assert "Another" in page.building_note.text()
+    page._form_inputs["additional_city_ids"].item(1).setCheckState(Qt.Unchecked)
+    assert not page.start_button.isEnabled()

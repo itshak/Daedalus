@@ -10,19 +10,27 @@ def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
         raise ValueError("Unknown worker operation")
     production = task == "modifyProduction"
     keys = {"percentage", "project", "overcharge"} if production else {"percentage"}
-    if (set(draft) != keys or type(draft.get("percentage")) is not int
+    if (not keys <= set(draft) <= keys | {"additional_city_ids"} or type(draft.get("percentage")) is not int
             or not 0 <= draft["percentage"] <= 100):
         raise ValueError("Invalid worker draft")
-    if production and (draft["project"] not in ("resource", "tradegood")
+    if production and (draft["project"] not in ("resource", "tradegood", "both")
                        or type(draft["overcharge"]) is not bool
                        or (draft["overcharge"] and draft["percentage"] != 100)):
         raise ValueError("Invalid worker project or overcharge")
+    if "additional_city_ids" in draft:
+        ids = draft["additional_city_ids"]
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 31
+                or any(type(cid) is not int or not 0 < cid < 10**12 for cid in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError("Invalid additional worker cities")
     return dict(draft)
 
 
 def validate_worker_plan(task: str, city_id: int, draft: dict[str, object],
                          plan: object) -> dict[str, object]:
     """Check a bounded engine observation; never synthesize missing values."""
+    if "additional_city_ids" in draft or draft.get("project") == "both":
+        return _validate_worker_aggregate(task, city_id, draft, plan, with_config=True)
     if (not isinstance(plan, dict) or plan.get("task") != task
             or type(plan.get("city_id")) is not int or plan["city_id"] != city_id
             or plan.get("percentage") != draft["percentage"]
@@ -60,6 +68,78 @@ def validate_worker_plan(task: str, city_id: int, draft: dict[str, object],
     return {k: plan[k] for k in ("task", "city_id", "city_name", "percentage",
                                  "project", "overcharge", "maximum", "extra",
                                  "current", "target", "ready", "config")}
+
+def _validate_worker_aggregate(task, city_id, draft, plan, *, with_config):
+    ids = [city_id, *draft.get("additional_city_ids", [])]
+    projects = ["resource", "tradegood"] if draft.get("project") == "both" else [draft.get("project")]
+    if (not isinstance(plan, dict) or len(set(ids)) != len(ids) or plan.get("task") != task
+            or plan.get("city_id") != city_id or plan.get("percentage") != draft["percentage"]
+            or plan.get("project") != draft.get("project")
+            or plan.get("overcharge") is not draft.get("overcharge", False)
+            or plan.get("additional_city_ids") != draft.get("additional_city_ids")
+            or plan.get("ready") is not True or not isinstance(plan.get("assignments"), list)
+            or len(plan["assignments"]) != len(ids) * len(projects)):
+        raise ValueError("Invalid worker assignment scope")
+    config = plan.get("config") if with_config else None
+    if with_config and (not isinstance(config, dict) or not isinstance(config.get("expected"), list)
+                        or len(config["expected"]) != len(plan["assignments"])
+                        or config != {"city_id": city_id, **draft, "expected": config["expected"]}):
+        raise ValueError("Invalid worker assignment config")
+    names = {}
+    for i, ((cid, project), row) in enumerate(zip(
+            [(cid, project) for cid in ids for project in projects], plan["assignments"])):
+        if (not isinstance(row, dict) or set(row) != {"city_id", "city_name", "project", "maximum", "extra", "current", "target"}
+                or type(row["city_id"]) is not int or row["city_id"] != cid or row["project"] != project
+                or not isinstance(row["city_name"], str) or not 0 < len(row["city_name"]) <= 100
+                or any(type(row[k]) is not int or not 0 <= row[k] <= 2*10**6 for k in ("maximum", "extra", "target"))
+                or (row["current"] is not None and (type(row["current"]) is not int or not 0 <= row["current"] <= 2*10**6))
+                or row["target"] != row["maximum"] * draft["percentage"] // 100
+                    + (row["extra"] if draft.get("overcharge") else 0)
+                or (task != "modifyProduction" and row["extra"] != 0)
+                or (cid in names and names[cid] != row["city_name"])):
+            raise ValueError("Invalid worker assignment row")
+        names[cid] = row["city_name"]
+        if with_config:
+            entry = config["expected"][i]
+            if (not isinstance(entry, dict) or set(entry) != {"city_id", "project", "observation"}
+                    or entry["city_id"] != cid or entry["project"] != project):
+                raise ValueError("Invalid worker assignment fingerprint")
+            single = {"percentage": draft["percentage"]}
+            if task == "modifyProduction":
+                single.update(project=project, overcharge=draft["overcharge"])
+            validate_worker_plan(task, cid, single, {
+                **row, "task": task, "percentage": draft["percentage"],
+                "overcharge": draft.get("overcharge", False), "ready": True,
+                "config": {"city_id": cid, **single, "expected": entry["observation"]}})
+    rows = plan["assignments"]
+    current = sum(r["current"] for r in rows) if all(r["current"] is not None for r in rows) else None
+    if (plan.get("city_name") != names[city_id]
+            or any(type(plan.get(k)) is not int or plan[k] != sum(r[k] for r in rows) for k in ("maximum", "extra", "target"))
+            or type(plan.get("current")) is not type(current) or plan["current"] != current):
+        raise ValueError("Invalid worker assignment totals")
+    keys = ("task", "city_id", "city_name", "percentage", "project", "overcharge",
+            "maximum", "extra", "current", "target", "assignments", "ready")
+    return {**{k: plan[k] for k in keys},
+            **({"additional_city_ids": draft["additional_city_ids"]} if "additional_city_ids" in draft else {}),
+            **({"config": config} if with_config else {})}
+
+
+def validate_worker_observation(task, city_id, draft, plan):
+    if "additional_city_ids" in draft or draft.get("project") == "both":
+        return _validate_worker_aggregate(task, city_id, draft, plan, with_config=False)
+    if (not isinstance(plan, dict) or "assignments" in plan or "additional_city_ids" in plan
+            or plan.get("task") != task or plan.get("city_id") != city_id
+            or plan.get("percentage") != draft["percentage"] or plan.get("project") != draft.get("project")
+            or plan.get("overcharge") is not draft.get("overcharge", False) or plan.get("ready") is not True
+            or not isinstance(plan.get("city_name"), str) or not 0 < len(plan["city_name"]) <= 100
+            or any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 2*10**6 for k in ("maximum", "extra", "target"))
+            or (plan.get("current") is not None and (type(plan["current"]) is not int or not 0 <= plan["current"] <= 2*10**6))
+            or plan["target"] != plan["maximum"] * draft["percentage"] // 100
+                + (plan["extra"] if draft.get("overcharge") else 0)
+            or (task != "modifyProduction" and plan["extra"] != 0)):
+        raise ValueError("Invalid worker preview")
+    return plan
+
 
 def validated_layout_draft(city_id: object, draft: object) -> int:
     if (type(city_id) is not int or not 0 < city_id < 10**12

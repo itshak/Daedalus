@@ -28,9 +28,9 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
     "reorganizeCityBuildings": "Copy the layout of an owned template city to another owned city.",
-    "modifyProduction": "Set workers for a forest or luxury-resource project.",
-    "modifyAcademyWorkers": "Set scientists in a verified academy.",
-    "modifyTempleWorkers": "Set priests in a verified temple.",
+    "modifyProduction": "Set workers for forest, luxury-resource projects or both in selected owned cities.",
+    "modifyAcademyWorkers": "Set scientists in selected owned cities with verified academies.",
+    "modifyTempleWorkers": "Set priests in selected owned cities with verified temples.",
     "donate": "Make one reviewed wood donation to an owned city’s island project.",
     "donationBot": "Coordinate supported island donations across configured cities.",
     "dumpWorld": "Export an allowed portion of the world map.",
@@ -150,9 +150,11 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("reorganizeCityBuildings", "city_id"): {"type": "city_picker", "label": "Target city"},
     ("reorganizeCityBuildings", "template_city_id"): {"type": "city_picker", "label": "Template city"},
     ("reorganizeCityBuildings", "expected"): {"type": "hidden_derived"},
+    **{(task_name, "additional_city_ids"): {"type": "city_list", "label": "Additional owned cities (optional)", "required": False}
+       for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")},
     ("modifyProduction", "project"): {
-        "type": "text", "choices": ["resource", "tradegood"],
-        "choice_labels": ["Forest", "Luxury resource"], "label": "Resource production",
+        "type": "text", "choices": ["resource", "tradegood", "both"],
+        "choice_labels": ["Forest", "Luxury resource", "Both resource projects"], "label": "Resource production",
     },
     ("modifyProduction", "overcharge"): {
         "type": "boolean", "default": False, "label": "Use overcharge (only at 100%)",

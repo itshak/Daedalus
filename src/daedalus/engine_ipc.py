@@ -562,7 +562,9 @@ class ExistingIPCClient:
     def worker_preview(self, account: Account, city_id: int, task: str,
                        draft: dict[str, object]) -> dict[str, object]:
         clean = validated_worker_draft(task, draft)
-        if city_id not in {row["id"] for row in self.cities(account)}:
+        owned = {row["id"] for row in self.cities(account)}
+        additional = clean.get("additional_city_ids", [])
+        if city_id not in owned or city_id in additional or not set(additional) <= owned:
             raise ValueError("Worker city is not owned by this account")
         data = self.request("preview_workers_existing", account=account,
                             city_id=city_id, worker_task=task, worker_draft=clean)

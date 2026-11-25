@@ -14,3 +14,10 @@ Baseline full local regression at 0a6d33d: 765 controller tests passed, 11 skipp
 Station troops/fleet now covers all five upstream CLI deployment choices, including all other owned cities and combined ground/fleet. Both clients present named per-origin/category totals and shared transport capacity before approval. The engine builds a bounded aggregate fingerprint and revalidates every nonempty route before its individual non-retried POST. The conservative summed ground weight must fit the shared observed capacity. Empty routes are explicit and skipped; changed units or insufficient capacity stop remaining routes, with no rollback of prior submissions. Existing single-city contract remains compatible. The controller verifies complete owned-city coverage; the client independently validates the projection and ticket. This extends option parity but is not live acceptance.
 
 Focused Python/Qt/API/batch/manifest regression: 49 passed. Web unit suite: 48 passed. TypeScript and Ruff passed; web lint 0 errors, 14 existing warnings. No real game requests.
+
+
+## Multiple-city worker assignment and both production projects
+
+Both clients now support additional selected owned cities for all three worker assignment operations and forest, luxury or both production projects. The engine reads the actual upstream slider in each city/project and constructs the exact reviewed target, validates the aggregate contract and rechecks each assignment immediately before a single non-retried mutation. Foreign/duplicate cities, missing buildings and invalid capacity block the plan; changed observations stop remaining writes. Existing single-city payloads remain compatible. Up to 32 cities can be selected. The game may still reject assignments when population is insufficient; no speculative economic impact or live acceptance is asserted.
+
+Focused controller/engine-adapter/Qt/batch/manifest regressions: 58 passed. Web unit suite: 49 passed; TypeScript, Ruff and web lint passed (14 existing warnings).

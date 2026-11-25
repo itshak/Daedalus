@@ -160,3 +160,77 @@ def test_worker_reviewed_api_and_cross_operation_scope(monkeypatch, tmp_path):
         assert len(starts) == 1
     finally:
         controller.close()
+
+
+def test_multiple_cities_both_projects_review_and_halt(monkeypatch):
+    session, slider, city = fake_game(monkeypatch)
+    second = {**city, "id": "2", "name": "Another town"}
+    def own(_s, cid, _name):
+        if cid not in (1, 2):
+            raise ValueError("Foreign city")
+        return str(cid)
+
+    monkeypatch.setattr(workers, "requireOwnCity", own)
+    monkeypatch.setattr(workers, "getCityById", lambda _s, cid: city if cid == "1" else second)
+    draft = {"percentage": 100, "project": "both", "overcharge": True, "additional_city_ids": [2]}
+    plan = workers.preview_native_workers(session, "modifyProduction", 1, **draft)
+    assert plan["target"] == 480
+    assert [r["project"] for r in plan["assignments"]] == ["resource", "tradegood"] * 2
+    assert validate_worker_plan("modifyProduction", 1, validated_worker_draft("modifyProduction", draft),
+                                plan)["config"] == plan["config"]
+    with pytest.raises(ValueError):
+        workers.preview_native_workers(session, "modifyProduction", 1, **{**draft, "additional_city_ids": [3]})
+    with pytest.raises(ValueError):
+        workers.preview_native_workers(session, "modifyProduction", 1, **{**draft, "additional_city_ids": [1]})
+    assert not any(c.kwargs for c in session.post.call_args_list)
+    original = session.post.side_effect
+
+    def post(url="", **kwargs):
+        reply = original(url, **kwargs)
+        if kwargs:
+            slider["max_value"] = 99
+        return reply
+
+    session.post.side_effect = post
+    with pytest.raises(ValueError, match="stale"):
+        workers.execute_native_workers(session, "modifyProduction", **plan["config"])
+    writes = [c.kwargs for c in session.post.call_args_list if c.kwargs]
+    assert len(writes) == 1 and writes[0]["params"]["rw"] == 120
+    assert writes[0]["retry_on_failure"] is False
+    assert restart_class_for("modifyProduction", plan["config"]) == "manual"
+
+
+def test_worker_aggregate_api_rejects_foreign_city_and_preserves_projects(monkeypatch, tmp_path):
+    session, _, _ = fake_game(monkeypatch)
+    file = tmp_path / "accounts.toml"
+    file.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s1-en"\nplayer = "Example"\n')
+    accounts = load_accounts(file)
+    owner = AccountSessionCoordinator(accounts, state_dir=tmp_path / "locks")
+    ipc = ControlledIPCClient()
+    monkeypatch.setattr(ipc, "cities", lambda _a: [{"id": 1}])
+    monkeypatch.setattr(ipc, "_exchange", lambda p, **_kw: {
+        "status": "ok", "world": p["world"], "username": p["player"],
+        "plan": workers.preview_native_workers(session, p["task"], p["city_id"], p["percentage"],
+                                               p.get("project"), p.get("overcharge", False),
+                                               p.get("additional_city_ids"))})
+    monkeypatch.setattr(ipc, "preflight_task", lambda _a, task: {
+        "task": task, "ready": True, "reason": "none", "notifications_required": False, "checked": []})
+    monkeypatch.setattr(ipc, "has_account", lambda _a: True)
+    controller = TaskController(accounts, owner, ipc, ledger_path=tmp_path / "tasks.sqlite")
+    token = "x"*48
+    auth = {"Authorization": "Bearer " + token}
+    client = TestClient(create_app(accounts_path=file, api_token=token, ipc_client=ipc,
+                                   session_coordinator=owner, task_controller=controller))
+    try:
+        path = "/api/v1/accounts/alpha/cities/1/worker-plan"
+        draft = {"percentage": 50, "project": "both", "overcharge": False}
+        request = {"task": "modifyProduction", "draft": draft}
+        assert client.post(path, headers=auth, json={**request, "draft": {
+            **draft, "additional_city_ids": [2]}}).status_code == 422
+        reply = client.post(path, headers=auth, json=request)
+        assert reply.status_code == 200, reply.text
+        result = reply.json()
+        assert result["target"] == 100 and len(result["assignments"]) == 2
+        assert result["preview_id"] and "config" not in result
+    finally:
+        controller.close()

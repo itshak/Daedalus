@@ -850,20 +850,18 @@ class DaedalusClient:
         clean = validated_worker_draft(task, draft)
         data = self._write(f"accounts/{account_id}/cities/{city_id}/worker-plan",
                            {"task": task, "draft": clean})
-        if (data.get("account_id") != account_id or data.get("city_id") != city_id
-                or data.get("task") != task or data.get("percentage") != clean["percentage"]
-                or data.get("project") != clean.get("project")
-                or data.get("overcharge") is not clean.get("overcharge", False)
-                or data.get("ready") is not True
-                or not isinstance(data.get("city_name"), str)
-                or any(type(data.get(k)) is not int or not 0 <= data[k] <= 2*10**6
-                       for k in ("maximum", "extra", "target"))
-                or (data.get("current") is not None and type(data["current"]) is not int)
-                or not isinstance(data.get("preview_id"), str)
-                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
-                or type(data.get("expires_in")) is not int
-                or not 1 <= data["expires_in"] <= 120):
-            raise APIConnectionError("Backend returned invalid worker preview")
+        from daedalus.reviewed_operations import validate_worker_observation
+
+        try:
+            if data.get("account_id") != account_id:
+                raise ValueError("Invalid account scope")
+            validate_worker_observation(task, city_id, clean, data)
+            if (not isinstance(data.get("preview_id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                    or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise ValueError("Invalid worker ticket")
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid worker preview") from exc
         return data
 
     def donation_preview(self, account_id: str, city_id: int,

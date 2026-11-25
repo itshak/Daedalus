@@ -1010,7 +1010,7 @@ class IPCServer:
         session = self._existing_session(request)
         plan = preview_native_workers(session, request.get("task"), request.get("city_id"),
                                       request.get("percentage"), request.get("project"),
-                                      request.get("overcharge", False))
+                                      request.get("overcharge", False), request.get("additional_city_ids"))
         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                 "username": session.username, "plan": plan}
 

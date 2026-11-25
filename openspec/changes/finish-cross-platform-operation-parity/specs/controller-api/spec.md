@@ -22,3 +22,11 @@ Supported owned-city deployment SHALL support a single origin or all other owned
 #### Scenario: A route becomes stale
 - **WHEN** a reviewed route changes before its submission
 - **THEN** remaining submissions stop and previously submitted routes are not automatically retried or rolled back
+
+
+### Requirement: Reviewed multi-city worker assignments
+Worker assignment SHALL support selected owned cities and both production projects, with authoritative per-city and per-project observations. The reviewed operation SHALL revalidate each assignment before a single non-retried submission.
+
+#### Scenario: A worker assignment changes after approval
+- **WHEN** the city, project or observed slider state differs from the reviewed plan
+- **THEN** execution stops before submitting that changed assignment and remaining assignments are not retried automatically
