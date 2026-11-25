@@ -1070,3 +1070,16 @@ def test_external_island_monitor_requires_matching_verified_response(page):
         editor.to_config()
     editor.all_owned.setChecked(True)
     assert editor.to_config() == []
+
+
+def test_fill_city_warehouse_has_native_city_and_resource_selectors(page):
+    set_native(page, "fillCityWarehouse", [
+        field("destination_city", required=True),
+        field("resource", required=True),
+        field("useFreighters", "boolean", default=False),
+        field("reviewed_sources"),
+    ])
+    page._form_inputs["destination_city"].setCurrentIndex(2)
+    page._form_inputs["resource"].setCurrentIndex(2)
+    assert page._form_config() == {"destination_city": 102, "resource": "marble", "useFreighters": False}
+    assert "reviewed_sources" not in page._form_inputs

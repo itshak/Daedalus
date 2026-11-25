@@ -214,6 +214,18 @@
       ],
       "live_accepted": false
     },
+    "fillCityWarehouse": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
     "getStatus": {
       "desktop": "existing_view",
       "web": "existing_view",

@@ -87,6 +87,7 @@ _TASK_LABELS = {
     "constructionList": "Construction planner", "research": "Research manager",
     "resourceTransportManager": "Resource transport manager",
     "consolidateResources": "Consolidate resources", "distributeResources": "Distribute resources",
+    "fillCityWarehouse": "Fill city warehouse",
     "sendResources": "Send resources", "buyResources": "Buy resources",
     "sellResources": "Sell resources", "donate": "Donate once", "donationBot": "Island donations",
     "trainArmy": "Train army", "attackBarbarians": "Attack barbarians",
@@ -109,7 +110,7 @@ _TEMPLATE_TASKS = {
 }
 _TASK_CATEGORIES = {
     "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces", "testTelegramBot", "testDiscordBot"},
-    "Resources & trade": {"buyResources", "sellResources", "sendResources",
+    "Resources & trade": {"fillCityWarehouse", "buyResources", "sellResources", "sendResources",
                           "resourceTransportManager", "consolidateResources",
                           "distributeResources", "donationBot", "donate"},
     "City management": {"constructionList", "tavernManager", "research",

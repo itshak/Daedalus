@@ -8,6 +8,7 @@ from daedalus.native_policy_review import POLICY_TASKS
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 REVIEW_ENDPOINTS = {
+    "fillCityWarehouse": "fill-warehouse-start",
     "consolidateResources": "consolidate-start",
     "resourceTransportManager": "transport-policy-start",
     "donationBot": "donation-policy-start",

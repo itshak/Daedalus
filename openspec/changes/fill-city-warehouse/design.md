@@ -1,0 +1,3 @@
+# Design
+
+The existing-session worker reads owned city stock, destination free storage, fleet capacity and the military advisor's incoming resource rows. Allocate in stable city-ID order, limited to the aggregate budget. Unknown movement cargo fails closed. Dispatch only an account-bound reviewed plan, with fresh ownership, stock, incoming cargo and storage verification before each non-retried shipment. Before another shipment, require evidence of the previous accepted cargo in the advisor, otherwise stop for reconciliation. Concurrent manual changes and production can affect arrival-time capacity; no server-side warehouse reservation is claimed. A zero allocation is a safe no-op, and manual review is required after interruption.

@@ -2,6 +2,10 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Fill only the available warehouse space, accounting for incoming cargo.": "Заполнить только свободное место на складе с учётом входящих грузов.",
+  "All other owned cities": "Все остальные свои города",
+  "Destination city": "Город назначения",
+  "Fill city warehouse": "Заполнить склад города",
   "Operation preview unavailable; refresh before retrying.": "Предпросмотр недоступен. Обновите данные перед повторной попыткой.",
   "Reviewed listing requires an empty market; existing offers are never overwritten.": "Подтверждённое размещение требует пустого рынка; существующие предложения не перезаписываются.",
   "Observed current state; future eligibility and costs may change.": "Наблюдаемое текущее состояние; будущие условия и затраты могут измениться.",

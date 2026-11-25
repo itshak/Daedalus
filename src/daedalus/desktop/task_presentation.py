@@ -41,6 +41,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "resourceTransportManager": "Manage validated resource transport routes and intervals.",
     "searchForIslandSpaces": "Monitor island availability using a reviewed search configuration.",
     "sellResources": "Offer resources for sale using validated market criteria.",
+    "fillCityWarehouse": "Fill a chosen owned city with one resource from all other cities, up to available storage.",
     "sendResources": "Send resources along prepared, approved routes.",
     "tavernManager": "Balance tavern wine consumption in all cities, or a selected subset.",
     "trainArmy": "Review recruitment rounds and repetitions across selected owned cities.",
@@ -54,6 +55,13 @@ TASK_DESCRIPTIONS: dict[str, str] = {
 # The engine AST cannot infer these because upstream parameters lack type
 # annotations/defaults. Nothing else is presumed to be a primitive value.
 REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
+    ("fillCityWarehouse", "destination_city"): {"type": "city_picker", "label": "Destination city"},
+    ("fillCityWarehouse", "resource"): {"type": "text", "label": "Resource",
+        "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
+        "choice_labels": ["Wood", "Wine", "Marble", "Crystal", "Sulfur"]},
+    ("fillCityWarehouse", "reviewed_sources"): {"type": "hidden_derived"},
+    ("fillCityWarehouse", "useFreighters"): {"type": "boolean", "label": "Use freighters"},
+
     ("buyResources", "city"): {
         "type": "market_buy", "label": "Buy at this trading post",
         "help": "Choose live seller offers from this account's trading-post city.",

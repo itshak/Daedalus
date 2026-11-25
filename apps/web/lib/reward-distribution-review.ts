@@ -3,7 +3,7 @@ import {validNativeConfig,scopedShipmentPlan,type ShipmentPlan} from "./native-t
 type Draft=Record<string,unknown>;
 type DailyObservation={cities:Record<string,string>;favour:number;limit:number;reset_seconds:number;collectable:number};
 type MarketObservation={rows:{city:string;player:string;amount:number;unit_price:number}[];gold_total:number;gold_available:number|null;mode:string};
-export const POLICY_TASKS=["research","tavernManager","activateMiracle","activateShrine","UpgradeUnits","consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"] as const;
+export const POLICY_TASKS=["fillCityWarehouse","research","tavernManager","activateMiracle","activateShrine","UpgradeUnits","consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"] as const;
 export function policyTask(task:string){return (POLICY_TASKS as readonly string[]).includes(task);}
 export function reviewRoute(task:string){return (REVIEW_ENDPOINTS as Readonly<Record<string,string>>)[task];}
 type Review={policySummary?:string;market?:MarketObservation;preview_id:string;expires_in:number;daily?:DailyObservation;shipment?:ShipmentPlan};
@@ -66,6 +66,23 @@ const name=(v:unknown):v is string=>typeof v==="string"&&v.length>0&&v.length<=1
 const city=(v:unknown)=>int(v,1,999999999999);
 function policySummary(task:string,d:Draft,o:Draft):string{
   const bad=()=>{throw new Error("Invalid account policy observation");};
+  if(task==="fillCityWarehouse"){
+    const fields=["destination_city","destination_name","stock","free_space","incoming","budget","amount","sources","capacity","total_ships","available_ships"];
+    if(!keys(o,fields)||o.destination_city!==d.destination_city||!name(o.destination_name)||
+      !int(o.stock,0,1e12)||!int(o.free_space,0,1e12)||!int(o.incoming,0,1e12)||!int(o.budget,0,1e12)||!int(o.amount,0,1e12)||
+      o.budget!==Math.max(0,o.free_space-o.incoming)||!int(o.capacity,0,1e8)||!int(o.total_ships,0,1e8)||!int(o.available_ships,0,o.total_ships)||
+      !Array.isArray(o.sources)||o.sources.length>99)return bad();
+    let remaining=o.budget,last=0;
+    const lines:string[]=[];
+    for(const row of o.sources){
+      if(!obj(row)||!keys(row,["city_id","city_name","stock","amount"])||!int(row.city_id,last+1,999999999999)||row.city_id===d.destination_city||
+        !name(row.city_name)||!int(row.stock,0,1e12)||!int(row.amount,0,1e12)||row.amount!==Math.min(remaining,row.stock))return bad();
+      last=row.city_id;remaining-=row.amount;
+      lines.push(row.city_name+": "+row.amount.toLocaleString()+" / "+row.stock.toLocaleString());
+    }
+    if(o.amount!==o.budget-remaining||(o.amount>0&&(!o.capacity||!o.total_ships)))return bad();
+    return o.destination_name+" · "+d.resource+"\nCurrent stock: "+o.stock.toLocaleString()+"; free space: "+o.free_space.toLocaleString()+"; incoming: "+o.incoming.toLocaleString()+"\nAvailable budget: "+o.budget.toLocaleString()+"; planned transfer: "+o.amount.toLocaleString()+"\n"+o.available_ships+"/"+o.total_ships+" vessels free; "+o.capacity+" per vessel.\n"+lines.join("\n")+"\nOne-time transfer; check incoming cargo and storage before each load. No automatic replay.";
+  }
   if(["consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"].includes(task))
     return recurringSummary(task,d,o);
   if(task==="research"&&d.study_choice){

@@ -389,6 +389,25 @@ class ExistingIPCClient:
             )
         return result
 
+    def fill_preview(self, account: Account, draft):
+        from daedalus.fill_warehouse_review import draft_fill, validate_fill
+
+        clean = draft_fill(draft)
+        owned = {r["id"] for r in self.cities(account)}
+        if clean["destination_city"] not in owned or not account.enabled:
+            raise ValueError("Choose an owned destination")
+        response = self._exchange({"action": "preview_fill_existing", "world": account.world,
+                                   "player": account.player, "draft": clean}, read_timeout=120)
+        if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
+            raise EngineIPCUnavailable("Invalid fill scope")
+        try:
+            result = validate_fill(clean, response.get("result"))
+            if {r["city_id"] for r in result["sources"]} != owned - {clean["destination_city"]}:
+                raise ValueError("Owned city scope changed")
+            return result
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid fill observation") from exc
+
     def recurring_preview(self, account: Account, task, draft):
         from daedalus.recurring_review import (
             RECURRING_TASKS,

@@ -15,7 +15,7 @@ from ikabot.helpers.varios import wait
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
-def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None):
+def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None, before_send=None):
     """This function will execute one route
     Parameters
     ----------
@@ -105,6 +105,8 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = amount
 
+        if before_send is not None:
+            before_send()
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.
@@ -119,6 +121,8 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 checkpoint.confirmed(chunk_id, send)
             break
         if outcome == 11:
+            if before_send is not None:
+                raise RuntimeError("Reviewed transport rejected; review before retrying")
             if checkpoint:
                 checkpoint.rejected(chunk_id, send)
             wait(getMinimumWaitingTime(session))

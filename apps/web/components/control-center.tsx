@@ -73,7 +73,7 @@ function ResourceIcon({resource, small = false}: {resource: Resource; small?: bo
 
 const TASK_GROUPS = [
   { name: "City & research", icon: Building2, tasks: ["constructionList", "research", "tavernManager", "loginDaily", "activateMiracle", "activateShrine","modifyProduction","modifyAcademyWorkers","modifyTempleWorkers","reorganizeCityBuildings","constructBuilding"] },
-  { name: "Resources & trade", icon: Layers3, tasks: ["sendResources", "resourceTransportManager", "consolidateResources", "distributeResources", "buyResources", "sellResources", "donate", "donationBot"] },
+  { name: "Resources & trade", icon: Layers3, tasks: ["fillCityWarehouse", "sendResources", "resourceTransportManager", "consolidateResources", "distributeResources", "buyResources", "sellResources", "donate", "donationBot"] },
   { name: "Military & missions", icon: Ship, tasks: ["trainArmy", "UpgradeUnits", "stationArmy", "attackBarbarians", "autoBarbarians", "autoPirate"] },
   { name: "Alerts & exploration", icon: Compass, tasks: ["alertAttacks", "alertLowWine", "searchForIslandSpaces", "testTelegramBot", "testDiscordBot"] },
   { name: "System & advanced", icon: Settings2, tasks: ["dumpWorld", "viewArmy", "shipMovements"] }
@@ -92,7 +92,7 @@ const INVENTORIES: Record<string, { resource: string; scope: "account" | "city";
   shipMovements: {resource: "ship-movements", scope: "account", title: "Ship movements"}
 };
 function name(a: Account) { return a.email || a.name || a.player || a.id; }
-function readable(text: string) { return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
+function readable(text: string) { if(text==="fillCityWarehouse")return "Fill city warehouse"; return text.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
 function isConnected(a: Account) { return a.session_status === "authenticated"; }
 function accountWorld(a: Account) { return a.world || "Unknown world"; }
 function safeCsv(value: unknown) { const str=String(value??""); const protectedValue=/^[=+@-]/.test(str)?"'"+str:str;return '"'+protectedValue.replace(/"/g,'""')+'"'; }

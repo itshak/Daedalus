@@ -59,3 +59,14 @@ test("recurring transport and island policy review checks observed scope",()=>{
  assert.throws(()=>parseRewardDistributionReview({...reviewed,observation:{islands:["20:10"]}},"alpha","searchForIslandSpaces",monitor));
  assert.equal(validReviewBatch({entries:[{account_id:"alpha",task:"consolidateResources",preview_id:value.preview_id},{account_id:"beta",task:"searchForIslandSpaces",preview_id:"b".repeat(43)}]}),true);
 });
+
+test("warehouse fill shares storage across all source cities and deducts incoming cargo",()=>{
+ const draft={destination_city:103,resource:"marble",useFreighters:false};
+ const observation={destination_city:103,destination_name:"Corinth",stock:350,free_space:150,incoming:20,budget:130,amount:130,sources:[{city_id:101,city_name:"Athens",stock:100,amount:100},{city_id:102,city_name:"Sparta",stock:200,amount:30}],capacity:100,total_ships:3,available_ships:2};
+ const value={account_id:"alpha",task:"fillCityWarehouse",draft,observation,preview_id:"a".repeat(43),expires_in:120};
+ assert.equal(validRewardDistributionRequest({task:"fillCityWarehouse",draft}),true);
+ assert.match(parseRewardDistributionReview(value,"alpha","fillCityWarehouse",draft).policySummary,/planned transfer: 130/);
+ assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,amount:150}},"alpha","fillCityWarehouse",draft));
+ assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,sources:[observation.sources[0],{...observation.sources[1],amount:50}]}},"alpha","fillCityWarehouse",draft));
+ assert.throws(()=>parseRewardDistributionReview(value,"beta","fillCityWarehouse",draft));
+});

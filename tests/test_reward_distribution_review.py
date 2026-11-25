@@ -65,6 +65,11 @@ def test_daily_preview_reads_only_advisor(monkeypatch):
         daily_draft({"wine_city":101,"favour_tasks":[{}]})
 
 @pytest.mark.parametrize(("task","endpoint","draft","observation"),[
+    ("fillCityWarehouse","fill-warehouse-start",
+     {"destination_city":102,"resource":"wood","useFreighters":False},
+     {"destination_city":102,"destination_name":"Sparta","stock":50,"free_space":100,"incoming":20,
+      "budget":80,"amount":80,"sources":[{"city_id":101,"city_name":"Athens","stock":100,"amount":80}],
+      "capacity":100,"total_ships":1,"available_ships":1}),
     ("consolidateResources","consolidate-start",CONSOLIDATION_DRAFT,CONSOLIDATION_OBS),
     ("distributeResources","distribution-start",DRAFT,PLAN),
     ("loginDaily","daily-start",daily_draft({"wine_city":101}),
@@ -92,6 +97,7 @@ def test_review_ticket_scope_and_replay(monkeypatch,tmp_path,task,endpoint,draft
     monkeypatch.setattr(ipc,"has_account",lambda _a:True)
     monkeypatch.setattr(ipc,"native_reward_distribution_preview",lambda _a,_t,_d:observation)
     monkeypatch.setattr(ipc,"recurring_preview",lambda _a,_t,_d:observation)
+    monkeypatch.setattr(ipc,"fill_preview",lambda _a,_d:observation)
     starts=[]
     def start(account,t,config,rid):
         starts.append((account.id,t,config,rid))
@@ -114,7 +120,7 @@ def test_review_ticket_scope_and_replay(monkeypatch,tmp_path,task,endpoint,draft
         assert not starts
         assert client.post(path+"/tasks/"+endpoint,headers=auth,json=payload).status_code==200
         assert starts[0][:2]==("alpha",task)
-        assert starts[0][2]==({**draft,"reviewed_routes":ROUTES} if task=="distributeResources" else draft)
+        assert starts[0][2]==({**draft,"reviewed_routes":ROUTES} if task=="distributeResources" else {**draft,"reviewed_sources":[{"city_id":101,"amount":80}]} if task=="fillCityWarehouse" else draft)
         assert client.post(path+"/tasks/"+endpoint,headers=auth,json=payload).status_code==200
         assert len(starts)==1
     finally:

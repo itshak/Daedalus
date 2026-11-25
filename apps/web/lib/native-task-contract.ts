@@ -172,6 +172,8 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
       return exact(c,["hours","auto_transfer","transfer_amount"]) && integer(c.hours,1,720)
         && typeof c.auto_transfer === "boolean"
         && (c.auto_transfer ? integer(c.transfer_amount,1,MAX_AMOUNT) : c.transfer_amount === 0);
+    case "fillCityWarehouse":
+      return exact(c,["destination_city","resource","useFreighters"])&&city(c.destination_city)&&(MATERIALS as readonly unknown[]).includes(c.resource)&&typeof c.useFreighters==="boolean";
     case "sendResources": {
       if (!exact(c,["routes","useFreighters"]) || typeof c.useFreighters !== "boolean"
         || !Array.isArray(c.routes) || c.routes.length < 1 || c.routes.length > 20) return false;

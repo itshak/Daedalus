@@ -2,6 +2,8 @@
 import re
 
 from daedalus.daily_distribution_review import _city
+from daedalus.fill_warehouse_review import TASK as FILL_TASK
+from daedalus.fill_warehouse_review import draft_fill, fill_summary, validate_fill
 from daedalus.recurring_review import (
     RECURRING_TASKS,
     recurring_draft,
@@ -11,7 +13,7 @@ from daedalus.recurring_review import (
 from daedalus.research_choices import validate_study_choice
 from daedalus.tavern_choices import fixed_tavern_review, validate_fixed_tavern
 
-POLICY_TASKS = RECURRING_TASKS | {"research", "tavernManager", "activateMiracle", "activateShrine", "UpgradeUnits"}
+POLICY_TASKS = RECURRING_TASKS | {FILL_TASK, "research", "tavernManager", "activateMiracle", "activateShrine", "UpgradeUnits"}
 
 
 def _integer(value, lo, hi):
@@ -34,6 +36,8 @@ def _name(value):
 def policy_draft(task, value):
     if task not in POLICY_TASKS or not isinstance(value, dict):
         raise ValueError("Invalid native policy")
+    if task == FILL_TASK:
+        return draft_fill(value)
     if task in RECURRING_TASKS:
         return recurring_draft(task, value)
     if task == "research":
@@ -85,6 +89,8 @@ def policy_draft(task, value):
 
 def observe_policy(ipc, account, task, draft):
     """Use only account-attested existing read-only inventories."""
+    if task == FILL_TASK:
+        return validate_fill(draft, ipc.fill_preview(account, draft))
     if task in RECURRING_TASKS:
         if task == "autoPirate":
             fortress = next((r for r in ipc.pirate_fortresses(account)["fortresses"]
@@ -131,6 +137,8 @@ def observe_policy(ipc, account, task, draft):
 
 
 def validate_policy_observation(task, draft, value):
+    if task == FILL_TASK:
+        return validate_fill(draft, value)
     if task in RECURRING_TASKS:
         return validate_recurring(task, draft, value)
     if not isinstance(value, dict):
@@ -196,6 +204,8 @@ def validate_policy_observation(task, draft, value):
 
 
 def policy_summary(task, draft, value):
+    if task == FILL_TASK:
+        return fill_summary(draft, value)
     if task in RECURRING_TASKS:
         return recurring_summary(task, draft, value)
     validate_policy_observation(task, draft, value)

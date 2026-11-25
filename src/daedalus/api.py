@@ -673,7 +673,10 @@ def create_app(
             observed = (observe_policy(ipc_client, account, task, draft) if task in POLICY_TASKS
                         else ipc_client.native_reward_distribution_preview(account, task, draft))
             config = dict(draft)
-            if task == "loginDaily":
+            if task == "fillCityWarehouse":
+                config["reviewed_sources"] = [{"city_id": r["city_id"], "amount": r["amount"]}
+                                              for r in observed["sources"] if r["amount"]]
+            elif task == "loginDaily":
                 validate_daily(draft, observed)
             elif task == "distributeResources":
                 config["reviewed_routes"] = validate_distribution(draft, observed)
@@ -1815,6 +1818,10 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/fill-warehouse-start", dependencies=[Depends(authorized)])
+    def start_fill_warehouse(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "fillCityWarehouse", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/consolidate-start", dependencies=[Depends(authorized)])
     def start_reviewed_consolidate(account_id: str, payload: Annotated[dict[str, object], Body()]):

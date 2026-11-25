@@ -92,7 +92,11 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   else if(task==="alertAttacks"){config={minutes};summary=t("Check for attacks every")+" "+minutes+" "+t("minutes");}
   else if(task==="alertLowWine"){config={hours,auto_transfer:autoTransfer,transfer_amount:autoTransfer?transferAmount:0};
     summary=t("Warn when wine has less than")+" "+hours+" "+t("hours")+"; "+(autoTransfer?t("Automatic wine transfer")+": "+transferAmount:t("Notifications only"));}
-  else if(task==="sendResources"){
+  else if(task==="fillCityWarehouse"){
+    config={destination_city:single,resource:material,useFreighters:freighters};
+    scoped=actual(single)&&cities.length>=2;
+    summary=t("All other owned cities")+" → "+cityName(single)+" · "+materialName(material)+" · "+fleetName;
+  } else if(task==="sendResources"){
     config={routes:routes.map(r=>{const ext=externalById.get(r.to);return {from:r.from,to:r.to,resources:r.resources,...(ext?{island:ext.island,recipient:ext.recipient}:{})};}),useFreighters:freighters};
     scoped=routes.every(r=>actual(r.from)&&(actual(r.to)||externalById.has(r.to)));
     summary=routes.map(r=>cityName(r.from)+" → "+destinationName(r.to)+": "+resourceSummary(r.resources)).join("\n")+"\n"+fleetName
@@ -245,6 +249,12 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
         <label className="field"><span>{t("Resource")}</span><select value={material} onChange={e=>{edit();setMaterial(e.target.value);if(e.target.value==="wood")setPolicy("even");}}>{MATERIALS.map(m=><option key={m} value={m}>{materialName(m)}</option>)}</select></label>
         <label className="field"><span>{t("Distribution policy")}</span><select value={policy} onChange={e=>{edit();setPolicy(e.target.value);}}><option value="even">{t("Balance evenly")}</option><option value="producers" disabled={material==="wood"}>{t("From producers")}</option></select></label>
         {cityChecks(t("Participating cities"))}{fleetSelect}
+      </>}
+      {task==="fillCityWarehouse"&&<>
+        {citySelect(t("Destination city"),single,setSingle)}
+        <label className="field"><span>{t("Resource")}</span><select value={material} onChange={e=>{edit();setMaterial(e.target.value);}}>{MATERIALS.map(m=><option key={m} value={m}>{materialName(m)}</option>)}</select></label>
+        <p>{t("All other owned cities")}. {t("Fill only the available warehouse space, accounting for incoming cargo.")}</p>
+        {fleetSelect}
       </>}
       {task==="consolidateResources"&&<>
         {citySelect(t("To city"),single,v=>{setSingle(v);setMultiple(old=>old.filter(id=>id!==v));})}

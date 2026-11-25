@@ -13,7 +13,7 @@ MANIFEST_VERSION = 1
 
 _BACKGROUND_NATIVE = frozenset({
     "activateMiracle", "activateShrine", "alertAttacks", "alertLowWine",
-    "autoPirate", "buyResources", "consolidateResources", "constructionList",
+    "fillCityWarehouse", "autoPirate", "buyResources", "consolidateResources", "constructionList",
     "distributeResources", "donationBot", "dumpWorld", "loginDaily", "research",
     "resourceTransportManager", "searchForIslandSpaces", "sellResources",
     "sendResources", "tavernManager", "trainArmy", "UpgradeUnits",
