@@ -155,7 +155,7 @@ function recurringSummary(task:string,d:Draft,o:Draft):string{
    if(!requested.every(x=>seen.has(Number(x))))return bad();
    return r.city_name+": fortress level "+r.fortress_level+"; stops at a human challenge.";
  }
- let expected:number[],extra:string[]=[];
+ let expected:number[];const extra:string[]=[];
  if(task==="donationBot"){
    if(!keys(o,["cities"])||!obj(d.cities_dict))return bad();
    expected=Object.keys(d.cities_dict).map(Number);
