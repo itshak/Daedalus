@@ -27,7 +27,7 @@ Focused tests: four native donation/Qt tests, 17 session expiry/retry tests (12 
 
 The three upstream worker operations (production, academy, temple) now have structured, city-scoped engine adapters and native desktop/web editors. The current project/building slider and normal/extra capacity are read from the game; the selected percentage is converted into an exact target. A one-shot ticket binds the operation and city to the reviewed slider state, and the child revalidates it before mutation. No raw game fields or automatic retry/replay. Population, production and faith impact estimates beyond the source slider are not inferred.
 
-The versioned capability manifest records 27 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
+The versioned capability manifest records 28 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
 
 Donation integration baseline: 705 Python tests passed, 11 skipped; 408 engine tests passed, 9 skipped, 123 subtests passed; 25 web tests, TypeScript, lint (warnings only), production build, Ruff and proposal validation passed. Worker/manifest focused regression: 33 Python tests passed; 27 web unit tests passed before the final manifest UI wiring. Full combined validation is required.
 
@@ -46,6 +46,12 @@ Combined regression at worker/manifest commit 04aa845: 715 Python passed, 11 ski
 ## Station troops and fleet
 
 The desktop and web clients now support reviewed deployment of all available ground troops or fleet units from one owned city to another. The engine reads current deployment inventory, validates both city identities, checks ground transport capacity, binds the cargo to an expiring account-specific ticket, and revalidates before a single submission. Synthetic tests cover stale inventory, insufficient capacity, account scope, ticket replay, and desktop confirmation. Individual unit allocation, ETA, external destinations, multi-origin orchestration and live-game acceptance remain outside this slice.
+
+## Automatic barbarian preset
+
+Both clients select an owned origin city and a city on the target island, display the current village level, named troop requirements and available/required ships, and offer optional configured notifications. The engine derives the upstream default non-Hephaestus schematic, verifies prerequisites, issues a scoped review ticket and rechecks the plan in the child. The legacy CLI contract is retained; automatic attack and looting submissions no longer replay uncertain transport failures. The current slice covers the existing level 1–39 preset with a non-destroyed starting village; manual wave editing, unsupported schematics, and live acceptance remain open. The recovery policy is manual rather than automatic replay.
+
+At integrated revision 8a0a76f the full regression passed: 722 Python, 408 engine tests and 123 engine subtests, 29 web tests, typecheck/build/Ruff/OpenSpec (lint warnings only). Automatic attack focused tests: 7 engine/API/manifest/previous station tests, 1 Qt test and 31 web tests passed.
 
 ## Still open
 

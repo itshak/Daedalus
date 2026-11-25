@@ -60,6 +60,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "grind-plan" && !z.object({target_city_id:z.number().int().positive().max(999_999_999_999),send_notifications:z.boolean()}).strict().safeParse(value).success)
+      return NextResponse.json({error:"Invalid automatic attack draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "station-plan" && !z.object({destination_city_id:z.number().int().positive().max(999_999_999_999),ground:z.boolean()}).strict().safeParse(value).success)
       return NextResponse.json({error:"Invalid deployment choice"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "build-plan" && !z.object({position:z.number().int().min(0).max(80),building_id:z.number().int().positive().max(999999)}).strict().safeParse(value).success)
@@ -68,7 +70,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start","layout-start","build-start","station-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
       return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });

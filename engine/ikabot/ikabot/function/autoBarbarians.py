@@ -2,6 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import math
+import hashlib
+import json
+from ikabot.helpers import pedirInfo
+from ikabot.helpers.taskConfig import requireOwnCity, getCityById
 import traceback
 import re
 from decimal import *
@@ -654,11 +658,11 @@ def do_attack(session, island, city, schematic, ship_capacity, float_city=None, 
 
         if isinstance(main_city_data, list) and len(main_city_data) > 0:
             for data in main_city_data:
-                session.post(params=data["attack_data"])
+                session.post(params=data["attack_data"], retry_on_failure=False)
 
         if isinstance(float_city_data, list) and len(float_city_data) > 0:
             for data in float_city_data:
-                session.post(params=data["attack_data"])
+                session.post(params=data["attack_data"], retry_on_failure=False)
 
         if wave_id == 1:
             wait_for_arrival(session, minor_travel_city, island)
@@ -726,14 +730,14 @@ def loot(session, island, city, schematic, ship_capacity, float_city=None, units
         ):
             send_scatter = True
 
-        session.post(params=attack_data)
+        session.post(params=attack_data, retry_on_failure=False)
 
         if send_scatter:
             # same "units" key requirement as above
             ram_attack_data, ram_travel_time, _ = get_send_attack_data(
                 session, island, destin_city, {"from_float": False, "units": {"307": 1}}, units_data, ship_capacity
             )
-            session.post(params=ram_attack_data)
+            session.post(params=ram_attack_data, retry_on_failure=False)
             new_countdown = wait_next_scatter(session, ram_travel_time)
             if new_countdown is not None:
                 barbarian_countdown = new_countdown
@@ -895,6 +899,119 @@ def wait_for_looting(session, city, island):
     wait(wait_time + 5)
 
     wait_for_looting(session, city, island)
+
+
+def _native_grind_plan(session, city_id, target_city_id, send_notifications):
+    """Build the original automatic schematic from actual owned-city observations."""
+    if (type(city_id) is not int or type(target_city_id) is not int
+            or not 0 < city_id < 10**12 or not 0 < target_city_id < 10**12
+            or type(send_notifications) is not bool):
+        raise ValueError("Invalid barbarian settings")
+    pedirInfo.ids_cache = None
+    origin = requireOwnCity(session, city_id, "Origin city")
+    target = requireOwnCity(session, target_city_id, "Target island city")
+    city = getCityById(session, origin)
+    anchor = city if origin == target else getCityById(session, target)
+    if str(city["id"]) != origin or str(anchor["id"]) != target:
+        raise ValueError("City identity changed")
+    island_id = str(anchor["islandId"])
+    if not island_id.isdigit() or not 0 < int(island_id) < 10**12:
+        raise ValueError("Invalid target island")
+    island = getIsland(session.get(island_url + island_id))
+    if str(island["id"]) != island_id:
+        raise ValueError("Island identity changed")
+    ship_capacity, _ = getShipCapacity(session)
+    if type(ship_capacity) is not int or not 0 < ship_capacity <= 10**8:
+        raise ValueError("Invalid ship capacity")
+    village = get_barbarians_lv(session, island, ship_capacity)
+    level = village["level"]
+    if type(level) is not int or not 1 <= level <= 1000:
+        raise ValueError("Invalid village level")
+    schematic = DEFAULT_SCHEMATICS["WITHOUT_HEPHAESTUS"]
+    current = get_barbarians_attack_plan(village, schematic)
+    if current is None:
+        raise ValueError("Village level outside the supported upstream preset")
+    if check_need_float_city(schematic):
+        raise ValueError("Preset requires an unsupported floating city")
+    _, details = get_schematic_information(
+        session, city, schematic, ship_capacity,
+        is_in_island=str(city["islandId"]) == island_id,
+    )
+    units_data = details["units_data"]
+    available = details["main_city_units"]
+    requirements = []
+    for uid, count in sorted(current["needed_units"]["total"].items()):
+        unit = units_data[uid]
+        actual = available.get(uid, {}).get("amount", 0)
+        if (type(actual) is not int or not 0 <= actual <= 10**9
+                or type(count) is not int or not 0 < count <= 10**9
+                or not isinstance(unit.get("name"), str) or not 0 < len(unit["name"]) <= 100
+                or type(unit.get("weight")) is not int or unit["weight"] < 0
+                or type(unit.get("speed")) is not int or unit["speed"] <= 0):
+            raise ValueError("Invalid unit inventory")
+        requirements.append({"name": unit["name"], "required": count, "available": actual})
+    loot_ships = village["ships"]
+    if type(loot_ships) is not int or not 0 <= loot_ships <= 10**9:
+        raise ValueError("Invalid loot capacity")
+    required_ships = get_amount_ships_schematic(
+        current["needed_units"]["total"], units_data, ship_capacity) + loot_ships
+    available_ships = getAvailableShips(session)
+    if type(available_ships) is not int or not 0 <= available_ships <= 10**9:
+        raise ValueError("Invalid available ships")
+    destroyed = island["barbarians"]["destroyed"]
+    if destroyed not in (0, 1):
+        raise ValueError("Invalid village status")
+    notifications_ready = not send_notifications or bool(
+        telegramDataIsValid(session) or discordDataIsValid(session))
+    ready = (not destroyed and notifications_ready and available_ships >= required_ships
+             and all(row["available"] >= row["required"] for row in requirements))
+    fingerprint = hashlib.sha256(json.dumps(
+        [city_id, target_city_id, island_id, level, ship_capacity, required_ships,
+         current, village["resources"], units_data], sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    config = {"city_id": city_id, "target_city_id": target_city_id,
+              "send_notifications": send_notifications, "expected": fingerprint}
+    plan = {"city_id": city_id, "target_city_id": target_city_id,
+            "send_notifications": send_notifications, "city_name": str(city["cityName"])[:100],
+            "target_name": str(anchor["cityName"])[:100],
+            "level": level, "requirements": requirements, "required_ships": required_ships,
+            "available_ships": available_ships, "destroyed": bool(destroyed),
+            "notifications_ready": notifications_ready, "ready": ready, "config": config}
+    return plan, (island, city, schematic, units_data, ship_capacity)
+
+
+def preview_native_grind(session, city_id, target_city_id, send_notifications=False):
+    return _native_grind_plan(session, city_id, target_city_id, send_notifications)[0]
+
+
+def prepare_native_grind(session, city_id=None, target_city_id=None,
+                         send_notifications=True, expected=None, **legacy):
+    # Keep the original CLI configurator/structured task contract intact.
+    if city_id is None and target_city_id is None and expected is None:
+        if set(legacy) != {"island", "city", "float_city", "schematic", "units_data", "ship_capacity"}:
+            raise ValueError("Incomplete legacy schematic")
+        return {**legacy, "send_notifications": send_notifications}
+    if legacy:
+        raise ValueError("Mixed native and legacy settings")
+    plan = preview_native_grind(session, city_id, target_city_id, send_notifications)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Automatic attack review is stale or prerequisites are missing")
+    return plan["config"]
+
+
+@task("autoBarbarians", prepare=prepare_native_grind)
+def native_grind(session, city_id: int = None, target_city_id: int = None,
+                 send_notifications: bool = True, expected: str = None, **legacy):
+    if city_id is None and target_city_id is None and expected is None:
+        return do_it.__wrapped__(session, send_notifications=send_notifications, **legacy)
+    if legacy:
+        raise ValueError("Mixed native and legacy settings")
+    plan, args = _native_grind_plan(session, city_id, target_city_id, send_notifications)
+    if not plan["ready"] or expected != plan["config"]["expected"]:
+        raise ValueError("Automatic attack review is stale or prerequisites are missing")
+    island, city, schematic, units_data, ship_capacity = args
+    return do_it.__wrapped__(session, island, city, None, schematic, units_data,
+                             ship_capacity, send_notifications)
 
 
 @configurator

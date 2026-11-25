@@ -83,3 +83,9 @@ test("station deployment uses explicit reviewed paths",()=>{
   assert.equal(allowedRequest("POST","accounts/a/tasks/station-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/station-plan".split("/"),params("raw=true")),false);
 });
+
+test("automatic attacks use explicit reviewed paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/grind-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/grind-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/grind-plan".split("/"),params("raw=true")),false);
+});

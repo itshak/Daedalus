@@ -18,7 +18,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "alertAttacks": "Get notified about incoming attacks at a chosen polling interval.",
     "alertLowWine": "Alert before city wine supplies run out, with optional transfers.",
     "attackBarbarians": "Execute an independently prepared barbarian attack plan.",
-    "autoBarbarians": "Repeat a reviewed barbarian mission configuration.",
+    "autoBarbarians": "Run the upstream automatic attack preset on a selected island.",
     "autoPirate": "Run a configured piracy schedule or mission.",
     "buyResources": "Make market purchases using a reviewed offer and amount.",
     "consolidateResources": "Consolidate known resources to a target city.",
@@ -124,6 +124,10 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         (task_name, "expected"): {"type": "hidden_derived"}
         for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
     },
+    ("autoBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
+    ("autoBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
+    ("autoBarbarians", "send_notifications"): {"type": "boolean", "label": "Send notifications", "default": False},
+    ("autoBarbarians", "expected"): {"type": "hidden_derived"},
     ("stationArmy", "city_id"): {"type": "city_picker", "label": "Origin city"},
     ("stationArmy", "destination_city_id"): {"type": "city_picker", "label": "Destination city"},
     ("stationArmy", "ground"): {"type": "boolean", "label": "Move ground troops (unchecked: fleet)", "default": True},

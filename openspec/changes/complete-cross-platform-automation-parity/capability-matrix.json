@@ -54,11 +54,13 @@
       "live_accepted": false
     },
     "autoBarbarians": {
-      "desktop": "pending",
-      "web": "pending",
-      "review": "unavailable",
-      "coverage": "pending",
-      "scopes": [],
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "autoPirate": {

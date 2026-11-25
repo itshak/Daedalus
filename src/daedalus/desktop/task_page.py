@@ -136,6 +136,7 @@ class TasksPage(QWidget):
     worker_preview_requested = Signal(str, str, object, str)
     layout_preview_requested = Signal(str, object, str)
     station_preview_requested = Signal(str, object, str)
+    grind_preview_requested = Signal(str, object, str)
     build_options_requested = Signal(str, int, str)
     build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
@@ -880,6 +881,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "autoBarbarians":
+            self.building_note.setText("Reading village level, unit requirements and ships…")
+            self.grind_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "stationArmy":
             self.building_note.setText("Checking actual available units and transport capacity…")
             self.station_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -920,6 +924,35 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_grind_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "autoBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        requirements = "; ".join(f"{r['name']}: {r['available']:,}/{r['required']:,}" for r in result["requirements"])
+        self.building_note.setText(
+            f"{result['city_name']} → island of {result['target_name']}, village level {result['level']}. "
+            f"Ships: {result['available_ships']:,}/{result['required_ships']:,}. {requirements}. "
+            "Repeat using the upstream preset until stopped or unsupported. "
+            + ("Ready for review." if self._city_review_plan else "Village destroyed or prerequisites missing.")
+        )
+        self._invalidate_review()
+
+    def set_grind_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "autoBarbarians" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Automatic attack preview unavailable. Check the village and try again.")
             self._invalidate_review()
 
     def set_station_preview(self, result: dict[str, object], nonce: str) -> None:
@@ -1728,6 +1761,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview automatic attacks…" if name == "autoBarbarians" else
             "Preview deployment…" if name == "stationArmy" else
             "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)

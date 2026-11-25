@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -187,3 +187,46 @@ def validate_station_plan(city_id: int, draft: dict[str, object], plan: object) 
         raise ValueError("Invalid deployment fingerprint")
     return {k: plan[k] for k in ("city_id", "destination_city_id", "ground", "city_name",
                                  "destination_name", "total", "weight", "capacity", "ready", "config")}
+
+def validated_grind_draft(city_id: object, draft: object) -> dict[str, object]:
+    if (type(city_id) is not int or not 0 < city_id < 10**12
+            or not isinstance(draft, dict) or set(draft) != {"target_city_id", "send_notifications"}
+            or type(draft["target_city_id"]) is not int or not 0 < draft["target_city_id"] < 10**12
+            or type(draft["send_notifications"]) is not bool):
+        raise ValueError("Invalid automatic attack draft")
+    return dict(draft)
+
+
+def validate_grind_plan(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or plan.get("target_city_id") != draft["target_city_id"]
+            or plan.get("send_notifications") is not draft["send_notifications"]
+            or any(not isinstance(plan.get(k), str) or not 0 < len(plan[k]) <= 100
+                   for k in ("city_name", "target_name"))
+            or type(plan.get("level")) is not int or not 1 <= plan["level"] <= 39
+            or any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 10**12
+                   for k in ("required_ships", "available_ships"))
+            or any(type(plan.get(k)) is not bool for k in ("destroyed", "notifications_ready", "ready"))
+            or not isinstance(plan.get("requirements"), list)
+            or not 1 <= len(plan["requirements"]) <= 100):
+        raise ValueError("Invalid automatic attack preview")
+    for row in plan["requirements"]:
+        if (not isinstance(row, dict) or set(row) != {"name", "required", "available"}
+                or not isinstance(row["name"], str) or not 0 < len(row["name"]) <= 100
+                or type(row["required"]) is not int or not 0 < row["required"] <= 10**9
+                or type(row["available"]) is not int or not 0 <= row["available"] <= 10**9):
+            raise ValueError("Invalid unit requirement")
+    if plan["ready"] is not (not plan["destroyed"] and plan["notifications_ready"]
+                             and plan["available_ships"] >= plan["required_ships"]
+                             and all(r["available"] >= r["required"] for r in plan["requirements"])):
+        raise ValueError("Invalid automatic attack eligibility")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", *draft, "expected"}
+            or config["city_id"] != city_id or any(config.get(k) != v for k, v in draft.items())
+            or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid automatic attack fingerprint")
+    return {k: plan[k] for k in ("city_id", "target_city_id", "send_notifications", "city_name",
+                                 "target_name", "level", "requirements", "required_ships", "available_ships",
+                                 "destroyed", "notifications_ready", "ready", "config")}

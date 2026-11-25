@@ -16,7 +16,9 @@ import httpx
 from daedalus.reviewed_operations import (
     WORKER_TASKS,
     validate_build_inventory,
+    validate_grind_plan,
     validated_build_draft,
+    validated_grind_draft,
     validated_layout_draft,
     validated_station_draft,
     validated_worker_draft,
@@ -186,6 +188,13 @@ class DaedalusClient:
             return self._write(f"accounts/{account_id}/tasks/worker-start", {
                 "task": task, "preview_id": config["preview_id"],
                 "request_id": request_id, "confirmed": confirmed,
+            })
+        if task == "autoBarbarians":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the automatic attack first")
+            return self._write(f"accounts/{account_id}/tasks/grind-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
             })
         if task == "stationArmy":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
@@ -650,6 +659,27 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def grind_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_grind_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/grind-plan", clean)
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Automatic attack preview scope mismatch")
+        try:
+            # Validate display data without exposing the internal fingerprint to the GUI.
+            validate_grind_plan(city_id, clean, {**data, "config": {
+                "city_id": city_id, **clean, "expected": "0" * 64,
+            }})
+        except ValueError as exc:
+            raise APIConnectionError("Invalid automatic attack preview") from exc
+        if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                              or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                              or type(data.get("expires_in")) is not int
+                              or not 1 <= data["expires_in"] <= 120):
+            raise APIConnectionError("Invalid automatic attack ticket")
         return data
 
     def station_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:

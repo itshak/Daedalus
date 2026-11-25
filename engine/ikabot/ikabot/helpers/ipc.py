@@ -774,6 +774,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_grind_existing":
+                    return self._preview_grind_existing(request)
                 if action == "preview_station_existing":
                     return self._preview_station_existing(request)
                 if action == "list_build_options_existing":
@@ -910,6 +912,15 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _preview_grind_existing(self, request):
+        from ikabot.function.autoBarbarians import preview_native_grind
+
+        session = self._existing_session(request)
+        plan = preview_native_grind(session, request.get("city_id"), request.get("target_city_id"),
+                                    request.get("send_notifications"))
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _preview_station_existing(self, request):
         from ikabot.function.stationArmy import preview_native_station
@@ -1770,7 +1781,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise
