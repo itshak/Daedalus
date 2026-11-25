@@ -115,3 +115,11 @@ test("shipment plan and ticket launch are allowlisted only for exact paths",()=>
   assert.equal(allowedRequest("POST","accounts/a/tasks/shipment-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/shipment-plan".split("/"),params("raw=1")),false);
 });
+
+test("activity history permits only bounded filters and cursor",()=>{
+  const path="accounts/a/activity".split("/");
+  assert.equal(allowedRequest("GET",path,params("limit=50&status=started&before=12")),true);
+  for(const q of ["limit=101","status=raw","before=0","before=9999999999999999","raw=true","limit=1&limit=2"])
+    assert.equal(allowedRequest("GET",path,params(q)),false);
+  assert.equal(allowedRequest("POST",path,params()),false);
+});

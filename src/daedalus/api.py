@@ -1424,6 +1424,17 @@ def create_app(
         except (TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
             raise HTTPException(status_code=503, detail="Task prerequisites unavailable") from exc
 
+    @app.get("/api/v1/accounts/{account_id}/activity", dependencies=[Depends(authorized)])
+    def account_activity(account_id: str, before: int | None = None,
+                         limit: int = 50, status: str = "all") -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        try:
+            return controller.activity(account_id, before=before, limit=limit, status=status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid activity filter") from exc
+        except (TaskUnavailable, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Activity unavailable") from exc
+
     @app.get("/api/v1/accounts/{account_id}/tasks", dependencies=[Depends(authorized)])
     def list_account_tasks(account_id: str) -> dict[str, object]:
         controller = require_task_controller(account_id)

@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Sequence
 from contextlib import closing
 from pathlib import Path
@@ -137,9 +138,19 @@ class TaskLedger:
                 status TEXT NOT NULL,
                 engine_task_id TEXT,
                 pid INTEGER,
+                created_at REAL,
+                updated_at REAL,
                 PRIMARY KEY(account_id, request_id)
             )
         """)
+        # Upgrade existing ledgers without discarding their receipt history.
+        # Old timestamps are unknown and must not be fabricated.
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(requests)")}
+            for name in ("created_at", "updated_at"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE requests ADD COLUMN {name} REAL")
         return conn
 
     def reserve(self, account_id: str, request_id: str, task: str, digest: str) -> tuple[bool, dict[str, object]]:
@@ -157,9 +168,9 @@ class TaskLedger:
                                "task": prior[0], "status": prior[2],
                                "task_id": prior[3], "pid": prior[4]}
             conn.execute(
-                "INSERT INTO requests (account_id, request_id, task, payload_hash, status) "
-                "VALUES (?, ?, ?, ?, 'dispatching')",
-                (account_id, request_id, task, digest),
+                "INSERT INTO requests (account_id, request_id, task, payload_hash, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'dispatching', ?, ?)",
+                (account_id, request_id, task, digest, time.time(), time.time()),
             )
             return True, {"account_id": account_id, "request_id": request_id,
                           "task": task, "status": "dispatching", "task_id": None, "pid": None}
@@ -200,10 +211,10 @@ class TaskLedger:
     def acknowledge(self, account_id: str, request_id: str) -> None:
         with self._mutex, closing(self._database()) as conn, conn:
             updated = conn.execute(
-                "UPDATE requests SET status = 'operator_reconciled' "
+                "UPDATE requests SET status = 'operator_reconciled', updated_at = ? "
                 "WHERE account_id = ? AND request_id = ? "
                 "AND status IN ('dispatching', 'unconfirmed')",
-                (account_id, request_id),
+                (time.time(), account_id, request_id),
             ).rowcount
             if updated != 1:
                 raise ValueError("No unresolved task request matches this ID")
@@ -214,9 +225,9 @@ class TaskLedger:
     ) -> None:
         with self._mutex, closing(self._database()) as conn, conn:
             conn.execute(
-                "UPDATE requests SET status = ?, engine_task_id = ?, pid = ? "
+                "UPDATE requests SET status = ?, engine_task_id = ?, pid = ?, updated_at = ? "
                 "WHERE account_id = ? AND request_id = ?",
-                (status, task_id, pid, account_id, request_id),
+                (status, task_id, pid, time.time(), account_id, request_id),
             )
 
     def entries(self, account_id: str) -> list[dict[str, object]]:
@@ -231,6 +242,33 @@ class TaskLedger:
              "status": row[2], "task_id": row[3], "pid": row[4]}
             for row in rows
         ]
+
+
+    def activity(self, account_id: str, *, before: int | None = None,
+                 limit: int = 50, status: str = "all") -> dict[str, object]:
+        from daedalus.activity_history import ACTIVITY_STATUSES, validate_activity_query
+
+        validate_activity_query(before, limit, status)
+        query = ("SELECT rowid, request_id, task, status, created_at, updated_at "
+                 "FROM requests WHERE account_id = ?")
+        args: list[object] = [account_id]
+        if before is not None:
+            query += " AND rowid < ?"
+            args.append(before)
+        if status != "all":
+            query += " AND status = ?"
+            args.append(status)
+        query += " ORDER BY rowid DESC LIMIT ?"
+        args.append(limit + 1)
+        with self._mutex, closing(self._database()) as conn:
+            rows = conn.execute(query, args).fetchall()
+        # Only reviewed metadata is projected; never a config, payload hash,
+        # process environment, arbitrary message or raw log text.
+        events = [{"request_id": row[1], "task": row[2], "status": row[3],
+                   "created_at": row[4], "updated_at": row[5]}
+                  for row in rows[:limit] if row[3] in ACTIVITY_STATUSES]
+        return {"account_id": account_id, "events": events,
+                "next_before": rows[limit-1][0] if len(rows) > limit else None}
 
 
 class TaskController:
@@ -451,6 +489,14 @@ class TaskController:
                     # must never misreport the engine dispatch as unconfirmed.
                     receipt["recovery_tracking"] = "unavailable"
             return receipt
+
+    def activity(self, account_id: str, *, before: int | None = None,
+                 limit: int = 50, status: str = "all") -> dict[str, object]:
+        # Durable history is available even when the configured account is
+        # disabled or its session worker has gone offline.
+        if account_id not in self._accounts:
+            raise KeyError("Account not found")
+        return self._ledger.activity(account_id, before=before, limit=limit, status=status)
 
     def list_tasks(self, account_id: str) -> dict[str, object]:
         account = self._account(account_id)

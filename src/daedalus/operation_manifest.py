@@ -55,7 +55,7 @@ def operation_workflow(name: str) -> dict[str, object]:
                 "coverage": "partial", "scopes": ["current", "selected", "all"],
                 "live_accepted": False}
     if name == "logs":
-        return {"desktop": "existing_view", "web": "pending", "view": "activity",
+        return {"desktop": "existing_view", "web": "existing_view", "view": "activity",
                 "review": "read_only", "coverage": "partial", "scopes": ["current"],
                 "live_accepted": False}
     if name in _LOCAL_BOUNDARIES:

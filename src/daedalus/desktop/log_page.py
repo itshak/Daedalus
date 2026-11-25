@@ -6,9 +6,12 @@ Advanced diagnostics.
 """
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 
-from PySide6.QtWidgets import QHBoxLayout, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import QSignalBlocker, Signal
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QPlainTextEdit, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -16,6 +19,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
+from daedalus.account_display import account_player_names
 from daedalus.desktop.design_system import PageHeading
 
 _EVENTS = {
@@ -135,6 +139,8 @@ def _login_stage_severity(stage: str) -> str:
 
 
 class LogPage(QWidget):
+    server_activity_requested = Signal(str, object, str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("log_page")
@@ -177,6 +183,37 @@ class LogPage(QWidget):
         self.timeline.setMaximumBlockCount(250)
         self.timeline.setPlainText("No local activity yet. Connect to see status updates.")
         root.addWidget(self.timeline, 1)
+        server_controls = QHBoxLayout()
+        server_controls.addWidget(BodyLabel("Server receipts"))
+        self.server_account = ComboBox()
+        self.server_account.setAccessibleName("Server activity account")
+        self.server_status = ComboBox()
+        self.server_status.addItems(["All statuses", "Started", "Rejected", "Unconfirmed", "Dispatching", "Operator reconciled"])
+        self.server_status.setAccessibleName("Server receipt status")
+        self.server_refresh = PushButton("Refresh")
+        self.server_older = PushButton("Older")
+        self.server_copy = PushButton("Copy CSV")
+        for widget in (self.server_account, self.server_status, self.server_refresh, self.server_older, self.server_copy):
+            server_controls.addWidget(widget)
+        root.addLayout(server_controls)
+        self.server_note = CaptionLabel("Server request history only; raw engine logs remain host-local.")
+        self.server_note.setWordWrap(True)
+        root.addWidget(self.server_note)
+        self.server_timeline = QPlainTextEdit()
+        self.server_timeline.setReadOnly(True)
+        self.server_timeline.setMaximumBlockCount(160)
+        self.server_timeline.setAccessibleName("Server task receipt history")
+        root.addWidget(self.server_timeline, 1)
+        self._server_ids = []
+        self._server_rows = []
+        self._server_before = None
+        self._server_requested = None
+        self.server_account.currentIndexChanged.connect(self._server_reset)
+        self.server_status.currentIndexChanged.connect(self._server_reset)
+        self.server_refresh.clicked.connect(self._server_reset)
+        self.server_older.clicked.connect(self._server_load_older)
+        self.server_copy.clicked.connect(self._server_export)
+        self._server_controls()
         self.log_view = QPlainTextEdit(self)
         self.log_view.setObjectName("advanced_diagnostics")
         self.log_view.setReadOnly(True)
@@ -188,6 +225,91 @@ class LogPage(QWidget):
         self.log_view.setFont(font)
         self.log_view.hide()
         root.addWidget(self.log_view, 1)
+
+    def set_accounts(self, accounts):
+        previous = self.server_account.currentData()
+        rows = [row for row in accounts if isinstance(row, dict) and isinstance(row.get("id"), str)]
+        names = account_player_names(rows)
+        with QSignalBlocker(self.server_account):
+            self.server_account.clear()
+            for row in rows:
+                self.server_account.addItem(names[row["id"]], userData=row["id"])
+            self.server_account.setCurrentIndex(next((i for i,r in enumerate(rows) if r["id"] == previous), 0 if rows else -1))
+        self._server_ids = [row["id"] for row in rows]
+        self._server_clear()
+        self._server_controls()
+
+    def _server_filter(self):
+        return ("all", "started", "rejected", "unconfirmed", "dispatching",
+                "operator_reconciled")[max(0, self.server_status.currentIndex())]
+
+    def _server_controls(self):
+        self.server_refresh.setEnabled(bool(self._server_ids))
+        self.server_older.setEnabled(self._server_before is not None and self._server_requested is None)
+        self.server_copy.setEnabled(bool(self._server_rows))
+
+    def _server_clear(self):
+        self._server_rows = []
+        self._server_before = None
+        self._server_requested = None
+        self.server_timeline.setPlainText("Select an account and refresh its server receipts.")
+
+    def _server_reset(self, *_args):
+        self._server_clear()
+        self._server_load(None)
+
+    def _server_load_older(self):
+        if self._server_before is not None:
+            self._server_load(self._server_before)
+
+    def _server_load(self, before):
+        account = self.server_account.currentData()
+        if not account:
+            self._server_controls()
+            return
+        status = self._server_filter()
+        self._server_requested = (account, before, status)
+        self.server_note.setText("Loading server receipts…")
+        self._server_controls()
+        self.server_activity_requested.emit(account, before, status)
+
+    @staticmethod
+    def _server_time(value):
+        if value is None:
+            return "Unknown"
+        try:
+            return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OverflowError, OSError):
+            return "Unknown"
+
+    def set_server_activity(self, result, before, status):
+        key = (result.get("account_id"), before, status)
+        if key != self._server_requested or key[0] != self.server_account.currentData() or status != self._server_filter():
+            return
+        self._server_requested = None
+        self._server_rows = result["events"]
+        self._server_before = result["next_before"]
+        self.server_timeline.setPlainText("\n".join(
+            f"{self._server_time(row['updated_at'])}  ·  {row['task']}  ·  {row['status'].replace('_', ' ')}\n{row['request_id']}"
+            for row in self._server_rows) or "No matching server receipts.")
+        self.server_note.setText("Showing a page of server receipts. Started is a dispatch receipt, not proof of completion.")
+        self._server_controls()
+
+    def set_server_activity_unavailable(self, account, before, status):
+        if (account, before, status) == self._server_requested:
+            self._server_requested = None
+            self.server_note.setText("Server receipt history unavailable. Refresh to retry.")
+            self._server_controls()
+
+    def _server_export(self):
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["request_id", "task", "status", "created_at", "updated_at"])
+        for row in self._server_rows:
+            writer.writerow([row["request_id"], row["task"], row["status"],
+                             row["created_at"], row["updated_at"]])
+        QApplication.clipboard().setText(output.getvalue())
+        self.server_note.setText("Current page copied as CSV.")
 
     def _toggle_diagnostics(self) -> None:
         show = not self.log_view.isVisible()

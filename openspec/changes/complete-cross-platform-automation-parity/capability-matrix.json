@@ -233,7 +233,7 @@
     },
     "logs": {
       "desktop": "existing_view",
-      "web": "pending",
+      "web": "existing_view",
       "view": "activity",
       "review": "read_only",
       "coverage": "partial",

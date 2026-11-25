@@ -88,3 +88,8 @@ Both native clients now request an account-specific read-only quote before appro
 ### Native notification tests
 
 Telegram and Discord each have a native fixed-message test workflow. Preflight checks the exact provider's configured credential shape without returning any secret. The worker accepts only official HTTPS endpoints, disables redirects, bounds the request timeout, suppresses automatic error notifications and never retries the provider request. Managed activity reports accepted or failed/uncertain based on process exit status. A 30-second per-account/provider cooldown limits repeated dispatch. Credentials remain shared by login; editing and pairing are not yet implemented. Synthetic focused tests: 49 passed; no real provider contacted.
+
+### Account-scoped durable server activity
+
+Desktop Activity and web Activity now provide an account/player picker, exact receipt status filter, cursor-based older pages, refresh, and current-page CSV export. The API is read-only, bearer-protected and bounded to at most 100 rows per page; it reads durable receipt history even if the account is disabled or its worker is offline. Existing ledgers migrate in place; timestamps on older entries remain unknown. Only request identity, operation, dispatch status and timestamps are projected. This is not a complete log of game operations, proof of task completion, or raw IkaBot log access. Global raw logs and session log level remain host-local and are not claimed as implemented.
+Focused history/API/Qt regressions: 7 passed. Web suite: 40 passed; TypeScript passed.

@@ -855,3 +855,26 @@ def test_city_bound_bulk_plan_cannot_be_reused_for_other_accounts(app):
         assert not page.start_selected_button.isEnabled()
     finally:
         page.deleteLater()
+
+
+def test_server_activity_history_account_scope_and_filter(app):
+    from daedalus.desktop.log_page import LogPage
+    page = LogPage()
+    page.set_accounts([{"id":"alpha","player":"A"}, {"id":"beta","player":"B"}])
+    calls = []
+    page.server_activity_requested.connect(lambda *args:calls.append(args))
+    page._server_reset()
+    assert calls[-1] == ("alpha", None, "all")
+    row = {"request_id":"a"*36, "task":"alertAttacks", "status":"started",
+           "created_at":None, "updated_at":None}
+    page.set_server_activity({"account_id":"beta","events":[row],"next_before":None}, None, "all")
+    assert not page.server_copy.isEnabled()
+    page.set_server_activity({"account_id":"alpha","events":[row],"next_before":2}, None, "all")
+    assert page.server_copy.isEnabled() and page.server_older.isEnabled()
+    assert "Unknown" in page.server_timeline.toPlainText()
+    page._server_load_older()
+    assert calls[-1] == ("alpha",2,"all")
+    page.server_account.setCurrentIndex(1)
+    assert calls[-1] == ("beta",None,"all")
+    assert not page.server_copy.isEnabled()
+    page.close()

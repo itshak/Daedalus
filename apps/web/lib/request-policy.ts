@@ -10,6 +10,11 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
   if (method === "GET") {
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
+    if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "activity")
+      return [...params.keys()].every(k=>["before","limit","status"].includes(k)&&params.getAll(k).length===1)
+        && (!params.has("before")||(/^[1-9][0-9]{0,15}$/.test(params.get("before")??"")&&Number.isSafeInteger(Number(params.get("before")))))
+        && (!params.has("limit")||/^(?:[1-9][0-9]?|100)$/.test(params.get("limit")??""))
+        && (!params.has("status")||["all","dispatching","started","rejected","unconfirmed","operator_reconciled"].includes(params.get("status")??""));
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "island-destinations") return params.size===2 && ["x","y"].every(k=>/^(?:[1-9][0-9]?|100)$/.test(params.get(k)??""));
     if (parts.length === 3 && parts[0] === "accounts" && (accountResources.has(parts[2]) || parts[2] === "recovery")) return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "jobs") return true;

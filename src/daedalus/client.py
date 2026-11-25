@@ -270,6 +270,22 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid prerequisite status")
         return data
 
+    def activity(self, account_id: str, *, before: int | None = None,
+                 limit: int = 50, status: str = "all") -> dict[str, object]:
+        from daedalus.activity_history import validate_activity_page, validate_activity_query
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        validate_activity_query(before, limit, status)
+        path = f"accounts/{account_id}/activity?limit={limit}&status={status}"
+        if before is not None:
+            path += f"&before={before}"
+        data = self._read(path)
+        try:
+            return validate_activity_page(data, account_id, before, limit, status)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid server activity") from exc
+
     def tasks(self, account_id: str) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")

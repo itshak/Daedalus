@@ -299,6 +299,9 @@ class APIWorker(QThread):
                 result = _known_ikabot_workers(self.client)
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "server_activity" and self.account_id and self.task_payload:
+                result = self.client.activity(self.account_id, before=self.task_payload["before"],
+                                              status=self.task_payload["status"])
             elif self.action == "task_shipment_preview" and self.account_id and self.task_payload:
                 result = self.client.shipment_preview(self.account_id, self.task_payload["draft"])
             elif self.action == "task_island_destinations" and self.account_id and self.task_payload:
@@ -675,6 +678,9 @@ class MainWindow(FluentWindow):
         self.operations_page = self.tasks_page.catalog_panel
         self._task_views = (self.tasks_page,)
         self.log_page = LogPage(self)
+        self.log_page.server_activity_requested.connect(
+            lambda aid, before, status: self._request_server_activity(aid, before, status)
+        )
         self.connection_page = ConnectionPage(self)
         self.appearance_page = AppearancePage(self)
         self.appearance_page.set_preferences(self._gui_preferences)
@@ -1727,6 +1733,13 @@ class MainWindow(FluentWindow):
         if self.client is not None and self._worker is None:
             self._launch(self.client, "assistance_pending")
 
+    def _request_server_activity(self, account_id, before, status):
+        if self.client is None or self._worker is not None:
+            self.log_page.set_server_activity_unavailable(account_id, before, status)
+            return
+        self._request("server_activity", account_id=account_id,
+                      task_payload={"before": before, "status": status})
+
     def _request(
         self, action: str, *, account_id: str | None = None,
         task_payload: dict[str, object] | None = None,
@@ -2326,6 +2339,10 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_result(account_id, action, payload)
+        elif action == "server_activity":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(payload, dict) and isinstance(request, dict):
+                self.log_page.set_server_activity(payload, request["before"], request["status"])
         elif action == "task_shipment_preview":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2511,6 +2528,7 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_accounts(visible)
         self.warehouses_page.set_accounts(visible)
         self.military_page.set_accounts(visible)
+        self.log_page.set_accounts(visible)
         self.home_page.set_accounts(visible)
         # Refresh inclusion *after* the warehouse account map is replaced.
         # This also handles accounts newly created via metadata editing.
@@ -2562,6 +2580,11 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_unavailable(account_id, action)
+        if action == "server_activity":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.log_page.set_server_activity_unavailable(getattr(self._worker, "account_id", None),
+                                                              request["before"], request["status"])
         if action == "task_shipment_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
