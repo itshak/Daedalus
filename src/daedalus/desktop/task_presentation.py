@@ -22,6 +22,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "autoPirate": "Run a configured piracy schedule or mission.",
     "buyResources": "Make market purchases using a reviewed offer and amount.",
     "consolidateResources": "Consolidate known resources to a target city.",
+    "stationArmy": "Move all available ground units or fleet from one owned city to another.",
     "constructBuilding": "Build a new building in an eligible empty slot.",
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
@@ -123,6 +124,10 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         (task_name, "expected"): {"type": "hidden_derived"}
         for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
     },
+    ("stationArmy", "city_id"): {"type": "city_picker", "label": "Origin city"},
+    ("stationArmy", "destination_city_id"): {"type": "city_picker", "label": "Destination city"},
+    ("stationArmy", "ground"): {"type": "boolean", "label": "Move ground troops (unchecked: fleet)", "default": True},
+    ("stationArmy", "expected"): {"type": "hidden_derived"},
     ("constructBuilding", "city_id"): {"type": "city_picker", "label": "Construction city"},
     ("constructBuilding", "position"): {"type": "build_choice", "label": "Available building"},
     ("constructBuilding", "building_id"): {"type": "hidden_derived"},

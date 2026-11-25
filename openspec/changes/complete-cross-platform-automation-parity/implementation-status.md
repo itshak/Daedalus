@@ -27,7 +27,7 @@ Focused tests: four native donation/Qt tests, 17 session expiry/retry tests (12 
 
 The three upstream worker operations (production, academy, temple) now have structured, city-scoped engine adapters and native desktop/web editors. The current project/building slider and normal/extra capacity are read from the game; the selected percentage is converted into an exact target. A one-shot ticket binds the operation and city to the reviewed slider state, and the child revalidates it before mutation. No raw game fields or automatic retry/replay. Population, production and faith impact estimates beyond the source slider are not inferred.
 
-The versioned capability manifest records 26 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
+The versioned capability manifest records 27 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
 
 Donation integration baseline: 705 Python tests passed, 11 skipped; 408 engine tests passed, 9 skipped, 123 subtests passed; 25 web tests, TypeScript, lint (warnings only), production build, Ruff and proposal validation passed. Worker/manifest focused regression: 33 Python tests passed; 27 web unit tests passed before the final manifest UI wiring. Full combined validation is required.
 
@@ -42,6 +42,10 @@ Focused layout/Qt/manifest regression: 31 Python tests passed. Web: TypeScript a
 The new-building editor discovers actual empty-slot building choices through the upstream building-ground view. Both clients select a city and named building/slot, show the five-resource cost and eligibility, and use an account-bound, single-use review ticket. The worker checks the same slot and cost fingerprint at launch and again before one non-retried construction request. Unparsed prices, unavailable slots, busy cities and unaffordable construction are not launched. The building-ground parser still requires live acceptance on actual game responses.
 
 Combined regression at worker/manifest commit 04aa845: 715 Python passed, 11 skipped; 408 engine passed, 9 skipped, 123 subtests passed; 27 web tests, TypeScript, production build, Ruff and proposal validation passed. Layout and new-building focused regression: 40 Python tests passed.
+
+## Station troops and fleet
+
+The desktop and web clients now support reviewed deployment of all available ground troops or fleet units from one owned city to another. The engine reads current deployment inventory, validates both city identities, checks ground transport capacity, binds the cargo to an expiring account-specific ticket, and revalidates before a single submission. Synthetic tests cover stale inventory, insufficient capacity, account scope, ticket replay, and desktop confirmation. Individual unit allocation, ETA, external destinations, multi-origin orchestration and live-game acceptance remain outside this slice.
 
 ## Still open
 

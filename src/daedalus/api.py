@@ -50,6 +50,7 @@ from daedalus.reviewed_operations import (
     WORKER_TASKS,
     validated_build_draft,
     validated_layout_draft,
+    validated_station_draft,
     validated_worker_draft,
 )
 from daedalus.saved_session_recovery import SavedSessionUnavailable, _email_binding
@@ -702,6 +703,28 @@ def create_app(
                 status_code=503, detail="Authenticated construction preview unavailable"
             ) from exc
 
+    @app.post("/api/v1/accounts/{account_id}/cities/{city_id}/station-plan",
+              dependencies=[Depends(authorized)])
+    def station_plan(account_id: str, city_id: int,
+                     payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real deployment planner unavailable")
+        try:
+            plan = ipc_client.station_preview(account, city_id, validated_station_draft(city_id, payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Deployment preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Deployment preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = operation_previews.issue(account_id, "stationArmy", config) if plan["ready"] and task_controller is not None else None
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/build-options",
              dependencies=[Depends(authorized)])
     def build_options(account_id: str, city_id: int) -> dict[str, object]:
@@ -1329,6 +1352,12 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/station-start",
+              dependencies=[Depends(authorized)])
+    def start_reviewed_station(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "stationArmy", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/build-start",
               dependencies=[Depends(authorized)])

@@ -84,6 +84,7 @@ _TASK_LABELS = {
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
     "loginDaily": "Daily login", "dumpWorld": "Export world data",
+    "stationArmy": "Station troops or fleet",
     "constructBuilding": "Build new building",
     "reorganizeCityBuildings": "Copy city building layout",
     "modifyProduction": "Production workers", "modifyAcademyWorkers": "Academy scientists",
@@ -134,6 +135,7 @@ class TasksPage(QWidget):
     donation_preview_requested = Signal(str, object, str)
     worker_preview_requested = Signal(str, str, object, str)
     layout_preview_requested = Signal(str, object, str)
+    station_preview_requested = Signal(str, object, str)
     build_options_requested = Signal(str, int, str)
     build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
@@ -878,6 +880,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "stationArmy":
+            self.building_note.setText("Checking actual available units and transport capacity…")
+            self.station_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "constructBuilding":
             self.building_note.setText("Checking selected building and actual costs…")
             self.build_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -915,6 +920,35 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def set_station_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "stationArmy" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(k) != v for k, v in draft.items()):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        capacity = (f" Cargo weight {result['weight']:,} / capacity {result['capacity']:,}."
+                    if result["ground"] else "")
+        self.building_note.setText(
+            f"{result['city_name']} → {result['destination_name']}: all {result['total']:,} "
+            + ("available ground units." if result["ground"] else "available fleet units.")
+            + capacity + (" Ready for review." if self._city_review_plan else " No units or insufficient capacity.")
+        )
+        self._invalidate_review()
+
+    def set_station_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "stationArmy" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Deployment preview unavailable. Refresh and try again.")
             self._invalidate_review()
 
     def _clear_build_options(self, *_args: object) -> None:
@@ -1694,6 +1728,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview deployment…" if name == "stationArmy" else
             "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
         if name in CITY_REVIEW_TASKS:

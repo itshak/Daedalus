@@ -18,6 +18,7 @@ from daedalus.reviewed_operations import (
     validate_build_inventory,
     validated_build_draft,
     validated_layout_draft,
+    validated_station_draft,
     validated_worker_draft,
 )
 
@@ -185,6 +186,13 @@ class DaedalusClient:
             return self._write(f"accounts/{account_id}/tasks/worker-start", {
                 "task": task, "preview_id": config["preview_id"],
                 "request_id": request_id, "confirmed": confirmed,
+            })
+        if task == "stationArmy":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the deployment first")
+            return self._write(f"accounts/{account_id}/tasks/station-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
             })
         if task == "constructBuilding":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
@@ -642,6 +650,28 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def station_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_station_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/station-plan", clean)
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("destination_city_id") != clean["destination_city_id"]
+                or data.get("ground") is not clean["ground"]
+                or any(not isinstance(data.get(k), str) for k in ("city_name", "destination_name"))
+                or type(data.get("total")) is not int or not 0 <= data["total"] <= 10**12
+                or (clean["ground"] and any(type(data.get(k)) is not int or not 0 <= data[k] <= 10**16
+                                           for k in ("weight", "capacity")))
+                or (not clean["ground"] and (data.get("weight") is not None or data.get("capacity") is not None))
+                or data.get("ready") is not (data["total"] > 0 and (
+                    not clean["ground"] or data["weight"] <= data["capacity"]))
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Invalid deployment preview")
         return data
 
     def build_options(self, account_id: str, city_id: int) -> dict[str, object]:

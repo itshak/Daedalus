@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -152,3 +152,38 @@ def validate_build_plan(city_id: int, draft: dict[str, int], plan: object) -> di
         raise ValueError("Invalid building fingerprint")
     return {k: plan[k] for k in ("city_id", "city_name", "position", "building_id", "name", "surface",
                                  "available", "costs", "missing", "busy", "ready", "config")}
+
+def validated_station_draft(city_id: object, draft: object) -> dict[str, object]:
+    if (not isinstance(draft, dict) or set(draft) != {"destination_city_id", "ground"}
+            or type(draft["ground"]) is not bool):
+        raise ValueError("Invalid deployment draft")
+    validated_layout_draft(city_id, {"template_city_id": draft["destination_city_id"]})
+    return dict(draft)
+
+
+def validate_station_plan(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or plan.get("destination_city_id") != draft["destination_city_id"]
+            or plan.get("ground") is not draft["ground"]
+            or any(not isinstance(plan.get(k), str) or not 0 < len(plan[k]) <= 100
+                   for k in ("city_name", "destination_name"))
+            or type(plan.get("total")) is not int or not 0 <= plan["total"] <= 10**12):
+        raise ValueError("Invalid deployment preview")
+    if draft["ground"]:
+        if any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 10**16
+               for k in ("weight", "capacity")):
+            raise ValueError("Invalid transport capacity")
+    elif plan.get("weight") is not None or plan.get("capacity") is not None:
+        raise ValueError("Unexpected fleet cargo capacity")
+    if plan.get("ready") is not (plan["total"] > 0 and (
+            not draft["ground"] or plan["weight"] <= plan["capacity"])):
+        raise ValueError("Invalid deployment readiness")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", *draft, "expected"}
+            or config["city_id"] != city_id or any(config.get(k) != v for k, v in draft.items())
+            or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid deployment fingerprint")
+    return {k: plan[k] for k in ("city_id", "destination_city_id", "ground", "city_name",
+                                 "destination_name", "total", "weight", "capacity", "ready", "config")}
