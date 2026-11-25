@@ -178,6 +178,8 @@ class APIWorker(QThread):
                     ),
                     "connected_accounts": _known_ikabot_workers(self.client),
                 }
+            elif self.action == "world_reports" and self.account_id:
+                result = self.client.world_reports(self.account_id, (self.task_payload or {}).get("report_id"))
             elif self.action == "challenge_policy" and self.account_id:
                 result = self.client.challenge_policy(self.account_id, self.task_payload)
             elif self.action == "extension_settings" and self.account_id:
@@ -740,6 +742,8 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.world_reports_requested.connect(
+            lambda aid, rid: self._request("world_reports", account_id=aid, task_payload={"report_id": rid}))
         self.appearance_page.challenge_policy_requested.connect(
             lambda aid, draft: self._request("challenge_policy", account_id=aid, task_payload=draft))
         self.appearance_page.extension_settings_requested.connect(
@@ -1786,6 +1790,11 @@ class MainWindow(FluentWindow):
         task_payload: dict[str, object] | None = None,
     ) -> None:
         if self.client is None or self._worker is not None:
+            if action == "task_island_destinations" and task_payload is not None:
+                for view in self._task_views:
+                    view.set_island_destinations_unavailable(account_id, task_payload["nonce"])
+            if action == "world_reports":
+                self.appearance_page.set_world_report_unavailable(account_id)
             if action == "challenge_policy":
                 self.appearance_page.set_challenge_unavailable(account_id)
             if action == "extension_settings":
@@ -2189,6 +2198,11 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "world_reports":
+            if isinstance(payload, dict) and "reports" in payload:
+                self.appearance_page.set_world_reports(payload)
+            else:
+                self.appearance_page.set_world_export(payload)
         elif action == "challenge_policy":
             self.appearance_page.set_challenge_policy(payload)
         elif action == "extension_settings":
@@ -2419,7 +2433,8 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
-                self.tasks_page.set_island_destinations(payload, request["nonce"])
+                for view in self._task_views:
+                    view.set_island_destinations(payload, request["nonce"])
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
@@ -2623,6 +2638,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "world_reports":
+            self.appearance_page.set_world_report_unavailable(getattr(self._worker, "account_id", None))
         if action == "challenge_policy":
             self.appearance_page.set_challenge_unavailable(getattr(self._worker, "account_id", None))
         if action == "extension_settings":
@@ -2678,8 +2695,9 @@ class MainWindow(FluentWindow):
         if action == "task_island_destinations":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
-                self.tasks_page.set_island_destinations_unavailable(
-                    getattr(self._worker, "account_id", None), request["nonce"])
+                for view in self._task_views:
+                    view.set_island_destinations_unavailable(
+                        getattr(self._worker, "account_id", None), request["nonce"])
         if action == "task_cities":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)

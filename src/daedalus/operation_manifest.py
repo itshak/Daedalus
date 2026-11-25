@@ -28,13 +28,12 @@ _READ_VIEWS = {
 }
 _LOCAL_BOUNDARIES = frozenset({
     "importExportCookie", "proxyConf",
-    "show_proxy",
 })
 _PROTECTED_SETTINGS = frozenset({"updateTelegramData", "updateDiscordData", "developer",
                                 "update", "checkForUpdate", "webServer", "loadCustomModule", "decaptchaConf"})
 _PENDING = frozenset()
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})
-ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PROTECTED_SETTINGS | _PENDING | {"logs"}
+ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PROTECTED_SETTINGS | _PENDING | {"logs", "show_proxy"}
 
 
 def operation_workflow(name: str) -> dict[str, object]:
@@ -56,6 +55,10 @@ def operation_workflow(name: str) -> dict[str, object]:
                 "live_accepted": False}
     if name == "logs":
         return {"desktop": "existing_view", "web": "existing_view", "view": "activity",
+                "review": "read_only", "coverage": "partial", "scopes": ["current"],
+                "live_accepted": False}
+    if name == "show_proxy":
+        return {"desktop": "existing_view", "web": "existing_view", "view": "settings",
                 "review": "read_only", "coverage": "partial", "scopes": ["current"],
                 "live_accepted": False}
     if name in _PROTECTED_SETTINGS:

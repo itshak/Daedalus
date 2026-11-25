@@ -48,3 +48,8 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Implement account-scoped human challenge stop or notify-and-stop controls, force managed piracy to stop before challenge retrieval/solving, and require fresh reviewed manual launch. Legacy automated solver setup remains outside remote controls.
 
 - [x] Implement the upstream Study submenu in the existing native Research editor, with named account-scoped advisor choices, strict projection, explicit review, stale-choice rejection and non-retried submission.
+
+
+- [x] Expose the upstream fixed-percent tavern serving submenu in both clients, with observed options, exact named before/after effects, stale-state halt and non-retried one-time updates.
+- [x] Complete external-island monitoring selection, scoped verification, explicit all-owned option, stale-response invalidation and strict coordinate revalidation.
+- [x] Generate private account-bound aggregate reports from managed world scans, validate and paginate completed data, provide complete CSV exports in desktop Settings and web Activity; prevent raw identifying dump export and correct radius-zero scope.

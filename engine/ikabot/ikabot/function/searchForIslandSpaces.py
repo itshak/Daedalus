@@ -44,7 +44,10 @@ def islandIdFromCoords(session, coords):
     """
     x, y = coords.replace(" ", "").split(":")
     html = session.get("view=island&xcoord={}&ycoord={}".format(x, y))
-    return getIsland(html)["id"]
+    island = getIsland(html)
+    if (int(island["x"]), int(island["y"])) != (int(x), int(y)):
+        raise ValueError("Island coordinates changed")
+    return island["id"]
 
 
 def prepare_searchForIslandSpaces(session, time, islandList=None, fights="n"):

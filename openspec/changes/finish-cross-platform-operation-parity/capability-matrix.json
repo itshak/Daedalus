@@ -386,11 +386,14 @@
       "live_accepted": false
     },
     "show_proxy": {
-      "desktop": "pending",
-      "web": "protected_local",
-      "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "read_only",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "stationArmy": {

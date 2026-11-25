@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
-import {MAX_AMOUNT, type City, type DomainTask, scopedCities, readyPreflight,validNativeConfig,scopedStudyChoices,type StudyChoice} from "@/lib/native-task-contract";
+import {MAX_AMOUNT, type City, type DomainTask, scopedCities, readyPreflight,validNativeConfig,scopedStudyChoices,type StudyChoice,fixedTavernReview,scopedExternalCities} from "@/lib/native-task-contract";
 
 type Row=Record<string,unknown>;
 type Draft=Record<string,unknown>;
@@ -17,6 +17,10 @@ async function api(path:string,body?:unknown):Promise<unknown>{
 export function NativeDomainEditor({account,accountName,task,enabled,role}:{account:string;accountName:string;task:DomainTask;enabled:boolean;role:string}){
   const {t}=useLanguage();
   const [cities,setCities]=useState<City[]>([]);
+  const [monitorX,setMonitorX]=useState(50),[monitorY,setMonitorY]=useState(50);
+  const [externalIslands,setExternalIslands]=useState<string[]>([]),[monitorBusy,setMonitorBusy]=useState(false),[monitorNote,setMonitorNote]=useState("");
+  const monitorFlight=useRef(false);
+  const [fixedTavern,setFixedTavern]=useState(false),[percentage,setPercentage]=useState(100);
   const [studies,setStudies]=useState<StudyChoice[]|null>(null),[studyIndex,setStudyIndex]=useState(-1);
   const [data,setData]=useState<unknown>(null);
   const [ready,setReady]=useState(false);
@@ -82,7 +86,8 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
   const owned=(id:number)=>cities.some(c=>c.id===id);
   const selectedRows=rows.filter(row=>chosen.includes(Number(row.city_id)));
   const rowNames=selectedRows.map(row=>String(row.city_name)).join(", ");
-  const coords=Array.from(new Set(cities.map(c=>c.coords??"").filter(x=>/^\d{1,3}:\d{1,3}$/.test(x))));
+  const coords=Array.from(new Set(cities.map(c=>c.coords??"").filter(x=>/^(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)$/.test(x))));
+  const monitorChoices=Array.from(new Set([...coords,...externalIslands]));
   const fortress=rows.find(r=>r.city_id===city);
   const missions=fortress&&Array.isArray(fortress.missions)?fortress.missions.filter(record):[];
   const selectedWonder=rows.find(row=>row.wonder===wonder);
@@ -103,10 +108,19 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
       scoped=selectedRows.length===chosen.length&&(!all?selectedRows.length===1&&Number(selectedRows[0].crystal)>=300000:true);
       summary=rowNames+"\n"+(all?t("Automatic experiments"):t("Experiments")+": "+count);break;
     }
-    case "tavernManager":
+    case "tavernManager": {
+      if(fixedTavern){
+        const targets=rows.filter(r=>r.has_tavern===true&&(all||chosen.includes(Number(r.city_id))));
+        const draft=fixedTavernReview(targets,percentage);
+        config=draft?{run_hours:0,fixed_servings:draft}:{};
+        scoped=!!draft;
+        summary=draft?t("Set fixed serving percentage once")+": "+percentage+"%\n"+draft.rows.map(r=>r.city_name+": "+t("Level")+" "+r.current_level+" → "+r.target_level+"; "+t("Wine per hour")+" "+r.current_wine+" → "+r.target_wine).join("\n"):"";
+        break;
+      }
       config={cities_ids:all?null:chosen,run_hours:interval,notification_mode:policy};
       scoped=all?rows.some(row=>row.has_tavern===true):selectedRows.length===chosen.length&&selectedRows.every(row=>row.has_tavern===true);
       summary=(all?t("All cities with taverns"):rowNames)+"\n"+t("Repeat every (hours; 0 once)")+": "+interval+"\n"+t(["Every change","Only errors","None"][policy-1]);break;
+    }
     case "activateMiracle":
       config={wonder,iterations:count};scoped=!!selectedWonder;
       summary=selectedWonder?String(selectedWonder.wonder_name)+" · "+String(selectedWonder.temple_city)+"\n"+t("Activations")+": "+count:"";break;
@@ -124,7 +138,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
       scoped=!!fortress&&(scheduled?[day,night]:[mission]).every(id=>missions.some(m=>m.number===id));
       summary=(fortress?String(fortress.city_name):"")+"\n"+t("Mission count")+": "+count+"\n"+(scheduled?t("Day mission")+": "+day+" ("+dayStart+"–"+dayEnd+") · "+t("Night mission")+": "+night+" ("+nightStart+"–"+nightEnd+")":t("Mission")+": "+mission)+"\n"+t("Convert capture points")+": "+t(convert==="none"?"None":convert==="all"?"All":"Fixed amount")+(convert==="amount"?": "+convertAmount:"")+"\n"+t("Maximum random wait (seconds)")+": "+wait;break;
     case "searchForIslandSpaces":
-      config={time:interval,islandList:all?[]:choices,fights:extra?"y":"n"};scoped=all?cities.length>0:choices.length>0&&choices.every(c=>coords.includes(c));
+      config={time:interval,islandList:all?[]:choices,fights:extra?"y":"n"};scoped=all?coords.length>0:choices.length>0&&choices.every(c=>monitorChoices.includes(c));
       summary=(all?t("All owned islands"):choices.join(", "))+"\n"+t("minutes")+": "+interval+"\n"+t("Monitor fight activity")+": "+t(extra?"Yes":"No");break;
     case "dumpWorld":
       config={waiting_time:delay,coords:dumpMode==="region"?[x,y]:null,radius:dumpMode==="region"?radius:null,shallow:dumpMode==="shallow",non_empty_islands:dumpMode==="shallow"?false:extra};
@@ -132,8 +146,22 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
   }
   const valid=scoped&&validNativeConfig(task,config);
   const disabled=busy||locked||loading||!enabled||role==="viewer";
-  const canReview=!disabled&&ready&&!error&&valid;
+  const canReview=!disabled&&ready&&!error&&valid&&!monitorBusy;
   const change=()=>{setReview(null);setApproved(false);};
+  const verifyIsland=async()=>{
+    if(disabled||monitorFlight.current||!Number.isInteger(monitorX)||!Number.isInteger(monitorY)||monitorX<1||monitorX>100||monitorY<1||monitorY>100)return;
+    const key=monitorX+":"+monitorY;
+    change();
+    if(coords.includes(key)){setAll(false);setChoices(old=>Array.from(new Set([...old,key])));return;}
+    if(externalIslands.length>=10&&!externalIslands.includes(key)){setMonitorNote("Clear external islands before adding more than ten.");return;}
+    monitorFlight.current=true;setMonitorBusy(true);setMonitorNote("");setAll(false);
+    setExternalIslands(old=>old.filter(c=>c!==key));setChoices(old=>old.filter(c=>c!==key));
+    try{
+      scopedExternalCities(await api(prefix+"/island-destinations?x="+monitorX+"&y="+monitorY),account,monitorX,monitorY);
+      if(mounted.current){setExternalIslands(old=>Array.from(new Set([...old,key])));setChoices(old=>Array.from(new Set([...old,key])));setAll(false);setMonitorNote("Verified island added.");}
+    }catch{if(mounted.current)setMonitorNote("Island unavailable. No unverified coordinates were added.");}
+    finally{monitorFlight.current=false;if(mounted.current)setMonitorBusy(false);}
+  };
   const numeric=(label:string,value:number,set:(v:number)=>void,min:number,max:number,step=1)=><label className="field"><span>{t(label)}</span><input type="number" step={step} min={min} max={max} value={Number.isNaN(value)?"":value} onChange={e=>{change();set(e.target.value===""?NaN:Number(e.target.value));}}/></label>;
   const toggle=(label:string,value:boolean,set:(v:boolean)=>void)=><label className="check-label"><input type="checkbox" checked={value} onChange={e=>{change();set(e.target.checked);}}/>{t(label)}</label>;
   const select=(label:string,value:string|number,options:[string|number,string][],set:(v:string)=>void)=><label className="field"><span>{t(label)}</span><select value={value} onChange={e=>{change();set(e.target.value);}}>{options.map(([v,n])=><option key={v} value={v}>{n}</option>)}</select></label>;
@@ -158,13 +186,13 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
     <fieldset disabled={disabled}><legend>{t("Settings")}</legend>
       {task==="loginDaily"&&<>{citySelect("Daily wine reward city",city,setCity)}{citySelect("Wood reward city",wood,setWood,true)}{citySelect("Luxury reward city",luxury,setLuxury,true)}{favour.map(([id,name])=><div key={id}>{toggle(name,choices.includes(id),v=>toggleChoice(id,v))}</div>)}{toggle("Collect ambrosia",extra,setExtra)}</>}
       {task==="research"&&<>{select("Research action",studyIndex,[[-1,t("Academy experiments")],...(studies??[]).map(r=>[r.index,t("Study")+": "+r.name] as [number,string])],v=>setStudyIndex(Number(v)))}{studies===null&&<p>{t("Study advisor unavailable; experiments remain available.")}</p>}{studyIndex<0&&<>{rows.map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={chosen.includes(Number(r.city_id))} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {String(r.crystal)} {t("Glass")} · {t(r.cooldown?"Cooling down":"Ready")}</label>)}{toggle("Automatic experiments",all,setAll)}{!all&&numeric("Experiments",count,setCount,1,10000)}<p>{t("Each experiment requires at least 300,000 crystal and has an approximately four-hour cooldown.")}</p></>}</>}
-      {task==="tavernManager"&&<>{toggle("All cities with taverns",all,setAll)}{rows.filter(r=>r.has_tavern===true).map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={all||chosen.includes(Number(r.city_id))} disabled={all} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {t("Wine")}: {String(r.wine)} · {t("Wine per hour")}: {String(r.wine_per_hour??"—")} · {t("Population")}: {String(r.population??"—")}</label>)}{numeric("Repeat every (hours; 0 once)",interval,setInterval,0,24)}{select("Notifications",policy,[[1,t("Every change")],[2,t("Only errors")],[3,t("None")]],v=>setPolicy(Number(v)))}</>}
+      {task==="tavernManager"&&<>{select("Tavern operation",fixedTavern?"fixed":"equilibrium",[["equilibrium",t("Equilibrium (optimize consumption)")],["fixed",t("Set fixed serving percentage once")]],v=>setFixedTavern(v==="fixed"))}{toggle("All cities with taverns",all,setAll)}{rows.filter(r=>r.has_tavern===true).map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={all||chosen.includes(Number(r.city_id))} disabled={all} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {t("Wine")}: {String(r.wine)} · {t("Wine per hour")}: {String(r.wine_per_hour??"—")} · {t("Population")}: {String(r.population??"—")}</label>)}{fixedTavern?<>{numeric("Serving percentage",percentage,setPercentage,0,100)}{!valid&&<p>{t("Verified serving choices are required for all selected taverns.")}</p>}</>:<>{numeric("Repeat every (hours; 0 once)",interval,setInterval,0,24)}{select("Notifications",policy,[[1,t("Every change")],[2,t("Only errors")],[3,t("None")]],v=>setPolicy(Number(v)))}</>}</>}
       {task==="activateMiracle"&&<>{select("Wonder",wonder,[["",t("Choose wonder")],...rows.map(r=>[String(r.wonder),String(r.wonder_name)+" · "+String(r.temple_city)+" · "+t("Level")+" "+r.level+" · "+r.available_in_seconds+" "+t("seconds")] as [string,string])],setWonder)}{numeric("Activations",count,setCount,1,100)}</>}
       {task==="activateShrine"&&<>{record(data)&&<p>{String(data.city_name)} · {t("Current favour")}: {String(data.favor??"—")}</p>}{gods.map((g,i)=><div key={g}>{toggle(g,chosen.includes(i+1),v=>choose(i+1,v))}</div>)}<p>{t("Favour per cycle")}: {chosen.length*100}</p>{select("Activation schedule",policy,[[1,t("Fixed activations")],[2,t("Automatic repetition")],[3,t("Fixed then automatic")]],v=>setPolicy(Number(v)))}{policy!==2&&numeric("Activations",count,setCount,1,10)}</>}
       {task==="donationBot"&&<>{select("Donation method",policy,[[1,t("Storage percentage to keep")],[2,t("Production percentage to donate")],[3,t("Fixed donation amount")]],v=>{setPolicy(Number(v));setDonations({});})}{cities.slice(0,100).map(c=>{const row=donations[c.id]??{donation_type:"none",percentage:0};return <fieldset key={c.id}><legend>{c.name}</legend>{select("Island project",row.donation_type,[["none",t("None")],["resource",t("Forest")],["tradegood",t("Luxury resource")],["both",t("Both projects")]],v=>setDonations(old=>({...old,[c.id]:{...row,donation_type:v}})))}{row.donation_type!=="none"&&numeric("Policy amount",row.percentage,v=>setDonations(old=>({...old,[c.id]:{...row,percentage:v}})),0,policy===3?MAX_AMOUNT:100)}</fieldset>;})}{numeric("Repeat every (minutes)",interval,setInterval,1,10080)}</>}
       {task==="autoPirate"&&<><p className="subtle-message">{t("Managed piracy stops at a game challenge. Complete the challenge manually before a new reviewed launch.")}</p>{select("Pirate fortress city",city,[[0,t("Choose a city")],...rows.map(r=>[Number(r.city_id),String(r.city_name)+" · "+t("Level")+" "+r.fortress_level] as [number,string])],v=>{setCity(Number(v));setMission(0);setDay(0);setNight(0);})}{numeric("Mission count",count,setCount,1,100000)}{toggle("Separate day and night missions",scheduled,setScheduled)}{scheduled?<>{missionSelect("Day mission",day,setDay)}{numeric("Day starts",dayStart,setDayStart,0,23)}{numeric("Day ends",dayEnd,setDayEnd,0,23)}{missionSelect("Night mission",night,setNight)}{numeric("Night starts",nightStart,setNightStart,0,23)}{numeric("Night ends",nightEnd,setNightEnd,0,23)}</>:missionSelect("Mission",mission,setMission)}{select("Convert capture points",convert,[["none",t("None")],["all",t("All")],["amount",t("Fixed amount")]],setConvert)}{convert==="amount"&&numeric("Capture points",convertAmount,setConvertAmount,0,MAX_AMOUNT)}{numeric("Maximum random wait (seconds)",wait,setWait,0,3600)}</>}
-      {task==="searchForIslandSpaces"&&<>{toggle("All owned islands",all,setAll)}{!all&&coords.map(c=><div key={c}>{toggle(c,choices.includes(c),v=>toggleChoice(c,v))}</div>)}{numeric("Check every (minutes)",interval,setInterval,3,1440)}{toggle("Monitor fight activity",extra,setExtra)}</>}
-      {task==="dumpWorld"&&<>{select("Map extent",dumpMode,[["region",t("Map region")],["full",t("Full world")],["shallow",t("Shallow map")]],setDumpMode)}{dumpMode==="region"&&<>{numeric("Map X",x,setX,0,100)}{numeric("Map Y",y,setY,0,100)}{numeric("Radius",radius,setRadius,0,200)}</>}{numeric("Request interval (seconds)",delay,setDelay,1,10,.5)}{dumpMode!=="shallow"&&toggle("Only occupied islands",extra,setExtra)}<p>{t("World dump output is stored on the controller.")}</p></>}
+      {task==="searchForIslandSpaces"&&<>{toggle("All owned islands",all,setAll)}{!all&&monitorChoices.map(c=><div key={c}>{toggle(c+(externalIslands.includes(c)?" · "+t("Verified external island"):""),choices.includes(c),v=>toggleChoice(c,v))}</div>)}<fieldset disabled={monitorBusy}><legend>{t("Verify external island")}</legend>{numeric("Map X",monitorX,setMonitorX,1,100)}{numeric("Map Y",monitorY,setMonitorY,1,100)}<button type="button" className="secondary-button" disabled={monitorBusy} onClick={()=>void verifyIsland()}>{t("Verify and add island")}</button><button type="button" className="secondary-button" disabled={monitorBusy||!externalIslands.length} onClick={()=>{change();setChoices(old=>old.filter(c=>!externalIslands.includes(c)));setExternalIslands([]);setMonitorNote("");}}>{t("Clear external islands")}</button>{monitorNote&&<p role="status">{t(monitorNote)}</p>}</fieldset>{numeric("Check every (minutes)",interval,setInterval,3,1440)}{toggle("Monitor fight activity",extra,setExtra)}</>}
+      {task==="dumpWorld"&&<><p className="subtle-message">{t("Completed managed scans are available in Activity as aggregate CSV reports without player names.")}</p>{select("Map extent",dumpMode,[["region",t("Map region")],["full",t("Full world")],["shallow",t("Shallow map")]],setDumpMode)}{dumpMode==="region"&&<>{numeric("Map X",x,setX,0,100)}{numeric("Map Y",y,setY,0,100)}{numeric("Radius",radius,setRadius,0,200)}</>}{numeric("Request interval (seconds)",delay,setDelay,1,10,.5)}{dumpMode!=="shallow"&&toggle("Only occupied islands",extra,setExtra)}<p>{t("World dump output is stored on the controller.")}</p></>}
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
     <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>{setReview({config,summary});setApproved(false);}}>{t("Review settings")}</button>

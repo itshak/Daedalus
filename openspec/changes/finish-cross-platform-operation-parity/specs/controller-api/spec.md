@@ -73,3 +73,33 @@ The authenticated academy inventory SHALL include a bounded projection of availa
 #### Scenario: Study availability changes
 - **WHEN** the selected advisor entry no longer matches the reviewed name and research type
 - **THEN** the worker rejects the selection without a study mutation
+
+
+### Requirement: Reviewed fixed tavern servings
+Both clients SHALL expose one-time fixed-percent tavern servings separately from equilibrium schedules. Each selected tavern SHALL have a verified serving-option observation and exact named current/target consumption review. The worker SHALL revalidate all selected rows before mutation, recheck each current row immediately before non-retried submission, and observe the new serving level before proceeding.
+
+#### Scenario: The reviewed serving changes
+- **WHEN** an observed serving option or current level differs from the reviewed draft
+- **THEN** the worker stops without substituting another target
+
+### Requirement: Verified island monitoring scope
+Both clients SHALL allow explicit all-owned island monitoring or selected verified owned/external coordinates. A failed lookup SHALL invalidate its previously selected external entry. The controller SHALL reject malformed coordinates and arbitrary island identifiers; the worker SHALL resolve and confirm the exact coordinates again.
+
+#### Scenario: An external island lookup fails
+- **WHEN** an external coordinate cannot be verified
+- **THEN** the client does not add it to the review or silently broaden the intended selection
+
+### Requirement: Private aggregate map report export
+Managed world scans SHALL store only bounded aggregate island observations in an identity-bound private report store, with opaque server-owned identifiers. Authenticated clients SHALL list completed reports and validate each bounded page before exporting a complete CSV. Raw player names, account identifiers from game responses, filesystem paths and unprojected game objects MUST NOT be exported. Local legacy dumps remain protected local.
+
+#### Scenario: A report is requested for another identity
+- **WHEN** the selected authenticated account does not own the report
+- **THEN** the worker rejects access without revealing the other account or its report data
+
+#### Scenario: A report page is inconsistent
+- **WHEN** metadata, offsets, count or unique island identities do not agree across pages
+- **THEN** no completed export is offered
+
+#### Scenario: The scan radius is zero
+- **WHEN** the approved region radius is zero
+- **THEN** the scan covers only the selected center coordinate

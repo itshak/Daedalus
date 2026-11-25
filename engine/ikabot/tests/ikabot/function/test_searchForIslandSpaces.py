@@ -46,3 +46,14 @@ class TestPrepareSearchForIslandSpaces(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_coordinate_lookup_requires_exact_island():
+    from ikabot.function.searchForIslandSpaces import islandIdFromCoords
+    import pytest
+    session = MagicMock()
+    with patch("ikabot.function.searchForIslandSpaces.getIsland",
+               return_value={"x": 50, "y": 60, "id": "123"}):
+        assert islandIdFromCoords(session, "50:60") == "123"
+        with pytest.raises(ValueError, match="changed"):
+            islandIdFromCoords(session, "51:60")

@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl, Signal
+from datetime import UTC
+
+from PySide6.QtCore import QSignalBlocker, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMessageBox, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -34,6 +44,7 @@ class AppearancePage(QWidget):
     release_status_requested = Signal()
     extension_settings_requested = Signal(str, object)
     challenge_policy_requested = Signal(str, object)
+    world_reports_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -206,6 +217,27 @@ class AppearancePage(QWidget):
         layout.addWidget(self.extension_status)
         self._extension_rows = []
         self._extension_override = True
+        layout.addWidget(SubtitleLabel("Aggregate world map reports"))
+        report_note = CaptionLabel("Browse completed managed map scans for the selected account. "
+                                   "Exports include island data only, without player names or raw game responses.")
+        report_note.setWordWrap(True)
+        layout.addWidget(report_note)
+        self.world_refresh = PushButton("Read completed map reports")
+        self.world_refresh.setEnabled(False)
+        self.world_refresh.clicked.connect(self._request_world_reports)
+        layout.addWidget(self.world_refresh)
+        self.world_picker = ComboBox()
+        self.world_picker.setAccessibleName("Completed aggregate world map report")
+        self.world_picker.currentIndexChanged.connect(self._world_controls)
+        layout.addWidget(self.world_picker)
+        self.world_export = PushButton("Export selected report to CSV…")
+        self.world_export.setEnabled(False)
+        self.world_export.clicked.connect(self._request_world_export)
+        layout.addWidget(self.world_export)
+        self.world_note = CaptionLabel()
+        self.world_note.setWordWrap(True)
+        layout.addWidget(self.world_note)
+        self._world_metadata = []
         boundary = CaptionLabel(
              "Proxy configuration is deferred. Legacy automated challenge providers and unreviewed extensions "
             "are not exposed. The raw engine web service, developer "
@@ -282,6 +314,8 @@ class AppearancePage(QWidget):
             self._reset_extensions()
         if hasattr(self, "challenge_status"):
             self._reset_challenge_policy()
+        if hasattr(self, "world_picker"):
+            self._reset_world_reports()
 
     def _notification_changed(self, *_args):
         self.notification_secret.clear()
@@ -332,6 +366,83 @@ class AppearancePage(QWidget):
         if account == self.admin_account.currentData():
             self.admin_rows.clear()
             self.notification_note.setText("Configuration unavailable or outcome uncertain. Refresh status before retrying.")
+
+    def _reset_world_reports(self):
+        self._world_metadata = []
+        self.world_picker.clear()
+        self.world_export.setEnabled(False)
+        self.world_refresh.setEnabled(isinstance(self.admin_account.currentData(), str))
+        self.world_note.clear()
+
+    def _world_controls(self, *_args):
+        self.world_export.setEnabled(isinstance(self.world_picker.currentData(), str))
+
+    def _request_world_reports(self):
+        account = self.admin_account.currentData()
+        if isinstance(account, str):
+            self._reset_world_reports()
+            self.world_note.setText("Reading completed aggregate reports…")
+            self.world_reports_requested.emit(account, None)
+
+    def _request_world_export(self):
+        account, report_id = self.admin_account.currentData(), self.world_picker.currentData()
+        if isinstance(account, str) and isinstance(report_id, str):
+            self.world_export.setEnabled(False)
+            self.world_note.setText("Validating every report page…")
+            self.world_reports_requested.emit(account, report_id)
+
+    def set_world_reports(self, value):
+        from datetime import datetime
+
+        from daedalus.world_reports import validate_world_reports
+
+        account = self.admin_account.currentData()
+        if not isinstance(value, dict) or value.get("account_id") != account:
+            return
+        self._reset_world_reports()
+        try:
+            result = validate_world_reports(value, account)
+        except ValueError:
+            self.set_world_report_unavailable(account)
+            return
+        self._world_metadata = result["reports"]
+        with QSignalBlocker(self.world_picker):
+            for row in self._world_metadata:
+                date = datetime.fromtimestamp(row["completed_at"], UTC).strftime("%Y-%m-%d %H:%M UTC")
+                kind = "Shallow" if row["shallow"] else "Detailed aggregate"
+                extent = "partial" if row["partial"] else "whole map"
+                self.world_picker.addItem(f"{date} · {kind} · {extent} · {row['island_count']} islands",
+                                          userData=row["report_id"])
+        self._world_controls()
+        self.world_note.setText(f"{len(self._world_metadata)} completed reports. Only complete validated reports can be exported.")
+
+    def set_world_export(self, value):
+        from pathlib import Path
+
+        from daedalus.world_reports import report_csv
+
+        account = self.admin_account.currentData()
+        if (not isinstance(value, dict) or value.get("account_id") != account
+                or value.get("report_id") != self.world_picker.currentData()):
+            return
+        self._world_controls()
+        filename, _ = QFileDialog.getSaveFileName(self, "Export aggregate map report",
+                                                   "Daedalus-world-map.csv", "CSV files (*.csv)")
+        if not filename:
+            self.world_note.setText("Export cancelled.")
+            return
+        try:
+            with Path(filename).open("w", encoding="utf-8", newline="") as handle:
+                handle.write(report_csv(value))
+        except OSError:
+            self.world_note.setText("Could not save the selected report.")
+            return
+        self.world_note.setText(f"Exported {len(value['rows'])} island rows.")
+
+    def set_world_report_unavailable(self, account):
+        if self.admin_account.currentData() == account:
+            self._reset_world_reports()
+            self.world_note.setText("Aggregate map reports unavailable. Refresh before retrying.")
 
     def _reset_challenge_policy(self):
         self._challenge_policy = None

@@ -1096,6 +1096,21 @@ class DaedalusClient:
         except ValueError:
             raise APIConnectionError("Invalid extension status") from None
 
+    def world_reports(self, account_id: str, report_id=None):
+        from daedalus.world_reports import REPORT_ID, collect_report, validate_world_reports
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or (report_id is not None and
+                (not isinstance(report_id, str) or not REPORT_ID.fullmatch(report_id))):
+            raise ValueError("Invalid map report scope")
+        path = f"accounts/{account_id}/world-reports"
+        try:
+            if report_id is None:
+                return validate_world_reports(self._read(path), account_id)
+            return collect_report(lambda offset: self._read(f"{path}/{report_id}?offset={offset}"),
+                                  account_id, report_id)
+        except ValueError:
+            raise APIConnectionError("Invalid aggregate map report") from None
+
     def administrative_status(self, account_id: str) -> dict[str, object]:
         from daedalus.admin_status import validate_admin_status
 

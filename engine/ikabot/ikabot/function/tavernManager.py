@@ -46,6 +46,7 @@ class TavernManager:
             return None
 
         current_level = 0
+        level_observed = False
         action_code = None
         consumption_values = []
         sat_per_wine = []
@@ -69,6 +70,7 @@ class TavernManager:
                         js_data = json.loads(load_js["params"])
                         if "wineServeLevel" in js_data:
                             current_level = int(js_data["wineServeLevel"])
+                            level_observed = True
                         if "satPerWine" in js_data:
                             sat_per_wine = js_data["satPerWine"]
                     except (json.JSONDecodeError, ValueError, KeyError):
@@ -80,6 +82,7 @@ class TavernManager:
 
         result = {
             'current_level': current_level,
+            'level_observed': level_observed,
             'action_code': action_code,
             'consumption_values': consumption_values,
             'sat_per_wine': sat_per_wine,
@@ -90,7 +93,7 @@ class TavernManager:
     def _wine_at_level(self, consumption_values, level):
         return next((w for l, w in consumption_values if l == level), 0)
 
-    def _apply_level(self, city, tavern, target_level, tavern_data):
+    def _apply_level(self, city, tavern, target_level, tavern_data, *, reviewed=False):
         params = {
             'action': 'CityScreen',
             'function': 'assignWinePerTick',
@@ -103,7 +106,10 @@ class TavernManager:
             'actionRequest': tavern_data['action_code'],
             'ajax': '1',
         }
-        self.session.post(params=params)
+        if reviewed:
+            self.session.post(params=params, retry_on_failure=False)
+        else:
+            self.session.post(params=params)
         self._cache.pop(city['id'], None)
 
     def _get_town_hall_data(self, city_id, city_data):
@@ -420,7 +426,82 @@ from ikabot.helpers.decorators import configurator, task
 from ikabot.helpers.taskConfig import asInt, requireOwnCity
 
 
-def prepare_tavernManager(session, run_hours, cities_ids=None, cities=None, notification_mode=2, check_now=True):
+def native_serving_options(info):
+    if not isinstance(info, dict) or info.get("level_observed") is not True or not info.get("action_code"):
+        return None
+    current = info.get("current_level")
+    raw = info.get("consumption_values")
+    if (type(current) is not int or not isinstance(raw, list) or not 1 <= len(raw) <= 151
+            or any(not isinstance(pair, (tuple, list)) or len(pair) != 2
+                   or type(pair[0]) is not int or not 0 <= pair[0] <= 150
+                   or type(pair[1]) is not int or not 0 <= pair[1] <= 10**9 for pair in raw)):
+        return None
+    levels = {level: wine for level, wine in raw}
+    if len(levels) != len(raw) or current not in levels:
+        return None
+    return [[level, levels[level]] for level in sorted(levels)]
+
+
+def _fixed_row(session, manager, city_id, percentage):
+    city_id = requireOwnCity(session, city_id, "tavern city")
+    city = getCity(session.get(city_url + str(city_id)))
+    if str(city.get("id")) != city_id:
+        raise ValueError("Unexpected tavern city")
+    tavern = next((b for b in city.get("position", []) if b.get("building") == "tavern"), None)
+    if tavern is None:
+        raise ValueError("Tavern no longer available")
+    info = manager._get_tavern_data(city, tavern, force_refresh=True)
+    options = native_serving_options(info)
+    if options is None:
+        raise ValueError("Tavern serving choices unavailable")
+    levels = dict(options)
+    current = info["current_level"]
+    maximum = max(levels)
+    target = maximum * percentage // 100
+    if target not in levels:
+        raise ValueError("Requested tavern serving unavailable")
+    row = {"city_id": int(city_id), "city_name": city["name"], "current_level": current,
+           "max_level": maximum, "target_level": target, "current_wine": levels[current],
+           "target_wine": levels[target]}
+    return row, city, tavern, info
+
+
+def _review_fixed_servings(session, draft):
+    if (not isinstance(draft, dict) or set(draft) != {"percentage", "rows"}
+            or type(draft["percentage"]) is not int or not 0 <= draft["percentage"] <= 100
+            or not isinstance(draft["rows"], list) or not 1 <= len(draft["rows"]) <= 100):
+        raise ValueError("Invalid fixed tavern review")
+    manager = TavernManager(session)
+    seen = set()
+    for reviewed in draft["rows"]:
+        if (not isinstance(reviewed, dict) or type(reviewed.get("city_id")) is not int
+                or reviewed["city_id"] in seen):
+            raise ValueError("Invalid tavern city review")
+        seen.add(reviewed["city_id"])
+        actual, *_ = _fixed_row(session, manager, reviewed["city_id"], draft["percentage"])
+        if actual != reviewed:
+            raise ValueError("Tavern servings changed; prepare a new review")
+    return draft
+
+
+def _run_fixed_servings(session, draft):
+    _review_fixed_servings(session, draft)
+    manager = TavernManager(session)
+    for reviewed in draft["rows"]:
+        row, city, tavern, info = _fixed_row(session, manager, reviewed["city_id"], draft["percentage"])
+        if row != reviewed:
+            raise ValueError("Tavern servings changed; stop and review")
+        if row["current_level"] == row["target_level"]:
+            continue
+        manager._apply_level(city, tavern, row["target_level"], info, reviewed=True)
+        after, *_ = _fixed_row(session, manager, reviewed["city_id"], draft["percentage"])
+        if (after["current_level"] != row["target_level"]
+                or after["current_wine"] != row["target_wine"]):
+            raise RuntimeError("Tavern submission unconfirmed; stop and inspect")
+    session.setStatus("Reviewed tavern servings observed")
+
+
+def prepare_tavernManager(session, run_hours, cities_ids=None, cities=None, notification_mode=2, check_now=True, fixed_servings=None):
     """Checks the config of a tavernManager task (equilibrium mode) started from the CLI
     Parameters
     ----------
@@ -440,6 +521,10 @@ def prepare_tavernManager(session, run_hours, cities_ids=None, cities=None, noti
     -------
     config : dict
     """
+    if fixed_servings is not None:
+        if type(run_hours) is not int or run_hours != 0 or cities_ids is not None or cities is not None or notification_mode != 2 or check_now is not True:
+            raise ValueError("Fixed servings must be a separate one-time operation")
+        return {"run_hours": 0, "fixed_servings": _review_fixed_servings(session, fixed_servings)}
     if cities_ids is not None:
         if not isinstance(cities_ids, (list, tuple)):
             raise ValueError("cities_ids must be a list of city ids, got {!r}".format(cities_ids))
@@ -452,7 +537,7 @@ def prepare_tavernManager(session, run_hours, cities_ids=None, cities=None, noti
 
 
 @task("tavernManager", prepare=prepare_tavernManager)
-def do_tavernManager(session, run_hours, cities_ids=None, cities=None, notification_mode=2, check_now=True):
+def do_tavernManager(session, run_hours, cities_ids=None, cities=None, notification_mode=2, check_now=True, fixed_servings=None):
     """
     Parameters
     ----------
@@ -467,6 +552,9 @@ def do_tavernManager(session, run_hours, cities_ids=None, cities=None, notificat
     check_now : bool
         False when the configurator already ran the first check
     """
+    if fixed_servings is not None:
+        _run_fixed_servings(session, fixed_servings)
+        return
     mgr = TavernManager(session, notification_mode)
     def run_check():
         if cities is not None:

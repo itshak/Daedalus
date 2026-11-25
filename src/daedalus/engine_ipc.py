@@ -1012,6 +1012,14 @@ class ExistingIPCClient:
                 "satisfaction": satisfaction,
                 "population": population, "capacity": capacity,
             })
+            if "serving_options" in record:
+                from daedalus.tavern_choices import validate_serving_options
+
+                try:
+                    result[-1]["serving_options"] = validate_serving_options(
+                        record["serving_options"], servings, consumption)
+                except ValueError as exc:
+                    raise EngineIPCUnavailable("Invalid tavern serving choices") from exc
         return {"account_id": account.id, "taverns": result}
 
     def miracles(self, account: Account) -> dict[str, object]:
@@ -1137,6 +1145,28 @@ class ExistingIPCClient:
             return result
         except ValueError as exc:
             raise EngineIPCUnavailable("Invalid extension status") from exc
+
+    def world_reports(self, account: Account, report_id=None, offset=0) -> dict[str, object]:
+        from daedalus.world_reports import REPORT_ID, validate_world_page, validate_world_reports
+
+        if not account.enabled or (report_id is not None and (
+                not isinstance(report_id, str) or not REPORT_ID.fullmatch(report_id)
+                or type(offset) is not int or not 0 <= offset <= 10201)):
+            raise ValueError("Invalid map report scope")
+        payload = {"action": "world_reports_existing", "world": account.world, "player": account.player}
+        if report_id is not None:
+            payload.update(action="world_report_page_existing", report_id=report_id, offset=offset)
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid map report scope")
+        value = {**reply["result"], "account_id": account.id}
+        try:
+            return (validate_world_reports(value, account.id) if report_id is None else
+                    validate_world_page(value, account.id, report_id, offset))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid aggregate map report") from exc
 
     def administrative_status(self, account: Account) -> dict[str, object]:
         from daedalus.admin_status import scoped_admin_status

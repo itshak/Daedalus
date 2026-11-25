@@ -408,6 +408,22 @@ class TaskController:
             if set(clean) != {"study_choice"}:
                 raise ValueError("Study and experiments must be reviewed separately")
             clean["study_choice"] = validate_study_choice(clean["study_choice"])
+        if task == "tavernManager" and "fixed_servings" in clean:
+            from daedalus.tavern_choices import validate_fixed_tavern
+
+            if set(clean) != {"run_hours", "fixed_servings"} or type(clean["run_hours"]) is not int or clean["run_hours"] != 0:
+                raise ValueError("Fixed tavern servings must be a separate one-time operation")
+            validate_fixed_tavern(clean["fixed_servings"])
+        if task == "searchForIslandSpaces":
+            # Managed clients select reviewed coordinates, never arbitrary island IDs.
+            islands = clean.get("islandList", [])
+            if (not isinstance(islands, list) or len(islands) > 100
+                    or any(not isinstance(x, str) or not re.fullmatch(
+                        r"(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)", x) for x in islands)
+                    or len(set(islands)) != len(islands)):
+                raise ValueError("Choose verified island coordinates")
+        if task == "dumpWorld" and "managed_report_id" in clean:
+            raise ValueError("Map report identity is server-owned")
         is_fixed = False
         if task == "sendResources" and self._recovery_store is not None:
             from daedalus.recovery_reconcile import canonical_fixed_transfer

@@ -17,3 +17,8 @@ Settings can check the fixed public Daedalus GitHub release catalog for a publis
 ### Human challenge handling
 
 Managed piracy stops at a game challenge. Set the selected account's policy to stop (default) or notify-and-stop in Settings. The latter requires a configured supported notification destination and sends one fixed notice without challenge contents. Complete the challenge manually before starting a new reviewed task. Legacy automated solver configuration is not available through either remote client.
+
+
+## Aggregate world map reports
+
+Run a managed world scan from Automations. For completed scans, select the appropriate account in desktop Settings → Aggregate world map reports or web Activity → Aggregate world map reports. Refresh the report inventory, choose a completed report, and export the validated CSV. The data contains only numeric island observations, not upstream raw world-dump files or player/alliance names. A detailed scan also reports luxury-resource level; a shallow scan leaves it blank. Reports are kept privately per worker identity, with a maximum of twenty completed reports; host-local reconciliation is required to free a full report store. Legacy raw dump files and name-based searches remain local.

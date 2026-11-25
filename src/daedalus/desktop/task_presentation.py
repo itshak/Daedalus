@@ -33,7 +33,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "modifyTempleWorkers": "Set priests in selected owned cities with verified temples.",
     "donate": "Make one reviewed wood donation to an owned city’s island project.",
     "donationBot": "Coordinate supported island donations across configured cities.",
-    "dumpWorld": "Export an allowed portion of the world map.",
+    "dumpWorld": "Scan a reviewed map area. Completed aggregate CSV reports are available in Settings.",
     "loginDaily": "Perform the supported daily collection routine.",
     "research": "Choose an available study or run verified academy experiments.",
     "testTelegramBot": "Send one fixed test message to the configured Telegram bot and chat. Credentials are shared by the login; no credentials are shown.",
@@ -248,6 +248,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("research", "automatic"): {"type": "hidden_derived"},
     ("research", "cities"): {"type": "hidden_derived"},
     ("research", "info"): {"type": "hidden_derived"},
+    ("tavernManager", "fixed_servings"): {"type": "hidden_derived"},
     ("tavernManager", "cities"): {"type": "hidden_derived"},
     ("activateMiracle", "wonder"): {
         "type": "miracle_temple", "label": "Actual owned wonder temple",
@@ -268,7 +269,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("activateShrine", "wait_time"): {"type": "hidden_derived"},
     ("searchForIslandSpaces", "islandList"): {
         "type": "island_list", "label": "Islands to monitor",
-        "help": "Optionally select islands already hosting your cities; otherwise IkaBot searches all owned islands.",
+        "help": "Choose verified owned or external islands, or explicitly monitor all owned islands.",
     },
     ("searchForIslandSpaces", "time"): {
         "type": "integer", "minimum": 3, "maximum": 1440,
@@ -289,6 +290,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "minimum": 0.1, "maximum": 60.0, "suffix": " s",
         "help": "Avoid aggressive world requests. Default is 1.5 seconds.",
     },
+    ("dumpWorld", "managed_report_id"): {"type": "hidden_derived"},
     ("dumpWorld", "show_progress"): {"type": "hidden_derived"},
     ("autoPirate", "pirateCount"): {
         "type": "piracy_missions", "label": "Piracy mission planner",
@@ -345,7 +347,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Leave all unchecked to use every city. Choose at least two for a custom subset.",
     },
     ("tavernManager", "cities_ids"): {
-        "type": "tavern_cities", "label": "Tavern equilibrium",
+        "type": "tavern_cities", "label": "Tavern management",
         "help": "Use actual wine, population and tavern statuses to choose managed cities.",
     },
     ("tavernManager", "run_hours"): {"type": "hidden_derived"},

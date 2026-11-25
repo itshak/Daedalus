@@ -53,6 +53,38 @@ export function scopedStudyChoices(value:unknown):StudyChoice[]|null{
     throw new Error("Invalid research advisor inventory");
   return value;
 }
+export type FixedTavernRow={city_id:number;city_name:string;current_level:number;max_level:number;target_level:number;current_wine:number;target_wine:number};
+export type FixedTavernReview={percentage:number;rows:FixedTavernRow[]};
+export function validFixedTavern(v:unknown):v is FixedTavernReview{
+  if(!obj(v)||!exact(v,["percentage","rows"])||!integer(v.percentage,0,100)||!Array.isArray(v.rows)||v.rows.length<1||v.rows.length>100)return false;
+  const percentage=v.percentage;
+  const ids=new Set<number>();
+  return v.rows.every(r=>{
+    if(!obj(r)||!exact(r,["city_id","city_name","current_level","max_level","target_level","current_wine","target_wine"])
+      ||!city(r.city_id)||ids.has(r.city_id)||!boundedText(r.city_name)||Array.from(r.city_name).some(c=>c.charCodeAt(0)<32||c==="<"||c===">")
+      ||!integer(r.max_level,0,150)||!integer(r.current_level,0,r.max_level)||!integer(r.target_level,0,r.max_level)
+      ||r.target_level!==Math.floor(r.max_level*percentage/100)||!integer(r.current_wine,0,1e9)||!integer(r.target_wine,0,1e9))return false;
+    ids.add(r.city_id);return true;
+  });
+}
+export function fixedTavernReview(rows:unknown[],percentage:number):FixedTavernReview|null{
+  if(!integer(percentage,0,100))return null;
+  const result:unknown[]=[];
+  for(const r of rows){
+    if(!obj(r)||r.has_tavern!==true||!Array.isArray(r.serving_options)||r.serving_options.length<1||r.serving_options.length>151)return null;
+    const levels=new Map<number,number>();
+    for(const pair of r.serving_options){
+      if(!Array.isArray(pair)||pair.length!==2||!integer(pair[0],0,150)||!integer(pair[1],0,1e9)||levels.has(pair[0]))return null;
+      levels.set(pair[0],pair[1]);
+    }
+    if(!integer(r.serving_level,0,150)||!integer(r.wine_per_hour,0,1e9)||levels.get(r.serving_level)!==r.wine_per_hour)return null;
+    const max=Math.max(...levels.keys()),target=Math.floor(max*percentage/100);
+    if(!levels.has(target))return null;
+    result.push({city_id:r.city_id,city_name:r.city_name,current_level:r.serving_level,max_level:max,target_level:target,current_wine:r.wine_per_hour,target_wine:levels.get(target)});
+  }
+  const draft={percentage,rows:result};
+  return validFixedTavern(draft)?draft:null;
+}
 export function isNativeTask(task: unknown): task is NativeTask {
   return typeof task === "string" && (NATIVE_TASKS as readonly string[]).includes(task);
 }
@@ -92,6 +124,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
       return exact(c,["cities_ids","qty"]) && ids(c.cities_ids,1)
         && (c.qty===null || (c.cities_ids.length===1&&integer(c.qty,1,10000)));
     case "tavernManager":
+      if(exact(c,["run_hours","fixed_servings"]))return c.run_hours===0&&validFixedTavern(c.fixed_servings);
       return exact(c,["cities_ids","run_hours","notification_mode"])
         && (c.cities_ids===null||ids(c.cities_ids,1)) && integer(c.run_hours,0,24)
         && integer(c.notification_mode,1,3);
@@ -125,7 +158,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
     case "searchForIslandSpaces":
       return exact(c,["time","islandList","fights"])&&integer(c.time,3,1440)
         && Array.isArray(c.islandList)&&c.islandList.length<=100&&new Set(c.islandList).size===c.islandList.length
-        && c.islandList.every(x=>typeof x==="string"&&/^\d{1,3}:\d{1,3}$/.test(x))
+        && c.islandList.every(x=>typeof x==="string"&&/^(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)$/.test(x))
         && (c.fights==="y"||c.fights==="n");
     case "dumpWorld":
       return exact(c,["waiting_time","coords","radius","shallow","non_empty_islands"])

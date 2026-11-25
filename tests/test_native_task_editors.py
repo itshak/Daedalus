@@ -1024,3 +1024,49 @@ def test_study_uses_named_verified_choice_and_resets_on_refresh(app):
     finally:
         editor.close()
         editor.deleteLater()
+
+
+def test_fixed_tavern_editor_requires_observed_serving_choices(app):
+    editor = TavernCitiesEditor()
+    try:
+        row = {**TAVERNS[0], "serving_level": 1, "wine_per_hour": 5,
+               "serving_options": [[0, 0], [1, 5], [2, 12], [3, 20], [4, 30]]}
+        editor.set_taverns([row])
+        editor.mode.setCurrentIndex(1)
+        editor.percentage.setValue(75)
+        config = editor.to_config()
+        assert config["run_hours"] == 0
+        assert config["fixed_servings"]["rows"][0]["target_wine"] == 20
+        editor.set_taverns([TAVERNS[0]])
+        with pytest.raises(ValueError, match="Serving choices unavailable"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()
+
+
+def test_external_island_monitor_requires_matching_verified_response(page):
+    set_native(page, "searchForIslandSpaces", [
+        field("time", "integer", required=True),
+        field("islandList"), field("fights", "text", default="n"),
+    ])
+    editor = page._form_inputs["islandList"]
+    requests = []
+    page.island_destinations_requested.connect(lambda *args: requests.append(args))
+    editor.x.setValue(60)
+    editor.y.setValue(70)
+    editor._lookup()
+    account, x, y, nonce = requests[-1]
+    assert (account, x, y) == ("alpha", 60, 70)
+    with pytest.raises(ValueError, match="Finish island verification"):
+        editor.to_config()
+    page.set_island_destinations({"account_id": "beta", "x": 60, "y": 70, "cities": []}, nonce)
+    assert editor.count() == 2
+    page.set_island_destinations({"account_id": "alpha", "x": 60, "y": 70, "cities": []}, nonce)
+    assert editor.to_config() == ["60:70"]
+    editor._lookup()
+    page.set_island_destinations_unavailable("alpha", requests[-1][3])
+    with pytest.raises(ValueError, match="Select at least one"):
+        editor.to_config()
+    editor.all_owned.setChecked(True)
+    assert editor.to_config() == []

@@ -1216,6 +1216,35 @@ def create_app(
         except (ValueError, EngineIPCUnavailable):
             raise HTTPException(status_code=503, detail="Administrative status unavailable") from None
 
+    def scoped_world_reports(account_id, report_id=None, offset=0):
+        from daedalus.world_reports import validate_world_page, validate_world_reports
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Aggregate map report unavailable")
+        try:
+            value = ipc_client.world_reports(account, report_id, offset)
+            return (validate_world_reports(value, account_id) if report_id is None else
+                    validate_world_page(value, account_id, report_id, offset))
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Aggregate map report unavailable") from None
+
+    @app.get("/api/v1/accounts/{account_id}/world-reports", dependencies=[Depends(authorized)])
+    def list_world_reports(account_id: str):
+        return scoped_world_reports(account_id)
+
+    @app.get("/api/v1/accounts/{account_id}/world-reports/{report_id}", dependencies=[Depends(authorized)])
+    def read_world_report(account_id: str, report_id: str, offset: int = 0):
+        from daedalus.world_reports import REPORT_ID
+
+        if not REPORT_ID.fullmatch(report_id) or not 0 <= offset <= 10201:
+            raise HTTPException(status_code=422, detail="Invalid map report request")
+        return scoped_world_reports(account_id, report_id, offset)
+
     def human_challenge_policy(account_id, draft=None):
         from daedalus.challenge_policy import validate_challenge_policy
 

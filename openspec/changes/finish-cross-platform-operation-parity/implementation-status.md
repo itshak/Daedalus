@@ -80,3 +80,14 @@ Verification: four dedicated policy, worker halt and authenticated controller te
 Both native Research editors now distinguish existing experiments from named available advisor studies. The existing authenticated academy inventory optionally includes a bounded projection of the upstream advisor view; it exposes neither arbitrary AJAX requests nor HTML. The controller validates exact study configuration, the worker rechecks the current choice before start and before submission, and the existing upstream study action is submitted without transport-layer retry. No alternate study or experiment is inferred from a stale choice. Receipts record dispatch, not game-side research success. Real advisor responses remain subject to owner-operated acceptance. Existing experiment stock and cooldown behavior is retained.
 
 Focused Python/Qt/engine study and experiment tests: 14 passed; web tests: 58 passed. Proxy deferral is independently tracked in issue #98.
+
+
+## Fixed tavern servings, external-island monitoring and managed map reports
+
+Both clients now expose the upstream tavern set-percentage action alongside equilibrium mode. Exact game-projected serving choices determine each selected city's current/target serving and wine consumption. The worker revalidates every reviewed row before dispatch, rechecks the current row before each non-retried submission, observes the resulting level and stops on ambiguity. One-time updates are not restored.
+
+Island monitoring now selects verified external islands using the existing account-scoped lookup, including islands with no eligible external city. Both clients preserve explicit all-owned scope and invalidate failed or stale external selections. The controller accepts bounded coordinates rather than arbitrary island IDs; the existing engine resolves and verifies the actual coordinates again before launch.
+
+Managed map scans now write only private account-bound aggregate reports, using server-owned report IDs and atomic owner-only files. They no longer write raw identifying world dumps or send filesystem paths to notification providers. Desktop Settings and web Activity list completed reports and export validated complete CSV pages, containing only coordinates, island ID, resource/wonder types, wood/luxury levels and occupied slots. Existing host-local legacy dumps and player/alliance searches remain outside this remote projection; the original local CLI behavior is preserved. A zero-radius regional scan selects only the stated center instead of the entire world. Storage is bounded at twenty completed reports per identity; a full store requires host-local reconciliation rather than deleting evidence automatically.
+
+Focused tavern/island checks: 34 passed. Dedicated map export, engine dump and desktop registry tests: 17 passed, plus zero-radius regression passed. Web tests: 61 passed. TypeScript and Ruff passed. No live game actions or actual user report exports performed.

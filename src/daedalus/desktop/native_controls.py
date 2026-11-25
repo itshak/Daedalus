@@ -64,6 +64,153 @@ def _city_picker(cities: list[dict[str, object]], label: str) -> ComboBox:
     return picker
 
 
+class IslandMonitorEditor(QWidget):
+    """Owned islands plus a bounded account-scoped external coordinate lookup."""
+
+    changed = Signal()
+    lookup_requested = Signal(int, int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.all_owned = CheckBox("Monitor all owned islands")
+        self.all_owned.setChecked(True)
+        self.all_owned.stateChanged.connect(self.changed.emit)
+        layout.addWidget(self.all_owned)
+        self.list = QListWidget()
+        self.list.setAccessibleName("Select verified islands to monitor")
+        self.list.setMinimumHeight(110)
+        self.list.setMaximumHeight(150)
+        self.list.itemChanged.connect(self._changed)
+        layout.addWidget(self.list)
+        controls = QHBoxLayout()
+        self.x, self.y = _amount(label="Island X coordinate"), _amount(label="Island Y coordinate")
+        for label, field in (("X", self.x), ("Y", self.y)):
+            field.setRange(1, 100)
+            field.setValue(50)
+            controls.addWidget(QLabel(label))
+            controls.addWidget(field)
+        self.lookup = PushButton("Verify and add island")
+        self.lookup.clicked.connect(self._lookup)
+        controls.addWidget(self.lookup)
+        self.clear_external = PushButton("Clear external islands")
+        self.clear_external.clicked.connect(self._clear_external)
+        layout.addWidget(self.clear_external)
+        layout.addLayout(controls)
+        self.note = QLabel("Select specific islands or explicitly monitor all owned islands.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self._owned = set()
+        self._external = set()
+        self._pending = None
+
+    def count(self):
+        return self.list.count()
+
+    def item(self, index):
+        return self.list.item(index)
+
+    def _changed(self, item):
+        if item.checkState() == Qt.Checked:
+            self.all_owned.setChecked(False)
+        self.changed.emit()
+
+    def _add(self, coords, label, checked=False):
+        row = QListWidgetItem(label)
+        row.setData(Qt.UserRole, coords)
+        row.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+        row.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.list.addItem(row)
+
+    def set_cities(self, cities):
+        import re
+
+        self._pending = None
+        self.lookup.setEnabled(True)
+        self._owned.clear()
+        self._external.clear()
+        with QSignalBlocker(self.list):
+            self.list.clear()
+            for city in cities:
+                coords = str(city.get("coords") or "")
+                if (not re.fullmatch(r"(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)", coords)
+                        or coords in self._owned):
+                    continue
+                self._owned.add(coords)
+                self._add(coords, f"{coords} · {city['name']}")
+        self.all_owned.setChecked(True)
+        self.changed.emit()
+
+    def _clear_external(self):
+        self._pending = None
+        self.lookup.setEnabled(True)
+        for i in reversed(range(self.count())):
+            if self.item(i).data(Qt.UserRole) in self._external:
+                self.list.takeItem(i)
+        self._external.clear()
+        self.note.setText("External island selections cleared.")
+        self.changed.emit()
+
+    def _lookup(self):
+        x, y = self.x.value(), self.y.value()
+        coords = f"{x}:{y}"
+        if coords in self._owned:
+            for i in range(self.count()):
+                row = self.item(i)
+                if row.data(Qt.UserRole) == coords:
+                    row.setCheckState(Qt.Checked)
+                    return
+        if len(self._external) >= 10 and coords not in self._external:
+            self.note.setText("Clear external islands before adding more than ten.")
+            return
+        # A failed refresh must not leave a previously verified selection usable.
+        self._external.discard(coords)
+        for i in range(self.count()):
+            if self.item(i).data(Qt.UserRole) == coords:
+                self.list.takeItem(i)
+                break
+        nonce = uuid.uuid4().hex
+        self._pending = (nonce, x, y)
+        self.all_owned.setChecked(False)
+        self.lookup.setEnabled(False)
+        self.note.setText("Verifying island coordinates…")
+        self.changed.emit()
+        self.lookup_requested.emit(x, y, nonce)
+
+    def set_external(self, result, nonce):
+        if self._pending != (nonce, result.get("x"), result.get("y")):
+            return
+        self._pending = None
+        self.lookup.setEnabled(True)
+        coords = f"{result['x']}:{result['y']}"
+        self._external.add(coords)
+        self._add(coords, f"{coords} · Verified external island", True)
+        self.all_owned.setChecked(False)
+        self.note.setText("Verified island added. Review the selected monitoring scope.")
+        self.changed.emit()
+
+    def lookup_failed(self, nonce):
+        if self._pending is not None and self._pending[0] == nonce:
+            self._pending = None
+            self.lookup.setEnabled(True)
+            self.note.setText("Island unavailable. No unverified coordinates were added.")
+            self.changed.emit()
+
+    def to_config(self):
+        if self._pending is not None:
+            raise ValueError("Finish island verification before review")
+        if self.all_owned.isChecked():
+            if not self._owned:
+                raise ValueError("Load actual owned islands before using all-owned scope")
+            return []
+        selected = [self.item(i).data(Qt.UserRole) for i in range(self.count())
+                    if self.item(i).checkState() == Qt.Checked]
+        if not selected:
+            raise ValueError("Select at least one verified island or all owned islands")
+        return selected
+
+
 class ResourceLimitsEditor(QWidget):
     """The five IkaBot consolidateResources limits; -1 means keep *all*."""
 
@@ -1269,6 +1416,16 @@ class TavernCitiesEditor(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.mode = ComboBox()
+        self.mode.addItems(["Equilibrium (optimize consumption)", "Set fixed serving percentage once"])
+        self.mode.setAccessibleName("Tavern operation")
+        layout.addWidget(self.mode)
+        self.percentage = _amount(label="Percentage of available maximum serving")
+        self.percentage.setRange(0, 100)
+        self.percentage.setValue(100)
+        self.percentage.setSuffix("%")
+        layout.addWidget(self.percentage)
+        self.percentage.valueChanged.connect(self.changed.emit)
         self.all_cities = CheckBox("Manage all cities with taverns")
         self.all_cities.setChecked(True)
         self.all_cities.stateChanged.connect(self._scope_changed)
@@ -1304,6 +1461,15 @@ class TavernCitiesEditor(QWidget):
         self.description.setWordWrap(True)
         layout.addWidget(self.description)
         self._taverns: list[dict[str, object]] | None = None
+        self.mode.currentIndexChanged.connect(self._mode_changed)
+        self._mode_changed()
+
+    def _mode_changed(self, *_args):
+        fixed = self.mode.currentIndex() == 1
+        self.percentage.setVisible(fixed)
+        self.interval.setEnabled(not fixed)
+        self.notifications.setEnabled(not fixed)
+        self.changed.emit()
 
     def _scope_changed(self, *_args: object) -> None:
         self.table.setEnabled(not self.all_cities.isChecked())
@@ -1370,6 +1536,12 @@ class TavernCitiesEditor(QWidget):
             ]
             if not ids:
                 raise ValueError("Choose at least one city with a real tavern")
+        if self.mode.currentIndex() == 1:
+            from daedalus.tavern_choices import fixed_tavern_review
+
+            chosen = [row for row in self._taverns if row["has_tavern"]
+                      and (ids is None or str(row["city_id"]) in ids)]
+            return {"run_hours": 0, "fixed_servings": fixed_tavern_review(chosen, self.percentage.value())}
         return {
             "cities_ids": ids,
             "run_hours": self.interval.value(),

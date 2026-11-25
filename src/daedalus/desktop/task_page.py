@@ -51,6 +51,7 @@ from daedalus.desktop.native_controls import (
     BarbarianWavesEditor,
     DonationPoliciesEditor,
     ExternalDestinationEditor,
+    IslandMonitorEditor,
     MapAreaEditor,
     MarketOffersEditor,
     MiracleTempleEditor,
@@ -773,20 +774,20 @@ class TasksPage(QWidget):
 
     def _lookup_destinations(self, x, y, nonce):
         account = self.selected_account_id()
-        if account and self.selected_task_name() in {"sendResources","resourceTransportManager"}:
+        if account and self.selected_task_name() in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
             self.island_destinations_requested.emit(account, x, y, nonce)
 
     def set_island_destinations(self, result, nonce):
-        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() not in {"sendResources","resourceTransportManager"}:
+        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() not in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
             return
-        editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city")
-        if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor)):
+        editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city") or self._form_inputs.get("islandList")
+        if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor,IslandMonitorEditor)):
             editor.set_external(result, nonce)
 
     def set_island_destinations_unavailable(self, account, nonce):
-        if account == self.selected_account_id() and self.selected_task_name() in {"sendResources","resourceTransportManager"}:
-            editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city")
-            if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor)):
+        if account == self.selected_account_id() and self.selected_task_name() in {"sendResources","resourceTransportManager","searchForIslandSpaces"}:
+            editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city") or self._form_inputs.get("islandList")
+            if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor,IslandMonitorEditor)):
                 editor.lookup_failed(nonce)
 
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
@@ -829,7 +830,7 @@ class TasksPage(QWidget):
                     if self.selected_task_name() == "constructBuilding" and key == "city_id":
                         self._clear_build_options()
                 elif isinstance(input_widget, (
-                    ShipmentRoutesEditor, ExternalDestinationEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    ShipmentRoutesEditor, ExternalDestinationEditor, IslandMonitorEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
                     # Account-scoped read data are never portable between cities/worlds.
@@ -1710,7 +1711,7 @@ class TasksPage(QWidget):
                                                self._field_is_required(key))
                     self._invalidate_review()
                 elif isinstance(input_widget, (
-                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    ShipmentRoutesEditor, IslandMonitorEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
                     # Account-scoped read data are never portable between cities/worlds.
@@ -2297,12 +2298,10 @@ class TasksPage(QWidget):
                 widget.changed.connect(self._mark_form_dirty)
                 widget.city_requested.connect(self._workshop_city_requested)
             elif kind == "island_list":
-                widget = QListWidget(self)
-                widget.setProperty("island_scope", True)
-                widget.setMinimumHeight(110)
-                widget.setMaximumHeight(140)
-                self._populate_island_list(widget)
-                widget.itemChanged.connect(self._mark_form_dirty)
+                widget = IslandMonitorEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.lookup_requested.connect(self._lookup_destinations)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "city_list":
                 widget = QListWidget(self)
                 widget.setProperty("city_scope", True)
@@ -2585,6 +2584,9 @@ class TasksPage(QWidget):
                 config.update(widget.to_config())
                 continue
             if isinstance(widget, BarbarianWavesEditor):
+                config[key] = widget.to_config()
+                continue
+            if isinstance(widget, IslandMonitorEditor):
                 config[key] = widget.to_config()
                 continue
             if isinstance(widget, ResourceLimitsEditor):
@@ -2904,13 +2906,21 @@ class TasksPage(QWidget):
                       + ("freighters" if config.get("useFreighters") else "trade ships")
                       + f"; notifications: {config.get('notify','none')}"
                       + ("\nExternal shipments require manual recovery." if "recipient" in config else ""))
+        if task == "searchForIslandSpaces":
+            params = ("All owned islands" if not config.get("islandList") else ", ".join(config["islandList"]))
+            params += f"\nCheck every {config['time']} minutes; fights: {config.get('fights', 'n')}"
+        if task == "tavernManager" and "fixed_servings" in config:
+            draft = config["fixed_servings"]
+            params = f"Set {draft['percentage']}% of maximum serving once.\n" + "\n".join(
+                f"{r['city_name']}: level {r['current_level']} → {r['target_level']}; "
+                f"wine/hour {r['current_wine']} → {r['target_wine']}" for r in draft["rows"])
         if task in {"testTelegramBot", "testDiscordBot"}:
             params = "Send one fixed test message to the existing configured provider. Check task Activity for acceptance."
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList'} | WORKER_TASKS else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces'} | WORKER_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

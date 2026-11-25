@@ -860,6 +860,18 @@ class IPCServer:
                                 "username": session.username, "result": result}
                     except Exception:
                         return {"status": "error", "error": "Human challenge policy unavailable"}
+                if action in {"world_reports_existing", "world_report_page_existing"}:
+                    try:
+                        from ikabot.helpers import nativeWorldReports
+
+                        session = self._existing_session(request)
+                        result = ({"reports": nativeWorldReports.list_reports(session)}
+                                  if action == "world_reports_existing" else
+                                  nativeWorldReports.read_report(session, request.get("report_id"), request.get("offset")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Aggregate world reports unavailable"}
                 if action == "administrative_status_existing":
                     from ikabot.helpers.nativeAdminStatus import administrative_status
 
@@ -1260,7 +1272,7 @@ class IPCServer:
     def _list_taverns_existing(self, request):
         """Read-only city wine, tavern servings and population state."""
         from ikabot.config import city_url
-        from ikabot.function.tavernManager import TavernManager
+        from ikabot.function.tavernManager import TavernManager, native_serving_options
         from ikabot.helpers.getJson import getCity
         from ikabot.helpers.pedirInfo import getIdsOfCities
 
@@ -1301,6 +1313,7 @@ class IPCServer:
                 "city_id": city_id, "city_name": str(city.get("name") or "")[:100],
                 "wine": stock[1], "has_tavern": tavern is not None,
                 "serving_level": current, "wine_per_hour": wine_hour,
+                "serving_options": native_serving_options(info),
                 "satisfaction": (
                     hall.get("total_satisfaction") if isinstance(hall, dict) else None
                 ),
@@ -1902,12 +1915,28 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research", "tavernManager", "searchForIslandSpaces",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise
             if prepared is not None:
                 clean_config = _validate_task_config(canonical_name, task_func, prepared)
+
+        task_id = secrets.token_hex(12) if existing_only else None
+        if existing_only and canonical_name == "dumpWorld":
+            from ikabot.helpers.nativeWorldReports import ensure_capacity
+
+            if "managed_report_id" in config_dict or any(
+                    entry["world"].casefold() == fingerprint[0]
+                    and entry["player"].casefold() == fingerprint[1]
+                    and entry["task"] == canonical_name and entry["process"].is_alive()
+                    for entry in self._daedalus_tasks.values()):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            try:
+                ensure_capacity(session)
+            except (OSError, ValueError):
+                return {"status": "rejected", "reason": "invalid_configuration"}
+            clean_config["managed_report_id"] = task_id
 
         started = multiprocessing.Event()
         proc = multiprocessing.Process(
@@ -1949,7 +1978,6 @@ class IPCServer:
             "username": session.username, "host_pid": os.getpid(),
         }
         if existing_only:
-            task_id = secrets.token_hex(12)
             self._daedalus_tasks[task_id] = {
                 "process": proc, "pid": proc.pid, "task": canonical_name,
                 "world": response["world"], "player": session.username,

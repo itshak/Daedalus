@@ -16,6 +16,8 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     if (parts.join("/") === "release-status") return params.size===0;
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
+    if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "world-reports") return params.size===0;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "world-reports" && /^[a-f0-9]{24}$/.test(parts[3])) return params.size===1 && /^(?:0|[1-9][0-9]{0,4})$/.test(params.get("offset")??"") && Number(params.get("offset"))<=10201;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "administrative-status") return params.size===0;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "activity")
       return [...params.keys()].every(k=>["before","limit","status"].includes(k)&&params.getAll(k).length===1)
