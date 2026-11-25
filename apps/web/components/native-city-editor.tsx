@@ -1,6 +1,6 @@
 "use client";
 import {QueueReviewButton} from "./reviewed-batch-queue";
-import {parseRewardDistributionReview} from "../lib/reward-distribution-review";
+import {parseRewardDistributionReview,reviewRoute} from "../lib/reward-distribution-review";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {MAX_AMOUNT,MATERIALS,type City,type CityTask,scopedCities,readyPreflight,validNativeConfig} from "@/lib/native-task-contract";
@@ -90,13 +90,12 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     invalidate();setMessage("");
-    if(task==="UpgradeUnits"){setReview({config,summary});return;}
     inFlight.current=true;setBusy(true);
     try{
       const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
-      const market=data.market!;
-      const details=market.rows.map(r=>r.city+" "+r.player+": "+r.amount.toLocaleString()+" × "+r.unit_price.toLocaleString()+" "+t("Gold")).join("\n");
-      if(mounted.current)setReview({config,previewId:data.preview_id,ttl:data.expires_in,summary:summary+"\n"+details+"\n"+t("Quoted gold total")+": "+market.gold_total.toLocaleString()+(market.gold_available===null?"":"\n"+t("Observed available gold")+": "+market.gold_available.toLocaleString())+"\n"+t("Quoted allocation, not a completion receipt. Changed quotes halt execution.")});
+      const market=data.market;
+      const details=market?market.rows.map(r=>r.city+" "+r.player+": "+r.amount.toLocaleString()+" × "+r.unit_price.toLocaleString()+" "+t("Gold")).join("\n")+"\n"+t("Quoted gold total")+": "+market.gold_total.toLocaleString()+(market.gold_available===null?"":"\n"+t("Observed available gold")+": "+market.gold_available.toLocaleString())+"\n"+t("Quoted allocation, not a completion receipt. Changed quotes halt execution."):data.policySummary+"\n"+t("Observed current state; future eligibility and costs may change.");
+      if(mounted.current)setReview({config,previewId:data.preview_id,ttl:data.expires_in,summary:summary+"\n"+details});
     }catch{if(mounted.current)setMessage("Operation preview unavailable; refresh before retrying.");}
     finally{inFlight.current=false;if(mounted.current)setBusy(false);}
   };
@@ -111,7 +110,7 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
       const p=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(p,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const receipt=(review.previewId?await api(prefix+"/tasks/"+(task==="buyResources"?"buy-start":"sell-start"),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()})) as {status?:string};
+      const receipt=(review.previewId?await api(prefix+"/tasks/"+reviewRoute(task),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()})) as {status?:string};
       if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
     }catch{if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
     finally{inFlight.current=false;if(mounted.current)setBusy(false);}

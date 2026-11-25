@@ -4,9 +4,15 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
+from daedalus.native_policy_review import POLICY_TASKS
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 REVIEW_ENDPOINTS = {
+    "research": "research-start",
+    "tavernManager": "tavern-start",
+    "activateMiracle": "miracle-start",
+    "activateShrine": "shrine-start",
+    "UpgradeUnits": "workshop-start",
     "distributeResources": "distribution-start",
     "loginDaily": "daily-start",
     "buyResources": "buy-start",
@@ -26,7 +32,8 @@ REVIEW_ENDPOINTS = {
     "vacationMode": "vacation-start",
 }
 BATCH_REVIEW_TASKS = frozenset(REVIEW_ENDPOINTS)
-assert BATCH_REVIEW_TASKS == CITY_REVIEW_TASKS | {"constructionList", "sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
+ADDITIONAL_REVIEW_TASKS = POLICY_TASKS | {"constructionList", "sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
+assert BATCH_REVIEW_TASKS == CITY_REVIEW_TASKS | ADDITIONAL_REVIEW_TASKS
 MAX_REVIEW_BATCH = 32
 PREVIEW_ID_PATTERN = r"[A-Za-z0-9_-]{43}"
 

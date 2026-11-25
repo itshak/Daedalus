@@ -95,8 +95,12 @@ def validate_ticket(value, account, task, draft):
         validate_distribution(draft, value["observation"])
         if value["observation"]["ready"] is not True:
             raise ValueError("No usable fleet")
-    else:
+    elif task in {"buyResources", "sellResources"}:
         from daedalus.market_review import validate_market_observation
 
         validate_market_observation(task, draft, value["observation"])
+    else:
+        from daedalus.native_policy_review import validate_policy_observation
+
+        validate_policy_observation(task, draft, value["observation"])
     return value

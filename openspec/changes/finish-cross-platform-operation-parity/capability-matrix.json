@@ -4,20 +4,24 @@
     "activateMiracle": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
     "activateShrine": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -332,10 +336,12 @@
     "research": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -422,10 +428,12 @@
     "tavernManager": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -497,10 +505,12 @@
     "UpgradeUnits": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },

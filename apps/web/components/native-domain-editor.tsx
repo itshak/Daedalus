@@ -1,6 +1,6 @@
 "use client";
 import {QueueReviewButton} from "./reviewed-batch-queue";
-import {parseRewardDistributionReview} from "../lib/reward-distribution-review";
+import {parseRewardDistributionReview,policyTask,reviewRoute} from "../lib/reward-distribution-review";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {MAX_AMOUNT, type City, type DomainTask, scopedCities, readyPreflight,validNativeConfig,scopedStudyChoices,type StudyChoice,fixedTavernReview,scopedExternalCities} from "@/lib/native-task-contract";
@@ -174,12 +174,12 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     change();
-    if(task!=="loginDaily"){setReview({config,summary});return;}
+    if(task!=="loginDaily"&&!policyTask(task)){setReview({config,summary});return;}
     inFlight.current=true;setBusy(true);setMessage("");
     try{
       const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
-      const d=data.daily!;
-      if(mounted.current)setReview({config,previewId:data.preview_id,ttl:data.expires_in,summary:summary+"\n"+t("Observed favour")+": "+d.favour+"/"+d.limit+"; "+t("Collectable tasks")+": "+d.collectable+"; "+t("Reset in seconds")+": "+d.reset_seconds+"\n"+t("Recurring policy; eligibility and reward quantities can change. No reward collected by preview.")});
+      const d=data.daily;
+      if(mounted.current)setReview({config,previewId:data.preview_id,ttl:data.expires_in,summary:summary+"\n"+(d?t("Observed favour")+": "+d.favour+"/"+d.limit+"; "+t("Collectable tasks")+": "+d.collectable+"; "+t("Reset in seconds")+": "+d.reset_seconds+"\n"+t("Recurring policy; eligibility and reward quantities can change. No reward collected by preview."):data.policySummary+"\n"+t("Observed current state; future eligibility and costs may change."))});
     }catch{if(mounted.current)setMessage("Operation preview unavailable; refresh before retrying.");}
     finally{inFlight.current=false;if(mounted.current)setBusy(false);}
   };
@@ -195,7 +195,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
       const p=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(p,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const result=(task==="loginDaily"&&review.previewId?await api(prefix+"/tasks/daily-start",{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()})) as {status?:string};
+      const result=(review.previewId?await api(prefix+"/tasks/"+reviewRoute(task),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()})) as {status?:string};
       if(mounted.current)setMessage(result.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
     }catch{if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
     finally{inFlight.current=false;if(mounted.current)setBusy(false);}
@@ -215,7 +215,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
     <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t("Review settings")}</button>
-    {review&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p style={{whiteSpace:"pre-line"}}>{review.summary}</p><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={!canReview||!approved} onClick={()=>void launch()}>{t("Start automation")}</button>{task==="loginDaily"&&review.previewId&&<QueueReviewButton key={review.previewId} account={account} accountName={accountName} task={task} previewId={review.previewId} ttl={review.ttl??null} summary={review.summary} disabled={!canReview||!approved} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
+    {review&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p style={{whiteSpace:"pre-line"}}>{review.summary}</p><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={!canReview||!approved} onClick={()=>void launch()}>{t("Start automation")}</button>{review.previewId&&<QueueReviewButton key={review.previewId} account={account} accountName={accountName} task={task} previewId={review.previewId} ttl={review.ttl??null} summary={review.summary} disabled={!canReview||!approved} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;
 }

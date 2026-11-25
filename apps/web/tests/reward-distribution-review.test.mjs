@@ -28,3 +28,18 @@ test("market preview checks exact offer allocation and quoted gold",()=>{
  assert.equal(parseRewardDistributionReview(result,"alpha","buyResources",draft).market.gold_total,3500);
  assert.throws(()=>parseRewardDistributionReview({...result,observation:{...observation,gold_total:1}},"alpha","buyResources",draft));
 });
+
+test("account policy reviews verify academy and workshop scope",()=>{
+ const draft={cities_ids:[101],qty:2};
+ const observation={academies:[{city_id:101,city_name:"Athens",crystal:300000,cooldown:false,can_experiment_now:true}]};
+ const result={account_id:"alpha",task:"research",draft,observation,preview_id:"a".repeat(43),expires_in:120};
+ assert.equal(validRewardDistributionRequest({task:"research",draft}),true);
+ assert.match(parseRewardDistributionReview(result,"alpha","research",draft).policySummary,/Athens/);
+ assert.throws(()=>parseRewardDistributionReview({...result,observation:{academies:[{...observation.academies[0],city_id:102}]}},"alpha","research",draft));
+ const job={jobs:[{city_id:101,upgrades:[{unitId:"301",upgradeType:"offensive",target:3}]}]};
+ const upgrades={city_id:101,upgrades:[{unit_id:"301",name:"Unit",upgrade_type:"offensive",description:"Attack",current_level:1,max_level:4,target:3}]};
+ const plan={...result,task:"UpgradeUnits",draft:job,observation:upgrades};
+ assert.match(parseRewardDistributionReview(plan,"alpha","UpgradeUnits",job).policySummary,/level 1 → 3/);
+ assert.throws(()=>parseRewardDistributionReview({...plan,observation:{...upgrades,upgrades:[{...upgrades.upgrades[0],current_level:3}]}},"alpha","UpgradeUnits",job));
+ assert.equal(validReviewBatch({entries:[{account_id:"alpha",task:"research",preview_id:"a".repeat(43)},{account_id:"beta",task:"UpgradeUnits",preview_id:"b".repeat(43)}]}),true);
+});

@@ -72,11 +72,12 @@ from daedalus.desktop.task_presentation import (
     present_fields,
     task_explanation,
 )
+from daedalus.native_policy_review import POLICY_TASKS
 from daedalus.reviewed_batch import BATCH_REVIEW_TASKS, validated_batch_entries
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS as ENGINE_REVIEW_TASKS
 from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
 
-CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | {"sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
+CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | POLICY_TASKS | {"sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
 
 # Fixed, reviewed display labels. Unknown built-ins get a readable fallback,
 # but dispatch always uses the engine's canonical original task name.
@@ -1012,7 +1013,7 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
-        elif task in {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
+        elif task in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
             self.building_note.setText("Reading actual operation data…")
             self.reward_distribution_preview_requested.emit(account, task, draft, self._city_review_nonce)
         elif task == "sendResources":
@@ -1050,16 +1051,18 @@ class TasksPage(QWidget):
             validate_ticket,
         )
         from daedalus.market_review import market_draft
+        from daedalus.native_policy_review import policy_draft, policy_summary
 
         task = self.selected_task_name()
         account = self.selected_account_id()
-        if (task not in {"loginDaily", "distributeResources", "buyResources", "sellResources"} or nonce != self._city_review_nonce
+        if (task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"} or nonce != self._city_review_nonce
                 or result.get("account_id") != account):
             return
         try:
             original = self._form_config()
             clean = (daily_draft(original) if task == "loginDaily" else distribution_draft(original)
-                     if task == "distributeResources" else market_draft(task, original))
+                     if task == "distributeResources" else policy_draft(task, original) if task in POLICY_TASKS
+                     else market_draft(task, original))
             validate_ticket(result, account, task, clean)
         except (ValueError, TypeError, KeyError):
             self.set_reward_distribution_unavailable(nonce)
@@ -1078,6 +1081,9 @@ class TasksPage(QWidget):
                 lines.append(f"{row['origin_name']} → {row['destination_name']}: {sum(row['resources']):,}; "
                              f"first load ≤ {row['first_load_limit']:,}; minimum loads {row['minimum_loads']}.")
             lines.append("Exact allocation; a changed plan requires a new review. No combined ETA.")
+        elif task in POLICY_TASKS:
+            lines = [configuration_summary(original), policy_summary(task, clean, observation),
+                     "Observed current state; future eligibility and costs may change."]
         else:
             lines = [f"{observation['mode'].replace('_', ' ')} · quoted total {observation['gold_total']:,} gold."]
             if observation["gold_available"] is not None:

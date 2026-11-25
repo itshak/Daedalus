@@ -46,7 +46,6 @@ from daedalus.recovery_credentials import RecoveryCredentials, RecoveryCredentia
 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkerError
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore
 from daedalus.reviewed_operations import (
-    CITY_REVIEW_TASKS,
     WORKER_TASKS,
     validated_attack_draft,
     validated_build_draft,
@@ -655,20 +654,24 @@ def create_app(
             validate_distribution,
         )
         from daedalus.market_review import market_draft, validate_market_observation
+        from daedalus.native_policy_review import POLICY_TASKS, observe_policy, policy_draft
 
         controller = require_task_controller(account_id)
         task = payload.get("task")
-        if set(payload) != {"task", "draft"} or task not in ("loginDaily", "distributeResources", "buyResources", "sellResources"):
+        if set(payload) != {"task", "draft"} or not isinstance(task, str) or task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
             raise HTTPException(status_code=422, detail="Invalid operation preview")
         if demo_mode or ipc_client is None:
             raise HTTPException(status_code=503, detail="Operation preview unavailable")
         try:
             draft = (daily_draft(payload["draft"]) if task == "loginDaily" else distribution_draft(payload["draft"])
-                     if task == "distributeResources" else market_draft(task, payload["draft"]))
+                     if task == "distributeResources" else policy_draft(task, payload["draft"]) if task in POLICY_TASKS
+                     else market_draft(task, payload["draft"]))
             preflight = controller.preflight(account_id, task)
             if preflight.get("ready") is not True or preflight.get("unresolved_request") is not False:
                 raise ValueError("Prerequisites unavailable")
-            observed = ipc_client.native_reward_distribution_preview(account_by_id[account_id], task, draft)
+            account = account_by_id[account_id]
+            observed = (observe_policy(ipc_client, account, task, draft) if task in POLICY_TASKS
+                        else ipc_client.native_reward_distribution_preview(account, task, draft))
             config = dict(draft)
             if task == "loginDaily":
                 validate_daily(draft, observed)
@@ -676,7 +679,7 @@ def create_app(
                 config["reviewed_routes"] = validate_distribution(draft, observed)
                 if observed["ready"] is not True:
                     raise ValueError("No usable fleet")
-            else:
+            elif task in {"buyResources", "sellResources"}:
                 validate_market_observation(task, draft, observed)
                 config["reviewed_market"] = True
             ticket = operation_previews.issue(account_id, task, config)
@@ -1717,7 +1720,9 @@ def create_app(
     def start_account_task(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
-        if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS | {"distributeResources", "loginDaily", "buyResources", "sellResources"}:
+        from daedalus.reviewed_batch import BATCH_REVIEW_TASKS
+
+        if isinstance(payload.get("task"), str) and payload["task"] in BATCH_REVIEW_TASKS - {"constructionList", "sendResources"}:
             raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
         if payload.get("task") == "constructionList":
             config = payload.get("config")
@@ -1810,6 +1815,26 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/research-start", dependencies=[Depends(authorized)])
+    def start_reviewed_research(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "research", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/tavern-start", dependencies=[Depends(authorized)])
+    def start_reviewed_tavern(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "tavernManager", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/miracle-start", dependencies=[Depends(authorized)])
+    def start_reviewed_miracle(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "activateMiracle", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/shrine-start", dependencies=[Depends(authorized)])
+    def start_reviewed_shrine(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "activateShrine", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/workshop-start", dependencies=[Depends(authorized)])
+    def start_reviewed_workshop(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "UpgradeUnits", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/buy-start", dependencies=[Depends(authorized)])
     def start_reviewed_buy(account_id: str, payload: Annotated[dict[str, object], Body()]):

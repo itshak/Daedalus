@@ -61,3 +61,5 @@ The owner initially deferred proxy configuration and connectivity testing, then 
 
 ## Owner acceptance deferral (2026-11-26)
 Manual macOS installation/UI and real-account acceptance are deferred at the owner's request to [issue #60](https://github.com/itshak/Daedalus/issues/60). These tests remain unperformed; automated CI, packaging, safe rollout and unresolved implementation criteria are not waived.
+
+- [x] Extend independently reviewed batches to academy/study, tavern, miracle, shrine and workshop operations using their existing account-attested inventories, typed observations and expiring tickets. Future recurring effects and workshop costs are not asserted from unavailable observations.

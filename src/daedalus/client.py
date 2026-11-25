@@ -687,11 +687,13 @@ class DaedalusClient:
             validate_ticket,
         )
         from daedalus.market_review import market_draft
+        from daedalus.native_policy_review import POLICY_TASKS, policy_draft
 
-        if not _ACCOUNT_ID.fullmatch(account_id) or task not in ("loginDaily", "distributeResources", "buyResources", "sellResources"):
+        if not _ACCOUNT_ID.fullmatch(account_id) or task not in POLICY_TASKS | {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
             raise ValueError("Unsupported preview")
         clean = (daily_draft(draft) if task == "loginDaily" else distribution_draft(draft)
-                 if task == "distributeResources" else market_draft(task, draft))
+                 if task == "distributeResources" else policy_draft(task, draft) if task in POLICY_TASKS
+                 else market_draft(task, draft))
         value = self._write(f"accounts/{account_id}/reward-distribution-plan", {"task": task, "draft": clean})
         try:
             return validate_ticket(value, account_id, task, clean)

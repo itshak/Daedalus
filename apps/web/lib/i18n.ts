@@ -4,6 +4,7 @@ export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
   "Operation preview unavailable; refresh before retrying.": "Предпросмотр недоступен. Обновите данные перед повторной попыткой.",
   "Reviewed listing requires an empty market; existing offers are never overwritten.": "Подтверждённое размещение требует пустого рынка; существующие предложения не перезаписываются.",
+  "Observed current state; future eligibility and costs may change.": "Наблюдаемое текущее состояние; будущие условия и затраты могут измениться.",
   "Quoted allocation, not a completion receipt. Changed quotes halt execution.": "Распределение по предложениям, а не подтверждение завершения. Изменение цен останавливает выполнение.",
   "Observed available gold": "Доступное золото",
   "Quoted gold total": "Общая стоимость по предложениям",

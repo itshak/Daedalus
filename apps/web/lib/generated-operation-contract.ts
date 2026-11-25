@@ -4,6 +4,9 @@ export const MAX_REVIEW_BATCH = 32 as const;
 export const PREVIEW_ID_PATTERN = "[A-Za-z0-9_-]{43}" as const;
 export const NATIVE_TASKS = ["activateMiracle", "activateShrine", "alertAttacks", "alertLowWine", "autoPirate", "buyResources", "consolidateResources", "distributeResources", "donationBot", "dumpWorld", "loginDaily", "research", "resourceTransportManager", "searchForIslandSpaces", "sellResources", "sendResources", "tavernManager", "testDiscordBot", "testTelegramBot", "UpgradeUnits"] as const;
 export const REVIEW_ENDPOINTS = {
+  "UpgradeUnits": "workshop-start",
+  "activateMiracle": "miracle-start",
+  "activateShrine": "shrine-start",
   "attackBarbarians": "attack-start",
   "autoBarbarians": "grind-start",
   "buyResources": "buy-start",
@@ -16,9 +19,11 @@ export const REVIEW_ENDPOINTS = {
   "modifyProduction": "worker-start",
   "modifyTempleWorkers": "worker-start",
   "reorganizeCityBuildings": "layout-start",
+  "research": "research-start",
   "sellResources": "sell-start",
   "sendResources": "shipment-start",
   "stationArmy": "station-start",
+  "tavernManager": "tavern-start",
   "trainArmy": "training-start",
   "vacationMode": "vacation-start"
 } as const;

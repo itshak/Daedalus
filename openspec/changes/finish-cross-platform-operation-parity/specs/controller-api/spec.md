@@ -115,3 +115,10 @@ The controller SHALL obtain bounded account-scoped daily advisor, exact distribu
 #### Scenario: A quote or allocation changes
 - **WHEN** the worker finds a changed reviewed quote or distribution allocation
 - **THEN** the worker stops rather than substituting a different transaction
+
+### Requirement: Account-attested policy reviews
+Research, tavern, miracle, shrine and workshop native workflows SHALL issue account-scoped, expiring review tickets using existing authenticated inventory observations and strict typed drafts. Both clients SHALL independently check the selected scope and relevant observed choices, state or targets. Independent reviewed batches SHALL preserve account-specific configurations and receipts. Generic launch SHALL NOT bypass the reviewed endpoints. Current observations SHALL NOT be presented as guarantees of future eligibility, cost or successful game execution.
+
+#### Scenario: A selected workshop or academy is unavailable
+- **WHEN** the current authenticated inventory does not contain the reviewed selection or its eligible target
+- **THEN** the controller rejects the review rather than substituting another city or option
