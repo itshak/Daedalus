@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 WORKER_TASKS = frozenset({"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"})
-CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians"}
+CITY_REVIEW_TASKS = WORKER_TASKS | {"donate", "reorganizeCityBuildings", "constructBuilding", "stationArmy", "autoBarbarians", "attackBarbarians"}
 
 
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
@@ -230,3 +230,88 @@ def validate_grind_plan(city_id: int, draft: dict[str, object], plan: object) ->
     return {k: plan[k] for k in ("city_id", "target_city_id", "send_notifications", "city_name",
                                  "target_name", "level", "requirements", "required_ships", "available_ships",
                                  "destroyed", "notifications_ready", "ready", "config")}
+
+def validated_attack_draft(city_id: object, draft: object) -> dict[str, object]:
+    import re
+
+    if (type(city_id) is not int or not 0 < city_id < 10**12
+            or not isinstance(draft, dict) or set(draft) != {"target_city_id", "waves"}
+            or type(draft["target_city_id"]) is not int or not 0 < draft["target_city_id"] < 10**12
+            or not isinstance(draft["waves"], list) or not 1 <= len(draft["waves"]) <= 8):
+        raise ValueError("Invalid manual attack draft")
+    previous = 0
+    for index, wave in enumerate(draft["waves"]):
+        if (not isinstance(wave, dict) or set(wave) != {"round", "loot", "ships", "units"}
+                or type(wave["round"]) is not int or not previous < wave["round"] <= 100
+                or (index == 0 and wave["round"] != 1)
+                or type(wave["loot"]) is not bool
+                or (wave["loot"] and (index == 0 or index != len(draft["waves"])-1))
+                or type(wave["ships"]) is not int or not 0 <= wave["ships"] <= 10**9
+                or (wave["loot"] and wave["ships"] != 0)
+                or not isinstance(wave["units"], dict) or not 1 <= len(wave["units"]) <= 100
+                or any(not isinstance(uid, str) or not re.fullmatch(r"[0-9]{1,6}", uid)
+                       or type(n) is not int or not 1 <= n <= 10**9
+                       for uid, n in wave["units"].items())):
+            raise ValueError("Invalid manual attack wave")
+        previous = wave["round"]
+    return dict(draft)
+
+
+def validate_attack_inventory(city_id: int, data: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(data, dict) or data.get("city_id") != city_id
+            or not isinstance(data.get("city_name"), str) or not 0 < len(data["city_name"]) <= 100
+            or type(data.get("available_ships")) is not int or not 0 <= data["available_ships"] <= 10**9
+            or not isinstance(data.get("units"), list) or len(data["units"]) > 100):
+        raise ValueError("Invalid attack inventory")
+    seen = set()
+    for row in data["units"]:
+        if (not isinstance(row, dict) or set(row) != {"unit_id", "name", "available"}
+                or not isinstance(row["unit_id"], str) or not re.fullmatch(r"[0-9]{1,6}", row["unit_id"])
+                or row["unit_id"] in seen or not isinstance(row["name"], str)
+                or not 0 < len(row["name"]) <= 100 or type(row["available"]) is not int
+                or not 0 < row["available"] <= 10**9):
+            raise ValueError("Invalid attack troop")
+        seen.add(row["unit_id"])
+    return {k: data[k] for k in ("city_id", "city_name", "available_ships", "units")}
+
+
+def validate_attack_plan(city_id: int, draft: dict[str, object], plan: object) -> dict[str, object]:
+    import re
+
+    if (not isinstance(plan, dict) or plan.get("city_id") != city_id
+            or plan.get("target_city_id") != draft["target_city_id"]
+            or any(not isinstance(plan.get(k), str) or not 0 < len(plan[k]) <= 100
+                   for k in ("city_name", "target_name"))
+            or type(plan.get("level")) is not int or not 1 <= plan["level"] <= 1000
+            or any(type(plan.get(k)) is not int or not 0 <= plan[k] <= 10**12
+                   for k in ("required_ships", "available_ships"))
+            or type(plan.get("ready")) is not bool
+            or (plan["ready"] and plan["available_ships"] < plan["required_ships"])
+            or not isinstance(plan.get("waves"), list) or len(plan["waves"]) != len(draft["waves"])):
+        raise ValueError("Invalid manual attack preview")
+    total_ships = 0
+    for wave, requested in zip(plan["waves"], draft["waves"]):
+        if (not isinstance(wave, dict) or set(wave) != {"round", "loot", "ships", "transport_ships", "units"}
+                or any(wave[k] != requested[k] for k in ("round", "loot", "ships"))
+                or type(wave["transport_ships"]) is not int or not 0 <= wave["transport_ships"] <= 10**12
+                or not isinstance(wave["units"], list) or len(wave["units"]) != len(requested["units"])):
+            raise ValueError("Invalid manual wave preview")
+        for row in wave["units"]:
+            if (not isinstance(row, dict) or set(row) != {"name", "amount"}
+                    or not isinstance(row["name"], str) or not 0 < len(row["name"]) <= 100
+                    or type(row["amount"]) is not int or not 0 < row["amount"] <= 10**9):
+                raise ValueError("Invalid troop quantity")
+        if sorted(r["amount"] for r in wave["units"]) != sorted(requested["units"].values()):
+            raise ValueError("Manual wave quantity mismatch")
+        total_ships += wave["transport_ships"] + wave["ships"]
+    if total_ships != plan["required_ships"]:
+        raise ValueError("Manual attack ship mismatch")
+    config = plan.get("config")
+    if (not isinstance(config, dict) or set(config) != {"city_id", *draft, "expected"}
+            or config["city_id"] != city_id or any(config.get(k) != v for k, v in draft.items())
+            or not isinstance(config["expected"], str) or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
+        raise ValueError("Invalid manual attack fingerprint")
+    return {k: plan[k] for k in ("city_id", "target_city_id", "city_name", "target_name", "level",
+                                 "waves", "available_ships", "required_ships", "ready", "config")}

@@ -15,8 +15,11 @@ import httpx
 
 from daedalus.reviewed_operations import (
     WORKER_TASKS,
+    validate_attack_inventory,
+    validate_attack_plan,
     validate_build_inventory,
     validate_grind_plan,
+    validated_attack_draft,
     validated_build_draft,
     validated_grind_draft,
     validated_layout_draft,
@@ -188,6 +191,13 @@ class DaedalusClient:
             return self._write(f"accounts/{account_id}/tasks/worker-start", {
                 "task": task, "preview_id": config["preview_id"],
                 "request_id": request_id, "confirmed": confirmed,
+            })
+        if task == "attackBarbarians":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the manual attack first")
+            return self._write(f"accounts/{account_id}/tasks/attack-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
             })
         if task == "autoBarbarians":
             if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
@@ -660,6 +670,38 @@ class DaedalusClient:
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
         return data
+
+    def attack_inventory(self, account_id: str, city_id: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid troop inventory scope")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/attack-options")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Troop inventory scope mismatch")
+        try:
+            return {"account_id": account_id, **validate_attack_inventory(city_id, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid troop inventory") from exc
+
+    def attack_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        clean = validated_attack_draft(city_id, draft)
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/attack-plan", clean)
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Manual attack preview scope mismatch")
+        try:
+            validate_attack_plan(city_id, clean, {**data, "config": {
+                "city_id": city_id, **clean, "expected": "0" * 64,
+            }})
+        except ValueError as exc:
+            raise APIConnectionError("Invalid manual attack preview") from exc
+        if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                              or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                              or type(data.get("expires_in")) is not int
+                              or not 1 <= data["expires_in"] <= 120):
+            raise APIConnectionError("Invalid manual attack ticket")
+        # Internal correlation only; the user sees named wave summaries.
+        return {**data, "reviewed_waves": clean["waves"]}
 
     def grind_preview(self, account_id: str, city_id: int, draft: dict[str, object]) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):

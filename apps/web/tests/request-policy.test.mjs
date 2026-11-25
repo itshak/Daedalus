@@ -89,3 +89,10 @@ test("automatic attacks use explicit reviewed paths",()=>{
   assert.equal(allowedRequest("POST","accounts/a/tasks/grind-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/grind-plan".split("/"),params("raw=true")),false);
 });
+
+test("manual attack inventory and reviewed wave endpoints are explicit",()=>{
+  assert.equal(allowedRequest("GET","accounts/a/cities/12/attack-options".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/attack-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/attack-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/attack-plan".split("/"),params("raw=true")),false);
+});

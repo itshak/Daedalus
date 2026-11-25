@@ -60,6 +60,12 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if (parts.at(-1) === "attack-plan") {
+      const wave=z.object({round:z.number().int().min(1).max(100),loot:z.boolean(),ships:z.number().int().min(0).max(1e9),units:z.record(z.string().regex(/^[0-9]{1,6}$/),z.number().int().positive().max(1e9))}).strict();
+      const draft=z.object({target_city_id:z.number().int().positive().max(999_999_999_999),waves:z.array(wave).min(1).max(8)}).strict().safeParse(value);
+      if(!draft.success||draft.data.waves.some((w,i,a)=>!Object.keys(w.units).length||Object.keys(w.units).length>100||(i===0?w.round!==1:w.round<=a[i-1].round)||(w.loot&&(i===0||i!==a.length-1||w.ships!==0))))
+        return NextResponse.json({error:"Invalid manual attack draft"},{status:422,headers:responseHeaders});
+    }
     if (parts.at(-1) === "grind-plan" && !z.object({target_city_id:z.number().int().positive().max(999_999_999_999),send_notifications:z.boolean()}).strict().safeParse(value).success)
       return NextResponse.json({error:"Invalid automatic attack draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "station-plan" && !z.object({destination_city_id:z.number().int().positive().max(999_999_999_999),ground:z.boolean()}).strict().safeParse(value).success)
@@ -70,7 +76,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
       return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });

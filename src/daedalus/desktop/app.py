@@ -304,6 +304,12 @@ class APIWorker(QThread):
                     "account_id": self.account_id,
                     "cities": self.client.cities(self.account_id),
                 }
+            elif self.action == "task_attack_inventory" and self.account_id and self.task_payload:
+                result = self.client.attack_inventory(self.account_id, self.task_payload["city_id"])
+            elif self.action == "task_attack_preview" and self.account_id and self.task_payload:
+                draft = self.task_payload["draft"]
+                result = self.client.attack_preview(self.account_id, draft["city_id"],
+                                                    {k: v for k, v in draft.items() if k != "city_id"})
             elif self.action == "task_grind_preview" and self.account_id and self.task_payload:
                 draft = self.task_payload["draft"]
                 result = self.client.grind_preview(self.account_id, draft["city_id"],
@@ -823,6 +829,14 @@ class MainWindow(FluentWindow):
             view.shrine_requested.connect(self._queue_shrine)
             view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
+            view.attack_inventory_requested.connect(
+                lambda aid, city, nonce: self._request("task_attack_inventory", account_id=aid,
+                    task_payload={"city_id": city, "nonce": nonce})
+            )
+            view.attack_preview_requested.connect(
+                lambda aid, draft, nonce: self._request("task_attack_preview", account_id=aid,
+                    task_payload={"draft": draft, "nonce": nonce})
+            )
             view.grind_preview_requested.connect(
                 lambda aid, draft, nonce: self._request("task_grind_preview", account_id=aid,
                     task_payload={"draft": draft, "nonce": nonce})
@@ -2325,6 +2339,14 @@ class MainWindow(FluentWindow):
             assert isinstance(payload, dict)
             self.tasks_page.set_buildings(payload["account_id"], payload["city_id"],
                                           payload["buildings"])
+        elif action in {"task_attack_inventory", "task_attack_preview"}:
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                if action == "task_attack_inventory":
+                    self.tasks_page.set_attack_inventory(payload, request["nonce"])
+                else:
+                    self.tasks_page.set_attack_preview(payload, request["nonce"])
         elif action == "task_grind_preview":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2565,6 +2587,10 @@ class MainWindow(FluentWindow):
             city_id = request.get("city_id") if isinstance(request, dict) else None
             if isinstance(account_id, str) and type(city_id) is int:
                 self.tasks_page.set_buildings_unavailable(account_id, city_id)
+        if action in {"task_attack_inventory", "task_attack_preview"}:
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_attack_unavailable(request["nonce"])
         if action == "task_grind_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

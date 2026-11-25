@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import ComboBox, PushButton, SpinBox
+from qfluentwidgets import CheckBox, ComboBox, PushButton, SpinBox
 
 _RESOURCES = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
 _MAX_AMOUNT = 1_000_000_000
@@ -1409,4 +1409,133 @@ class PiracyMissionsEditor(QWidget):
             "maxRandomWaitingTime": self.waiting.value(),
             "piracyCities": [{"id": city["city_id"]}],
         }
+        return result
+
+
+class BarbarianWavesEditor(QWidget):
+    """Named troop inventory and editable wave columns; never display engine IDs."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.note = QLabel("Load actual troops for the origin city first.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self.table = _table(("Setting / troop", "Available"))
+        self.table.setAccessibleName("Attack wave settings and available troop quantities")
+        self.table.setMinimumHeight(185)
+        layout.addWidget(self.table)
+        self.add_button = PushButton("Add wave")
+        self.remove_button = PushButton("Remove last wave")
+        self.add_button.clicked.connect(self.add_wave)
+        self.remove_button.clicked.connect(self.remove_wave)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.remove_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+        self.units = []
+        self.waves = []
+        self.loaded = False
+        self.ship_limit = 0
+        self._controls()
+
+    def _controls(self):
+        self.add_button.setEnabled(self.loaded and bool(self.units) and len(self.waves) < 8)
+        self.remove_button.setEnabled(len(self.waves) > 1)
+
+    def clear(self):
+        self.loaded = False
+        self.units = []
+        self.waves = []
+        self.ship_limit = 0
+        self.table.setRowCount(0)
+        self.table.setColumnCount(2)
+        self.note.setText("Load actual troops for the origin city first.")
+        self._controls()
+        self.changed.emit()
+
+    def set_inventory(self, result):
+        self.clear()
+        self.loaded = True
+        self.units = result["units"]
+        self.ship_limit = result["available_ships"]
+        self.note.setText(f"Available transport ships: {self.ship_limit:,}. "
+                          "Add up to eight ordered waves. An optional looting wave must be last.")
+        self.table.setRowCount(3 + len(self.units))
+        for i, label in enumerate(("Battle round", "Loot ships", "Final looting wave")):
+            self.table.setItem(i, 0, QTableWidgetItem(label))
+        for i, unit in enumerate(self.units, 3):
+            self.table.setItem(i, 0, QTableWidgetItem(unit["name"]))
+            self.table.setItem(i, 1, QTableWidgetItem(f"{unit['available']:,}"))
+        if self.units:
+            self.add_wave()
+        self._controls()
+
+    def add_wave(self):
+        if not self.loaded or not self.units or len(self.waves) >= 8:
+            return
+        n = len(self.waves)
+        col = n + 2
+        self.table.setColumnCount(col + 1)
+        self.table.setHorizontalHeaderItem(col, QTableWidgetItem(f"Wave {n+1}"))
+        round_field = _amount(minimum=1, value=n+1, label=f"Wave {n+1} battle round")
+        round_field.setMaximum(100)
+        if not n:
+            round_field.setEnabled(False)
+        ships = _amount(label=f"Wave {n+1} loot ships")
+        ships.setMaximum(self.ship_limit)
+        loot = CheckBox()
+        loot.setAccessibleName(f"Wave {n+1} is final looting wave")
+        loot.setEnabled(n > 0)
+        for i, field in enumerate((round_field, ships, loot)):
+            self.table.setCellWidget(i, col, field)
+        round_field.valueChanged.connect(self.changed.emit)
+        ships.valueChanged.connect(self.changed.emit)
+        def loot_changed(_state):
+            if loot.isChecked():
+                ships.setValue(0)
+            ships.setEnabled(not loot.isChecked())
+            self.changed.emit()
+        loot.stateChanged.connect(loot_changed)
+        fields = []
+        for i, unit in enumerate(self.units, 3):
+            amount = _amount(label=f"Wave {n+1}: {unit['name']}")
+            amount.setMaximum(unit["available"])
+            amount.valueChanged.connect(self.changed.emit)
+            self.table.setCellWidget(i, col, amount)
+            fields.append(amount)
+        self.waves.append((round_field, ships, loot, fields))
+        self._controls()
+        self.changed.emit()
+
+    def remove_wave(self):
+        if len(self.waves) <= 1:
+            return
+        self.waves.pop()
+        self.table.setColumnCount(len(self.waves) + 2)
+        self._controls()
+        self.changed.emit()
+
+    def to_config(self):
+        if not self.loaded or not self.waves:
+            raise ValueError("Load actual troops before planning the attack")
+        result = []
+        totals = {}
+        previous = 0
+        for i, (round_field, ships, loot, fields) in enumerate(self.waves):
+            if round_field.value() <= previous or (loot.isChecked() and i != len(self.waves)-1):
+                raise ValueError("Use increasing battle rounds; looting must be the final wave")
+            previous = round_field.value()
+            units = {u["unit_id"]: w.value() for u, w in zip(self.units, fields) if w.value()}
+            if not units:
+                raise ValueError("Select at least one troop in every wave")
+            for uid, amount in units.items():
+                totals[uid] = totals.get(uid, 0) + amount
+            result.append({"round": previous, "ships": ships.value(), "loot": loot.isChecked(), "units": units})
+        if any(totals.get(u["unit_id"], 0) > u["available"] for u in self.units):
+            raise ValueError("Combined waves exceed available troops")
         return result

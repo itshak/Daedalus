@@ -849,3 +849,54 @@ def test_grind_editor_named_cities_and_review(page, monkeypatch):
     page.confirm_box.setChecked(True)
     page._start()
     assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+
+
+def test_attack_editor_native_waves_and_review(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    task = "attackBarbarians"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Origin"}, {"id": 2, "name": "Target"}])
+    page.set_preflight({"account_id": "alpha", "task": task, "ready": True, "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["target_city_id"].setCurrentIndex(2)
+    inventory = []
+    page.attack_inventory_requested.connect(lambda *args: inventory.append(args))
+    page._request_native_preview()
+    assert inventory[0][:2] == ("alpha", 1)
+    result = {"account_id": "alpha", "city_id": 1, "available_ships": 100,
+              "units": [{"unit_id": "302", "name": "Unit", "available": 100}]}
+    editor = page._form_inputs["waves"]
+    page.set_attack_inventory(result, "wrong")
+    assert not editor.loaded
+    page.set_attack_inventory(result, inventory[0][2])
+    assert editor.loaded and len(editor.waves) == 1
+    editor.waves[0][3][0].setValue(30)
+    editor.waves[0][1].setValue(2)
+    editor.add_wave()
+    editor.waves[1][3][0].setValue(10)
+    editor.waves[1][2].setChecked(True)
+    calls = []
+    page.attack_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    draft = calls[0][1]
+    assert draft["city_id"] == 1 and draft["target_city_id"] == 2
+    assert draft["waves"][0]["units"] == {"302": 30}
+    assert draft["waves"][1]["loot"] is True
+    plan = {"account_id": "alpha", "city_id": 1, "target_city_id": 2, "city_name": "Origin",
+            "target_name": "Target", "level": 1, "available_ships": 100, "required_ships": 4,
+            "reviewed_waves": draft["waves"], "waves": [
+                {"round": 1, "loot": False, "ships": 2, "units": [{"name": "Unit", "amount": 30}]},
+                {"round": 2, "loot": True, "ships": 0, "units": [{"name": "Unit", "amount": 10}]},
+            ], "ready": True, "preview_id": "a" * 43, "expires_in": 120}
+    page.set_attack_preview(plan, calls[0][2])
+    assert page.start_button.isEnabled()
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", task, {"preview_id": "a" * 43})
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert not editor.loaded

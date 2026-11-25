@@ -124,6 +124,10 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         (task_name, "expected"): {"type": "hidden_derived"}
         for task_name in ("modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers")
     },
+    ("attackBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
+    ("attackBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
+    ("attackBarbarians", "waves"): {"type": "attack_waves", "label": "Attack waves", "required": True},
+    ("attackBarbarians", "expected"): {"type": "hidden_derived"},
     ("autoBarbarians", "city_id"): {"type": "city_picker", "label": "Origin city", "required": True},
     ("autoBarbarians", "target_city_id"): {"type": "city_picker", "label": "City on target island", "required": True},
     ("autoBarbarians", "send_notifications"): {"type": "boolean", "label": "Send notifications", "default": False},

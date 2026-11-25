@@ -47,6 +47,7 @@ from daedalus.account_display import account_player_name, account_player_names
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.native_controls import (
     AcademyResearchEditor,
+    BarbarianWavesEditor,
     DonationPoliciesEditor,
     MapAreaEditor,
     MarketOffersEditor,
@@ -137,6 +138,8 @@ class TasksPage(QWidget):
     layout_preview_requested = Signal(str, object, str)
     station_preview_requested = Signal(str, object, str)
     grind_preview_requested = Signal(str, object, str)
+    attack_inventory_requested = Signal(str, int, str)
+    attack_preview_requested = Signal(str, object, str)
     build_options_requested = Signal(str, int, str)
     build_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
@@ -745,6 +748,8 @@ class TasksPage(QWidget):
                     self._populate_city_picker(input_widget, optional=not
                                                self._field_is_required(key))
                     self._invalidate_review()
+                    if self.selected_task_name() == "attackBarbarians" and key == "city_id":
+                        self._clear_attack_inventory()
                     if self.selected_task_name() == "constructBuilding" and key == "city_id":
                         self._clear_build_options()
                 elif isinstance(input_widget, (
@@ -855,6 +860,19 @@ class TasksPage(QWidget):
         account = self.selected_account_id()
         if account is None:
             return
+        if task == "attackBarbarians":
+            editor = self._form_inputs.get("waves")
+            picker = self._form_inputs.get("city_id")
+            cities = self._cities_by_account.get(account, [])
+            index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+            if not 1 <= index <= len(cities):
+                QMessageBox.warning(self, "Choose origin city", "Choose an actual city first.")
+                return
+            if not isinstance(editor, BarbarianWavesEditor) or not editor.loaded:
+                self._city_review_nonce = str(uuid.uuid4())
+                self.building_note.setText("Loading actual troops and ships…")
+                self.attack_inventory_requested.emit(account, cities[index-1]["id"], self._city_review_nonce)
+                return
         if task == "constructBuilding":
             picker = self._form_inputs.get("city_id")
             choice = self._form_inputs.get("position")
@@ -881,6 +899,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task == "attackBarbarians":
+            self.building_note.setText("Checking actual village and planned waves…")
+            self.attack_preview_requested.emit(account, draft, self._city_review_nonce)
         elif task == "autoBarbarians":
             self.building_note.setText("Reading village level, unit requirements and ships…")
             self.grind_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -924,6 +945,55 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self._city_review_plan = None
             self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
+
+    def _clear_attack_inventory(self, *_args):
+        editor = self._form_inputs.get("waves")
+        if isinstance(editor, BarbarianWavesEditor):
+            editor.clear()
+
+    def set_attack_inventory(self, result, nonce):
+        if (self.selected_task_name() != "attackBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        picker = self._form_inputs.get("city_id")
+        cities = self._cities_by_account.get(self.selected_account_id() or "", [])
+        index = picker.currentIndex() if isinstance(picker, ComboBox) else -1
+        editor = self._form_inputs.get("waves")
+        if (not isinstance(editor, BarbarianWavesEditor) or not 1 <= index <= len(cities)
+                or result.get("city_id") != cities[index-1]["id"]):
+            return
+        editor.set_inventory(result)
+        self.building_note.setText("Choose quantities, then preview the attack. No troops have been sent.")
+        self._invalidate_review()
+
+    def set_attack_preview(self, result, nonce):
+        if (self.selected_task_name() != "attackBarbarians" or nonce != self._city_review_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if (result.get("city_id") != draft.get("city_id") or result.get("target_city_id") != draft.get("target_city_id")
+                or result.get("reviewed_waves") != draft.get("waves")):
+            return
+        self._city_review_nonce = None
+        self._city_review_plan = {**result, "waves": draft["waves"]} if result.get("ready") and result.get("preview_id") else None
+        self._city_review_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        waves = "; ".join(f"Round {w['round']}: " + ", ".join(
+            f"{u['name']} × {u['amount']}" for u in w["units"]) +
+            (" (looting)" if w["loot"] else f"; loot ships {w['ships']}") for w in result["waves"])
+        self.building_note.setText(f"{result['city_name']} → island of {result['target_name']}, "
+                                   f"village level {result['level']}. Ships: {result['available_ships']:,}/{result['required_ships']:,}. "
+                                   + waves + (". Ready for review." if self._city_review_plan else ". Prerequisites missing."))
+        self._invalidate_review()
+
+    def set_attack_unavailable(self, nonce):
+        if self.selected_task_name() == "attackBarbarians" and nonce == self._city_review_nonce:
+            self._city_review_nonce = None
+            self._city_review_plan = None
+            self.building_note.setText("Attack inventory or preview unavailable. Refresh and try again.")
             self._invalidate_review()
 
     def set_grind_preview(self, result: dict[str, object], nonce: str) -> None:
@@ -1761,6 +1831,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Load troops / preview attack…" if name == "attackBarbarians" else
             "Preview automatic attacks…" if name == "autoBarbarians" else
             "Preview deployment…" if name == "stationArmy" else
             "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
@@ -1881,6 +1952,9 @@ class TasksPage(QWidget):
                     item.setCheckState(Qt.Unchecked)
                     widget.addItem(item)
                 widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "attack_waves":
+                widget = BarbarianWavesEditor(self)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "build_choice":
                 widget = ComboBox()
                 widget.addItem("Load actual building options first…")
@@ -1891,6 +1965,8 @@ class TasksPage(QWidget):
                 widget.setAccessibleName(f"Choose actual city for {label}")
                 self._populate_city_picker(widget, optional=not field["required"])
                 widget.currentIndexChanged.connect(self._mark_form_dirty)
+                if name == "attackBarbarians" and key == "city_id":
+                    widget.currentIndexChanged.connect(self._clear_attack_inventory)
                 if name == "constructBuilding" and key == "city_id":
                     widget.currentIndexChanged.connect(self._clear_build_options)
             elif name == "constructionList" and key == "city_id":
@@ -2020,7 +2096,7 @@ class TasksPage(QWidget):
         if (account_id and account_id not in self._cities_by_account
                 and (name == "constructionList"
                      or any(field.get("type") in {
-                         "city_list", "city_picker", "island_list", "shipment_routes",
+                         "city_list", "city_picker", "island_list", "shipment_routes", "attack_waves",
                          "donation_policies", "workshop_jobs", "train_units",
                          "market_buy", "market_sell", "academy_research",
                          "tavern_cities", "miracle_temple", "olympus_shrine",
@@ -2128,6 +2204,9 @@ class TasksPage(QWidget):
                         or key == "island"):
                     continue
             widget = self._form_inputs[key]
+            if isinstance(widget, BarbarianWavesEditor):
+                config[key] = widget.to_config()
+                continue
             if isinstance(widget, ResourceLimitsEditor):
                 config[key] = widget.to_config()
                 continue

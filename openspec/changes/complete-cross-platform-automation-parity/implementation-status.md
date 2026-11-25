@@ -27,7 +27,7 @@ Focused tests: four native donation/Qt tests, 17 session expiry/retry tests (12 
 
 The three upstream worker operations (production, academy, temple) now have structured, city-scoped engine adapters and native desktop/web editors. The current project/building slider and normal/extra capacity are read from the game; the selected percentage is converted into an exact target. A one-shot ticket binds the operation and city to the reviewed slider state, and the child revalidates it before mutation. No raw game fields or automatic retry/replay. Population, production and faith impact estimates beyond the source slider are not inferred.
 
-The versioned capability manifest records 28 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
+The versioned capability manifest records 29 native workflows, existing read-only or managed-task views, protected local boundaries and pending adapters. Its committed JSON companion is checked against the upstream registry and the runtime manifest. Clients show unsupported workflows explicitly, rather than enabling them based on registration alone. All rows remain partial/pending, not live accepted.
 
 Donation integration baseline: 705 Python tests passed, 11 skipped; 408 engine tests passed, 9 skipped, 123 subtests passed; 25 web tests, TypeScript, lint (warnings only), production build, Ruff and proposal validation passed. Worker/manifest focused regression: 33 Python tests passed; 27 web unit tests passed before the final manifest UI wiring. Full combined validation is required.
 
@@ -53,6 +53,12 @@ Both clients select an owned origin city and a city on the target island, displa
 
 At integrated revision 8a0a76f the full regression passed: 722 Python, 408 engine tests and 123 engine subtests, 29 web tests, typecheck/build/Ruff/OpenSpec (lint warnings only). Automatic attack focused tests: 7 engine/API/manifest/previous station tests, 1 Qt test and 31 web tests passed.
 
+## Manual barbarian waves
+
+Both clients load named available troops for an owned origin city, select the island of an owned target city, and edit up to eight ordered waves with troop quantities, requested loot ships and optional final looting. The engine reads village/ship/unit data, rejects invalid and overallocated waves, and produces a bound review ticket. It rechecks the draft before invoking the upstream attack routine. Reviewed waves refuse missing troops rather than silently reducing their quantities; game mutations do not replay uncertain transport failures. Both legacy and native task contracts are retained. Ship capacity is a conservative initial reservation; looting resources can change after combat and are calculated by the original engine. Live acceptance and larger wave counts remain unverified/unsupported.
+
+Focused manual/automatic tests: 6 Python engine/API/manifest, 2 Qt, 32 web tests and TypeScript passed. Full latest-revision CI remains required.
+
 ## Still open
 
-Attack/automatic barbarian planning and the engine web-service workflow need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.
+Vacation mode and the engine web-service workflow need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.

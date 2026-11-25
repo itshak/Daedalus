@@ -18,12 +18,15 @@ from typing import Any
 
 from daedalus.accounts import Account
 from daedalus.reviewed_operations import (
+    validate_attack_inventory,
+    validate_attack_plan,
     validate_build_inventory,
     validate_build_plan,
     validate_grind_plan,
     validate_layout_plan,
     validate_station_plan,
     validate_worker_plan,
+    validated_attack_draft,
     validated_build_draft,
     validated_grind_draft,
     validated_layout_draft,
@@ -43,7 +46,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+    "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
@@ -148,14 +151,15 @@ class ExistingIPCClient:
                 worker_task: str | None = None, worker_draft: dict[str, object] | None = None,
                 template_city_id: int | None = None, build_draft: dict[str, int] | None = None,
                 station_draft: dict[str, object] | None = None,
-                grind_draft: dict[str, object] | None = None) -> dict[str, Any]:
+                grind_draft: dict[str, object] | None = None,
+                attack_draft: dict[str, object] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+            "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
@@ -170,7 +174,7 @@ class ExistingIPCClient:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
                       "preview_donation_existing", "preview_workers_existing", "preview_layout_existing",
-                      "list_build_options_existing", "preview_build_existing", "preview_grind_existing", "preview_station_existing",
+                      "list_build_options_existing", "preview_build_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -231,8 +235,12 @@ class ExistingIPCClient:
             payload.update(validated_grind_draft(city_id, grind_draft))
         elif grind_draft is not None:
             raise ValueError("Unexpected automatic attack draft")
+        if action == "preview_attack_existing":
+            payload.update(validated_attack_draft(city_id, attack_draft))
+        elif attack_draft is not None:
+            raise ValueError("Unexpected manual attack draft")
         return self._exchange(payload, read_timeout=60.0 if action in {
-            "preview_grind_existing", "preview_station_existing",
+            "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
             "list_build_options_existing", "preview_build_existing",
             "preview_layout_existing",
             "preview_workers_existing",
@@ -395,6 +403,32 @@ class ExistingIPCClient:
                 "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
+
+    def attack_inventory(self, account: Account, city_id: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Choose an owned city")
+        data = self.request("list_attack_units_existing", account=account, city_id=city_id)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid attack inventory scope")
+        try:
+            return {"account_id": account.id, **validate_attack_inventory(city_id, data.get("inventory"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid attack inventory") from exc
+
+    def attack_preview(self, account: Account, city_id: int, draft: dict[str, object]) -> dict[str, object]:
+        clean = validated_attack_draft(city_id, draft)
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned or clean["target_city_id"] not in owned:
+            raise ValueError("Both cities must belong to this account")
+        data = self.request("preview_attack_existing", account=account, city_id=city_id, attack_draft=clean)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid manual attack scope")
+        try:
+            return {"account_id": account.id, **validate_attack_plan(city_id, clean, data.get("plan"))}
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid manual attack plan") from exc
 
     def grind_preview(self, account: Account, city_id: int, draft: dict[str, object]) -> dict[str, object]:
         clean = validated_grind_draft(city_id, draft)
