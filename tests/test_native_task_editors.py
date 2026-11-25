@@ -925,3 +925,36 @@ def test_shipment_requires_current_capacity_ticket(page, monkeypatch):
     page.confirm_box.setChecked(True)
     page._start()
     assert launches[0][:3] == ("alpha", "sendResources", {"preview_id": "a"*43})
+
+
+def test_recurring_external_destination_editor(page):
+    from daedalus.engine_registry import inspect_engine
+    task = "resourceTransportManager"
+    capability = next(c for c in inspect_engine() if c.name == task)
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", CITIES)
+    editor = page._form_inputs["destination_city"]
+    page._form_inputs["mode"].setCurrentIndex(0)
+    calls = []
+    page.island_destinations_requested.connect(lambda *args:calls.append(args))
+    editor.x.setValue(50)
+    editor.y.setValue(60)
+    editor._lookup()
+    assert calls[-1][:3] == ("alpha", 50, 60)
+    result = {"account_id":"alpha","x":50,"y":60,"cities":[
+        {"id":999,"recipient":888,"island":44,"name":"Town","owner":"Other"}
+    ]}
+    page.set_island_destinations(result, "stale")
+    assert editor.picker.count() == 4
+    page.set_island_destinations(result, calls[-1][3])
+    editor.picker.setCurrentIndex(4)
+    assert editor.to_config() == {"destination_city":999,"island":44,"recipient":888}
+    page._form_inputs["origin_cities"].item(0).setCheckState(Qt.Checked)
+    page._form_inputs["send_mode"].setCurrentIndex(0)
+    page._form_inputs["resource_config"].values[0].setValue(50)
+    config = page._form_config()
+    assert config["origin_cities"] == [101]
+    assert config["recipient"] == 888
+    editor.x.setValue(51)
+    with pytest.raises(ValueError):
+        editor.to_config()

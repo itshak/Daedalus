@@ -49,6 +49,7 @@ from daedalus.desktop.native_controls import (
     AcademyResearchEditor,
     BarbarianWavesEditor,
     DonationPoliciesEditor,
+    ExternalDestinationEditor,
     MapAreaEditor,
     MarketOffersEditor,
     MiracleTempleEditor,
@@ -722,20 +723,20 @@ class TasksPage(QWidget):
 
     def _lookup_destinations(self, x, y, nonce):
         account = self.selected_account_id()
-        if account and self.selected_task_name() == "sendResources":
+        if account and self.selected_task_name() in {"sendResources","resourceTransportManager"}:
             self.island_destinations_requested.emit(account, x, y, nonce)
 
     def set_island_destinations(self, result, nonce):
-        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() != "sendResources":
+        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() not in {"sendResources","resourceTransportManager"}:
             return
-        editor = self._form_inputs.get("routes")
-        if isinstance(editor, ShipmentRoutesEditor):
+        editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city")
+        if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor)):
             editor.set_external(result, nonce)
 
     def set_island_destinations_unavailable(self, account, nonce):
-        if account == self.selected_account_id() and self.selected_task_name() == "sendResources":
-            editor = self._form_inputs.get("routes")
-            if isinstance(editor, ShipmentRoutesEditor):
+        if account == self.selected_account_id() and self.selected_task_name() in {"sendResources","resourceTransportManager"}:
+            editor = self._form_inputs.get("routes") or self._form_inputs.get("destination_city")
+            if isinstance(editor, (ShipmentRoutesEditor,ExternalDestinationEditor)):
                 editor.lookup_failed(nonce)
 
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
@@ -778,7 +779,7 @@ class TasksPage(QWidget):
                     if self.selected_task_name() == "constructBuilding" and key == "city_id":
                         self._clear_build_options()
                 elif isinstance(input_widget, (
-                    ShipmentRoutesEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
+                    ShipmentRoutesEditor, ExternalDestinationEditor, DonationPoliciesEditor, WorkshopUpgradesEditor,
                     TrainableUnitsEditor, MarketOffersEditor,
                 )):
                     # Account-scoped read data are never portable between cities/worlds.
@@ -2057,6 +2058,11 @@ class TasksPage(QWidget):
                     item.setCheckState(Qt.Unchecked)
                     widget.addItem(item)
                 widget.itemChanged.connect(self._mark_form_dirty)
+            elif kind == "external_destination":
+                widget = ExternalDestinationEditor(self)
+                widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
+                widget.lookup_requested.connect(self._lookup_destinations)
+                widget.changed.connect(self._mark_form_dirty)
             elif kind == "attack_waves":
                 widget = BarbarianWavesEditor(self)
                 widget.changed.connect(self._mark_form_dirty)
@@ -2201,7 +2207,7 @@ class TasksPage(QWidget):
         if (account_id and account_id not in self._cities_by_account
                 and (name == "constructionList"
                      or any(field.get("type") in {
-                         "city_list", "city_picker", "island_list", "shipment_routes", "attack_waves",
+                         "city_list", "city_picker", "island_list", "shipment_routes", "attack_waves", "external_destination",
                          "donation_policies", "workshop_jobs", "train_units",
                          "market_buy", "market_sell", "academy_research",
                          "tavern_cities", "miracle_temple", "olympus_shrine",
@@ -2309,6 +2315,9 @@ class TasksPage(QWidget):
                         or key == "island"):
                     continue
             widget = self._form_inputs[key]
+            if isinstance(widget, ExternalDestinationEditor):
+                config.update(widget.to_config())
+                continue
             if isinstance(widget, BarbarianWavesEditor):
                 config[key] = widget.to_config()
                 continue
@@ -2439,8 +2448,15 @@ class TasksPage(QWidget):
             destination = config.get("destinationCityId")
             if destination is not None and str(destination) in config.get("sourceCityIds", []):
                 raise ValueError("Destination cannot also be a source city")
-        if name == "resourceTransportManager" and "mode" not in config:
-            raise ValueError("Choose a transport strategy")
+        if name == "resourceTransportManager":
+            if "mode" not in config:
+                raise ValueError("Choose a transport strategy")
+            if config["mode"] == "consolidate":
+                if not config.get("origin_cities") or config.get("destination_city") is None:
+                    raise ValueError("Choose source cities and a receiving city")
+                if str(config["destination_city"]) in config["origin_cities"]:
+                    raise ValueError("Destination cannot also be a source city")
+                config["origin_cities"] = [int(c) for c in config["origin_cities"]]
         if name == "dumpWorld" and config.get("shallow") is True and "coords" in config:
             raise ValueError("Whole-world shallow scans cannot be limited to a map area")
         if name == "distributeResources" and config.get("mode") == "producers" and config.get("resource") == "wood":
@@ -2592,6 +2608,18 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
         params = self.building_note.text() if task in CITY_REVIEW_TASKS else configuration_summary(config)
+        if task == "resourceTransportManager" and config.get("mode") == "consolidate":
+            editor = self._form_inputs.get("destination_city")
+            names = {c["id"]:c["name"] for c in self._cities_by_account.get(account_id, [])}
+            params = (", ".join(names[c] for c in config["origin_cities"]) + " → "
+                      + editor.picker.currentText() + "\n"
+                      + ("Keep reserve: " if config.get("send_mode") == "keep" else "Send: ")
+                      + ", ".join(f"{n} {v:,}" for n,v in zip(
+                          ("wood","wine","marble","crystal","sulfur"),config["resource_config"]) if v is not None)
+                      + f"\nRepeat every {config['interval_hours']} hours; "
+                      + ("freighters" if config.get("useFreighters") else "trade ships")
+                      + f"; notifications: {config.get('notify','none')}"
+                      + ("\nExternal shipments require manual recovery." if "recipient" in config else ""))
         if task in {"testTelegramBot", "testDiscordBot"}:
             params = "Send one fixed test message to the existing configured provider. Check task Activity for acceptance."
         answer = QMessageBox.question(

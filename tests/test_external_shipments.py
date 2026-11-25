@@ -164,3 +164,47 @@ def test_shipment_ticket_scopes_launch_and_rejects_external_bypass(monkeypatch, 
         assert len(starts) == 1
     finally:
         controller.close()
+
+
+def test_recurring_external_route_checks_recipient_before_every_cargo(monkeypatch):
+    from ikabot.function import resourceTransportManager as manager
+
+    session = Mock(username="Mine")
+    island = {"id": "44", "x": 50, "y": 60, "cities": [
+        {"type": "city", "state": "", "id": 9, "Id": 7, "name": "Town", "Name": "Other"}
+    ]}
+    origin = {"id": "1", "name": "Home", "availableResources": [100]*5}
+    monkeypatch.setattr(manager, "getIdsOfCities", lambda *_a: (["1"], {"1": origin}))
+    monkeypatch.setattr(manager, "requireOwnCity", lambda _s, cid, _n: str(cid))
+    monkeypatch.setattr(manager, "get_island", lambda *_a: island)
+    monkeypatch.setattr(shipments, "get_island", lambda *_a: island)
+    config = {"mode":"consolidate","origin_cities":[1],"destination_city":9,
+              "island":44,"recipient":7,"interval_hours":2,"resource_config":[50,None,None,None,None],
+              "useFreighters":False,"send_mode":"keep","notify":"none"}
+    prepared = manager.prepare_resourceTransportManager(session, **config)
+    assert prepared["recipient"] == "7"
+    assert restart_class_for("resourceTransportManager", config) == "manual"
+    monkeypatch.setattr(manager, "getCity", lambda *_a: origin)
+    monkeypatch.setattr(manager, "getIsland", lambda *_a: island)
+    monkeypatch.setattr(manager, "setInfoSignal", lambda *_a: None)
+    monkeypatch.setattr(manager, "getAvailableShips", lambda *_a: 1)
+    monkeypatch.setattr(manager, "acquire_shipping_lock", lambda *_a, **_kw: True)
+    release = Mock()
+    monkeypatch.setattr(manager, "release_shipping_lock", release)
+    cargo = []
+
+    def execute(_s, routes, _fleet, *, verify_recipient):
+        verify_recipient(0)
+        cargo.append(routes[0][3:])
+        island["cities"][0]["Id"] = 8
+        verify_recipient(0)
+
+    monkeypatch.setattr(manager, "executeRoutes", execute)
+    with pytest.raises(ValueError, match="destination changed"):
+        manager.do_it_unified.__wrapped__(session, **prepared)
+    assert cargo == [(50,0,0,0,0)]
+    release.assert_called_once()
+    with pytest.raises(ValueError, match="destination changed"):
+        manager.prepare_resourceTransportManager(session, **config)
+    with pytest.raises(ValueError):
+        manager.prepare_resourceTransportManager(session, **{**config,"mode":"distribute"})

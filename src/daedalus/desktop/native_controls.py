@@ -266,6 +266,93 @@ class ShipmentRoutesEditor(QWidget):
         )
 
 
+class ExternalDestinationEditor(QWidget):
+    """A single receiving city, optionally verified on another player's island."""
+
+    changed = Signal()
+    lookup_requested = Signal(int, int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cities = []
+        self._external = []
+        self._nonce = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.picker = _city_picker([], "Receiving city")
+        self.picker.currentIndexChanged.connect(self.changed.emit)
+        layout.addWidget(self.picker)
+        search = QHBoxLayout()
+        self.x = _amount(minimum=1, value=1, label="Island X coordinate")
+        self.y = _amount(minimum=1, value=1, label="Island Y coordinate")
+        for label, field in (("X", self.x), ("Y", self.y)):
+            field.setMaximum(100)
+            field.valueChanged.connect(self._invalidate)
+            search.addWidget(QLabel(label))
+            search.addWidget(field)
+        self.lookup_button = PushButton("Find external cities")
+        self.lookup_button.clicked.connect(self._lookup)
+        search.addWidget(self.lookup_button)
+        layout.addLayout(search)
+        self.note = QLabel("External shipments require manual recovery.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+
+    def set_cities(self, cities):
+        self._cities = list(cities)
+        self._invalidate()
+
+    def _refresh(self):
+        prior = self.picker.currentData()
+        with QSignalBlocker(self.picker):
+            self.picker.clear()
+            self.picker.addItem("Choose a city")
+            for city in self._cities:
+                self.picker.addItem(str(city["name"]), userData=city["id"])
+            for city in self._external:
+                self.picker.addItem(f"{city['name']} — {city['owner']} ({self.x.value()}:{self.y.value()})",
+                                    userData=city["id"])
+            self.picker.setCurrentIndex(next((i for i in range(1,self.picker.count())
+                                              if self.picker.itemData(i) == prior), 0))
+        self.lookup_button.setEnabled(bool(self._cities))
+        self.changed.emit()
+
+    def _invalidate(self, *_args):
+        self._nonce = None
+        self._external = []
+        self.note.setText("External shipments require manual recovery.")
+        self._refresh()
+
+    def _lookup(self):
+        self._invalidate()
+        self._nonce = str(uuid.uuid4())
+        self.note.setText("Looking up cities…")
+        self.lookup_requested.emit(self.x.value(), self.y.value(), self._nonce)
+
+    def set_external(self, result, nonce):
+        if nonce != self._nonce or (result.get("x"),result.get("y")) != (self.x.value(),self.y.value()):
+            return
+        self._nonce = None
+        owned = {c["id"] for c in self._cities}
+        self._external = [r for r in result["cities"] if r["id"] not in owned]
+        self.note.setText(f"{len(self._external)} eligible external cities. Choose the receiving city.")
+        self._refresh()
+
+    def lookup_failed(self, nonce):
+        if nonce == self._nonce:
+            self._nonce = None
+            self.note.setText("Island lookup unavailable.")
+
+    def to_config(self):
+        selected = self.picker.currentData()
+        if selected in {c["id"] for c in self._cities}:
+            return {"destination_city": selected}
+        for row in self._external:
+            if row["id"] == selected:
+                return {"destination_city": selected, "island": row["island"], "recipient": row["recipient"]}
+        raise ValueError("Choose an actual receiving city")
+
+
 class DonationPoliciesEditor(QWidget):
     """Per-city island donation policies from IkaBot donationBot.prepare_*."""
 

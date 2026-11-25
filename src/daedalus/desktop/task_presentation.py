@@ -199,7 +199,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Select one or more of your own source cities.",
     },
     ("resourceTransportManager", "destination_city"): {
-        "type": "city_picker", "label": "Receiving city",
+        "type": "external_destination", "label": "Receiving city",
     },
     ("resourceTransportManager", "origin_city"): {
         "type": "city_picker", "label": "Sending city",
@@ -219,7 +219,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("resourceTransportManager", "island"): {
         "type": "hidden_derived",
-        "help": "External destination islands need a separately verified lookup; currently unavailable.",
+        "help": "Derived from the verified external recipient.",
     },
     ("resourceTransportManager", "interval_hours"): {
         "type": "integer", "minimum": 0, "maximum": 720,
@@ -232,6 +232,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
                           "For every shipment"],
         "label": "Notifications",
     },
+    ("resourceTransportManager", "recipient"): {"type": "hidden_derived"},
     ("resourceTransportManager", "info"): {"type": "hidden_derived"},
     ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
     ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},

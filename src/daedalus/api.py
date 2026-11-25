@@ -1455,6 +1455,13 @@ def create_app(
             if isinstance(routes, list) and any(isinstance(r, dict) and
                     ("island" in r or "recipient" in r) for r in routes):
                 raise HTTPException(status_code=422, detail="Review external shipments first")
+        if payload.get("task") == "resourceTransportManager":
+            config = payload.get("config")
+            if (isinstance(config, dict) and ("recipient" in config or "island" in config)
+                    and (config.get("mode") != "consolidate" or any(
+                        type(config.get(k)) is not int or not 0 < config[k] < 10**12
+                        for k in ("recipient", "island", "destination_city")))):
+                raise HTTPException(status_code=422, detail="Choose a verified external recipient")
         return dispatch_account_task(account_id, payload)
 
     def dispatch_account_task(account_id: str, payload: dict[str, object]) -> dict[str, object]:

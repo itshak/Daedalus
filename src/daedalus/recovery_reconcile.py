@@ -114,7 +114,7 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
             return "convergent_transport"
     if task == "resourceTransportManager":  # noqa: SIM102 - explicit task allowlist
         if (config.get("mode") == "consolidate"
-                and "island" not in config  # Never auto-send to an external city.
+                and "island" not in config and "recipient" not in config  # Never auto-send to an external city.
                 and config.get("send_mode") == "keep"
                 and _thresholds(config.get("resource_config"), allow_null=True)
                 and any(v is not None for v in config["resource_config"])

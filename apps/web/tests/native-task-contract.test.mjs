@@ -142,3 +142,11 @@ test("notification tests allow no custom payload or credentials",()=>{
     assert.equal(validNativeConfig(task,{token:"arbitrary"}),false);
   }
 });
+
+test("recurring consolidation allows only a complete verified external identity",()=>{
+  const base={mode:"consolidate",origin_cities:[1],destination_city:9,interval_hours:2,resource_config:[50,null,null,null,null],useFreighters:false,send_mode:"keep",notify:"none"};
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44,recipient:7}),true);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,recipient:7}),false);
+  assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44,recipient:0}),false);
+});

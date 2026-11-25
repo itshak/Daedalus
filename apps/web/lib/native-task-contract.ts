@@ -163,7 +163,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
         || typeof c.notify !== "string" || !["none","start","all"].includes(c.notify)) return false;
       const common = ["mode","interval_hours","resource_config","useFreighters","notify"];
       if (c.mode === "consolidate")
-        return exact(c,[...common,"origin_cities","destination_city","send_mode"])
+        return (exact(c,[...common,"origin_cities","destination_city","send_mode"]) || (exact(c,[...common,"origin_cities","destination_city","send_mode","island","recipient"]) && city(c.island) && city(c.recipient)))
           && ids(c.origin_cities,1) && city(c.destination_city) && !c.origin_cities.includes(c.destination_city)
           && (c.send_mode === "keep" || c.send_mode === "send")
           && amounts(c.resource_config,0,true)
