@@ -267,10 +267,14 @@ class TasksPage(QWidget):
         self.view_selected_button = PushButton("Refresh selected")
         self.view_selected_button.clicked.connect(self._refresh_selected)
         scope_row.addWidget(self.view_selected_button)
+        self.overview_choose_button = PushButton("Choose accounts…")
+        self.overview_choose_button.clicked.connect(self._choose_bulk_accounts)
+        scope_row.addWidget(self.overview_choose_button)
         scope_row.addStretch(1)
 
         layout.addWidget(SubtitleLabel("Choose action"))
         self.category_combo = ComboBox(self)
+        self.category_combo.hide()
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
         self.group_tabs = Pivot(self)
@@ -553,8 +557,8 @@ class TasksPage(QWidget):
         self.discovery_scroll.setVisible(self._gallery_open and bool(self._task_names))
         self.discovery_note.setVisible(self._gallery_open)
         self.browse_button.setText(
-            "Hide automation gallery" if self._gallery_open
-            else "Browse automation gallery ▾"
+            "Hide actions" if self._gallery_open
+            else "Browse actions ▾"
         )
 
     def _show_section(self, index: int) -> None:
@@ -1138,7 +1142,9 @@ class TasksPage(QWidget):
         self.view_all_button.setEnabled(bool(self._status_account_ids))
         self.view_selected_button.setEnabled(bool(count))
         self.choose_bulk_button.setEnabled(bool(self._status_account_ids))
+        self.overview_choose_button.setEnabled(bool(self._status_account_ids))
         self.choose_bulk_button.setText(f"Choose accounts ({count})…")
+        self.overview_choose_button.setText(f"Choose accounts ({count})…")
         self.view_selected_button.setText(f"Refresh selected ({count})")
         self.start_selected_button.setText(f"Start for selected ({count})…")
         ineligible = [aid for aid in self._bulk_account_ids
@@ -1468,8 +1474,8 @@ class TasksPage(QWidget):
         ):
             widget.setVisible(self._advanced_visible)
         self.advanced_toggle.setText(
-            "Hide advanced JSON options" if self._advanced_visible
-            else "Show advanced JSON options"
+            "Hide advanced settings" if self._advanced_visible
+            else "Advanced settings…"
         )
         if self._advanced_visible and self.selected_task_name() != "constructionList":
             fields = self._config_fields_by_task.get(self.selected_task_name() or "", [])
