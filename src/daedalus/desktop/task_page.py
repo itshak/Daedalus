@@ -9,19 +9,16 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -149,7 +146,6 @@ class TasksPage(QWidget):
         self._prereq_ready: bool | None = None
         self._selection_generation = 0
         self._unresolved = False
-        self._advanced_visible = False
         self._config_fields_by_task: dict[str, list[dict[str, object]]] = {}
         self._catalog_operations: list[dict[str, object]] = []
         self._form_inputs: dict[str, QWidget] = {}
@@ -374,35 +370,6 @@ class TasksPage(QWidget):
         self.building_table.hide()
         self.building_note.hide()
         self.construction_preview_button.hide()
-        self.advanced_toggle = PushButton("Advanced settings…")
-        self.advanced_toggle.clicked.connect(self._toggle_advanced)
-        layout.addWidget(self.advanced_toggle)
-        self.advanced_note = CaptionLabel(
-            "Advanced mode overrides the guided settings with a custom JSON object. "
-            "Use Build JSON to copy the current guided fields into the editor."
-        )
-        self.advanced_note.setWordWrap(True)
-        layout.addWidget(self.advanced_note)
-        self.build_json_button = PushButton("Build JSON from guided settings")
-        self.build_json_button.clicked.connect(self._build_config_from_form)
-        layout.addWidget(self.build_json_button)
-        self.import_config_button = PushButton("Import a prepared configuration…")
-        self.import_config_button.setToolTip(
-            "Load an explicitly chosen, small JSON configuration previously prepared "
-            "for this engine task. Daedalus validates allowed parameter names."
-        )
-        self.import_config_button.clicked.connect(self._import_advanced_config)
-        layout.addWidget(self.import_config_button)
-        self.config_editor = QPlainTextEdit()
-        self.config_editor.setPlaceholderText('{"minutes": 20}')
-        self.config_editor.setPlainText("{}")
-        self.config_editor.setMaximumHeight(108)
-        layout.addWidget(self.config_editor)
-        self.advanced_note.hide()
-        self.build_json_button.hide()
-        self.import_config_button.hide()
-        self.config_editor.hide()
-        self.config_editor.textChanged.connect(self._review_advanced_json)
         self.task_combo.currentIndexChanged.connect(self._selected_task_changed)
 
         launch_row = QHBoxLayout()
@@ -1154,6 +1121,9 @@ class TasksPage(QWidget):
         if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
                                             "buyResources", "sellResources", "autoPirate"}:
             can_start = False
+        if expert_configuration_needed(
+                self._config_fields_by_task.get(self.selected_task_name() or "", [])):
+            can_start = False
         self.start_selected_button.setEnabled(
             self._dispatch_enabled and can_start
             and not self._pending_launch and bool(self._task_names)
@@ -1246,7 +1216,9 @@ class TasksPage(QWidget):
                                                  "buyResources", "sellResources", "autoPirate"}
                 or not self._bulk_account_ids or len(self._bulk_account_ids) > 32
                 or any(aid not in self._account_ids for aid in self._bulk_account_ids)
-                or not self.selected_task_name()):
+                or not self.selected_task_name()
+                or expert_configuration_needed(self._config_fields_by_task.get(
+                    self.selected_task_name() or "", []))):
             return
         if not self._reviewed or not self.confirm_box.isChecked():
             # Invalid consent should be contextual, not an unexpected modal.
@@ -1256,19 +1228,8 @@ class TasksPage(QWidget):
                 "before starting tasks for selected accounts."
             )
             return
-        if self._form_dirty and self._advanced_visible:
-            QMessageBox.warning(
-                self, "Review changed settings",
-                "Build JSON from the guided form or hide Advanced before starting."
-            )
-            return
         try:
-            if self._advanced_visible:
-                config = json.loads(self.config_editor.toPlainText())
-                if not isinstance(config, dict):
-                    raise ValueError("Advanced configuration must be a JSON object")
-            else:
-                config = self._form_config()
+            config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
@@ -1466,86 +1427,6 @@ class TasksPage(QWidget):
             self.parameter_scroll.ensureVisible(0, 0)
             self._show_section(0)
 
-    def _toggle_advanced(self) -> None:
-        self._advanced_visible = not self._advanced_visible
-        for widget in (
-            self.advanced_note, self.config_editor, self.build_json_button,
-            self.import_config_button,
-        ):
-            widget.setVisible(self._advanced_visible)
-        self.advanced_toggle.setText(
-            "Hide advanced settings" if self._advanced_visible
-            else "Advanced settings…"
-        )
-        if self._advanced_visible and self.selected_task_name() != "constructionList":
-            fields = self._config_fields_by_task.get(self.selected_task_name() or "", [])
-            if not expert_configuration_needed(fields):
-                self._build_config_from_form()
-            else:
-                # Never attempt to compile an unsupported raw game plan while
-                # opening Advanced. That would display a modal error dialog,
-                # blocking a headless Mac session and obscuring the import path.
-                self.advanced_note.setText(
-                    "This IkaBot operation requires an existing validated engine plan. "
-                    "Import it explicitly or review an account-specific configuration; "
-                    "do not invent city, combat or ship identifiers."
-                )
-        self._set_controls()
-
-    def _import_advanced_config(self) -> None:
-        """User-directed bounded JSON import, never a system or account-file search."""
-        name = self.selected_task_name()
-        if not name:
-            return
-        filename, _selected_filter = QFileDialog.getOpenFileName(
-            self, "Import reviewed IkaBot automation settings", "", "JSON files (*.json)"
-        )
-        if not filename:
-            return
-        try:
-            source = Path(filename)
-            if source.stat().st_size > 16384:
-                raise ValueError("Configuration file exceeds the 16 KiB safety limit")
-            raw = source.read_text(encoding="utf-8")
-            config = json.loads(raw, parse_constant=lambda _x: (
-                _ for _ in ()
-            ).throw(ValueError("Invalid nonfinite value")))
-            if not isinstance(config, dict):
-                raise TypeError("Configuration must be one JSON object")
-            allowed = {str(field["name"])
-                       for field in self._config_fields_by_task.get(name, [])}
-            if not allowed or not all(isinstance(key, str) and key in allowed
-                                      for key in config):
-                raise ValueError("File has parameters not registered for this automation")
-            if len(json.dumps(config, ensure_ascii=False, allow_nan=False).encode()) > 16384:
-                raise ValueError("Configuration exceeds the task size limit")
-        except (OSError, UnicodeError, ValueError, TypeError):
-            QMessageBox.warning(
-                self, "Configuration not imported",
-                "Choose a valid JSON object under 16 KiB containing only "
-                "this automation's registered parameter names. "
-                "No account operation was started.",
-            )
-            return
-        if not self._advanced_visible:
-            self._advanced_visible = True
-            for widget in (
-                self.advanced_note, self.config_editor, self.build_json_button,
-                self.import_config_button,
-            ):
-                widget.show()
-            self.advanced_toggle.setText("Hide advanced JSON options")
-        self.config_editor.setPlainText(
-            json.dumps(config, ensure_ascii=False, indent=2)
-        )
-        self._form_dirty = False
-        self._invalidate_review()
-        QMessageBox.information(
-            self, "Configuration loaded",
-            "Review the advanced settings and confirm the correct account "
-            "before starting anything. The backend will still validate the task.",
-        )
-
     def _approval_changed(self, *_args: object) -> None:
         # Consent is scoped to the current account, task and configuration.
         self._reviewed = self.confirm_box.isChecked()
@@ -1559,11 +1440,6 @@ class TasksPage(QWidget):
         finally:
             self.confirm_box.blockSignals(False)
         self._set_controls()
-
-    def _review_advanced_json(self) -> None:
-        """Hand-edited JSON supersedes unbuilt form values deliberately."""
-        self._form_dirty = False
-        self._invalidate_review()
 
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
@@ -1605,26 +1481,21 @@ class TasksPage(QWidget):
             f"Automation description: {_friendly_task(name)}" if name else
             "No matching automations"
         )
-        expert_needed = expert_configuration_needed(fields)
+        expert_needed = name != "constructionList" and expert_configuration_needed(fields)
         self.expert_note.setVisible(expert_needed)
         if expert_needed:
             self.expert_note.setText(
-                "This operation needs a prepared engine plan (for example, a "
-                "validated city, building queue or route). Daedalus cannot "
-                "invent those values. Use Advanced to import an existing "
-                "configuration or supply reviewed fields."
+                "Not yet available in the desktop app: this action needs a dedicated "
+                "game-data editor. Starting is disabled until that editor is supported."
             )
         for field in fields:
             key = str(field["name"])
             if name == "constructionList" and key not in {"city_id", "city_name"}:
-                # Complex planner internals belong to an expert imported plan,
-                # never to the normal construction interface.
+                # Construction internals are supplied by the verified preview.
                 continue
             if (field.get("type") in {"hidden_derived", "json"}
                     and not (name == "constructionList" and key == "city_id")):
-                # Game-derived nested plans must never look like free-form text
-                # inputs in the normal workflow. Import a verified expert plan
-                # through Advanced until a source-backed native editor exists.
+                # Opaque engine structures never become editable text fields.
                 continue
             if name == "constructionList" and key == "city_name":
                 # The paired, verified name comes from the selected city's read-only record.
@@ -1770,23 +1641,12 @@ class TasksPage(QWidget):
                 widget.valueChanged.connect(self._mark_form_dirty)
             else:
                 widget = LineEdit()
-                if kind == "json":
-                    widget.setPlaceholderText(
-                        'JSON value (e.g. 10, "text", [1,2])'
-                        if field["required"] else "Optional value"
-                    )
-                    if default is not None:
-                        widget.setText(json.dumps(default, ensure_ascii=False))
-                elif default is not None:
+                if default is not None:
                     widget.setText(str(default))
                 else:
                     widget.setPlaceholderText("Required" if field["required"] else "Optional")
                 widget.textChanged.connect(self._mark_form_dirty)
             help_text = str(field.get("help") or "")
-            if kind == "json" and not field.get("choices"):
-                help_text = (help_text + " " if help_text else "") + (
-                    "Structured JSON input; do not guess game identifiers or required plan values."
-                )
             style_form_input(widget, label, help_text)
             self.parameter_layout.addRow(label, widget)
             self._form_inputs[key] = widget
@@ -1840,9 +1700,6 @@ class TasksPage(QWidget):
                 len(visible_fields) * 44 + 24 + list_extra,
             )
             self.parameter_scroll.setFixedHeight(min(3000, max(72, content_height)))
-        self.build_json_button.setEnabled(bool(fields))
-        self._invalidate_review()
-        self.config_editor.setPlainText("{}")
         self._form_dirty = False
         self._invalidate_review()
         self._prereq_ready = None
@@ -1935,14 +1792,14 @@ class TasksPage(QWidget):
         for field in self._config_fields_by_task.get(name, []):
             key = str(field["name"])
             if name == "constructionList":
-                # Full engine-prepared construction internals remain expert-only.
+                # Construction is assembled only by the engine preview.
                 continue
             kind = str(field["type"])
             if kind == "hidden_derived":
                 continue
             if kind == "json":
                 if field["required"]:
-                    raise ValueError("This task requires an existing reviewed engine plan")
+                    raise ValueError("This action needs a dedicated native editor before it can start")
                 # An optional opaque game value is intentionally left unset.
                 continue
             if name == "autoPirate":
@@ -2110,16 +1967,6 @@ class TasksPage(QWidget):
             raise ValueError("Task configuration exceeds the safe size limit")
         return config
 
-    def _build_config_from_form(self) -> None:
-        try:
-            config = self._form_config()
-        except (TypeError, ValueError) as exc:
-            QMessageBox.warning(self, "Invalid task parameters", str(exc))
-            return
-        self.config_editor.setPlainText(json.dumps(config, ensure_ascii=False, indent=2))
-        self._form_dirty = False
-        self._invalidate_review()
-
     def set_tasks(self, data: dict[str, object]) -> None:
         task_rows = data.get("engine_tasks")
         request_rows = data.get("requests")
@@ -2167,14 +2014,12 @@ class TasksPage(QWidget):
             enabled and bool(self._task_names)
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
-            # Every unspecialized structured field requires an expert-verified
-            # plan. A guided form cannot silently omit required IkaBot settings.
-            and (self._advanced_visible or self.selected_task_name() == "constructionList"
+            # A native editor must cover all required structured parameters.
+            and (self.selected_task_name() == "constructionList"
                  or not expert_configuration_needed(
                      self._config_fields_by_task.get(self.selected_task_name() or "", [])))
-            # Live building selection alone is NOT a prepared engine plan.
             and (self.selected_task_name() != "constructionList"
-                 or self._advanced_visible or self._construction_preview_ready)
+                 or self._construction_preview_ready)
         )
         # Status/history is read-only even on a backend that refuses dispatch.
         has_read_scope = bool(self._account_ids)
@@ -2230,36 +2075,12 @@ class TasksPage(QWidget):
                 "Check the authorization box before starting this automation.")
             return
         try:
-            if self._advanced_visible:
-                if self._form_dirty and task != "constructionList":
-                    QMessageBox.warning(self, "Guided settings changed",
-                        "Build JSON from guided settings or hide Advanced to use the form.")
-                    return
-                config = json.loads(self.config_editor.toPlainText())
-                if not isinstance(config, dict):
-                    raise ValueError("Advanced configuration must be a JSON object")
-                if task == "constructionList":
-                    city_id = self._selected_construction_city()
-                    cities = self._cities_by_account.get(account_id, [])
-                    matching = next((city for city in cities if city["id"] == city_id), None)
-                    if (matching is None or config.get("city_id") != city_id
-                            or config.get("city_name") != matching["name"]):
-                        raise ValueError(
-                            "Prepared construction plan must match the selected "
-                            "authenticated city and its exact name"
-                        )
-                    if any(key not in config for key in (
-                        "buildings", "shipments", "expand_overall", "wait_resources",
-                        "construction_queue", "total_time",
-                    )):
-                        raise ValueError("Import a complete upstream-prepared construction plan")
+            if task == "constructionList":
+                if not self._construction_preview_ready or self._construction_prepared is None:
+                    raise ValueError("Calculate and approve the actual IkaBot construction preview first")
+                config = dict(self._construction_prepared)
             else:
-                if task == "constructionList":
-                    if not self._construction_preview_ready or self._construction_prepared is None:
-                        raise ValueError("Calculate and approve the actual IkaBot construction preview first")
-                    config = dict(self._construction_prepared)
-                else:
-                    config = self._form_config()
+                config = self._form_config()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
