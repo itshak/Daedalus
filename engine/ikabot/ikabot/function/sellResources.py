@@ -271,7 +271,7 @@ from ikabot.function.nativeMarket import prepare_sellResources
 
 
 @task("sellResources", prepare=prepare_sellResources)
-def do_it(session, mode, amount_to_sell=None, offers=None, resource_type=None, city_to_buy_from=None, price=None, sell_market_capacity=None, city=None):
+def do_it(session, mode, amount_to_sell=None, offers=None, resource_type=None, city_to_buy_from=None, price=None, sell_market_capacity=None, city=None, reviewed_market=False):
     if mode == "sell_to_offers":
         info = "\nI sell {} of {} in {}\n".format(
             addThousandSeparator(amount_to_sell),
@@ -279,7 +279,10 @@ def do_it(session, mode, amount_to_sell=None, offers=None, resource_type=None, c
             city_to_buy_from["name"],
         )
         setInfoSignal(session, info)
-        do_it1(session, amount_to_sell, offers, resource_type, city_to_buy_from)
+        if reviewed_market:
+            do_it1(session, amount_to_sell, offers, resource_type, city_to_buy_from, reviewed=True)
+        else:
+            do_it1(session, amount_to_sell, offers, resource_type, city_to_buy_from)
     elif mode == "create_offer":
         info = "\nI sell {} of {} in {}\n".format(
             addThousandSeparator(amount_to_sell),
@@ -287,7 +290,10 @@ def do_it(session, mode, amount_to_sell=None, offers=None, resource_type=None, c
             city["name"],
         )
         setInfoSignal(session, info)
-        do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, city)
+        if reviewed_market:
+            do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, city, reviewed=True)
+        else:
+            do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, city)
 
 @configurator
 def sellResources(session, event, stdin_fd, predetermined_input):
@@ -320,7 +326,7 @@ def sellResources(session, event, stdin_fd, predetermined_input):
         return createOffer(session, city, resource)
 
 
-def do_it1(session, left_to_sell, offers, resource_type, city_to_buy_from):
+def do_it1(session, left_to_sell, offers, resource_type, city_to_buy_from, *, reviewed=False):
     """
     Parameters
     ----------
@@ -378,7 +384,17 @@ def do_it1(session, left_to_sell, offers, resource_type, city_to_buy_from):
                 data["cargo_tradegood{:d}".format(resource_type)] = amount_to_sell
 
             session.get(city_url + city_to_buy_from["id"], noIndex=True)
-            session.post(params=data)
+            if reviewed:
+                from ikabot.function.nativeMarket import market_snapshot
+
+                fresh = market_snapshot(session, city_to_buy_from["id"], resource_type, "sell_to_offers")
+                if (fresh["city"]["availableResources"][resource_type] < amount_to_sell
+                        or not any(r[0] == cityname and r[1] == username and r[3] == precio
+                                   and r[5] == destination_city_id and r[2] >= amount_to_sell for r in fresh["offers"])):
+                    raise ValueError("Buyer quote or stock changed; stop and review")
+                session.post(params=data, retry_on_failure=False)
+            else:
+                session.post(params=data)
             
             resource_name = materials_names[resource_type]
             session.setStatus(
@@ -391,7 +407,7 @@ def do_it1(session, left_to_sell, offers, resource_type, city_to_buy_from):
                 break
 
 
-def do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, city):
+def do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, city, *, reviewed=False):
     """
     Parameters
     ----------
@@ -402,12 +418,29 @@ def do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, 
     sell_market_capacity : int
     city : dict
     """
+    if reviewed:
+        from ikabot.function.nativeMarket import market_snapshot
+        fresh = market_snapshot(session, city["id"], resource_type, "create_offer")
+        html = getMarketInfo(session, city)
+        # The legacy updateOffers request rewrites all five slots. Until
+        # complete price/type observations are available, allow only an empty
+        # market, never overwrite or cancel an existing listing.
+        if (any(onSellInMarket(html)) or fresh["currently_on_sale"] != 0
+                or fresh["sell_market_capacity"] != sell_market_capacity
+                or amount_to_sell > min(sell_market_capacity, fresh["city"]["availableResources"][resource_type])
+                or not fresh["price_min"] <= price <= fresh["price_max"]):
+            raise ValueError("Market state changed or existing listings require local review")
     initial_amount_to_sell = amount_to_sell
     html = getMarketInfo(session, city)
     previous_on_sell = onSellInMarket(html)[resource_type]
     while True:
         html = getMarketInfo(session, city)
-        currently_on_sell = onSellInMarket(html)[resource_type]
+        listings = onSellInMarket(html)
+        currently_on_sell = listings[resource_type]
+        if reviewed and (any(listings) or storageCapacityOfMarket(html) != sell_market_capacity
+                         or amount_to_sell != initial_amount_to_sell
+                         or amount_to_sell > sell_market_capacity):
+            raise ValueError("Market listing changed; stop and review")
         # if there is space in the store
         if currently_on_sell < storageCapacityOfMarket(html):
             # add our new offer to the free space
@@ -449,7 +482,21 @@ def do_it2(session, amount_to_sell, price, resource_type, sell_market_capacity, 
             else:
                 payloadPost["tradegood{:d}".format(resource_type)] = new_offer
                 payloadPost["tradegood{:d}Price".format(resource_type)] = price
-            session.post(params=payloadPost)
+            if reviewed:
+                last = getMarketInfo(session, city)
+                if (any(onSellInMarket(last)) or storageCapacityOfMarket(last) != sell_market_capacity
+                        or new_offer != initial_amount_to_sell):
+                    raise ValueError("Market listing changed; stop and review")
+                session.post(params=payloadPost, retry_on_failure=False)
+            else:
+                session.post(params=payloadPost)
+
+            if reviewed:
+                observed = onSellInMarket(getMarketInfo(session, city))
+                if observed[resource_type] != new_offer:
+                    raise RuntimeError("Market listing unconfirmed; inspect before retrying")
+                session.setStatus("Reviewed market listing observed")
+                return
 
             # if we don't have any more to add to the offer, leave the loop
             if amount_to_sell == 0:

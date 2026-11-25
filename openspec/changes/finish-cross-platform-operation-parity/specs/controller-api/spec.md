@@ -103,3 +103,15 @@ Managed world scans SHALL store only bounded aggregate island observations in an
 #### Scenario: The scan radius is zero
 - **WHEN** the approved region radius is zero
 - **THEN** the scan covers only the selected center coordinate
+
+### Requirement: Reviewed reward, distribution and trade operations
+
+The controller SHALL obtain bounded account-scoped daily advisor, exact distribution or market observations before issuing a short-lived operation-specific launch ticket. Both native clients SHALL independently validate the reviewed quantities, scope and applicable cost or storage observations and MAY queue separately reviewed accounts. A ticket SHALL NOT authorize another account or operation. Generic launch SHALL reject these operations. The worker SHALL reject a changed distribution allocation or changed market quote before the affected submission. A reviewed listing SHALL NOT overwrite existing listings. Observations SHALL NOT be presented as guaranteed future rewards or proof of game-side execution.
+
+#### Scenario: Independent multi-account review
+- **WHEN** each selected account has its own valid reviewed ticket
+- **THEN** the batch dispatches only those reviewed configurations with independent receipts
+
+#### Scenario: A quote or allocation changes
+- **WHEN** the worker finds a changed reviewed quote or distribution allocation
+- **THEN** the worker stops rather than substituting a different transaction

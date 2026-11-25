@@ -1,4 +1,5 @@
 "use client";
+import {parseRewardDistributionReview} from "../lib/reward-distribution-review";
 import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
@@ -119,7 +120,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const reviewed=review!==null&&review.fingerprint===fingerprint;
   const batchValid=!!batchTargets&&batchTargets.length>=1&&batchTargets.length<=32&&batchTargets.every(a=>a.enabled);
   const canReview=!lookingUp&&(batchTargets?batchValid:enabled&&ready&&!loading&&!loadError)&&role!=="viewer"&&valid&&!locked&&!busy;
-  const canLaunch=canReview&&reviewed&&approved&&(task!=="sendResources"||Boolean(shipment?.ready&&shipment.preview_id));
+  const needsShipmentReview=task==="sendResources"||task==="distributeResources";
+  const canLaunch=canReview&&reviewed&&approved&&(!needsShipmentReview||Boolean(shipment?.ready&&shipment.preview_id));
   const edit=()=>{setReview(null);setApproved(false);setShipment(null);};
   useEffect(()=>{
     if(!shipment?.expires_in)return;
@@ -129,10 +131,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     edit();setMessage("");
-    if(task!=="sendResources"){setReview({config,summary,fingerprint});return;}
+    if(!needsShipmentReview){setReview({config,summary,fingerprint});return;}
     inFlight.current=true;setBusy(true);
     try{
-      const data=scopedShipmentPlan(await api(prefix+"/shipment-plan",config),account,config);
+      const data=task==="distributeResources"?parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config).shipment!:scopedShipmentPlan(await api(prefix+"/shipment-plan",config),account,config);
       if(mounted.current){setShipment(data);setReview({config,summary,fingerprint});}
     }catch{if(mounted.current)setMessage("Shipment preview unavailable. Check stock, recipients and fleet.");}
     finally{if(mounted.current)setBusy(false);inFlight.current=false;}
@@ -198,7 +200,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       const current=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(current,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const result=task==="sendResources"&&shipment?.preview_id?await api(prefix+"/tasks/shipment-start",{preview_id:shipment.preview_id,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
+      const result=needsShipmentReview&&shipment?.preview_id?await api(prefix+"/tasks/"+(task==="distributeResources"?"distribution-start":"shipment-start"),{preview_id:shipment.preview_id,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
       const receipt=result as {status?:unknown};
       if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
     } catch {if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
@@ -257,13 +259,13 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
     {!notificationTest&&<p className="subtle-message">{t(task==="sendResources"?"The engine checks current game data again at launch. First-load timing is conditional.":"The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>}
-    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(task==="sendResources"?"Preview shipment capacity":"Review settings")}</button>
+    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(needsShipmentReview?"Preview shipment capacity":"Review settings")}</button>
     {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{batchTargets&&<ul>{batchTargets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
       {shipment&&<><p>{t("Available ships")}: {shipment.available_ships.toLocaleString()}/{shipment.total_ships.toLocaleString()} · {t("Cargo per vessel")}: {shipment.capacity.toLocaleString()}</p>
         <table><thead><tr><th>{t("Route")}</th><th>{t("Origin stock")}</th><th>{t("First load limit")}</th><th>{t("Minimum loads")}</th><th>{t("First-load estimate (seconds)")}</th><th>{t("Modeled final delivery (seconds)")}</th></tr></thead><tbody>{shipment.routes.map((r,i)=><tr key={i}><td>{r.origin_name} → {r.destination_name}{r.destination_space===null&&<p>{t("Recipient storage unknown")}</p>}</td><td>{r.stock.map((n,j)=>r.resources[j]?materialName(MATERIALS[j])+": "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.first_load_limit.toLocaleString()}</td><td>{r.minimum_loads??t("Unavailable")}</td><td>{r.first_load_timing? <>{r.first_load_timing.total_seconds.toLocaleString()}<p>{t("Queue")}: {r.first_load_timing.queue_seconds} · {t("Loading")}: {r.first_load_timing.loading_seconds} · {t("Travel")}: {r.first_load_timing.travel_seconds}</p></>:t("Unavailable")}</td><td>{r.full_route_model?.delivery_seconds.toLocaleString()??t("Unavailable")}</td></tr>)}</tbody></table>
         <p>{t("Model assumes an exclusive fleet, symmetric return travel, unchanged loading and storage, and no extra waits. No combined multi-route ETA.")}</p>{!shipment.ready&&<p role="alert">{t("No usable fleet")}</p>}</>}
-      <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy||(task==="sendResources"&&!shipment?.ready)} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
-      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{task==="sendResources"&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
+      <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy||(needsShipmentReview&&!shipment?.ready)} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
+      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{needsShipmentReview&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary+"\n"+shipment.routes.map(r=>r.origin_name+" → "+r.destination_name+": "+r.resources.reduce((a,b)=>a+b,0)).join("\n")} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {batchReceipts.length>0&&<section className="preview-panel"><h4>{t("Batch receipts")}</h4><ul>{batchReceipts.map(r=><li key={r.account}>{batchTargets?.find(a=>a.id===r.account)?.name??r.account} · {t(r.status)}</li>)}</ul><p>{t("Check Activity before starting any further task.")}</p></section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

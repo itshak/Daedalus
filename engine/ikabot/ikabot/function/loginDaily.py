@@ -229,6 +229,31 @@ def prepare_loginDaily(session, wine_city, wood_city=None, luxury_city=None, fav
     }
 
 
+def preview_daily_rewards(session, draft):
+    """Read the daily advisor without collecting rewards or opening a bonus."""
+    clean = prepare_loginDaily(session, **draft)
+    _, cities = getIdsOfCities(session)
+    labels = {key: cities[clean[key]]["name"] for key in ("wine_city", "wood_city", "luxury_city")
+              if clean[key] is not None}
+    html = session.post(
+        f"view=dailyTasks&backgroundView=city&currentCityId={clean['wine_city']}&actionRequest={actionRequest}&ajax=1",
+        retry_on_failure=False,
+    )
+    current = re.search(r'"currentFavor":\s*(\d+)', html)
+    limit = re.search(r'"favorLimit":\s*(\d+)', html)
+    countdown = re.search(r'"dailyTasksCountdown":\s*\{"countdown":\s*\{"enddate":(\d+),"currentdate":(\d+)', html)
+    if not current or not limit or not countdown:
+        raise ValueError("Daily advisor unavailable")
+    rows = [row for row in re.findall(r"<tr([\s\S]*?)tr>", html) if "task_row_" in row]
+    try:
+        collectable = sum(is_collectable(row) for row in rows)
+    except AttributeError:
+        raise ValueError("Daily advisor task status unavailable") from None
+    return {"cities": labels, "favour": int(current.group(1)), "limit": int(limit.group(1)),
+            "reset_seconds": max(0, int(countdown.group(1))-int(countdown.group(2))),
+            "collectable": collectable}
+
+
 @task("loginDaily", prepare=prepare_loginDaily)
 def do_it(session, wine_city, wood_city=None, luxury_city=None, favour_tasks=None, collect_ambrosia=False):
     """

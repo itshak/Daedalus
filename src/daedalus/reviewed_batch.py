@@ -7,6 +7,10 @@ from uuid import uuid4
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 REVIEW_ENDPOINTS = {
+    "distributeResources": "distribution-start",
+    "loginDaily": "daily-start",
+    "buyResources": "buy-start",
+    "sellResources": "sell-start",
     "trainArmy": "training-start",
     "constructionList": "construction-start",
     "sendResources": "shipment-start",
@@ -22,7 +26,7 @@ REVIEW_ENDPOINTS = {
     "vacationMode": "vacation-start",
 }
 BATCH_REVIEW_TASKS = frozenset(REVIEW_ENDPOINTS)
-assert BATCH_REVIEW_TASKS == CITY_REVIEW_TASKS | {"constructionList", "sendResources"}
+assert BATCH_REVIEW_TASKS == CITY_REVIEW_TASKS | {"constructionList", "sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
 MAX_REVIEW_BATCH = 32
 PREVIEW_ID_PATTERN = r"[A-Za-z0-9_-]{43}"
 

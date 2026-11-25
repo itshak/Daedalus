@@ -646,6 +646,47 @@ def create_app(
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
 
+    @app.post("/api/v1/accounts/{account_id}/reward-distribution-plan", dependencies=[Depends(authorized)])
+    def reward_distribution_plan(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_daily,
+            validate_distribution,
+        )
+        from daedalus.market_review import market_draft, validate_market_observation
+
+        controller = require_task_controller(account_id)
+        task = payload.get("task")
+        if set(payload) != {"task", "draft"} or task not in ("loginDaily", "distributeResources", "buyResources", "sellResources"):
+            raise HTTPException(status_code=422, detail="Invalid operation preview")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Operation preview unavailable")
+        try:
+            draft = (daily_draft(payload["draft"]) if task == "loginDaily" else distribution_draft(payload["draft"])
+                     if task == "distributeResources" else market_draft(task, payload["draft"]))
+            preflight = controller.preflight(account_id, task)
+            if preflight.get("ready") is not True or preflight.get("unresolved_request") is not False:
+                raise ValueError("Prerequisites unavailable")
+            observed = ipc_client.native_reward_distribution_preview(account_by_id[account_id], task, draft)
+            config = dict(draft)
+            if task == "loginDaily":
+                validate_daily(draft, observed)
+            elif task == "distributeResources":
+                config["reviewed_routes"] = validate_distribution(draft, observed)
+                if observed["ready"] is not True:
+                    raise ValueError("No usable fleet")
+            else:
+                validate_market_observation(task, draft, observed)
+                config["reviewed_market"] = True
+            ticket = operation_previews.issue(account_id, task, config)
+            return {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
+                    "preview_id": ticket, "expires_in": operation_previews.ttl}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Operation preview rejected") from exc
+        except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=503, detail="Operation preview unavailable") from exc
+
     @app.post("/api/v1/accounts/{account_id}/shipment-plan", dependencies=[Depends(authorized)])
     def shipment_plan(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         require_task_controller(account_id)
@@ -1676,7 +1717,7 @@ def create_app(
     def start_account_task(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
-        if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS:
+        if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS | {"distributeResources", "loginDaily", "buyResources", "sellResources"}:
             raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
         if payload.get("task") == "constructionList":
             config = payload.get("config")
@@ -1769,6 +1810,22 @@ def create_app(
     def start_reviewed_donation(account_id: str,
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/buy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_buy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "buyResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/sell-start", dependencies=[Depends(authorized)])
+    def start_reviewed_sell(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "sellResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/distribution-start", dependencies=[Depends(authorized)])
+    def start_distribution(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "distributeResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/daily-start", dependencies=[Depends(authorized)])
+    def start_daily(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "loginDaily", payload)
 
     @app.post("/api/v1/accounts/{account_id}/tasks/shipment-start", dependencies=[Depends(authorized)])
     def start_reviewed_shipment(account_id: str, payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:

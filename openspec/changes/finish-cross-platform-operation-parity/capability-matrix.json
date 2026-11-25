@@ -82,10 +82,12 @@
     "buyResources": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -159,10 +161,12 @@
     "distributeResources": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -246,10 +250,12 @@
     "loginDaily": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -356,10 +362,12 @@
     "sellResources": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },

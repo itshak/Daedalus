@@ -680,6 +680,24 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid city data")
         return data
 
+    def reward_distribution_preview(self, account_id, task, draft):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_ticket,
+        )
+        from daedalus.market_review import market_draft
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or task not in ("loginDaily", "distributeResources", "buyResources", "sellResources"):
+            raise ValueError("Unsupported preview")
+        clean = (daily_draft(draft) if task == "loginDaily" else distribution_draft(draft)
+                 if task == "distributeResources" else market_draft(task, draft))
+        value = self._write(f"accounts/{account_id}/reward-distribution-plan", {"task": task, "draft": clean})
+        try:
+            return validate_ticket(value, account_id, task, clean)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise APIConnectionError("Invalid operation preview") from exc
+
     def shipment_preview(self, account_id: str, draft: dict[str, object]) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account")

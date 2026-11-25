@@ -2,6 +2,15 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Operation preview unavailable; refresh before retrying.": "Предпросмотр недоступен. Обновите данные перед повторной попыткой.",
+  "Reviewed listing requires an empty market; existing offers are never overwritten.": "Подтверждённое размещение требует пустого рынка; существующие предложения не перезаписываются.",
+  "Quoted allocation, not a completion receipt. Changed quotes halt execution.": "Распределение по предложениям, а не подтверждение завершения. Изменение цен останавливает выполнение.",
+  "Observed available gold": "Доступное золото",
+  "Quoted gold total": "Общая стоимость по предложениям",
+  "Recurring policy; eligibility and reward quantities can change. No reward collected by preview.": "Повторяющаяся политика; доступность и количество наград могут изменяться. Предпросмотр не собирает награды.",
+  "Reset in seconds": "До сброса, секунд",
+  "Collectable tasks": "Доступные задания",
+  "Observed favour": "Наблюдаемая благосклонность",
   "Network profile unavailable or outcome uncertain. Refresh before retrying.": "Профиль недоступен или результат не подтверждён. Обновите данные перед повторной попыткой.",
   "Profile saved after HTTPS test.": "Профиль сохранён после проверки HTTPS.",
   "HTTPS test passed; settings unchanged.": "Проверка HTTPS прошла; настройки не изменены.",

@@ -772,6 +772,22 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action in {"preview_distribution_existing", "preview_daily_rewards_existing", "preview_market_existing"}:
+                    try:
+                        session = self._existing_session(request)
+                        if action == "preview_distribution_existing":
+                            from ikabot.function.distributeResources import preview_distribution
+                            result = preview_distribution(session, request["draft"])
+                        elif action == "preview_market_existing":
+                            from ikabot.function.nativeMarket import preview_native_market
+                            result = preview_native_market(session, request["task"], request["draft"])
+                        else:
+                            from ikabot.function.loginDaily import preview_daily_rewards
+                            result = preview_daily_rewards(session, request["draft"])
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Operation preview unavailable"}
                 if action == "preview_shipments_existing":
                     from ikabot.function.sendResources import preview_native_shipments
                     session = self._existing_session(request)
@@ -1932,7 +1948,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research", "tavernManager", "searchForIslandSpaces",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research", "tavernManager", "searchForIslandSpaces", "distributeResources", "loginDaily", "buyResources", "sellResources",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

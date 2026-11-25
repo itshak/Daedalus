@@ -1,4 +1,6 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
+import {parseRewardDistributionReview} from "../lib/reward-distribution-review";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {MAX_AMOUNT,MATERIALS,type City,type CityTask,scopedCities,readyPreflight,validNativeConfig} from "@/lib/native-task-contract";
@@ -22,7 +24,7 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   const [ready,setReady]=useState(false);
   const [error,setError]=useState(false);
   const [loading,setLoading]=useState(Boolean(account&&enabled));
-  const [review,setReview]=useState<{config:Row;summary:string}|null>(null);
+  const [review,setReview]=useState<{config:Row;summary:string;previewId?:string;ttl?:number}|null>(null);
   const [approved,setApproved]=useState(false);
   const [busy,setBusy]=useState(false);
   const [locked,setLocked]=useState(false);
@@ -85,13 +87,31 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
   const disabled=busy||locked||loading||!enabled||role==="viewer";
   const canReview=!disabled&&ready&&!error&&valid;
   const numeric=(label:string,value:number,onChange:(v:number)=>void,min:number,max:number)=><label className="field"><span>{label}</span><input type="number" min={min} max={max} step={1} value={Number.isNaN(value)?"":value} onChange={e=>{invalidate();onChange(e.target.value===""?NaN:Number(e.target.value));}}/></label>;
+  const prepare=async()=>{
+    if(!canReview||inFlight.current)return;
+    invalidate();setMessage("");
+    if(task==="UpgradeUnits"){setReview({config,summary});return;}
+    inFlight.current=true;setBusy(true);
+    try{
+      const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
+      const market=data.market!;
+      const details=market.rows.map(r=>r.city+" "+r.player+": "+r.amount.toLocaleString()+" × "+r.unit_price.toLocaleString()+" "+t("Gold")).join("\n");
+      if(mounted.current)setReview({config,previewId:data.preview_id,ttl:data.expires_in,summary:summary+"\n"+details+"\n"+t("Quoted gold total")+": "+market.gold_total.toLocaleString()+(market.gold_available===null?"":"\n"+t("Observed available gold")+": "+market.gold_available.toLocaleString())+"\n"+t("Quoted allocation, not a completion receipt. Changed quotes halt execution.")});
+    }catch{if(mounted.current)setMessage("Operation preview unavailable; refresh before retrying.");}
+    finally{inFlight.current=false;if(mounted.current)setBusy(false);}
+  };
+  useEffect(()=>{
+    if(!review?.ttl)return;
+    const timer=window.setTimeout(()=>{invalidate();setMessage("Review expired; prepare a new preview.");},review.ttl*1000);
+    return ()=>window.clearTimeout(timer);
+  },[review]);
   const launch=async()=>{
-    if(!canReview||!approved||!review||inFlight.current)return;inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);
+    if(!canReview||!approved||!review||inFlight.current||JSON.stringify(review.config)!==JSON.stringify(config))return;inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);
     try{
       const p=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(p,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const receipt=await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()}) as {status?:string};
+      const receipt=(review.previewId?await api(prefix+"/tasks/"+(task==="buyResources"?"buy-start":"sell-start"),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()})) as {status?:string};
       if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
     }catch{if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
     finally{inFlight.current=false;if(mounted.current)setBusy(false);}
@@ -103,11 +123,11 @@ export function NativeCityEditor({account,accountName,task,enabled,role}:{accoun
       {task==="UpgradeUnits"&&upgrades.map(r=>{const key=upgradeKey(r),current=Number(r.current_level),max=Number(r.max_level);return <fieldset key={key}><legend>{String(r.name)} · {String(r.description)}</legend><label className="check-label"><input type="checkbox" checked={Object.hasOwn(quantities,key)} disabled={current>=max} onChange={e=>{invalidate();setQuantities(old=>{const next={...old};if(e.target.checked)next[key]=current+1;else delete next[key];return next;});}}/>{t("Level")} {current}</label>{Object.hasOwn(quantities,key)&&numeric(t("Target level"),quantities[key],v=>setQuantities(old=>({...old,[key]:v})),current+1,max)}</fieldset>;})}
       {(task==="buyResources"||task==="sellResources")&&<><label className="field"><span>{t("Resource")}</span><select value={resource} onChange={e=>{changeScope();setResource(Number(e.target.value));}}>{MATERIALS.map((m,i)=><option key={m} value={i}>{material(i)}</option>)}</select></label>{task==="sellResources"&&<label className="field"><span>{t("Market action")}</span><select value={side} onChange={e=>{changeScope();setSide(e.target.value);}}><option value="sell_to_offers">{t("Sell to available offers")}</option><option value="create_offer">{t("Create a market offer")}</option></select></label>}
       {side==="create_offer"?snapshot&&<p>{t("Market capacity")}: {String(snapshot.sell_market_capacity)} · {t("Currently on sale")}: {String(snapshot.currently_on_sale)}</p>:offers.map((o,i)=><label key={i} className="check-label"><input type="checkbox" checked={selected.includes(i)} onChange={e=>{invalidate();setSelected(old=>e.target.checked?[...old,i]:old.filter(x=>x!==i));}}/>{Array.isArray(o)?o.slice(0,4).join(" · "):record(o)?[o.ciudadDestino,o.jugadorAComprar,o.amountAvailable,o.precio].join(" · "):"—"}</label>)}
-      {numeric(t("Quantity"),amount,setAmount,1,MAX_AMOUNT)}{side==="create_offer"&&snapshot&&numeric(t("Gold per unit"),price,setPrice,Number(snapshot.price_min),Number(snapshot.price_max))}</>}
+      {side==="create_offer"&&<p>{t("Reviewed listing requires an empty market; existing offers are never overwritten.")}</p>}{numeric(t("Quantity"),amount,setAmount,1,MAX_AMOUNT)}{side==="create_offer"&&snapshot&&numeric(t("Gold per unit"),price,setPrice,Number(snapshot.price_min),Number(snapshot.price_max))}</>}
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
-    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>{setReview({config,summary});setApproved(false);}}>{t("Review settings")}</button>
-    {review&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p style={{whiteSpace:"pre-line"}}>{review.summary}</p><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={!canReview||!approved} onClick={()=>void launch()}>{t("Start automation")}</button></section>}
+    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t("Review settings")}</button>
+    {review&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p style={{whiteSpace:"pre-line"}}>{review.summary}</p><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={!canReview||!approved} onClick={()=>void launch()}>{t("Start automation")}</button>{review.previewId&&<QueueReviewButton key={review.previewId} account={account} accountName={accountName} task={task} previewId={review.previewId} ttl={review.ttl??null} summary={review.summary} disabled={!canReview||!approved} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;
 }

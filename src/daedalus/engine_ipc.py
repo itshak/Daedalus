@@ -389,6 +389,44 @@ class ExistingIPCClient:
             )
         return result
 
+    def native_reward_distribution_preview(self, account: Account, task, draft):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_daily,
+            validate_distribution,
+        )
+        from daedalus.market_review import market_draft, validate_market_observation
+
+        if task not in ("loginDaily", "distributeResources", "buyResources", "sellResources") or not account.enabled:
+            raise ValueError("Unsupported preview")
+        clean = (daily_draft(draft) if task == "loginDaily" else distribution_draft(draft)
+                 if task == "distributeResources" else market_draft(task, draft))
+        owned = {r["id"] for r in self.cities(account)}
+        ids = ([clean[k] for k in ("wine_city", "wood_city", "luxury_city") if clean[k] is not None]
+               if task == "loginDaily" else clean["cities_ids"] if task == "distributeResources"
+               else [int((clean.get("city") or clean["city_to_buy_from"])["id"])])
+        if any(i not in owned for i in ids):
+            raise ValueError("Choose owned cities")
+        action = ("preview_daily_rewards_existing" if task == "loginDaily" else "preview_distribution_existing"
+                  if task == "distributeResources" else "preview_market_existing")
+        data = self._exchange({"action": action, "world": account.world, "player": account.player,
+                               "draft": clean, "task": task}, read_timeout=120.0)
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid preview scope")
+        try:
+            observation = data["result"]
+            if task == "loginDaily":
+                validate_daily(clean, observation)
+            elif task == "distributeResources":
+                validate_distribution(clean, observation)
+            else:
+                validate_market_observation(task, clean, observation)
+            return observation
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid operation preview") from exc
+
     def shipment_preview(self, account: Account, draft: dict[str, object]) -> dict[str, object]:
         clean = validated_shipment_draft(draft)
         owned = {row["id"] for row in self.cities(account)}

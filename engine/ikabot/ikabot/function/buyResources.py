@@ -189,7 +189,7 @@ def filterOffers(offers):
     return [offer for offer in offers if offer[key] == seller], seller
 
 
-def buy(session, city, offer, amount_to_buy, ships_available, ship_capacity):
+def buy(session, city, offer, amount_to_buy, ships_available, ship_capacity, *, reviewed=False):
     """
     Parameters
     ----------
@@ -248,7 +248,13 @@ def buy(session, city, offer, amount_to_buy, ships_available, ship_capacity):
         data_dict["cargo_resource"] = amount_to_buy
     else:
         data_dict["cargo_tradegood{}".format(resource)] = amount_to_buy
-    session.post(params=data_dict)
+    if reviewed:
+        price_key = "resourcePrice" if resource == "resource" else f"tradegood{resource}Price"
+        if data_dict.get(price_key) != offer["precio"]:
+            raise ValueError("Purchase quote changed; stop and review")
+        session.post(params=data_dict, retry_on_failure=False)
+    else:
+        session.post(params=data_dict)
     msg = "I buy {} to {} from {}".format(
         addThousandSeparator(amount_to_buy),
         offer["ciudadDestino"],
@@ -265,7 +271,7 @@ from ikabot.function.nativeMarket import prepare_buyResources
 
 
 @task("buyResources", prepare=prepare_buyResources)
-def do_it(session, city, offers, amount_to_buy):
+def do_it(session, city, offers, amount_to_buy, reviewed_market=False):
     """
     Parameters
     ----------
@@ -289,9 +295,21 @@ def do_it(session, city, offers, amount_to_buy):
             storageCapacity = ships_available * ship_capacity
             buy_amount = min(amount_to_buy, storageCapacity, offer["amountAvailable"])
 
+            if reviewed_market:
+                from ikabot.function.nativeMarket import market_snapshot
+                index = 0 if offer["resource"] == "resource" else int(offer["resource"])
+                fresh = market_snapshot(session, city["id"], index, "buy")
+                current = next((r for r in fresh["offers"] if all(r[k] == offer[k] for k in (
+                    "destinationCityId", "cityId", "position", "type", "resource", "precio",
+                    "ciudadDestino", "jugadorAComprar"))), None)
+                if (current is None or current["amountAvailable"] < buy_amount
+                        or getGold(session, city)[0] < buy_amount * offer["precio"]):
+                    raise ValueError("Purchase quote changed; stop and review")
+                buy(session, city, offer, buy_amount, ships_available, ship_capacity, reviewed=True)
+            else:
+                buy(session, city, offer, buy_amount, ships_available, ship_capacity)
             amount_to_buy -= buy_amount
             offer["amountAvailable"] -= buy_amount
-            buy(session, city, offer, buy_amount, ships_available, ship_capacity)
             # start from the beginning again, so that we always buy from the cheapest offers fisrt
             break
 @configurator

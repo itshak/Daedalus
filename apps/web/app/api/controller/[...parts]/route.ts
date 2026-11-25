@@ -1,3 +1,4 @@
+import {validRewardDistributionRequest} from "@/lib/reward-distribution-review";
 import {proxyProfileRoute,validProxyDraft} from "@/lib/proxy-profiles";
 import {challengeRoute,validChallengeDraft} from "@/lib/challenge-policy";
 import {extensionRoute,validExtensionDraft} from "@/lib/extension-settings";
@@ -81,6 +82,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
+    if(parts.at(-1)==="reward-distribution-plan"&&!validRewardDistributionRequest(value))return NextResponse.json({error:"Invalid operation preview"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "shipment-plan" && !validNativeConfig("sendResources",value))
       return NextResponse.json({error:"Invalid shipment draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "vacation-plan" && !z.object({}).strict().safeParse(value).success)

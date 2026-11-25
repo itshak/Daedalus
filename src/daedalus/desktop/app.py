@@ -321,6 +321,8 @@ class APIWorker(QThread):
             elif self.action == "server_activity" and self.account_id and self.task_payload:
                 result = self.client.activity(self.account_id, before=self.task_payload["before"],
                                               status=self.task_payload["status"])
+            elif self.action == "task_reward_distribution_preview" and self.account_id and self.task_payload:
+                result = self.client.reward_distribution_preview(self.account_id, self.task_payload["task"], self.task_payload["draft"])
             elif self.action == "task_shipment_preview" and self.account_id and self.task_payload:
                 result = self.client.shipment_preview(self.account_id, self.task_payload["draft"])
             elif self.action == "task_island_destinations" and self.account_id and self.task_payload:
@@ -872,6 +874,9 @@ class MainWindow(FluentWindow):
         )
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
+            view.reward_distribution_preview_requested.connect(
+                lambda aid, task, draft, nonce: self._request("task_reward_distribution_preview", account_id=aid,
+                    task_payload={"task": task, "draft": draft, "nonce": nonce}))
             view.shipment_preview_requested.connect(
                 lambda aid, draft, nonce: self._request("task_shipment_preview", account_id=aid,
                     task_payload={"draft": draft, "nonce": nonce})
@@ -1794,6 +1799,9 @@ class MainWindow(FluentWindow):
         task_payload: dict[str, object] | None = None,
     ) -> None:
         if self.client is None or self._worker is not None:
+            if action == "task_reward_distribution_preview" and task_payload is not None:
+                for view in self._task_views:
+                    view.set_reward_distribution_unavailable(task_payload["nonce"])
             if action == "task_island_destinations" and task_payload is not None:
                 for view in self._task_views:
                     view.set_island_destinations_unavailable(account_id, task_payload["nonce"])
@@ -2432,6 +2440,11 @@ class MainWindow(FluentWindow):
             request = getattr(self._worker, "task_payload", None)
             if isinstance(payload, dict) and isinstance(request, dict):
                 self.log_page.set_server_activity(payload, request["before"], request["status"])
+        elif action == "task_reward_distribution_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_reward_distribution_preview(payload, request["nonce"])
         elif action == "task_shipment_preview":
             assert isinstance(payload, dict)
             request = getattr(self._worker, "task_payload", None)
@@ -2698,6 +2711,11 @@ class MainWindow(FluentWindow):
             if isinstance(request, dict):
                 self.log_page.set_server_activity_unavailable(getattr(self._worker, "account_id", None),
                                                               request["before"], request["status"])
+        if action == "task_reward_distribution_preview":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                for view in self._task_views:
+                    view.set_reward_distribution_unavailable(request["nonce"])
         if action == "task_shipment_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

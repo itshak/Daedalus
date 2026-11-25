@@ -55,3 +55,9 @@ The owner initially deferred proxy configuration and connectivity testing, then 
 - [x] Generate private account-bound aggregate reports from managed world scans, validate and paginate completed data, provide complete CSV exports in desktop Settings and web Activity; prevent raw identifying dump export and correct radius-zero scope.
 
 - [x] Implement account-bound host-approved proxy profile selection, fixed credential-free HTTPS test, owner-authorized browser changes, explicit review, stale-state rejection and idle-account-only persistence in both clients. Arbitrary endpoint and authentication provisioning remain host-local.
+
+- [x] Add authoritative daily reward advisor and exact distribution previews; require account-bound review tickets and enable independent multi-account queueing.
+- [x] Add verified market quote allocation, quoted gold totals and available purchase gold; require account-bound review tickets, non-retried final submissions and independent multi-account queueing. Reviewed new listings require an empty market to avoid overwriting existing offers.
+
+## Owner acceptance deferral (2026-11-26)
+Manual macOS installation/UI and real-account acceptance are deferred at the owner's request to [issue #60](https://github.com/itshak/Daedalus/issues/60). These tests remain unperformed; automated CI, packaging, safe rollout and unresolved implementation criteria are not waived.

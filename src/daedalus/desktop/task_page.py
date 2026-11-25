@@ -76,7 +76,7 @@ from daedalus.reviewed_batch import BATCH_REVIEW_TASKS, validated_batch_entries
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS as ENGINE_REVIEW_TASKS
 from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
 
-CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | {"sendResources"}
+CITY_REVIEW_TASKS = ENGINE_REVIEW_TASKS | {"sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"}
 
 # Fixed, reviewed display labels. Unknown built-ins get a readable fallback,
 # but dispatch always uses the engine's canonical original task name.
@@ -142,6 +142,7 @@ class TasksPage(QWidget):
     cities_requested = Signal(str)
     island_destinations_requested = Signal(str, int, int, str)
     shipment_preview_requested = Signal(str, object, str)
+    reward_distribution_preview_requested = Signal(str, str, object, str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
     construction_supply_preview_requested = Signal(str, int, object, object)
@@ -1011,6 +1012,9 @@ class TasksPage(QWidget):
         if task in WORKER_TASKS:
             self.building_note.setText("Reading the actual worker capacity…")
             self.worker_preview_requested.emit(account, task, draft, self._city_review_nonce)
+        elif task in {"loginDaily", "distributeResources", "buyResources", "sellResources"}:
+            self.building_note.setText("Reading actual operation data…")
+            self.reward_distribution_preview_requested.emit(account, task, draft, self._city_review_nonce)
         elif task == "sendResources":
             self.building_note.setText("Reading current fleet, stock and storage…")
             self.shipment_preview_requested.emit(account, draft, self._city_review_nonce)
@@ -1038,6 +1042,61 @@ class TasksPage(QWidget):
         else:
             self.building_note.setText("Reading the actual island project and available wood…")
             self.donation_preview_requested.emit(account, draft, self._city_review_nonce)
+
+    def set_reward_distribution_preview(self, result, nonce):
+        from daedalus.daily_distribution_review import (
+            daily_draft,
+            distribution_draft,
+            validate_ticket,
+        )
+        from daedalus.market_review import market_draft
+
+        task = self.selected_task_name()
+        account = self.selected_account_id()
+        if (task not in {"loginDaily", "distributeResources", "buyResources", "sellResources"} or nonce != self._city_review_nonce
+                or result.get("account_id") != account):
+            return
+        try:
+            original = self._form_config()
+            clean = (daily_draft(original) if task == "loginDaily" else distribution_draft(original)
+                     if task == "distributeResources" else market_draft(task, original))
+            validate_ticket(result, account, task, clean)
+        except (ValueError, TypeError, KeyError):
+            self.set_reward_distribution_unavailable(nonce)
+            return
+        observation = result["observation"]
+        if task == "loginDaily":
+            labels = observation["cities"]
+            lines = [f"{key.replace('_', ' ')}: {name}" for key, name in labels.items()]
+            lines += ["Favour: " + ", ".join(clean["favour_tasks"]), "Collect ambrosia: " + str(clean["collect_ambrosia"]),
+                      (f"Observed favour: {observation['favour']:,}/{observation['limit']:,}; "
+                      f"{observation['collectable']} collectable tasks; reset in {observation['reset_seconds']:,} s."),
+                      "Recurring policy; eligibility and reward quantities can change. No reward collected by preview."]
+        elif task == "distributeResources":
+            lines = [f"{clean['resource']} · {clean['mode']} · {observation['available_ships']}/{observation['total_ships']} ships free."]
+            for row in observation["routes"]:
+                lines.append(f"{row['origin_name']} → {row['destination_name']}: {sum(row['resources']):,}; "
+                             f"first load ≤ {row['first_load_limit']:,}; minimum loads {row['minimum_loads']}.")
+            lines.append("Exact allocation; a changed plan requires a new review. No combined ETA.")
+        else:
+            lines = [f"{observation['mode'].replace('_', ' ')} · quoted total {observation['gold_total']:,} gold."]
+            if observation["gold_available"] is not None:
+                lines.append(f"Observed available gold: {observation['gold_available']:,}.")
+            for row in observation["rows"]:
+                lines.append(f"{row['city']} {row['player']}: {row['amount']:,} × {row['unit_price']:,} gold.")
+            lines.append("Quoted allocation, not a completion receipt. Changed quotes halt execution; no automatic replay.")
+        self._city_review_plan = {**original, "preview_id": result["preview_id"]}
+        self._city_review_expires = time.monotonic() + result["expires_in"]
+        self._city_review_nonce = None
+        self.building_note.setText("\n".join(lines))
+        self._invalidate_review()
+
+    def set_reward_distribution_unavailable(self, nonce):
+        if nonce == self._city_review_nonce:
+            self._city_review_plan = None
+            self._city_review_nonce = None
+            self.building_note.setText("Operation preview unavailable; refresh before retrying.")
+            self._invalidate_review()
 
     def set_shipment_preview(self, result, nonce):
         if (self.selected_task_name() != "sendResources" or nonce != self._city_review_nonce
@@ -2200,6 +2259,9 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview market allocation…" if name in {"buyResources", "sellResources"} else
+            "Preview daily rewards…" if name == "loginDaily" else
+            "Preview distribution allocation…" if name == "distributeResources" else
             "Preview shipment capacity…" if name == "sendResources" else
             "Preview vacation activation…" if name == "vacationMode" else
             "Load troops / preview attack…" if name == "attackBarbarians" else
@@ -2920,7 +2982,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces'} | WORKER_TASKS else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces', 'distributeResources', 'loginDaily', 'buyResources', 'sellResources'} | WORKER_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

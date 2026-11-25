@@ -12,7 +12,7 @@ from daedalus.reviewed_batch import MAX_REVIEW_BATCH, PREVIEW_ID_PATTERN, REVIEW
 def render() -> str:
     native = [name for name, workflow in coverage_manifest()["operations"].items()
               if workflow["web"] == "native" and name not in REVIEW_ENDPOINTS]
-    native.append("sendResources")  # one-time shipment editor also uses its typed draft schema
+    native.extend(("sendResources", "distributeResources", "loginDaily", "buyResources", "sellResources"))  # one-time shipment editor also uses its typed draft schema
     data = json.dumps(sorted(native, key=str.casefold), ensure_ascii=True)
     endpoints = json.dumps(REVIEW_ENDPOINTS, sort_keys=True, indent=2)
     return (

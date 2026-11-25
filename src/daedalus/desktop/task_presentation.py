@@ -329,6 +329,9 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "help": "Optional tasks: collect resource favour, visit information pages, stay online or collect completed tasks.",
     },
     # These are literal upstream enums in distributeResources.py, not guesses.
+    ("buyResources", "reviewed_market"): {"type": "hidden_derived"},
+    ("sellResources", "reviewed_market"): {"type": "hidden_derived"},
+    ("distributeResources", "reviewed_routes"): {"type": "hidden_derived"},
     ("distributeResources", "resource"): {
         "type": "text",
         "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
