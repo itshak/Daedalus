@@ -45,6 +45,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.account_display import account_player_name, account_player_names
 from daedalus.desktop.design_system import FEATURE_ICONS, PageHeading, style_form_input
 from daedalus.desktop.native_controls import (
     AcademyResearchEditor,
@@ -158,6 +159,7 @@ class TasksPage(QWidget):
         self._bulk_account_ids: list[str] = []
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
+        self._account_names: dict[str, str] = {}
         self._status_account_ids: list[str] = []
         # Authenticated, account-bound read-only city options; never invent IDs.
         self._cities_by_account: dict[str, list[dict[str, object]]] = {}
@@ -202,7 +204,7 @@ class TasksPage(QWidget):
             "Automations"
         )
         layout.addWidget(PageHeading(
-            title, "Choose an automation, review its settings, then start."
+            title, "Choose an account and action, then review and start."
         ))
         self.status_label = CaptionLabel(
             "Connect to your backend to configure an automation."
@@ -245,34 +247,35 @@ class TasksPage(QWidget):
         account_row = QHBoxLayout()
         account_row.addWidget(BodyLabel("Account"))
         self.account_combo = ComboBox()
+        self.account_combo.setAccessibleName("Player account for automation")
         self.account_combo.currentIndexChanged.connect(self._account_changed)
         account_row.addWidget(self.account_combo, 1)
-        self.refresh_button = PushButton("Refresh tasks")
+        self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self._refresh)
         account_row.addWidget(self.refresh_button)
-        layout.addLayout(account_row)
 
         scope_row = QHBoxLayout()
         self.choose_bulk_button = PushButton("Choose accounts…")
         self.choose_bulk_button.setAccessibleName("Choose accounts for automation actions")
         self.choose_bulk_button.clicked.connect(self._choose_bulk_accounts)
-        scope_row.addWidget(self.choose_bulk_button)
+        account_row.addWidget(self.choose_bulk_button)
+        layout.addLayout(account_row)
         self.view_all_button = PushButton("View all task statuses")
         self.view_all_button.setToolTip("Read-only task status for every configured account, including disabled accounts")
         self.view_all_button.clicked.connect(self._refresh_all)
         scope_row.addWidget(self.view_all_button)
-        self.view_selected_button = PushButton("View selected statuses")
+        self.view_selected_button = PushButton("Refresh selected")
         self.view_selected_button.clicked.connect(self._refresh_selected)
         scope_row.addWidget(self.view_selected_button)
         scope_row.addStretch(1)
-        layout.addLayout(scope_row)
 
+        layout.addWidget(SubtitleLabel("Choose action"))
         self.category_combo = ComboBox(self)
         self.category_combo.addItems(list(_CATEGORIES))
         self.category_combo.currentIndexChanged.connect(self._filter_tasks)
         self.group_tabs = Pivot(self)
         self.group_tabs.setAccessibleName("Automation categories")
-        for index, category in enumerate(_CATEGORIES):
+        for index, category in enumerate(("All", "Alerts", "Resources", "Cities", "Military", "Advanced")):
             self.group_tabs.addItem(
                 routeKey=f"group-{index}", text=category,
                 onClick=lambda index=index: self.category_combo.setCurrentIndex(index),
@@ -284,7 +287,6 @@ class TasksPage(QWidget):
         self.search_input.setPlaceholderText("Search automations")
         self.search_input.textChanged.connect(self._filter_tasks)
         filter_row.addWidget(self.search_input, 1)
-        layout.addLayout(filter_row)
 
         # Discover is a task gallery, not an unlabelled engine-name dropdown.
         # These are read-only selection cards; only the separate, reviewed
@@ -293,7 +295,8 @@ class TasksPage(QWidget):
         self.browse_button.setToolTip("Show or hide available automation choices")
         self._gallery_open = False
         self.browse_button.clicked.connect(self._toggle_gallery)
-        layout.addWidget(self.browse_button)
+        filter_row.addWidget(self.browse_button)
+        layout.addLayout(filter_row)
         self.discovery_scroll = QScrollArea(self)
         self.discovery_scroll.setWidgetResizable(True)
         self.discovery_scroll.setFrameShape(QScrollArea.NoFrame)
@@ -309,10 +312,10 @@ class TasksPage(QWidget):
         self.discovery_note.setWordWrap(True)
         self.discovery_note.hide()
         self.discovery_scroll.hide()
-        layout.addWidget(SubtitleLabel("Configure"))
+        layout.addWidget(self.discovery_note)
 
         task_row = QHBoxLayout()
-        task_row.addWidget(BodyLabel("Automation"))
+        task_row.addWidget(BodyLabel("Action"))
         self.task_combo = ComboBox()
         task_row.addWidget(self.task_combo, 1)
         layout.addLayout(task_row)
@@ -328,7 +331,7 @@ class TasksPage(QWidget):
         self.prerequisite_label = CaptionLabel("Select an automation to check readiness.")
         self.prerequisite_label.setWordWrap(True)
         layout.addWidget(self.prerequisite_label)
-
+        layout.addWidget(SubtitleLabel("Settings"))
 
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
@@ -367,7 +370,7 @@ class TasksPage(QWidget):
         self.building_table.hide()
         self.building_note.hide()
         self.construction_preview_button.hide()
-        self.advanced_toggle = PushButton("Show advanced JSON options")
+        self.advanced_toggle = PushButton("Advanced settings…")
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
         layout.addWidget(self.advanced_toggle)
         self.advanced_note = CaptionLabel(
@@ -399,7 +402,7 @@ class TasksPage(QWidget):
         self.task_combo.currentIndexChanged.connect(self._selected_task_changed)
 
         launch_row = QHBoxLayout()
-        self.confirm_box = CheckBox("I reviewed this automation and approve starting it")
+        self.confirm_box = CheckBox("I approve starting this automation")
         self.confirm_box.stateChanged.connect(self._approval_changed)
         launch_row.addWidget(self.confirm_box)
         launch_row.addStretch(1)
@@ -422,7 +425,6 @@ class TasksPage(QWidget):
             "checked independently; dispatch stops if any account is not ready."
         )
         self.bulk_note.setWordWrap(True)
-        self.bulk_note.hide()
         batch_row.addStretch(1)
         self.start_selected_button = PushButton("Start for selected…")
         self.start_selected_button.setToolTip(
@@ -431,6 +433,7 @@ class TasksPage(QWidget):
         self.start_selected_button.clicked.connect(self._start_selected)
         batch_row.addWidget(self.start_selected_button)
         footer_layout.addLayout(batch_row)
+        footer_layout.addWidget(self.bulk_note)
         configure_layout.addWidget(self.configure_footer)
 
         running_panel = QWidget(self.stack)
@@ -526,11 +529,10 @@ class TasksPage(QWidget):
             "View all accounts or selected accounts to see their task status side by side."
         )
         self.multi_summary.setWordWrap(True)
-        self.multi_summary.hide()
+        layout.addLayout(scope_row)
+        layout.addWidget(self.multi_summary)
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
-        self.multi_table.setMaximumHeight(185)
-        layout.addWidget(self.multi_table)
-        layout.addStretch(1)
+        layout.addWidget(self.multi_table, 1)
 
         # The capability catalog belongs to this same workspace. It is not
         # a separate operations window with a second selection lifecycle.
@@ -592,6 +594,7 @@ class TasksPage(QWidget):
             if isinstance(a.get("id"), str) and a["id"]
         ]
         self._status_account_ids = [str(a["id"]) for a in self._all_account_metadata]
+        self._account_names = account_player_names(self._all_account_metadata)
         # A metadata refresh may represent a changed session, so discard city caches.
         self._cities_by_account.clear()
         self._buildings_scope = None
@@ -610,11 +613,8 @@ class TasksPage(QWidget):
         self.account_combo.blockSignals(True)
         try:
             self.account_combo.clear()
-            for a in accounts:
-                if a.get("id") in self._account_ids:
-                    self.account_combo.addItem(str(
-                        a.get("label") or a.get("player") or a["id"]
-                    ))
+            for aid in self._account_ids:
+                self.account_combo.addItem(self._account_names[aid])
             if previous in self._account_ids:
                 self.account_combo.setCurrentIndex(self._account_ids.index(previous))
         finally:
@@ -624,10 +624,8 @@ class TasksPage(QWidget):
         for combo in (self.running_account_combo, self.history_account_combo):
             with QSignalBlocker(combo):
                 combo.clear()
-                for account in self._account_metadata:
-                    combo.addItem(str(
-                        account.get("label") or account.get("player") or account["id"]
-                    ))
+                for aid in self._account_ids:
+                    combo.addItem(self._account_names[aid])
                 combo.setCurrentIndex(self.account_combo.currentIndex())
         self._update_bulk_buttons()
         self._account_changed()
@@ -1123,6 +1121,7 @@ class TasksPage(QWidget):
         dialog = AccountSelectionDialog(
             self._all_account_metadata, self._bulk_account_ids, self,
             title="Choose automation accounts",
+            display_names=self._account_names,
             explanation=(
                 "View task status for any chosen accounts, including disabled accounts. "
                 "Starting an automation is separate and requires explicit approval, "
@@ -1139,7 +1138,8 @@ class TasksPage(QWidget):
         self.view_all_button.setEnabled(bool(self._status_account_ids))
         self.view_selected_button.setEnabled(bool(count))
         self.choose_bulk_button.setEnabled(bool(self._status_account_ids))
-        self.view_selected_button.setText(f"View selected ({count})")
+        self.choose_bulk_button.setText(f"Choose accounts ({count})…")
+        self.view_selected_button.setText(f"Refresh selected ({count})")
         self.start_selected_button.setText(f"Start for selected ({count})…")
         ineligible = [aid for aid in self._bulk_account_ids
                       if aid not in self._account_ids]
@@ -1155,8 +1155,7 @@ class TasksPage(QWidget):
         if self.selected_task_name() in {"constructionList", "UpgradeUnits", "trainArmy",
                                             "buyResources", "sellResources", "autoPirate"}:
             self.bulk_note.setText(
-                "Construction, workshop, training and market plans are city-specific. Configure "
-                "each account separately; never reuse a quote or game plan across accounts."
+                "City-specific plans must be configured separately for each account."
             )
         elif count > 32:
             self.bulk_note.setText(
@@ -1170,8 +1169,7 @@ class TasksPage(QWidget):
             )
         else:
             self.bulk_note.setText(
-                "Multi-account starts require approval and an independent preflight "
-                "for each account. A blocked account stops the batch."
+                "Each selected account is checked separately before a batch starts."
             )
 
     def _refresh_all(self) -> None:
@@ -1200,7 +1198,7 @@ class TasksPage(QWidget):
             account = next(
                 (a for a in self._all_account_metadata if a["id"] == row["account_id"]), {}
             )
-            label = str(account.get("label") or account.get("player") or row["account_id"])
+            label = self._account_names.get(str(row["account_id"])) or str(row["account_id"])
             if row.get("error"):
                 error_count += 1
                 data.append([label, "—", "—",
@@ -2203,7 +2201,7 @@ class TasksPage(QWidget):
             (a for a in self._all_account_metadata if a["id"] == account_id),
             {},
         )
-        label = str(record.get("label") or record.get("player") or account_id)
+        label = account_player_name(record or {"id": account_id})
         world = str(record.get("world") or "world unspecified")
         return f"{label} · {world} (account {account_id})"
 
