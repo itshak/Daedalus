@@ -85,7 +85,7 @@ class ResourceLimitsEditor(QWidget):
 
 
 class ShipmentRoutesEditor(QWidget):
-    """One or more account-local routes; destination outside the account requires expert import."""
+    """One or more account-local routes; external destinations require a future verified lookup."""
 
     changed = Signal()
 
