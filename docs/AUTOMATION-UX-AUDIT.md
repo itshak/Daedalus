@@ -86,3 +86,10 @@ Use a synthetic/demo backend to verify grouping, empty states, account switching
 - IkaBot's original interactive-only operations (single-building actions, production/scientist/priest controls, garrison dispatch, notifications, proxies, cookies, updater and developer tools) are **not** background tasks and cannot be safely launched through the task dispatcher. Native **read-only** army and movement inspection now use separate audited existing-session adapters, not the generic task dispatcher. Remaining mutating CLI operations require individually scoped reviewed controllers and dedicated screens.
 - Shipment capacity and external-island destination validation, donation project balances, academy eligibility refinements, daily reward eligibility, task preview TTL/fingerprint and multi-screen accessibility evidence are pending. They must not be presented as already supported.
 - All game-changing tasks require explicit per-account review, the backend/engine's existing task preflight, and reconciliation of uncertain outcomes. Demo/synthetic tests do not constitute user acceptance or live Ikariam validation.
+
+
+### Compact Automation workspace
+
+Automation account selectors, the multi-account chooser, status overview and launch review prefer the server-provided game player name. Missing names fall back to a configured nonsecret display identity; duplicate player names include world and account ID for clarity. IDs used for API dispatch are unchanged. The Accounts management table retains its email-oriented display convention.
+
+The Configure tab uses a single account toolbar, compact category tabs, a searchable action selector with optional gallery, and a dedicated Settings section. Status-only controls live in All accounts, with refresh-all and refresh-selected actions. The launch footer retains explicit approval, single-account and batch review actions, and explains batch restrictions. Advanced JSON stays collapsed by default; account-specific plans still require their existing independent validation.
