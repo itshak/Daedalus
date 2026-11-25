@@ -636,3 +636,42 @@ def test_unknown_compound_engine_fields_do_not_create_raw_json_form_wall(page):
         page._form_config()
     assert not page.start_selected_button.isEnabled()
     assert not hasattr(page, "advanced_toggle")
+
+
+def test_donate_once_requires_scoped_preview(page, monkeypatch):
+    from daedalus.engine_registry import inspect_engine
+
+    capability = next(c for c in inspect_engine() if c.name == "donate")
+    page.set_capabilities([capability.to_dict()], enabled=True)
+    page.set_cities("alpha", [{"id": 1, "name": "Town"}])
+    page.set_preflight({"account_id": "alpha", "task": "donate", "ready": True,
+                        "reason": "none"})
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page._form_inputs["project"].setCurrentIndex(0)
+    page._form_inputs["amount"].setValue(100)
+    assert not page.start_button.isEnabled()
+    calls = []
+    page.donation_preview_requested.connect(lambda *args: calls.append(args))
+    page._request_native_preview()
+    assert calls[0][:2] == ("alpha", {"city_id": 1, "project": "resource", "amount": 100})
+    nonce = calls[0][2]
+    result = {"account_id": "alpha", "city_id": 1, "project": "resource",
+              "city_name": "Town", "project_name": "Forest", "amount": 100,
+              "stock": 1000, "remaining": 400, "level": 2, "ready": True,
+              "preview_id": "a" * 43, "expires_in": 120}
+    page.set_donation_preview(result, "wrong")
+    assert not page.start_button.isEnabled()
+    page.set_donation_preview(result, nonce)
+    assert page.start_button.isEnabled()
+    page.confirm_box.setChecked(True)
+    page._form_inputs["amount"].setValue(101)
+    assert not page.start_button.isEnabled()
+    assert not page.confirm_box.isChecked()
+    page._request_native_preview()
+    page.set_donation_preview({**result, "amount": 101}, calls[-1][2])
+    launched = []
+    page.launch_requested.connect(lambda *args: launched.append(args))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.Yes)
+    page.confirm_box.setChecked(True)
+    page._start()
+    assert launched[0][:3] == ("alpha", "donate", {"preview_id": "a" * 43})

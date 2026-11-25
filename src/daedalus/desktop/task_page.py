@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -77,7 +78,7 @@ _TASK_LABELS = {
     "resourceTransportManager": "Resource transport manager",
     "consolidateResources": "Consolidate resources", "distributeResources": "Distribute resources",
     "sendResources": "Send resources", "buyResources": "Buy resources",
-    "sellResources": "Sell resources", "donationBot": "Island donations",
+    "sellResources": "Sell resources", "donate": "Donate once", "donationBot": "Island donations",
     "trainArmy": "Train army", "attackBarbarians": "Attack barbarians",
     "autoBarbarians": "Barbarian automation", "activateMiracle": "Activate miracle",
     "activateShrine": "Activate shrine", "UpgradeUnits": "Upgrade units",
@@ -94,7 +95,7 @@ _TASK_CATEGORIES = {
     "Alerts & monitoring": {"alertAttacks", "alertLowWine", "searchForIslandSpaces"},
     "Resources & trade": {"buyResources", "sellResources", "sendResources",
                           "resourceTransportManager", "consolidateResources",
-                          "distributeResources", "donationBot"},
+                          "distributeResources", "donationBot", "donate"},
     "City management": {"constructionList", "tavernManager", "research",
                         "loginDaily", "activateMiracle", "activateShrine"},
     "Military & missions": {"trainArmy", "UpgradeUnits", "attackBarbarians",
@@ -124,6 +125,7 @@ class TasksPage(QWidget):
     cities_requested = Signal(str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
+    donation_preview_requested = Signal(str, object, str)
     workshop_requested = Signal(str, int)
     trainable_units_requested = Signal(str, int, bool)
     market_quotes_requested = Signal(str, int, int, str)
@@ -164,6 +166,9 @@ class TasksPage(QWidget):
         self._construction_prepared: dict[str, object] | None = None
         self._construction_preview_ready = False
         self._pending_preview_key: tuple[object, ...] | None = None
+        self._donation_nonce: str | None = None
+        self._donation_plan: dict[str, object] | None = None
+        self._donation_expires = 0.0
         self._building_rows: list[dict[str, object]] = []
 
         # Large native forms must scroll instead of clipping at 900x650.
@@ -356,7 +361,7 @@ class TasksPage(QWidget):
         self.building_table.itemChanged.connect(self._mark_form_dirty)
         layout.addWidget(self.building_table)
         self.construction_preview_button = PushButton("Calculate actual upgrade costs & queue…")
-        self.construction_preview_button.clicked.connect(self._request_construction_preview)
+        self.construction_preview_button.clicked.connect(self._request_native_preview)
         self.construction_preview_button.setAccessibleDescription(
             "Only reads IkaBot game information. Does not upgrade or ship anything."
         )
@@ -706,6 +711,9 @@ class TasksPage(QWidget):
                 })
         self._cities_by_account[account_id] = verified
         if account_id == self.selected_account_id():
+            if self.selected_task_name() == "donate":
+                self._donation_plan = None
+                self._donation_nonce = None
             picker = self._form_inputs.get("city_id")
             if self.selected_task_name() == "constructionList" and isinstance(picker, ComboBox):
                 self._populate_city_picker(picker)
@@ -823,6 +831,53 @@ class TasksPage(QWidget):
         if not 0 < len(upgrades) <= 12:
             raise ValueError("Select 1 to 12 real buildings before preview")
         return upgrades
+
+    def _request_native_preview(self) -> None:
+        if self.selected_task_name() != "donate":
+            self._request_construction_preview()
+            return
+        account = self.selected_account_id()
+        if account is None:
+            return
+        try:
+            draft = self._form_config()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Choose donation settings", str(exc))
+            return
+        self._donation_plan = None
+        self._invalidate_review()
+        self._donation_nonce = str(uuid.uuid4())
+        self.building_note.setText("Reading the actual island project and available wood…")
+        self.donation_preview_requested.emit(account, draft, self._donation_nonce)
+
+    def set_donation_preview(self, result: dict[str, object], nonce: str) -> None:
+        if (self.selected_task_name() != "donate" or nonce != self._donation_nonce
+                or result.get("account_id") != self.selected_account_id()):
+            return
+        try:
+            draft = self._form_config()
+        except ValueError:
+            return
+        if any(result.get(key) != draft.get(key) for key in ("city_id", "project", "amount")):
+            return
+        self._donation_nonce = None
+        self._donation_plan = result if result.get("ready") and result.get("preview_id") else None
+        self._donation_expires = time.monotonic() + int(result.get("expires_in") or 0)
+        self.building_note.setText(
+            f"{result['city_name']} · {result['project_name']} (level {result['level']}). "
+            f"Wood available: {result['stock']:,}; project remaining: {result['remaining']:,}. "
+            f"Donate {result['amount']:,} wood once. "
+            + ("Ready for review." if self._donation_plan else
+               "Project is upgrading or the amount is unavailable; adjust and preview again.")
+        )
+        self._invalidate_review()
+
+    def set_donation_preview_unavailable(self, nonce: str) -> None:
+        if self.selected_task_name() == "donate" and nonce == self._donation_nonce:
+            self._donation_nonce = None
+            self._donation_plan = None
+            self.building_note.setText("Donation preview unavailable. Refresh and try again.")
+            self._invalidate_review()
 
     def _request_construction_preview(self) -> None:
         account_id = self.selected_account_id()
@@ -1441,6 +1496,10 @@ class TasksPage(QWidget):
 
     def _mark_form_dirty(self, *_args: object) -> None:
         self._form_dirty = True
+        if self.selected_task_name() == "donate":
+            self._donation_plan = None
+            self._donation_nonce = None
+            self.building_note.setText("Preview the chosen city and project before approval.")
         if self.selected_task_name() == "constructionList":
             self._construction_prepared = None
             self._construction_preview_ready = False
@@ -1452,6 +1511,8 @@ class TasksPage(QWidget):
         # A response from a prior visit to the same account/task must not
         # unlock the new draft merely because its identifiers match again.
         self._selection_generation += 1
+        self._donation_plan = None
+        self._donation_nonce = None
         while self.parameter_layout.rowCount():
             self.parameter_layout.removeRow(0)
         self._form_inputs.clear()
@@ -1465,9 +1526,14 @@ class TasksPage(QWidget):
         show_buildings = name == "constructionList"
         self.building_header.setVisible(show_buildings)
         self.building_table.setVisible(show_buildings)
-        self.building_note.setVisible(show_buildings)
-        self.construction_preview_button.setVisible(show_buildings)
-        self.construction_preview_button.setEnabled(False)
+        self.building_note.setVisible(show_buildings or name == "donate")
+        self.construction_preview_button.setVisible(show_buildings or name == "donate")
+        self.construction_preview_button.setText(
+            "Preview island donation…" if name == "donate" else "Calculate actual upgrade costs & queue…")
+        self.construction_preview_button.setEnabled(name == "donate")
+        if name == "donate":
+            self.building_note.setText("Choose a city, project and amount, then preview.")
+
         if show_buildings:
             self.building_note.setText("Choose a city to load its actual buildings.")
         fields = self._config_fields_by_task.get(name or "", [])
@@ -2015,6 +2081,7 @@ class TasksPage(QWidget):
             and self._prereq_ready is True and not self._unresolved
             and not self._pending_launch
             and self.selected_task_name() != "webServer"
+            and (self.selected_task_name() != "donate" or self._donation_plan is not None)
             # A native editor must cover all required structured parameters.
             and (self.selected_task_name() == "constructionList"
                  or not expert_configuration_needed(
@@ -2076,7 +2143,15 @@ class TasksPage(QWidget):
                 "Check the authorization box before starting this automation.")
             return
         try:
-            if task == "constructionList":
+            if task == "donate":
+                if self._donation_plan is None or time.monotonic() >= self._donation_expires:
+                    raise ValueError("Donation preview expired; prepare a new preview")
+                draft = self._form_config()
+                if any(self._donation_plan.get(key) != draft.get(key)
+                       for key in ("city_id", "project", "amount")):
+                    raise ValueError("Donation settings changed; prepare a new preview")
+                config = {"preview_id": self._donation_plan["preview_id"]}
+            elif task == "constructionList":
                 if not self._construction_preview_ready or self._construction_prepared is None:
                     raise ValueError("Calculate and approve the actual IkaBot construction preview first")
                 config = dict(self._construction_prepared)
@@ -2085,7 +2160,7 @@ class TasksPage(QWidget):
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
-        params = configuration_summary(config)
+        params = self.building_note.text() if task == "donate" else configuration_summary(config)
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
@@ -2101,6 +2176,8 @@ class TasksPage(QWidget):
         self._pending_launch = True
         self._set_controls()
         self.launch_requested.emit(account_id, task, config, str(uuid.uuid4()))
+        if task == "donate":
+            self._donation_plan = None
         self._invalidate_review()
 
     def finish_launch(self) -> None:

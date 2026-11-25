@@ -24,6 +24,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "consolidateResources": "Consolidate known resources to a target city.",
     "constructionList": "Run a prepared city construction plan; building queues require engine data.",
     "distributeResources": "Distribute resources using a selected supported policy.",
+    "donate": "Make one reviewed wood donation to an owned city’s island project.",
     "donationBot": "Coordinate supported island donations across configured cities.",
     "dumpWorld": "Export an allowed portion of the world map.",
     "loginDaily": "Perform the supported daily collection routine.",
@@ -104,6 +105,19 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "choice_labels": ["Trade ships", "Freighters", "Both fleets"],
         "label": "Fleet type",
     },
+    ("donate", "city_id"): {"type": "city_picker", "label": "Donation city"},
+    ("donate", "project"): {
+        "type": "text", "choices": ["resource", "tradegood"],
+        "choice_labels": ["Forest", "Luxury resource"], "label": "Island project",
+    },
+    ("donate", "amount"): {
+        "type": "integer", "label": "Wood to donate", "minimum": 1,
+        "maximum": 1000000000, "explicit_input": True,
+    },
+    ("donate", "expected_island"): {"type": "hidden_derived"},
+    ("donate", "expected_level"): {"type": "hidden_derived"},
+    ("donate", "expected_donated"): {"type": "hidden_derived"},
+    ("donate", "expected_required"): {"type": "hidden_derived"},
     ("donationBot", "cities_dict"): {
         "type": "donation_policies", "label": "Donation by city",
         "help": "Choose each city's island project and share or amount.",

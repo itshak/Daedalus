@@ -2,6 +2,15 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Donate once": "Разовое пожертвование",
+  "Donate": "Пожертвовать",
+  "Wood to donate": "Древесина для пожертвования",
+  "Preview island donation": "Предпросмотр пожертвования острову",
+  "Wood available": "Доступная древесина",
+  "Project remaining": "Осталось для проекта",
+  "Donation preview unavailable.": "Предпросмотр пожертвования недоступен.",
+  "Donation task started. Verify the island balance.": "Задача пожертвования запущена. Проверьте баланс острова.",
+  "Project is upgrading or the amount is unavailable.": "Проект улучшается или указанное количество недоступно.",
   "Launch scope": "Область запуска",
   "One account": "Один аккаунт",
   "Selected accounts": "Выбранные аккаунты",

@@ -774,6 +774,8 @@ class IPCServer:
                     return self._list_cities(request, existing_only=True)
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
+                if action == "preview_donation_existing":
+                    return self._preview_donation_existing(request)
                 if action == "preview_construction_existing":
                     return self._preview_construction_existing(request)
                 if action == "list_workshop_upgrades_existing":
@@ -898,6 +900,16 @@ class IPCServer:
             "username": session.username, "city_id": city_id,
             "buildings": buildings,
         }
+
+    def _preview_donation_existing(self, request):
+        from ikabot.function.donate import preview_native_donation
+
+        session = self._existing_session(request)
+        plan = preview_native_donation(
+            session, request.get("city_id"), request.get("project"), request.get("amount"),
+        )
+        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                "username": session.username, "plan": plan}
 
     def _preview_construction_existing(self, request):
         """Read-only construction cost/queue preparation for a verified owned city.
@@ -1701,7 +1713,12 @@ class IPCServer:
         prepare = getattr(task_func, "prepare", None)
         if prepare is not None:
             # errors found here go back to the CLI instead of only to the task's log
-            prepared = prepare(session, **clean_config)
+            try:
+                prepared = prepare(session, **clean_config)
+            except ValueError:
+                if existing_only and canonical_name == "donate":
+                    return {"status": "rejected", "reason": "invalid_configuration"}
+                raise
             if prepared is not None:
                 clean_config = _validate_task_config(canonical_name, task_func, prepared)
 

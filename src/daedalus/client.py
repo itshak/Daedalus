@@ -171,6 +171,13 @@ class DaedalusClient:
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
+        if task == "donate":
+            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
+                raise ValueError("Review the donation first")
+            return self._write(f"accounts/{account_id}/tasks/donation-start", {
+                "preview_id": config["preview_id"], "request_id": request_id,
+                "confirmed": confirmed,
+            })
         return self._write(f"accounts/{account_id}/tasks", {
             "task": task, "config": config, "request_id": request_id,
             "confirmed": confirmed,
@@ -606,6 +613,28 @@ class DaedalusClient:
         data = self._read(f"accounts/{account_id}/cities").get("cities")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
+        return data
+
+    def donation_preview(self, account_id: str, city_id: int,
+                         project: str, amount: int) -> dict[str, object]:
+        if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
+                or not 0 < city_id < 10**12 or project not in ("resource", "tradegood")
+                or type(amount) is not int or not 1 <= amount <= 10**9):
+            raise ValueError("Invalid donation draft")
+        data = self._write(f"accounts/{account_id}/cities/{city_id}/donation-plan",
+                           {"project": project, "amount": amount})
+        if (data.get("account_id") != account_id or data.get("city_id") != city_id
+                or data.get("project") != project or data.get("amount") != amount
+                or type(data.get("ready")) is not bool
+                or type(data.get("upgrading")) is not bool
+                or any(type(data.get(k)) is not int or data[k] < 0
+                       for k in ("level", "stock", "remaining"))
+                or any(not isinstance(data.get(k), str) for k in ("city_name", "project_name"))
+                or (data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                       or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                       or type(data.get("expires_in")) is not int
+                                       or not 1 <= data["expires_in"] <= 120))):
+            raise APIConnectionError("Backend returned invalid donation preview")
         return data
 
     def construction_preview(

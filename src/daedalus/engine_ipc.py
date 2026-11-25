@@ -30,7 +30,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing",
@@ -130,14 +130,15 @@ class ExistingIPCClient:
                 upgrades: list[dict[str, int]] | None = None,
                 train_troops: bool | None = None,
                 resource_type: int | None = None,
-                market_side: str | None = None) -> dict[str, Any]:
+                market_side: str | None = None,
+                project: str | None = None, amount: int | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
             "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing",
@@ -151,6 +152,7 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
+                      "preview_donation_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
             if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -185,7 +187,14 @@ class ExistingIPCClient:
         elif (city_id is not None or upgrades is not None or train_troops is not None
               or resource_type is not None or market_side is not None):
             raise ValueError("City argument is not supported for this IPC action")
+        if action == "preview_donation_existing":
+            if project not in ("resource", "tradegood") or type(amount) is not int or not 1 <= amount <= 10**9:
+                raise ValueError("Invalid donation draft")
+            payload.update(project=project, amount=amount)
+        elif project is not None or amount is not None:
+            raise ValueError("Donation fields are allowed only for a donation preview")
         return self._exchange(payload, read_timeout=60.0 if action in {
+            "preview_donation_existing",
             "preview_construction_existing", "military_overview_existing",
             "ship_movements_existing",
         } else 8.0)
@@ -344,6 +353,47 @@ class ExistingIPCClient:
                 "can_upgrade_now": row.get("can_upgrade_now", row["can_upgrade"]),
             })
         return validated
+
+    def donation_preview(self, account: Account, city_id: int,
+                         project: str, amount: int) -> dict[str, object]:
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Donation city is not owned by this account")
+        data = self.request("preview_donation_existing", account=account,
+                            city_id=city_id, project=project, amount=amount)
+        plan = data.get("plan")
+        if (str(data.get("world", "")).casefold() != account.world.casefold()
+                or str(data.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(plan, dict)
+                or plan.get("city_id") != city_id or plan.get("project") != project
+                or plan.get("amount") != amount):
+            raise EngineIPCUnavailable("Invalid donation preview scope")
+        for key in ("city_name", "project_name"):
+            if not isinstance(plan.get(key), str) or not 0 < len(plan[key]) <= 100:
+                raise EngineIPCUnavailable("Invalid donation name")
+        for key in ("stock", "required", "donated", "remaining", "level"):
+            if type(plan.get(key)) is not int or not 0 <= plan[key] <= 10**15:
+                raise EngineIPCUnavailable("Invalid donation observation")
+        if (type(plan.get("upgrading")) is not bool or type(plan.get("ready")) is not bool
+                or plan["remaining"] != plan["required"] - plan["donated"]
+                or plan["ready"] != (not plan["upgrading"]
+                                     and amount <= min(plan["stock"], plan["remaining"]))):
+            raise EngineIPCUnavailable("Invalid donation eligibility")
+        config = plan.get("config")
+        if (not isinstance(config, dict)
+                or set(config) != {"city_id", "project", "amount", "expected_island",
+                                   "expected_level", "expected_donated", "expected_required"}
+                or type(config.get("expected_island")) is not int
+                or not 0 < config["expected_island"] < 10**12
+                or config != {"city_id": city_id, "project": project, "amount": amount,
+                              "expected_island": config["expected_island"],
+                              "expected_level": plan["level"],
+                              "expected_donated": plan["donated"],
+                              "expected_required": plan["required"]}):
+            raise EngineIPCUnavailable("Invalid reviewed donation config")
+        return {"account_id": account.id, **{k: plan[k] for k in (
+            "city_id", "city_name", "project", "project_name", "amount", "stock",
+            "required", "donated", "remaining", "level", "upgrading", "ready", "config",
+        )}}
 
     def construction_preview(
         self, account: Account, city_id: int, upgrades: list[dict[str, int]],

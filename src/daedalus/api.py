@@ -693,6 +693,37 @@ def create_app(
             ) from exc
 
     @app.post(
+        "/api/v1/accounts/{account_id}/cities/{city_id}/donation-plan",
+        dependencies=[Depends(authorized)],
+    )
+    def donation_plan(account_id: str, city_id: int,
+                      payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Real donation planner unavailable")
+        project, amount = payload.get("project"), payload.get("amount")
+        if (set(payload) != {"project", "amount"} or project not in ("resource", "tradegood")
+                or type(amount) is not int or not 1 <= amount <= 10**9
+                or not 0 < city_id < 10**12):
+            raise HTTPException(status_code=422, detail="Invalid donation draft")
+        try:
+            plan = ipc_client.donation_preview(account, city_id, project, amount)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Donation preview rejected") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Donation preview unavailable") from exc
+        config = plan.pop("config")
+        ticket = None
+        if plan["ready"] and task_controller is not None:
+            ticket = operation_previews.issue(account_id, "donate", config)
+        return {**plan, "preview_id": ticket,
+                "expires_in": operation_previews.ttl if ticket else None}
+
+    @app.post(
         "/api/v1/accounts/{account_id}/cities/{city_id}/construction-plan",
         dependencies=[Depends(authorized)],
     )
@@ -1153,6 +1184,11 @@ def create_app(
     def start_account_task(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
+        if payload.get("task") == "donate":
+            raise HTTPException(status_code=422, detail="Use the reviewed donation endpoint")
+        return dispatch_account_task(account_id, payload)
+
+    def dispatch_account_task(account_id: str, payload: dict[str, object]) -> dict[str, object]:
         controller = require_task_controller(account_id)
         try:
             confirmed = payload.get("confirmed") is True
@@ -1180,6 +1216,18 @@ def create_app(
     def start_reviewed_construction(
         account_id: str, payload: Annotated[dict[str, object], Body()],
     ) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "constructionList", payload)
+
+    @app.post(
+        "/api/v1/accounts/{account_id}/tasks/donation-start",
+        dependencies=[Depends(authorized)],
+    )
+    def start_reviewed_donation(account_id: str,
+                               payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        return start_reviewed_operation(account_id, "donate", payload)
+
+    def start_reviewed_operation(account_id: str, task: str,
+                                 payload: dict[str, object]) -> dict[str, object]:
         require_task_controller(account_id)
         key, request_id = payload.get("preview_id"), payload.get("request_id")
         if (
@@ -1188,7 +1236,7 @@ def create_app(
             or not isinstance(key, str) or len(key) != 43
             or not isinstance(request_id, str)
         ):
-            raise HTTPException(status_code=422, detail="Explicit construction review required")
+            raise HTTPException(status_code=422, detail="Explicit operation review required")
         try:
             parsed = UUID(request_id)
             if parsed.version != 4 or str(parsed) != request_id:
@@ -1196,11 +1244,11 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Valid request ID required") from exc
         try:
-            config = operation_previews.claim(key, account_id, "constructionList", request_id)
+            config = operation_previews.claim(key, account_id, task, request_id)
         except PreviewUnavailable as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return start_account_task(account_id, {
-            "task": "constructionList", "config": config,
+        return dispatch_account_task(account_id, {
+            "task": task, "config": config,
             "request_id": request_id, "confirmed": True,
         })
 

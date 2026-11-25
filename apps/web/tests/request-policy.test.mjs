@@ -50,3 +50,10 @@ test("construction uses reviewed tickets rather than a browser-supplied engine p
   assert.equal(allowedRequest("POST","accounts/a/tasks/construction-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/construction-preview".split("/"),params()),false);
 });
+
+test("one-shot donations use reviewed ticket endpoints, not arbitrary paths",()=>{
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/donation-plan".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/tasks/donation-start".split("/"),params()),true);
+  assert.equal(allowedRequest("POST","accounts/a/cities/12/donation-plan".split("/"),params("raw=true")),false);
+  assert.equal(allowedRequest("POST","accounts/a/cities/0/donation-plan".split("/"),params()),false);
+});
