@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 
@@ -70,7 +69,7 @@ def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
     page.launch_requested.connect(lambda *args: emitted.append(args))
     answers = []
     monkeypatch.setattr(QMessageBox, "question", lambda *_args: (answers.append(True) or QMessageBox.Yes))
-    assert not page.config_editor.isVisible()
+    assert not hasattr(page, "config_editor")
     page.confirm_box.setChecked(True)
     page._start()
     assert answers == [True]
@@ -83,19 +82,10 @@ def test_enabled_task_explicit_confirmation_and_uuid(page, monkeypatch):
     assert page.confirm_box.isChecked() is False
 
 
-def test_bad_json_does_not_emit_task_start(page, monkeypatch):
-    page.set_capabilities([{"name": "alertAttacks", "kind": "background_task"}], enabled=True)
-    page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
-    page._toggle_advanced()
-    page.confirm_box.setChecked(True)
-    page.config_editor.setPlainText("{not valid")
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    emitted = []
-    page.launch_requested.connect(lambda *args: emitted.append(args))
-    page._start()
-    assert warnings == [True]
-    assert emitted == []
+def test_no_raw_configuration_entry_points(page):
+    for name in ("config_editor", "advanced_toggle", "import_config_button",
+                 "build_json_button", "_toggle_advanced", "_import_advanced_config"):
+        assert not hasattr(page, name)
 
 
 def test_task_listing_stop_only_selected_managed_id(page, monkeypatch):
@@ -132,17 +122,15 @@ def test_uncertain_task_request_needs_manual_review(page, monkeypatch):
     assert emitted == [("alpha", rid)]
 
 
-def test_parameter_form_generates_json_but_requires_explicit_review(page, monkeypatch):
+def test_parameter_form_builds_internal_payload_and_requires_explicit_review(page, monkeypatch):
     from daedalus.engine_registry import inspect_engine
 
     record = next(cap for cap in inspect_engine() if cap.name == "alertAttacks")
     page.set_capabilities([record.to_dict()], enabled=True)
     assert "minutes" in page._form_inputs
-    assert page.build_json_button.isEnabled()
     widget = page._form_inputs["minutes"]
     assert widget.value() == 20
     assert widget.minimum() == 3
-    assert page.config_editor.isHidden()
 
     emitted = []
     warnings = []
@@ -152,44 +140,30 @@ def test_parameter_form_generates_json_but_requires_explicit_review(page, monkey
 
     widget.setValue(42)
     assert page._form_dirty is True
-    assert not page._advanced_visible
     page.set_preflight({"account_id": "alpha", "task": "alertAttacks", "ready": True, "reason": "none"})
     page.confirm_box.setChecked(True)
     page._start()
     assert warnings == []
     assert emitted[0][2] == {"minutes": 42}
-    assert page.config_editor.isHidden()  # no manual JSON editing needed
-
-    page._toggle_advanced()
-    assert page._advanced_visible
-    assert json.loads(page.config_editor.toPlainText()) == {"minutes": 42}
+    assert not hasattr(page, "config_editor")
 
 
-def test_json_required_and_boolean_fields_are_typed_and_validated(page, monkeypatch):
+def test_required_and_boolean_fields_are_typed_and_validated(page):
     from daedalus.engine_registry import inspect_engine
 
     record = next(cap for cap in inspect_engine() if cap.name == "alertLowWine")
     page.set_capabilities([record.to_dict()], enabled=True)
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page._build_config_from_form()
-    assert warnings
-    assert page.config_editor.toPlainText() == "{}"
-    # Upstream documents hours as an integer; the redesigned GUI uses a
-    # native Fluent SpinBox with a mandatory empty sentinel, not free-form JSON.
+    with pytest.raises(ValueError):
+        page._form_config()
     page._form_inputs["hours"].setValue(4)
     page._form_inputs["auto_transfer"].setChecked(True)
     page._form_inputs["transfer_amount"].setValue(1500)
-    page._build_config_from_form()
-    assert json.loads(page.config_editor.toPlainText()) == {
+    assert page._form_config() == {
         "hours": 4, "auto_transfer": True, "transfer_amount": 1500,
     }
-
-    previous_warnings = len(warnings)
-    page._form_inputs["hours"].setValue(0)  # missing-value sentinel
-    page._build_config_from_form()
-    assert len(warnings) > previous_warnings
-    assert '"hours": 4' in page.config_editor.toPlainText()
+    page._form_inputs["hours"].setValue(0)
+    with pytest.raises(ValueError):
+        page._form_config()
 
 
 def test_switching_tasks_clears_previous_task_configuration_and_confirmation(page):
@@ -201,10 +175,10 @@ def test_switching_tasks_clears_previous_task_configuration_and_confirmation(pag
     ]
     page.set_capabilities(operations, enabled=True)
     page._form_inputs["minutes"].setValue(15)
-    page._build_config_from_form()
+    assert page._form_config() == {"minutes": 15}
     page.confirm_box.setChecked(True)
     page.task_combo.setCurrentIndex(1)
-    assert page.config_editor.toPlainText() == "{}"
+    assert "minutes" not in page._form_inputs
     assert not page.confirm_box.isChecked()
     assert "hours" in page._form_inputs
 
@@ -345,7 +319,7 @@ def test_construction_table_renders_real_building_levels_and_draft_target(page):
     assert page.building_table.rowCount() == 0
 
 
-def test_construction_advanced_mode_does_not_require_making_up_queue_values(page, monkeypatch):
+def test_construction_has_no_raw_plan_override(page):
     page.set_capabilities([{
         "name": "constructionList", "kind": "background_task",
         "config_fields": [
@@ -354,11 +328,9 @@ def test_construction_advanced_mode_does_not_require_making_up_queue_values(page
                         "expand_overall", "wait_resources", "construction_queue", "total_time")
         ],
     }], enabled=True)
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page._toggle_advanced()
-    assert warnings == []  # Opening expert mode does not fabricate a plan.
-    assert page.config_editor.toPlainText() == "{}"
+    assert set(page._form_inputs) == {"city_id"}
+    assert not hasattr(page, "config_editor")
+    assert not page.start_button.isEnabled()
 
 
 def test_distribution_uses_verified_resource_policy_and_actual_city_multiselect(page):
@@ -459,7 +431,7 @@ def test_tavern_cities_are_native_and_never_fabricated(page):
     assert page._form_config()["cities_ids"] == ["30"]
 
 
-def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
+def test_construction_cannot_start_without_verified_preview(page):
     page.set_capabilities([{
         "name": "constructionList", "kind": "background_task",
         "config_fields": [
@@ -472,21 +444,12 @@ def test_advanced_construction_plan_cannot_use_another_city(page, monkeypatch):
     page._form_inputs["city_id"].setCurrentIndex(1)
     page.set_preflight({"account_id": "alpha", "task": "constructionList",
                         "ready": True, "reason": "none"})
-    page._toggle_advanced()
-    assert page.start_button.isEnabled()
     emitted = []
     page.launch_requested.connect(lambda *args: emitted.append(args))
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(True))
-    page.config_editor.setPlainText(json.dumps({
-        "city_id": 999, "city_name": "OtherPlayer", "buildings": [],
-        "shipments": [], "expand_overall": True, "wait_resources": False,
-        "construction_queue": [], "total_time": 0,
-    }))
     page.confirm_box.setChecked(True)
+    assert not page.start_button.isEnabled()
     page._start()
-    assert warnings
-    assert emitted == []
+    assert not emitted
 
 
 def test_daily_rewards_use_three_actual_city_pickers_and_native_favour_options(page):
@@ -669,9 +632,7 @@ def test_unknown_compound_engine_fields_do_not_create_raw_json_form_wall(page):
         "ready": True, "reason": "none", "unresolved_request": False,
     })
     assert not page.start_button.isEnabled()
-    with pytest.raises(ValueError, match="reviewed engine plan"):
+    with pytest.raises(ValueError, match="dedicated native editor"):
         page._form_config()
-    page._toggle_advanced()
-    assert page.start_button.isEnabled()
-    page._toggle_advanced()
-    assert not page.start_button.isEnabled()
+    assert not page.start_selected_button.isEnabled()
+    assert not hasattr(page, "advanced_toggle")
