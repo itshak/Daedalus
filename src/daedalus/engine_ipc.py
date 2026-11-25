@@ -389,6 +389,39 @@ class ExistingIPCClient:
             )
         return result
 
+    def recurring_preview(self, account: Account, task, draft):
+        from daedalus.recurring_review import (
+            RECURRING_TASKS,
+            recurring_draft,
+            route_scope,
+            validate_recurring,
+        )
+
+        if task not in RECURRING_TASKS - {"autoPirate"} or not account.enabled:
+            raise ValueError("Unsupported policy")
+        clean = recurring_draft(task, draft)
+        inventory = self.cities(account)
+        owned = {r["id"] for r in inventory}
+        if task in {"consolidateResources", "resourceTransportManager"}:
+            sources, destinations = route_scope(task, clean)
+            if any(i not in owned for i in sources) or any((i in owned) == ("recipient" in clean) for i in destinations):
+                raise ValueError("Invalid recipient scope")
+        if task == "donationBot" and not set(map(int, clean["cities_dict"])) <= owned:
+            raise ValueError("Invalid donation scope")
+        response = self._exchange({"action": "preview_recurring_existing", "task": task,
+                                   "world": account.world, "player": account.player, "draft": clean},
+                                  read_timeout=120)
+        if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
+            raise EngineIPCUnavailable("Invalid recurring scope")
+        try:
+            result = validate_recurring(task, clean, response.get("result"))
+            if (task == "searchForIslandSpaces" and not clean["islandList"]
+                    and set(result["islands"]) != {r["coords"] for r in inventory}):
+                raise ValueError("Owned island scope changed")
+            return result
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineIPCUnavailable("Invalid recurring observation") from exc
+
     def native_reward_distribution_preview(self, account: Account, task, draft):
         from daedalus.daily_distribution_review import (
             daily_draft,

@@ -2265,6 +2265,7 @@ class TasksPage(QWidget):
             "Preview island donation…" if name == "donate" else
             "Preview worker assignment…" if name in WORKER_TASKS else
             "Preview layout changes…" if name == "reorganizeCityBuildings" else
+            "Preview operation…" if name in POLICY_TASKS else
             "Preview market allocation…" if name in {"buyResources", "sellResources"} else
             "Preview daily rewards…" if name == "loginDaily" else
             "Preview distribution allocation…" if name == "distributeResources" else
@@ -2974,7 +2975,7 @@ class TasksPage(QWidget):
                       + ("freighters" if config.get("useFreighters") else "trade ships")
                       + f"; notifications: {config.get('notify','none')}"
                       + ("\nExternal shipments require manual recovery." if "recipient" in config else ""))
-        if task == "searchForIslandSpaces":
+        if task == "searchForIslandSpaces" and "preview_id" not in config:
             params = ("All owned islands" if not config.get("islandList") else ", ".join(config["islandList"]))
             params += f"\nCheck every {config['time']} minutes; fights: {config.get('fights', 'n')}"
         if task == "tavernManager" and "fixed_servings" in config:
@@ -2988,7 +2989,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces', 'distributeResources', 'loginDaily', 'buyResources', 'sellResources'} | WORKER_TASKS else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList', 'tavernManager', 'searchForIslandSpaces', 'distributeResources', 'loginDaily', 'buyResources', 'sellResources'} | WORKER_TASKS | POLICY_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

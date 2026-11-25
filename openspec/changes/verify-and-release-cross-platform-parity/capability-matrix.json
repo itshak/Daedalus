@@ -76,10 +76,12 @@
     "autoPirate": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -109,10 +111,12 @@
     "consolidateResources": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -189,20 +193,24 @@
     "donationBot": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
     "dumpWorld": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -348,20 +356,24 @@
     "resourceTransportManager": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
     "searchForIslandSpaces": {
       "desktop": "native",
       "web": "native",
-      "review": "native_draft",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },

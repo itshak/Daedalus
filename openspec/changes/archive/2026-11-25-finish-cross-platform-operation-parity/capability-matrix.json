@@ -1,0 +1,566 @@
+{
+  "version": 1,
+  "operations": {
+    "activateMiracle": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "activateShrine": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "alertAttacks": {
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "alertLowWine": {
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "attackBarbarians": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "autoBarbarians": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "autoPirate": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "buyResources": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "checkForUpdate": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "consolidateResources": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "constructBuilding": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "constructionList": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "decaptchaConf": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "developer": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "distributeResources": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "donate": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "donationBot": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "dumpWorld": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "getStatus": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "overview",
+      "review": "read_or_managed_task",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "importExportCookie": {
+      "desktop": "protected_local",
+      "web": "protected_local",
+      "review": "admin_review",
+      "coverage": "boundary_pending",
+      "scopes": [],
+      "live_accepted": false
+    },
+    "killTasks": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "activity",
+      "review": "read_or_managed_task",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "loadCustomModule": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "loginDaily": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "logs": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "activity",
+      "review": "read_only",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "modifyAcademyWorkers": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "modifyProduction": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "modifyTempleWorkers": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "proxyConf": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "reorganizeCityBuildings": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "research": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "resourceTransportManager": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "searchForIslandSpaces": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "sellResources": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "sendResources": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "shipMovements": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "military",
+      "review": "read_or_managed_task",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "show_proxy": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "read_only",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "stationArmy": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "tavernManager": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "testDiscordBot": {
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "testTelegramBot": {
+      "desktop": "native",
+      "web": "native",
+      "review": "native_draft",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "trainArmy": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "update": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "updateDiscordData": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "updateTelegramData": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    },
+    "UpgradeUnits": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "vacationMode": {
+      "desktop": "native",
+      "web": "native",
+      "review": "ticket",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "viewArmy": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "military",
+      "review": "read_or_managed_task",
+      "coverage": "partial",
+      "scopes": [
+        "current",
+        "selected",
+        "all"
+      ],
+      "live_accepted": false
+    },
+    "webServer": {
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
+      "review": "admin_review",
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
+      "live_accepted": false
+    }
+  }
+}

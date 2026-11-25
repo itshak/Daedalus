@@ -3,6 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 from ikabot.function import distributeResources, loginDaily
+from test_recurring_review import DRAFT as CONSOLIDATION_DRAFT
+from test_recurring_review import OBS as CONSOLIDATION_OBS
 
 from daedalus.daily_distribution_review import (
     daily_draft,
@@ -63,6 +65,7 @@ def test_daily_preview_reads_only_advisor(monkeypatch):
         daily_draft({"wine_city":101,"favour_tasks":[{}]})
 
 @pytest.mark.parametrize(("task","endpoint","draft","observation"),[
+    ("consolidateResources","consolidate-start",CONSOLIDATION_DRAFT,CONSOLIDATION_OBS),
     ("distributeResources","distribution-start",DRAFT,PLAN),
     ("loginDaily","daily-start",daily_draft({"wine_city":101}),
      {"cities":{"wine_city":"Athens"},"favour":20,"limit":100,"reset_seconds":500,"collectable":0}),
@@ -88,6 +91,7 @@ def test_review_ticket_scope_and_replay(monkeypatch,tmp_path,task,endpoint,draft
         "task":t,"ready":True,"reason":"none","notifications_required":False,"checked":[]})
     monkeypatch.setattr(ipc,"has_account",lambda _a:True)
     monkeypatch.setattr(ipc,"native_reward_distribution_preview",lambda _a,_t,_d:observation)
+    monkeypatch.setattr(ipc,"recurring_preview",lambda _a,_t,_d:observation)
     starts=[]
     def start(account,t,config,rid):
         starts.append((account.id,t,config,rid))

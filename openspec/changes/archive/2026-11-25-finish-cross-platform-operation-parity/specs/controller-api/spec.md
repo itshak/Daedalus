@@ -122,3 +122,15 @@ Research, tavern, miracle, shrine and workshop native workflows SHALL issue acco
 #### Scenario: A selected workshop or academy is unavailable
 - **WHEN** the current authenticated inventory does not contain the reviewed selection or its eligible target
 - **THEN** the controller rejects the review rather than substituting another city or option
+
+### Requirement: Reviewed recurring operation scopes
+
+Consolidation, recurring transport, donation, island monitoring, aggregate reports and the existing human-controlled fortress mission workflow SHALL require independent account-bound launch reviews. Transport SHALL verify current owned-city stock, free storage, selected fleet observations and exact external recipient identity where applicable. Donation SHALL verify selected city identity and stock. Island monitoring SHALL verify selected coordinates or the observed all-owned scope. Map review SHALL verify report storage availability and aggregate-only output. Fortress review SHALL preserve mandatory human challenge stop. Current observations MUST NOT be represented as guaranteed future cargo, donation, availability or completion.
+
+#### Scenario: A selected account scope is invalid
+- **WHEN** a requested city, external recipient, island or fortress is not verified for the current account
+- **THEN** no launch ticket is issued
+
+#### Scenario: An operator queues multiple accounts
+- **WHEN** each account is independently reviewed
+- **THEN** each launch uses its own expiring ticket and durable request identifier without sharing another account's configuration

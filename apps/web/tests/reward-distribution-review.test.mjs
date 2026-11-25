@@ -43,3 +43,19 @@ test("account policy reviews verify academy and workshop scope",()=>{
  assert.throws(()=>parseRewardDistributionReview({...plan,observation:{...upgrades,upgrades:[{...upgrades.upgrades[0],current_level:3}]}},"alpha","UpgradeUnits",job));
  assert.equal(validReviewBatch({entries:[{account_id:"alpha",task:"research",preview_id:"a".repeat(43)},{account_id:"beta",task:"UpgradeUnits",preview_id:"b".repeat(43)}]}),true);
 });
+
+test("recurring transport and island policy review checks observed scope",()=>{
+ const draft={limits:[0,-1,100,-1,-1],sourceCityIds:[101],destinationCityId:102,intervalInHours:2,shipType:1};
+ const cities=[{id:101,name:"Athens",coords:"10:20",stock:[1000,0,0,0,0],space:[2000,0,0,0,0]},{id:102,name:"Sparta",coords:"10:20",stock:[0,0,0,0,0],space:[2000,0,0,0,0]}];
+ const observation={cities,fleets:{trade:{capacity:100,free:2,total:3}},external:null};
+ const value={account_id:"alpha",task:"consolidateResources",draft,observation,preview_id:"a".repeat(43),expires_in:120};
+ assert.equal(validRewardDistributionRequest({task:"consolidateResources",draft}),true);
+ assert.match(parseRewardDistributionReview(value,"alpha","consolidateResources",draft).policySummary,/Athens/);
+ assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,cities:[cities[0],{...cities[1],id:999}]}},"alpha","consolidateResources",draft));
+ assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,fleets:{trade:{capacity:0,free:0,total:0}}}},"alpha","consolidateResources",draft));
+ const monitor={time:5,islandList:["10:20"],fights:"n"};
+ const reviewed={...value,task:"searchForIslandSpaces",draft:monitor,observation:{islands:["10:20"]}};
+ assert.match(parseRewardDistributionReview(reviewed,"alpha","searchForIslandSpaces",monitor).policySummary,/10:20/);
+ assert.throws(()=>parseRewardDistributionReview({...reviewed,observation:{islands:["20:10"]}},"alpha","searchForIslandSpaces",monitor));
+ assert.equal(validReviewBatch({entries:[{account_id:"alpha",task:"consolidateResources",preview_id:value.preview_id},{account_id:"beta",task:"searchForIslandSpaces",preview_id:"b".repeat(43)}]}),true);
+});

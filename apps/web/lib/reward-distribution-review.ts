@@ -3,7 +3,7 @@ import {validNativeConfig,scopedShipmentPlan,type ShipmentPlan} from "./native-t
 type Draft=Record<string,unknown>;
 type DailyObservation={cities:Record<string,string>;favour:number;limit:number;reset_seconds:number;collectable:number};
 type MarketObservation={rows:{city:string;player:string;amount:number;unit_price:number}[];gold_total:number;gold_available:number|null;mode:string};
-export const POLICY_TASKS=["research","tavernManager","activateMiracle","activateShrine","UpgradeUnits"] as const;
+export const POLICY_TASKS=["research","tavernManager","activateMiracle","activateShrine","UpgradeUnits","consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"] as const;
 export function policyTask(task:string){return (POLICY_TASKS as readonly string[]).includes(task);}
 export function reviewRoute(task:string){return (REVIEW_ENDPOINTS as Readonly<Record<string,string>>)[task];}
 type Review={policySummary?:string;market?:MarketObservation;preview_id:string;expires_in:number;daily?:DailyObservation;shipment?:ShipmentPlan};
@@ -66,6 +66,8 @@ const name=(v:unknown):v is string=>typeof v==="string"&&v.length>0&&v.length<=1
 const city=(v:unknown)=>int(v,1,999999999999);
 function policySummary(task:string,d:Draft,o:Draft):string{
   const bad=()=>{throw new Error("Invalid account policy observation");};
+  if(["consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"].includes(task))
+    return recurringSummary(task,d,o);
   if(task==="research"&&d.study_choice){
     if(!keys(o,["study"])||!equal(o.study,d.study_choice)||!obj(o.study))return bad();
     return "Verified study: "+o.study.name;
@@ -110,4 +112,62 @@ function policySummary(task:string,d:Draft,o:Draft):string{
     if(!obj(r)||!obj(c)||!keys(r,["unit_id","name","upgrade_type","description","current_level","max_level","target"])||r.unit_id!==c.unitId||r.upgrade_type!==c.upgradeType||r.target!==c.target||!name(r.name)||typeof r.description!=="string"||r.description.length>100||!int(r.current_level,0,24)||!int(r.target,1,25)||!int(r.max_level,r.target,25)||r.current_level>=r.target)return bad();
     return r.name+" ("+r.upgrade_type+"): level "+r.current_level+" → "+r.target;
   }).join("\n");
+}
+
+const coordinate=(v:unknown):v is string=>typeof v==="string"&&/^(?:[1-9][0-9]?|100):(?:[1-9][0-9]?|100)$/.test(v);
+function recurringSummary(task:string,d:Draft,o:Draft):string{
+ const bad=()=>{throw new Error("Invalid recurring observation");};
+ if(task==="dumpWorld"){
+   if(!equal(o,{scope:d.coords===null?"world":"region",aggregate_only:true}))return bad();
+   return "Private aggregate map report; no identifying player records.";
+ }
+ if(task==="searchForIslandSpaces"){
+   const a=o.islands;
+   if(!keys(o,["islands"])||!Array.isArray(a)||a.length<1||a.length>100||!a.every(coordinate)||new Set(a).size!==a.length||!Array.isArray(d.islandList)||(d.islandList.length>0&&!equal([...a].sort(),[...d.islandList].sort())))return bad();
+   return "Verified islands: "+a.join(", ");
+ }
+ if(task==="autoPirate"){
+   const r=o.fortress;
+   if(!keys(o,["fortress","human_challenge"])||o.human_challenge!=="stop"||!obj(r)||!keys(r,["city_id","city_name","fortress_level","missions"])||!Array.isArray(d.piracyCities)||r.city_id!==d.piracyCities[0].id||!name(r.city_name)||!int(r.fortress_level,1,100)||!Array.isArray(r.missions)||r.missions.length<1||r.missions.length>9)return bad();
+   const seen=new Set<number>();
+   for(const m of r.missions){
+     if(!obj(m)||!keys(m,["number","duration_seconds"])||!int(m.number,1,9)||seen.has(m.number)||r.fortress_level<2*m.number-1||!int(m.duration_seconds,1,86400))return bad();
+     seen.add(m.number);
+   }
+   const requested=d.pirateSchedule?[d.pirateMissionDayChoice,d.pirateMissionNightChoice]:[d.pirateMissionChoice];
+   if(!requested.every(x=>seen.has(Number(x))))return bad();
+   return r.city_name+": fortress level "+r.fortress_level+"; stops at a human challenge.";
+ }
+ let expected:number[],extra:string[]=[];
+ if(task==="donationBot"){
+   if(!keys(o,["cities"])||!obj(d.cities_dict))return bad();
+   expected=Object.keys(d.cities_dict).map(Number);
+ }else{
+   if(!keys(o,["cities","fleets","external"])||!obj(o.fleets))return bad();
+   const source=task==="consolidateResources"?d.sourceCityIds:d.mode==="consolidate"?d.origin_cities:[d.origin_city];
+   const dest=task==="consolidateResources"?[d.destinationCityId]:d.mode==="consolidate"?[d.destination_city]:d.destination_cities;
+   if(!Array.isArray(source)||!Array.isArray(dest))return bad();
+   expected=[...source,...(d.recipient!==undefined?[]:dest)].map(Number);
+   const ext=o.external;
+   if(d.recipient!==undefined){
+     if(!obj(ext)||!keys(ext,["id","island","recipient","name","owner"])||ext.id!==dest[0]||ext.island!==d.island||ext.recipient!==d.recipient||!name(ext.name)||!name(ext.owner))return bad();
+     extra.push("External destination: "+ext.name+" — "+ext.owner+"; storage unknown");
+   }else if(ext!==null)return bad();
+   const fleets=d.shipType===3?["trade","freighter"]:d.shipType===2||d.useFreighters===true?["freighter"]:["trade"];
+   if(!keys(o.fleets,fleets))return bad();
+   let usable=false;
+   for(const [k,r] of Object.entries(o.fleets)){
+     if(!obj(r)||!keys(r,["capacity","free","total"])||!int(r.capacity,0,1e8)||!int(r.total,0,1e8)||!int(r.free,0,r.total))return bad();
+     usable=usable||Boolean(r.capacity&&r.total);
+     extra.push(k+": "+r.free+"/"+r.total+" free, "+r.capacity+" cargo per ship");
+   }
+   if(!usable)return bad();
+ }
+ if(!Array.isArray(o.cities)||o.cities.length!==expected.length)return bad();
+ const seen=new Set<number>(),lines:string[]=[];
+ for(const row of o.cities){
+   if(!obj(row)||!keys(row,["id","name","coords","stock","space"])||!city(row.id)||!expected.includes(Number(row.id))||seen.has(Number(row.id))||!name(row.name)||!coordinate(row.coords)||![row.stock,row.space].every(a=>Array.isArray(a)&&a.length===5&&a.every(n=>int(n,0,1e15))))return bad();
+   seen.add(Number(row.id));lines.push(row.name+" ("+row.coords+"): stock "+(row.stock as number[]).join(" / ")+"; free space "+(row.space as number[]).join(" / "));
+ }
+ return [...lines,...extra].join("\n");
 }

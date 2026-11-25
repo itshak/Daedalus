@@ -8,6 +8,12 @@ from daedalus.native_policy_review import POLICY_TASKS
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 REVIEW_ENDPOINTS = {
+    "consolidateResources": "consolidate-start",
+    "resourceTransportManager": "transport-policy-start",
+    "donationBot": "donation-policy-start",
+    "searchForIslandSpaces": "island-monitor-start",
+    "dumpWorld": "world-report-start",
+    "autoPirate": "piracy-start",
     "research": "research-start",
     "tavernManager": "tavern-start",
     "activateMiracle": "miracle-start",

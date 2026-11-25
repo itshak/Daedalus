@@ -2,10 +2,16 @@
 import re
 
 from daedalus.daily_distribution_review import _city
+from daedalus.recurring_review import (
+    RECURRING_TASKS,
+    recurring_draft,
+    recurring_summary,
+    validate_recurring,
+)
 from daedalus.research_choices import validate_study_choice
 from daedalus.tavern_choices import fixed_tavern_review, validate_fixed_tavern
 
-POLICY_TASKS = frozenset({"research", "tavernManager", "activateMiracle", "activateShrine", "UpgradeUnits"})
+POLICY_TASKS = RECURRING_TASKS | {"research", "tavernManager", "activateMiracle", "activateShrine", "UpgradeUnits"}
 
 
 def _integer(value, lo, hi):
@@ -28,6 +34,8 @@ def _name(value):
 def policy_draft(task, value):
     if task not in POLICY_TASKS or not isinstance(value, dict):
         raise ValueError("Invalid native policy")
+    if task in RECURRING_TASKS:
+        return recurring_draft(task, value)
     if task == "research":
         if set(value) == {"study_choice"}:
             return {"study_choice": validate_study_choice(value["study_choice"])}
@@ -77,6 +85,12 @@ def policy_draft(task, value):
 
 def observe_policy(ipc, account, task, draft):
     """Use only account-attested existing read-only inventories."""
+    if task in RECURRING_TASKS:
+        if task == "autoPirate":
+            fortress = next((r for r in ipc.pirate_fortresses(account)["fortresses"]
+                             if r["city_id"] == draft["piracyCities"][0]["id"]), None)
+            return validate_recurring(task, draft, {"fortress": fortress, "human_challenge": "stop"})
+        return validate_recurring(task, draft, ipc.recurring_preview(account, task, draft))
     if task == "research":
         data = ipc.academies(account)
         if "study_choice" in draft:
@@ -117,6 +131,8 @@ def observe_policy(ipc, account, task, draft):
 
 
 def validate_policy_observation(task, draft, value):
+    if task in RECURRING_TASKS:
+        return validate_recurring(task, draft, value)
     if not isinstance(value, dict):
         raise ValueError("Invalid policy observation")  # noqa: TRY004 - invalid remote observation
     if task == "research":
@@ -180,6 +196,8 @@ def validate_policy_observation(task, draft, value):
 
 
 def policy_summary(task, draft, value):
+    if task in RECURRING_TASKS:
+        return recurring_summary(task, draft, value)
     validate_policy_observation(task, draft, value)
     if task == "research":
         if "study" in value:

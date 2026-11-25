@@ -287,7 +287,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("dumpWorld", "waiting_time"): {
         "type": "number", "label": "Delay between island requests",
-        "minimum": 0.1, "maximum": 60.0, "suffix": " s",
+        "minimum": 1.0, "maximum": 10.0, "suffix": " s",
         "help": "Avoid aggressive world requests. Default is 1.5 seconds.",
     },
     ("dumpWorld", "managed_report_id"): {"type": "hidden_derived"},

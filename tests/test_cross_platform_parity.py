@@ -31,7 +31,9 @@ def test_versioned_coverage_manifest_matches_source_and_committed_matrix():
             "*-complete-cross-platform-automation-parity"
         ))
     manifest = coverage_manifest()
-    successor = root / "openspec/changes/finish-cross-platform-operation-parity/capability-matrix.json"
+    successor = root / "openspec/changes/verify-and-release-cross-platform-parity/capability-matrix.json"
+    if not successor.exists():
+        successor = root / "openspec/changes/finish-cross-platform-operation-parity/capability-matrix.json"
     if successor.exists():
         matrix = successor
     else:

@@ -15,3 +15,6 @@ Controller, engine, desktop, web, security, tests, docs and release workflow. No
 
 
 **Owner scope decision (2026-11-26, superseded):** proxy configuration was initially deferred (issue #98); the owner subsequently restored it to scope. Implement host-approved account-specific profiles, fixed credential-free HTTPS tests and explicit idle-account changes. Arbitrary endpoint and authentication provisioning remain protected host-local; live acceptance and other outstanding requirements remain open.
+
+## Archival scope
+The delivered source milestone is archived at the owner's request. Remaining option-level, verification and rollout gates continue in verify-and-release-cross-platform-parity. This does not mark unperformed criteria complete.

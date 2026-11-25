@@ -772,12 +772,15 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
-                if action in {"preview_distribution_existing", "preview_daily_rewards_existing", "preview_market_existing"}:
+                if action in {"preview_distribution_existing", "preview_daily_rewards_existing", "preview_market_existing", "preview_recurring_existing"}:
                     try:
                         session = self._existing_session(request)
                         if action == "preview_distribution_existing":
                             from ikabot.function.distributeResources import preview_distribution
                             result = preview_distribution(session, request["draft"])
+                        elif action == "preview_recurring_existing":
+                            from ikabot.helpers.nativePolicyReview import preview_recurring
+                            result = preview_recurring(session, request["task"], request["draft"])
                         elif action == "preview_market_existing":
                             from ikabot.function.nativeMarket import preview_native_market
                             result = preview_native_market(session, request["task"], request["draft"])
@@ -1949,6 +1952,7 @@ class IPCServer:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
                     "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research", "tavernManager", "searchForIslandSpaces", "distributeResources", "loginDaily", "buyResources", "sellResources",
+                    "consolidateResources", "resourceTransportManager", "donationBot", "dumpWorld", "autoPirate", "activateMiracle", "activateShrine", "UpgradeUnits",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

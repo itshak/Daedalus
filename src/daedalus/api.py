@@ -1816,6 +1816,30 @@ def create_app(
                                payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         return start_reviewed_operation(account_id, "donate", payload)
 
+    @app.post("/api/v1/accounts/{account_id}/tasks/consolidate-start", dependencies=[Depends(authorized)])
+    def start_reviewed_consolidate(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "consolidateResources", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/transport-policy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_transport_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "resourceTransportManager", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/donation-policy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_donation_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "donationBot", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/island-monitor-start", dependencies=[Depends(authorized)])
+    def start_reviewed_island_monitor(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "searchForIslandSpaces", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/world-report-start", dependencies=[Depends(authorized)])
+    def start_reviewed_world_report(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "dumpWorld", payload)
+
+    @app.post("/api/v1/accounts/{account_id}/tasks/piracy-start", dependencies=[Depends(authorized)])
+    def start_reviewed_piracy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        return start_reviewed_operation(account_id, "autoPirate", payload)
+
     @app.post("/api/v1/accounts/{account_id}/tasks/research-start", dependencies=[Depends(authorized)])
     def start_reviewed_research(account_id: str, payload: Annotated[dict[str, object], Body()]):
         return start_reviewed_operation(account_id, "research", payload)

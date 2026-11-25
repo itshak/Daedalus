@@ -1,5 +1,5 @@
 "use client";
-import {parseRewardDistributionReview} from "../lib/reward-distribution-review";
+import {parseRewardDistributionReview,policyTask,reviewRoute} from "../lib/reward-distribution-review";
 import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
@@ -51,7 +51,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [mode,setMode]=useState("consolidate");
   const [sendMode,setSendMode]=useState("keep");
   const [notify,setNotify]=useState("none");
-  const [review,setReview]=useState<{config:Config;summary:string;fingerprint:string}|null>(null);
+  const [review,setReview]=useState<{config:Config;summary:string;fingerprint:string;previewId?:string;ttl?:number}|null>(null);
   const [approved,setApproved]=useState(false);
   const [shipment,setShipment]=useState<ShipmentPlan|null>(null);
   const [busy,setBusy]=useState(false);
@@ -120,20 +120,27 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const reviewed=review!==null&&review.fingerprint===fingerprint;
   const batchValid=!!batchTargets&&batchTargets.length>=1&&batchTargets.length<=32&&batchTargets.every(a=>a.enabled);
   const canReview=!lookingUp&&(batchTargets?batchValid:enabled&&ready&&!loading&&!loadError)&&role!=="viewer"&&valid&&!locked&&!busy;
+  const needsPolicyReview=policyTask(task);
   const needsShipmentReview=task==="sendResources"||task==="distributeResources";
-  const canLaunch=canReview&&reviewed&&approved&&(!needsShipmentReview||Boolean(shipment?.ready&&shipment.preview_id));
+  const canLaunch=canReview&&reviewed&&approved&&(!needsShipmentReview||Boolean(shipment?.ready&&shipment.preview_id))&&(!needsPolicyReview||Boolean(review?.previewId));
   const edit=()=>{setReview(null);setApproved(false);setShipment(null);};
   useEffect(()=>{
-    if(!shipment?.expires_in)return;
-    const timer=window.setTimeout(()=>{setReview(null);setApproved(false);setShipment(null);setMessage("Review expired; prepare a new preview.");},shipment.expires_in*1000);
+    const ttl=shipment?.expires_in??review?.ttl;
+    if(!ttl)return;
+    const timer=window.setTimeout(()=>{setReview(null);setApproved(false);setShipment(null);setMessage("Review expired; prepare a new preview.");},ttl*1000);
     return ()=>window.clearTimeout(timer);
-  },[shipment]);
+  },[shipment,review]);
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     edit();setMessage("");
-    if(!needsShipmentReview){setReview({config,summary,fingerprint});return;}
+    if(!needsShipmentReview&&!needsPolicyReview){setReview({config,summary,fingerprint});return;}
     inFlight.current=true;setBusy(true);
     try{
+      if(needsPolicyReview){
+        const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
+        if(mounted.current)setReview({config,summary:summary+"\n"+data.policySummary+"\n"+t("Observed current state; future eligibility and costs may change."),fingerprint,previewId:data.preview_id,ttl:data.expires_in});
+        return;
+      }
       const data=task==="distributeResources"?parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config).shipment!:scopedShipmentPlan(await api(prefix+"/shipment-plan",config),account,config);
       if(mounted.current){setShipment(data);setReview({config,summary,fingerprint});}
     }catch{if(mounted.current)setMessage("Shipment preview unavailable. Check stock, recipients and fleet.");}
@@ -200,7 +207,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       const current=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(current,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const result=needsShipmentReview&&shipment?.preview_id?await api(prefix+"/tasks/"+(task==="distributeResources"?"distribution-start":"shipment-start"),{preview_id:shipment.preview_id,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
+      const result=review.previewId?await api(prefix+"/tasks/"+reviewRoute(task),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):needsShipmentReview&&shipment?.preview_id?await api(prefix+"/tasks/"+(task==="distributeResources"?"distribution-start":"shipment-start"),{preview_id:shipment.preview_id,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
       const receipt=result as {status?:unknown};
       if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
     } catch {if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
@@ -265,7 +272,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
         <table><thead><tr><th>{t("Route")}</th><th>{t("Origin stock")}</th><th>{t("First load limit")}</th><th>{t("Minimum loads")}</th><th>{t("First-load estimate (seconds)")}</th><th>{t("Modeled final delivery (seconds)")}</th></tr></thead><tbody>{shipment.routes.map((r,i)=><tr key={i}><td>{r.origin_name} → {r.destination_name}{r.destination_space===null&&<p>{t("Recipient storage unknown")}</p>}</td><td>{r.stock.map((n,j)=>r.resources[j]?materialName(MATERIALS[j])+": "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.first_load_limit.toLocaleString()}</td><td>{r.minimum_loads??t("Unavailable")}</td><td>{r.first_load_timing? <>{r.first_load_timing.total_seconds.toLocaleString()}<p>{t("Queue")}: {r.first_load_timing.queue_seconds} · {t("Loading")}: {r.first_load_timing.loading_seconds} · {t("Travel")}: {r.first_load_timing.travel_seconds}</p></>:t("Unavailable")}</td><td>{r.full_route_model?.delivery_seconds.toLocaleString()??t("Unavailable")}</td></tr>)}</tbody></table>
         <p>{t("Model assumes an exclusive fleet, symmetric return travel, unchanged loading and storage, and no extra waits. No combined multi-route ETA.")}</p>{!shipment.ready&&<p role="alert">{t("No usable fleet")}</p>}</>}
       <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy||(needsShipmentReview&&!shipment?.ready)} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
-      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{needsShipmentReview&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary+"\n"+shipment.routes.map(r=>r.origin_name+" → "+r.destination_name+": "+r.resources.reduce((a,b)=>a+b,0)).join("\n")} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
+      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{review.previewId&&<QueueReviewButton key={review.previewId} account={account} accountName={accountName} task={task} previewId={review.previewId} ttl={review.ttl??null} summary={review.summary} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}{needsShipmentReview&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary+"\n"+shipment.routes.map(r=>r.origin_name+" → "+r.destination_name+": "+r.resources.reduce((a,b)=>a+b,0)).join("\n")} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {batchReceipts.length>0&&<section className="preview-panel"><h4>{t("Batch receipts")}</h4><ul>{batchReceipts.map(r=><li key={r.account}>{batchTargets?.find(a=>a.id===r.account)?.name??r.account} · {t(r.status)}</li>)}</ul><p>{t("Check Activity before starting any further task.")}</p></section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;
