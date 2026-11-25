@@ -2,16 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
+import { validNativeLaunch } from "@/lib/native-task-contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 const responseHeaders = { "Cache-Control": "private, no-store, max-age=0", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff" };
-const taskLaunch = z.object({
-  task: z.string().min(1).max(96),
-  config: z.record(z.string(), z.unknown()),
-  request_id: z.uuid(),
-  confirmed: z.literal(true)
-}).strict();
 const buildingTargets = z.object({ upgrades: z.array(z.object({
   position: z.number().int().min(0).max(80),
   target_level: z.number().int().min(1).max(150)
@@ -52,7 +47,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     if (raw.length > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
-    if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !taskLaunch.safeParse(value).success)
+    if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "construction-preview" && !buildingTargets.safeParse(value).success)
       return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
