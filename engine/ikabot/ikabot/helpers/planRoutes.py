@@ -15,7 +15,7 @@ from ikabot.helpers.varios import wait
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
-def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None):
+def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None):
     """This function will execute one route
     Parameters
     ----------
@@ -91,6 +91,8 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = send[i]
 
+        if verify_recipient is not None:
+            verify_recipient(route_index)
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.
@@ -113,7 +115,7 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         time.sleep(5)
 
 
-def executeRoutes(session, routes, useFreighters=False, checkpoint=None):
+def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_recipient=None):
     """This function will execute all the routes passed to it, regardless if there are enough ships available to do so
     Parameters
     ----------
@@ -190,7 +192,7 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None):
                 available_ships,
                 send,
                 useFreighters,
-                checkpoint=checkpoint, route_index=route_index,
+                checkpoint=checkpoint, route_index=route_index, verify_recipient=verify_recipient,
             )
             if checkpoint:
                 toSend = [remaining - transferred

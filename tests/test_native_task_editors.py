@@ -861,3 +861,34 @@ def test_shrine_task_uses_verified_olympus_snapshot_not_fake_gods(page):
     page.set_shrine_unavailable("alpha")
     with pytest.raises(ValueError, match="actual owned Shrine"):
         page._form_config()
+
+
+def test_external_city_selection_rejects_stale_lookup_and_preserves_own_origins(app):
+    editor = ShipmentRoutesEditor()
+    editor.set_cities([{"id": 101, "name": "Home"}])
+    editor.x.setValue(50)
+    editor.y.setValue(60)
+    calls = []
+    editor.lookup_requested.connect(lambda *args: calls.append(args))
+    editor._lookup()
+    result = {"x": 50, "y": 60, "cities": [
+        {"id": 999, "recipient": 888, "island": 44, "name": "Town", "owner": "Other"}
+    ]}
+    editor.set_external(result, "stale")
+    assert not editor.add_button.isEnabled()
+    editor.set_external(result, calls[0][2])
+    assert editor.add_button.isEnabled()
+    editor.add_route()
+    source, target = editor.table.cellWidget(0, 0), editor.table.cellWidget(0, 1)
+    assert source.count() == 2 and target.count() == 3
+    source.setCurrentIndex(1)
+    target.setCurrentIndex(2)
+    editor.table.cellWidget(0, 2).setValue(50)
+    assert editor.to_config() == [{"from": 101, "to": 999, "recipient": 888, "island": 44,
+                                   "resources": [50, 0, 0, 0, 0]}]
+    assert "Town — Other" in editor.summary()
+    editor.x.setValue(51)
+    assert target.currentIndex() == 0
+    with pytest.raises(ValueError):
+        editor.to_config()
+    editor.close()

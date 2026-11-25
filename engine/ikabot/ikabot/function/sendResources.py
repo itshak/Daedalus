@@ -43,6 +43,61 @@ def get_island(session, value, name):
     return getIsland(session.get(island_url + asId(value, name)))
 
 
+def _destination_id(value):
+    if type(value) not in (str, int) or not re.fullmatch(r"[1-9][0-9]{0,11}", str(value)):
+        raise ValueError("Invalid destination identity")
+    return int(value)
+
+
+def _eligible_destinations(session, island):
+    island_id = _destination_id(island["id"])
+    rows = []
+    for city in island["cities"]:
+        if (city.get("type") != "city" or city.get("state") != ""
+                or city.get("Name") == session.username):
+            continue
+        name, owner = city.get("name"), city.get("Name")
+        if not isinstance(name, str) or not isinstance(owner, str) or not name or not owner:
+            raise ValueError("Invalid destination name")
+        rows.append({"id": _destination_id(city["id"]),
+                     "recipient": _destination_id(city["Id"]),
+                     "island": island_id,
+                     "name": decodeUnicodeEscape(name)[:120],
+                     "owner": decodeUnicodeEscape(owner)[:120]})
+    if len(rows) > 100 or len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("Invalid island inventory")
+    return rows
+
+
+def native_island_destinations(session, x, y):
+    if any(type(v) is not int or not 1 <= v <= 100 for v in (x, y)):
+        raise ValueError("Choose island coordinates between 1 and 100")
+    # Match the upstream interactive foreign-city lookup exactly.
+    import json
+    html = session.get(f"view=worldmap_iso&islandX={x}&islandY={y}&oldBackgroundView=island&islandWorldviewScale=1")
+    try:
+        data = json.loads(re.search(r"jsonData = '(.*?)';", html).group(1), strict=False)
+        island_id = _destination_id(data["data"][str(x)][str(y)][0])
+    except (ValueError, AttributeError, KeyError, IndexError, TypeError):
+        raise ValueError("No verified island at these coordinates") from None
+    island = get_island(session, island_id, "Destination island")
+    if (_destination_id(island["id"]) != island_id or
+            (int(island["x"]), int(island["y"])) != (x, y)):
+        raise ValueError("Island coordinates changed")
+    return {"x": x, "y": y, "cities": _eligible_destinations(session, island)}
+
+
+def _verify_recipient(session, route, island=None):
+    if "recipient" not in route:
+        return
+    if island is None:
+        island = get_island(session, route["island"], "Destination island")
+    destination, owner, island_id = (_destination_id(route[k]) for k in ("to", "recipient", "island"))
+    if not any(row["id"] == destination and row["recipient"] == owner and row["island"] == island_id
+               for row in _eligible_destinations(session, island)):
+        raise ValueError("Reviewed external destination changed; stop and review again")
+
+
 def resource_amounts(value, name):
     if isinstance(value, dict):
         unknown = [key for key in value if key not in RESOURCE_KEYS]
@@ -101,6 +156,11 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
                     "{}.to {} is not on island {}:{}".format(name, destination, island["x"], island["y"])
                 )
             checked_route["island"] = str(island["id"])
+            if "recipient" in route:
+                _verify_recipient(session, route, island)
+                checked_route["recipient"] = str(_destination_id(route["recipient"]))
+        elif "recipient" in route:
+            raise ValueError("Reviewed external destination is now an owned city")
         checked.append(checked_route)
         asked[origin] = [a + b for a, b in zip(asked.get(origin, [0] * len(RESOURCE_KEYS)), amounts)]
 
@@ -155,6 +215,7 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         else:
             island = getIsland(session.get(island_url + str(route["island"])))
             island_id = island["id"]
+            _verify_recipient(session, route, island)
             destination_name = next(
                 (city["name"] for city in island["cities"] if str(city.get("id")) == destination), destination
             )
@@ -172,7 +233,11 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         checkpoint = FixedTransferJournal(
             session, transfer_id, list(routes), useFreighters,
         )
-    executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
+    if any("recipient" in route for route in routes):
+        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint,
+                      verify_recipient=lambda index: _verify_recipient(session, routes[index]))
+    else:
+        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
 
 
 @configurator

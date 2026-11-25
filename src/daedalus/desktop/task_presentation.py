@@ -88,7 +88,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     # independent engine-side validation.
     ("sendResources", "routes"): {
         "type": "shipment_routes", "label": "Shipments",
-        "help": "Add origin, destination and resource quantities for each route. Own cities only.",
+        "help": "Add origin, destination and resource quantities. Find external cities by island coordinates.",
     },
     ("consolidateResources", "limits"): {
         "type": "resource_limits", "label": "Retain in source cities",

@@ -57,7 +57,7 @@ Legend: D = desktop dedicated editor exists but full acceptance/gaps remain; E =
 
 ## Implementation progress — expanded background slice (not accepted)
 
-See [implementation-status.md](implementation-status.md) for current editors and local verification. The web now has 21 native operation editors (including one-time donation), including authoritative self-funded construction preview/launch, dynamic operation search and account-independent alert batches. The desktop player-first/native-only controls are integrated and tested offscreen. The baseline table above is intentionally retained as historical evidence rather than an acceptance claim. External cities, fleet capacity/ETA, full options, city-bound independent batches, interactive adapters, combat and web-service workflows remain open.
+See [implementation-status.md](implementation-status.md) for current editors and local verification. The web now has 21 native operation editors (including one-time donation), including authoritative self-funded construction preview/launch, dynamic operation search and account-independent alert batches. The desktop player-first/native-only controls are integrated and tested offscreen. The baseline table above is intentionally retained as historical evidence rather than an acceptance claim. Recurring external transport, fleet capacity/ETA, full options, city-bound independent batches, interactive adapters, combat and web-service workflows remain open.
 
 ## Evidence and gaps
 

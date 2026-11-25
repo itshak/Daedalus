@@ -639,6 +639,22 @@ def create_app(
             raise HTTPException(status_code=503, detail="Authenticated IkaBot session unavailable") from exc
         return {"account_id": account_id, "cities": cities}
 
+    @app.get("/api/v1/accounts/{account_id}/island-destinations", dependencies=[Depends(authorized)])
+    def island_destinations(account_id: str, x: int, y: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 1 <= x <= 100 or not 1 <= y <= 100:
+            raise HTTPException(status_code=422, detail="Invalid coordinates")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Island lookup unavailable")
+        try:
+            return ipc_client.island_destinations(account, x, y)
+        except (ValueError, EngineIPCUnavailable) as exc:
+            raise HTTPException(status_code=503, detail="Island lookup unavailable") from exc
+
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/buildings", dependencies=[Depends(authorized)])
     def account_buildings(account_id: str, city_id: int) -> dict[str, object]:
         """Safe, read-only actual building rows; not an executable construction plan."""

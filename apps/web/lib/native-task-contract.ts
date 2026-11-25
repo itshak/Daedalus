@@ -136,7 +136,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
         || !Array.isArray(c.routes) || c.routes.length < 1 || c.routes.length > 20) return false;
       const totals = new Map<number,number[]>();
       for (const r of c.routes) {
-        if (!obj(r) || !exact(r,["from","to","resources"]) || !city(r.from) || !city(r.to)
+        if (!obj(r) || !(exact(r,["from","to","resources"]) || (exact(r,["from","to","resources","island","recipient"]) && city(r.island) && city(r.recipient))) || !city(r.from) || !city(r.to)
           || r.from === r.to || !amounts(r.resources) || !positive(r.resources)) return false;
         const total = totals.get(r.from) ?? [0,0,0,0,0];
         for (let i=0;i<5;i++) total[i] += Number(r.resources[i]);
@@ -261,4 +261,15 @@ export function validWorkerLaunch(value:unknown):boolean {
     &&typeof value.preview_id==="string"&&/^[A-Za-z0-9_-]{43}$/.test(value.preview_id)
     &&typeof value.request_id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.request_id)
     &&value.confirmed===true;
+}
+
+export type ExternalCity = {id:number;island:number;recipient:number;name:string;owner:string};
+export function scopedExternalCities(value:unknown,account:string,x:number,y:number):ExternalCity[] {
+  if (!obj(value) || value.account_id!==account || value.x!==x || value.y!==y ||
+      !Array.isArray(value.cities) || value.cities.length>100 ||
+      !value.cities.every(r=>obj(r)&&exact(r,["id","island","recipient","name","owner"])&&city(r.id)&&city(r.island)&&city(r.recipient)&&
+        typeof r.name==="string"&&r.name.length>0&&r.name.length<=120&&typeof r.owner==="string"&&r.owner.length>0&&r.owner.length<=120) ||
+      new Set(value.cities.map(r=>r.id)).size!==value.cities.length || new Set(value.cities.map(r=>r.island)).size>1)
+    throw new Error("Invalid island inventory");
+  return value.cities as ExternalCity[];
 }

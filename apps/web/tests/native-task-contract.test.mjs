@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch} from "../lib/native-task-contract.ts";
-test("fixed shipment: strict route shape, positive quantities, distinct cities, no external/raw override",()=>{
+import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities} from "../lib/native-task-contract.ts";
+test("fixed shipment: strict route shape, positive quantities, distinct cities, no unverified external/raw override",()=>{
   const route={from:1,to:2,resources:[5,0,0,0,0]};
   const config={routes:[route],useFreighters:false};
   assert.equal(validNativeConfig("sendResources",config),true);
@@ -112,4 +112,14 @@ test("worker assignments accept only operation-specific drafts and reviewed tick
   assert.equal(validWorkerLaunch({...receipt,task:"developer"}),false);
   assert.equal(validWorkerLaunch({...receipt,confirmed:false}),false);
   assert.equal(validWorkerLaunch({...receipt,config:{}}),false);
+});
+
+test("external city inventory and route identity must be scoped",()=>{
+  const data={account_id:"a",x:50,y:60,cities:[{id:9,recipient:7,island:44,name:"Town",owner:"Other"}]};
+  assert.deepEqual(scopedExternalCities(data,"a",50,60),data.cities);
+  assert.throws(()=>scopedExternalCities(data,"b",50,60));
+  assert.throws(()=>scopedExternalCities(data,"a",51,60));
+  assert.throws(()=>scopedExternalCities({...data,cities:[...data.cities,...data.cities]},"a",50,60));
+  assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:7,resources:[1,0,0,0,0]}],useFreighters:false}),true);
+  assert.equal(validNativeConfig("sendResources",{routes:[{from:1,to:9,island:44,recipient:0,resources:[1,0,0,0,0]}],useFreighters:false}),false);
 });

@@ -19,8 +19,10 @@ from daedalus.reviewed_operations import (
     validate_attack_plan,
     validate_build_inventory,
     validate_grind_plan,
+    validate_island_destinations,
     validated_attack_draft,
     validated_build_draft,
+    validated_coordinates,
     validated_grind_draft,
     validated_layout_draft,
     validated_station_draft,
@@ -677,6 +679,19 @@ class DaedalusClient:
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
             raise APIConnectionError("Backend returned invalid city data")
         return data
+
+    def island_destinations(self, account_id: str, x: int, y: int) -> dict[str, object]:
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        validated_coordinates(x, y)
+        data = self._read(f"accounts/{account_id}/island-destinations?x={x}&y={y}")
+        if data.get("account_id") != account_id:
+            raise APIConnectionError("Invalid island scope")
+        try:
+            return {"account_id": account_id, "x": x, "y": y,
+                    "cities": validate_island_destinations(x, y, data)}
+        except ValueError as exc:
+            raise APIConnectionError("Invalid island inventory") from exc
 
     def vacation_preview(self, account_id: str, city_id: int) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:

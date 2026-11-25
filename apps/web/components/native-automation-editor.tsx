@@ -2,7 +2,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "./language-provider";
-import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, type BatchTarget, type BatchReceipt, launchAlertBatch, scopedCities, readyPreflight, validNativeConfig } from "@/lib/native-task-contract";
+import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, type BatchTarget, type BatchReceipt, launchAlertBatch, scopedCities, readyPreflight, validNativeConfig, scopedExternalCities, type ExternalCity } from "@/lib/native-task-contract";
 
 type Config = Record<string,unknown>;
 type Route = {key:number; from:number; to:number; resources:number[]};
@@ -27,6 +27,11 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [loadError,setLoadError]=useState(false);
   const [routes,setRoutes]=useState<Route[]>([route(1)]);
   const nextRoute=useRef(2);
+  const [islandX,setIslandX]=useState(1),[islandY,setIslandY]=useState(1);
+  const [external,setExternal]=useState<ExternalCity[]>([]);
+  const [lookupMessage,setLookupMessage]=useState("");
+  const [lookingUp,setLookingUp]=useState(false);
+  const lookupRevision=useRef(0);
   const [minutes,setMinutes]=useState(20);
   const [hours,setHours]=useState(4);
   const [autoTransfer,setAutoTransfer]=useState(false);
@@ -69,7 +74,9 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     return ()=>{alive=false;mounted.current=false;};
   },[account,enabled,prefix,task,cityTask]);
   const byId=new Map(cities.map(c=>[c.id,c.name+(c.coords?" · "+c.coords:"")]));
+  const externalById=new Map(external.filter(r=>!byId.has(r.id)).map(r=>[r.id,r]));
   const actual=(id:number)=>byId.has(id);
+  const destinationName=(id:number)=>{const r=externalById.get(id);return r?r.name+" — "+r.owner+" ("+islandX+":"+islandY+")":cityName(id);};
   const cityName=(id:number)=>byId.get(id)??t("Choose a city");
   const materialName=(m:string)=>t(m==="crystal"?"Glass":m[0].toUpperCase()+m.slice(1));
   const resourceSummary=(a:(number|null)[],keep=false)=>a.map((v,i)=>
@@ -81,9 +88,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   else if(task==="alertLowWine"){config={hours,auto_transfer:autoTransfer,transfer_amount:autoTransfer?transferAmount:0};
     summary=t("Warn when wine has less than")+" "+hours+" "+t("hours")+"; "+(autoTransfer?t("Automatic wine transfer")+": "+transferAmount:t("Notifications only"));}
   else if(task==="sendResources"){
-    config={routes:routes.map(r=>({from:r.from,to:r.to,resources:r.resources})),useFreighters:freighters};
-    scoped=routes.every(r=>actual(r.from)&&actual(r.to));
-    summary=routes.map(r=>cityName(r.from)+" → "+cityName(r.to)+": "+resourceSummary(r.resources)).join("\n")+"\n"+fleetName;
+    config={routes:routes.map(r=>{const ext=externalById.get(r.to);return {from:r.from,to:r.to,resources:r.resources,...(ext?{island:ext.island,recipient:ext.recipient}:{})};}),useFreighters:freighters};
+    scoped=routes.every(r=>actual(r.from)&&(actual(r.to)||externalById.has(r.to)));
+    summary=routes.map(r=>cityName(r.from)+" → "+destinationName(r.to)+": "+resourceSummary(r.resources)).join("\n")+"\n"+fleetName
+      +(routes.some(r=>externalById.has(r.to))?"\n"+t("External shipments require manual recovery."):"");
   } else if(task==="distributeResources"){
     config={resource:material,mode:policy,cities_ids:multiple,useFreighters:freighters};
     scoped=multiple.every(actual);
@@ -105,9 +113,26 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const fingerprint=JSON.stringify(config);
   const reviewed=review!==null&&review.fingerprint===fingerprint;
   const batchValid=!!batchTargets&&batchTargets.length>=1&&batchTargets.length<=32&&batchTargets.every(a=>a.enabled);
-  const canReview=(batchTargets?batchValid:enabled&&ready&&!loading&&!loadError)&&role!=="viewer"&&valid&&!locked&&!busy;
+  const canReview=!lookingUp&&(batchTargets?batchValid:enabled&&ready&&!loading&&!loadError)&&role!=="viewer"&&valid&&!locked&&!busy;
   const canLaunch=canReview&&reviewed&&approved;
   const edit=()=>{setReview(null);setApproved(false);};
+  const resetExternal=()=>{
+    lookupRevision.current++;setExternal([]);setLookingUp(false);setLookupMessage("");
+    setRoutes(old=>old.map(r=>actual(r.to)?r:{...r,to:0}));
+    edit();
+  };
+  const lookup=async()=>{
+    if(lookingUp||!enabled||role==="viewer"||!Number.isInteger(islandX)||islandX<1||islandX>100||!Number.isInteger(islandY)||islandY<1||islandY>100)return;
+    resetExternal();const revision=lookupRevision.current;setLookingUp(true);
+    try{
+      const value=await api(prefix+"/island-destinations?x="+islandX+"&y="+islandY);
+      if(mounted.current&&revision===lookupRevision.current){
+        const rows=scopedExternalCities(value,account,islandX,islandY).filter(r=>!actual(r.id));
+        setExternal(rows);setLookupMessage(rows.length?"Select a destination from the verified island.":"No eligible external cities on this island.");
+      }
+    }catch{if(mounted.current&&revision===lookupRevision.current)setLookupMessage("Island lookup unavailable.");}
+    finally{if(mounted.current&&revision===lookupRevision.current)setLookingUp(false);}
+  };
   const numeric=(label:string,value:number,onChange:(v:number)=>void,min:number,max:number)=>
     <label className="field"><span>{label}</span><input type="number" min={min} max={max} step={1} value={Number.isNaN(value)?"":value}
       onChange={e=>{edit();onChange(e.target.value===""?NaN:Number(e.target.value));}}/></label>;
@@ -145,15 +170,25 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   };
   return <section className="native-automation-editor">
     {batchTargets?<p>{batchValid?t("Each selected account is checked before any launch."):t("Select 1–32 enabled accounts.")}</p>:loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:loadError||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
-    {cityTask&&!loading&&cities.length<2&&<p role="alert">{t("At least two authenticated cities are required.")}</p>}
+    {cityTask&&task!=="sendResources"&&!loading&&cities.length<2&&<p role="alert">{t("At least two authenticated cities are required.")}</p>}
     <fieldset disabled={busy||locked||(batchTargets?!batchValid:loading||!enabled)||role==="viewer"}>
       <legend>{t("Settings")}</legend>
       {task==="alertAttacks"&&numeric(t("Check for attacks every (minutes)"),minutes,setMinutes,3,1440)}
       {task==="alertLowWine"&&<>{numeric(t("Warn when wine has less than (hours)"),hours,setHours,1,720)}<label className="check-label"><input type="checkbox" checked={autoTransfer} onChange={e=>{edit();setAutoTransfer(e.target.checked);}}/>{t("Automatic wine transfer")}</label>{autoTransfer&&numeric(t("Wine to transfer"),transferAmount,setTransferAmount,1,MAX_AMOUNT)}</>}
       {task==="sendResources"&&<>
+        <fieldset><legend>{t("Find external cities")}</legend>
+          {numeric(t("Island X"),islandX,v=>{resetExternal();setIslandX(v);},1,100)}
+          {numeric(t("Island Y"),islandY,v=>{resetExternal();setIslandY(v);},1,100)}
+          <button type="button" className="secondary-button" disabled={lookingUp||!cities.length||!Number.isInteger(islandX)||islandX<1||islandX>100||!Number.isInteger(islandY)||islandY<1||islandY>100} onClick={()=>void lookup()}>{t(lookingUp?"Looking up cities…":"Find external cities")}</button>
+          {lookupMessage&&<p role="status">{t(lookupMessage)}</p>}
+        </fieldset>
         {routes.map((r,i)=><fieldset key={r.key}><legend>{t("Route")} {i+1}</legend>
           {citySelect(t("From city"),r.from,v=>changeRoute(r.key,{from:v,to:r.to===v?0:r.to}),r.to)}
-          {citySelect(t("To city"),r.to,v=>changeRoute(r.key,{to:v}),r.from)}
+          <label className="field"><span>{t("To city")}</span><select value={r.to||""} onChange={e=>{edit();changeRoute(r.key,{to:Number(e.target.value)});}}>
+            <option value="">{t("Choose a city")}</option>
+            {cities.filter(c=>c.id!==r.from).map(c=><option key={c.id} value={c.id}>{cityName(c.id)}</option>)}
+            {[...externalById.values()].map(c=><option key={c.id} value={c.id}>{destinationName(c.id)}</option>)}
+          </select></label>
           {amountsFields(r.resources,(j,v)=>changeRoute(r.key,{resources:r.resources.map((x,k)=>j===k?v:x)}))}
           <button type="button" className="secondary-button" disabled={routes.length===1} onClick={()=>{edit();setRoutes(old=>old.filter(x=>x.key!==r.key));}}>{t("Remove route")}</button>
         </fieldset>)}

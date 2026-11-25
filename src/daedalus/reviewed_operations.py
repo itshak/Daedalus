@@ -330,3 +330,28 @@ def validate_vacation_plan(city_id: int, plan: object) -> dict[str, object]:
             or not re.fullmatch(r"[0-9a-f]{64}", config["expected"])):
         raise ValueError("Invalid vacation fingerprint")
     return {k: plan[k] for k in ("city_id", "city_name", "active_jobs", "ready", "config")}
+
+
+def validated_coordinates(x: object, y: object) -> tuple[int, int]:
+    if any(type(v) is not int or not 1 <= v <= 100 for v in (x, y)):
+        raise ValueError("Choose coordinates between 1 and 100")
+    return x, y
+
+
+def validate_island_destinations(x: int, y: int, result: object) -> list[dict[str, object]]:
+    if (not isinstance(result, dict) or result.get("x") != x or result.get("y") != y
+            or not isinstance(result.get("cities"), list) or len(result["cities"]) > 100):
+        raise ValueError("Invalid island inventory")
+    seen = set()
+    islands = set()
+    for row in result["cities"]:
+        if (not isinstance(row, dict) or set(row) != {"id", "recipient", "island", "name", "owner"}
+                or any(type(row[k]) is not int or not 0 < row[k] < 10**12 for k in ("id", "recipient", "island"))
+                or row["id"] in seen or any(not isinstance(row[k], str) or not 0 < len(row[k]) <= 120
+                                            for k in ("name", "owner"))):
+            raise ValueError("Invalid recipient")
+        seen.add(row["id"])
+        islands.add(row["island"])
+    if len(islands) > 1:
+        raise ValueError("Mixed island inventory")
+    return result["cities"]

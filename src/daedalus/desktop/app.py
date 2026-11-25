@@ -299,6 +299,8 @@ class APIWorker(QThread):
                 result = _known_ikabot_workers(self.client)
             elif self.action == "capabilities":
                 result = self.client.capabilities()
+            elif self.action == "task_island_destinations" and self.account_id and self.task_payload:
+                result = self.client.island_destinations(self.account_id, self.task_payload["x"], self.task_payload["y"])
             elif self.action == "task_cities" and self.account_id:
                 result = {
                     "account_id": self.account_id,
@@ -821,6 +823,10 @@ class MainWindow(FluentWindow):
         )
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
+            view.island_destinations_requested.connect(
+                lambda aid, x, y, nonce: self._request("task_island_destinations", account_id=aid,
+                    task_payload={"x": x, "y": y, "nonce": nonce})
+            )
             view.buildings_requested.connect(self._queue_task_buildings)
             view.workshop_requested.connect(self._queue_workshop)
             view.trainable_units_requested.connect(self._queue_trainables)
@@ -2314,6 +2320,11 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_result(account_id, action, payload)
+        elif action == "task_island_destinations":
+            assert isinstance(payload, dict)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_island_destinations(payload, request["nonce"])
         elif action == "task_cities":
             assert isinstance(payload, dict)
             self.tasks_page.set_cities(payload["account_id"], payload["cities"])
@@ -2540,6 +2551,11 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_unavailable(account_id, action)
+        if action == "task_island_destinations":
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(request, dict):
+                self.tasks_page.set_island_destinations_unavailable(
+                    getattr(self._worker, "account_id", None), request["nonce"])
         if action == "task_cities":
             worker = self._worker
             account_id = getattr(worker, "account_id", None)

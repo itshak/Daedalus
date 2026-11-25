@@ -132,6 +132,7 @@ class TasksPage(QWidget):
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
     cities_requested = Signal(str)
+    island_destinations_requested = Signal(str, int, int, str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
     donation_preview_requested = Signal(str, object, str)
@@ -714,6 +715,24 @@ class TasksPage(QWidget):
                 entry.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
                 entry.setCheckState(Qt.Unchecked)
                 widget.addItem(entry)
+
+    def _lookup_destinations(self, x, y, nonce):
+        account = self.selected_account_id()
+        if account and self.selected_task_name() == "sendResources":
+            self.island_destinations_requested.emit(account, x, y, nonce)
+
+    def set_island_destinations(self, result, nonce):
+        if result.get("account_id") != self.selected_account_id() or self.selected_task_name() != "sendResources":
+            return
+        editor = self._form_inputs.get("routes")
+        if isinstance(editor, ShipmentRoutesEditor):
+            editor.set_external(result, nonce)
+
+    def set_island_destinations_unavailable(self, account, nonce):
+        if account == self.selected_account_id() and self.selected_task_name() == "sendResources":
+            editor = self._form_inputs.get("routes")
+            if isinstance(editor, ShipmentRoutesEditor):
+                editor.lookup_failed(nonce)
 
     def set_cities(self, account_id: str, cities: list[dict[str, object]]) -> None:
         if account_id not in self._account_ids:
@@ -1923,6 +1942,7 @@ class TasksPage(QWidget):
                 widget.changed.connect(self._mark_form_dirty)
             elif kind == "shipment_routes":
                 widget = ShipmentRoutesEditor(self)
+                widget.lookup_requested.connect(self._lookup_destinations)
                 widget.set_cities(self._cities_by_account.get(self.selected_account_id() or "", []))
                 widget.changed.connect(self._mark_form_dirty)
             elif kind == "donation_policies":
@@ -2523,6 +2543,9 @@ class TasksPage(QWidget):
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
         params = self.building_note.text() if task in CITY_REVIEW_TASKS else configuration_summary(config)
+        if task == "sendResources" and isinstance(self._form_inputs.get("routes"), ShipmentRoutesEditor):
+            params = self._form_inputs["routes"].summary() + (
+                "\nFreighters" if config.get("useFreighters") else "\nTrade ships")
         answer = QMessageBox.question(
             self, "Review automation",
             f"Start {_friendly_task(task)} for "

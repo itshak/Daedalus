@@ -102,3 +102,10 @@ test("vacation activation requires explicit review paths",()=>{
   assert.equal(allowedRequest("POST","accounts/a/tasks/vacation-start".split("/"),params()),true);
   assert.equal(allowedRequest("POST","accounts/a/cities/12/vacation-plan".split("/"),params("raw=true")),false);
 });
+
+test("external island lookup allows only two bounded coordinates",()=>{
+  const path="accounts/a/island-destinations".split("/");
+  assert.equal(allowedRequest("GET",path,params("x=50&y=60")),true);
+  for(const q of ["x=0&y=60","x=101&y=60","x=50&y=60&raw=true","x=50&x=60","x=50"])
+    assert.equal(allowedRequest("GET",path,params(q)),false);
+});

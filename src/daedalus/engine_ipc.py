@@ -23,12 +23,14 @@ from daedalus.reviewed_operations import (
     validate_build_inventory,
     validate_build_plan,
     validate_grind_plan,
+    validate_island_destinations,
     validate_layout_plan,
     validate_station_plan,
     validate_vacation_plan,
     validate_worker_plan,
     validated_attack_draft,
     validated_build_draft,
+    validated_coordinates,
     validated_grind_draft,
     validated_layout_draft,
     validated_station_draft,
@@ -45,7 +47,7 @@ from daedalus.warehouse import (
 _MAX_DESCRIPTOR_BYTES = 4096
 _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
-    "ping", "list_sessions", "list_cities_existing", "warehouse_snapshots_existing",
+    "ping", "list_sessions", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
     "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
@@ -153,12 +155,13 @@ class ExistingIPCClient:
                 template_city_id: int | None = None, build_draft: dict[str, int] | None = None,
                 station_draft: dict[str, object] | None = None,
                 grind_draft: dict[str, object] | None = None,
-                attack_draft: dict[str, object] | None = None) -> dict[str, Any]:
+                attack_draft: dict[str, object] | None = None,
+                coordinates: tuple[int, int] | None = None) -> dict[str, Any]:
         """Issue only a fixed nonmutating action; never expose an unrestricted RPC."""
         if action not in _ALLOWED:
             raise ValueError("This IPC bridge is read-only")
         if action in {
-            "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
+            "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
@@ -240,7 +243,14 @@ class ExistingIPCClient:
             payload.update(validated_attack_draft(city_id, attack_draft))
         elif attack_draft is not None:
             raise ValueError("Unexpected manual attack draft")
+        if action == "island_destinations_existing":
+            if not isinstance(coordinates, tuple) or len(coordinates) != 2:
+                raise ValueError("Choose an island")
+            payload["x"], payload["y"] = validated_coordinates(*coordinates)
+        elif coordinates is not None:
+            raise ValueError("Unexpected island coordinates")
         return self._exchange(payload, read_timeout=60.0 if action in {
+            "island_destinations_existing",
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
             "list_build_options_existing", "preview_build_existing",
             "preview_layout_existing",
@@ -364,6 +374,18 @@ class ExistingIPCClient:
                 }
             )
         return result
+
+    def island_destinations(self, account: Account, x: int, y: int) -> dict[str, object]:
+        validated_coordinates(x, y)
+        result = self.request("island_destinations_existing", account=account, coordinates=(x, y))
+        if (str(result.get("world", "")).casefold() != account.world.casefold()
+                or str(result.get("username", "")).casefold() != account.player.casefold()):
+            raise EngineIPCUnavailable("Invalid island scope")
+        try:
+            rows = validate_island_destinations(x, y, result)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid island inventory") from exc
+        return {"account_id": account.id, "x": x, "y": y, "cities": rows}
 
     def buildings(self, account: Account, city_id: int) -> list[dict[str, object]]:
         """Return sanitized existing-session building slots from an owned city."""

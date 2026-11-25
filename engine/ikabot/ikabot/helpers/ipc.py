@@ -772,6 +772,12 @@ class IPCServer:
                     return self._validate_session_existing(request)
                 if action == "list_cities_existing":
                     return self._list_cities(request, existing_only=True)
+                if action == "island_destinations_existing":
+                    from ikabot.function.sendResources import native_island_destinations
+                    session = self._existing_session(request)
+                    result = native_island_destinations(session, request.get("x"), request.get("y"))
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, **result}
                 if action == "list_buildings_existing":
                     return self._list_buildings_existing(request)
                 if action == "preview_vacation_existing":

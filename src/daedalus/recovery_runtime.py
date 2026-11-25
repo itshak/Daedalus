@@ -40,6 +40,9 @@ logger = logging.getLogger("daedalus.recovery_runtime")
 _ACCOUNT_METHODS = frozenset({
     "has_account", "validate_account", "cities", "buildings",
     "construction_preview", "workshop_upgrades", "trainable_units",
+    "vacation_preview", "attack_inventory", "attack_preview", "grind_preview",
+    "station_preview", "build_options", "build_preview", "layout_preview",
+    "worker_preview", "donation_preview", "island_destinations",
     "market_quotes", "academies", "taverns", "miracles",
     "shrine_status", "pirate_fortresses", "military_overview",
     "ship_movements", "warehouses", "preflight_task",

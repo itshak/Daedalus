@@ -95,6 +95,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     body = JSON.stringify(value);
   }
   const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "")
+    : parts.at(-1) === "island-destinations" ? "?x=" + encodeURIComponent(url.searchParams.get("x") ?? "") + "&y=" + encodeURIComponent(url.searchParams.get("y") ?? "")
     : parts.at(-1) === "market-quotes" ? "?resource_type=" + encodeURIComponent(url.searchParams.get("resource_type") ?? "") + "&side=" + encodeURIComponent(url.searchParams.get("side") ?? "")
     : parts.at(-1) === "trainable-units" && url.searchParams.has("train_troops") ? "?train_troops=" + encodeURIComponent(url.searchParams.get("train_troops") ?? "") : "";
   try {

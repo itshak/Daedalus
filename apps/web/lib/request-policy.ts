@@ -10,6 +10,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
   if (method === "GET") {
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
+    if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "island-destinations") return params.size===2 && ["x","y"].every(k=>/^(?:[1-9][0-9]?|100)$/.test(params.get(k)??""));
     if (parts.length === 3 && parts[0] === "accounts" && (accountResources.has(parts[2]) || parts[2] === "recovery")) return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "jobs") return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "preflight") return params.has("task") && (params.get("task") ?? "").length <= 96;

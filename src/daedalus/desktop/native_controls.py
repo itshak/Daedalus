@@ -8,6 +8,8 @@ result before starting any task.
 
 from __future__ import annotations
 
+import uuid
+
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -85,9 +87,10 @@ class ResourceLimitsEditor(QWidget):
 
 
 class ShipmentRoutesEditor(QWidget):
-    """One or more account-local routes; external destinations require a future verified lookup."""
+    """Owned origins and verified owned or external destination choices."""
 
     changed = Signal()
+    lookup_requested = Signal(int, int, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -95,10 +98,28 @@ class ShipmentRoutesEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         self._cities: list[dict[str, object]] = []
+        self._external: list[dict[str, object]] = []
+        self._lookup_nonce: str | None = None
+        self._lookup_coords: tuple[int, int] | None = None
+        search = QHBoxLayout()
+        self.x = _amount(minimum=1, value=1, label="Island X coordinate")
+        self.y = _amount(minimum=1, value=1, label="Island Y coordinate")
+        for label, field in (("Island X", self.x), ("Y", self.y)):
+            field.setMaximum(100)
+            search.addWidget(QLabel(label))
+            search.addWidget(field)
+            field.valueChanged.connect(self._invalidate_external)
+        self.lookup_button = PushButton("Find external cities")
+        self.lookup_button.clicked.connect(self._lookup)
+        search.addWidget(self.lookup_button)
+        layout.addLayout(search)
+        self.lookup_note = QLabel("Optional: find another player's city by island coordinates.")
+        self.lookup_note.setWordWrap(True)
+        layout.addWidget(self.lookup_note)
         self._rows: list[tuple[ComboBox, ComboBox, list[SpinBox]]] = []
         self.table = _table(("From city", "To city", *_RESOURCES))
         self.table.setMinimumHeight(148)
-        self.table.setAccessibleName("Account-local resource routes and five resource amounts")
+        self.table.setAccessibleName("Resource routes and five resource amounts")
         layout.addWidget(self.table)
         row = QHBoxLayout()
         self.add_button = PushButton("Add route")
@@ -109,31 +130,32 @@ class ShipmentRoutesEditor(QWidget):
         row.addWidget(self.remove_button)
         row.addStretch(1)
         layout.addLayout(row)
-        note = QLabel("Only your own cities are shown. External destinations require "
-                      "a separately verified island and destination city.")
+        note = QLabel("External recipients are verified again before sending. External shipments require manual recovery.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self._controls()
 
     def _controls(self) -> None:
-        self.add_button.setEnabled(len(self._cities) >= 2 and len(self._rows) < 20)
+        self.add_button.setEnabled(bool(self._cities) and (len(self._cities) >= 2 or bool(self._external)) and len(self._rows) < 20)
         self.remove_button.setEnabled(bool(self._rows))
+        self.lookup_button.setEnabled(bool(self._cities))
 
     def set_cities(self, cities: list[dict[str, object]]) -> None:
         # On account/session refresh the previous row IDs must be discarded.
         self.table.setRowCount(0)
         self._rows.clear()
         self._cities = list(cities)
+        self._invalidate_external()
         self._controls()
         self.changed.emit()
 
     def add_route(self) -> None:
-        if len(self._cities) < 2 or len(self._rows) >= 20:
+        if not self._cities or (len(self._cities) < 2 and not self._external) or len(self._rows) >= 20:
             return
         row = len(self._rows)
         self.table.insertRow(row)
         source = _city_picker(self._cities, f"Route {row + 1} source city")
-        destination = _city_picker(self._cities, f"Route {row + 1} destination city")
+        destination = _city_picker(self._destination_choices(), f"Route {row + 1} destination city")
         source.currentIndexChanged.connect(self.changed.emit)
         destination.currentIndexChanged.connect(self.changed.emit)
         self.table.setCellWidget(row, 0, source)
@@ -161,6 +183,7 @@ class ShipmentRoutesEditor(QWidget):
         if not self._rows:
             raise ValueError("Add at least one shipment route between your cities")
         routes: list[dict[str, object]] = []
+        external = {row["id"]: row for row in self._external}
         ids = {city["id"] for city in self._cities}
         total: dict[int, list[int]] = {}
         for source, destination, fields in self._rows:
@@ -168,7 +191,7 @@ class ShipmentRoutesEditor(QWidget):
             target = destination.currentData()
             if type(origin) is not int or origin not in ids:
                 raise ValueError("Choose a verified source city for every route")
-            if type(target) is not int or target not in ids:
+            if type(target) is not int or (target not in ids and target not in external):
                 raise ValueError("Choose a verified destination city for every route")
             if origin == target:
                 raise ValueError("A shipment cannot send resources to the same city")
@@ -178,8 +201,69 @@ class ShipmentRoutesEditor(QWidget):
             total[origin] = [x + y for x, y in zip(total.get(origin, [0] * 5), amounts)]
             if any(x > _MAX_AMOUNT for x in total[origin]):
                 raise ValueError("Combined resource amount exceeds the safe limit")
-            routes.append({"from": origin, "to": target, "resources": amounts})
+            route = {"from": origin, "to": target, "resources": amounts}
+            if target not in ids:
+                route.update(island=external[target]["island"], recipient=external[target]["recipient"])
+            routes.append(route)
         return routes
+
+    def _destination_choices(self):
+        return self._cities + [
+            {"id": row["id"], "name": f"{row['name']} — {row['owner']}",
+             "coords": f"{self.x.value()}:{self.y.value()}"}
+            for row in self._external if row["id"] not in {c["id"] for c in self._cities}
+        ]
+
+    def _refresh_destinations(self):
+        choices = self._destination_choices()
+        for _, picker, _ in self._rows:
+            current = picker.currentData()
+            with QSignalBlocker(picker):
+                picker.clear()
+                picker.addItem("Choose a city")
+                for city in choices:
+                    title = str(city["name"])
+                    coords = str(city.get("coords") or "")
+                    picker.addItem(f"{title} ({coords})" if coords else title, userData=city["id"])
+                picker.setCurrentIndex(next((i+1 for i,c in enumerate(choices) if c["id"] == current), 0))
+        self._controls()
+        self.changed.emit()
+
+    def _invalidate_external(self, *_args):
+        self._lookup_nonce = None
+        self._lookup_coords = None
+        self._external = []
+        self.lookup_note.setText("Optional: find another player's city by island coordinates.")
+        self._refresh_destinations()
+
+    def _lookup(self):
+        self._invalidate_external()
+        self._lookup_nonce = str(uuid.uuid4())
+        self._lookup_coords = (self.x.value(), self.y.value())
+        self.lookup_note.setText("Looking up cities on the selected island…")
+        self.lookup_requested.emit(*self._lookup_coords, self._lookup_nonce)
+
+    def set_external(self, result, nonce):
+        if nonce != self._lookup_nonce or self._lookup_coords != (result.get("x"), result.get("y")):
+            return
+        self._lookup_nonce = None
+        owned = {c["id"] for c in self._cities}
+        self._external = [r for r in result["cities"] if r["id"] not in owned]
+        self.lookup_note.setText(f"{len(self._external)} eligible external cities. Choose a destination in each route.")
+        self._refresh_destinations()
+
+    def lookup_failed(self, nonce):
+        if nonce == self._lookup_nonce:
+            self._lookup_nonce = None
+            self.lookup_note.setText("Island lookup unavailable. Check coordinates and retry.")
+
+    def summary(self):
+        self.to_config()
+        return "\n".join(
+            source.currentText() + " → " + dest.currentText() + ": " +
+            ", ".join(f"{name} {field.value():,}" for name, field in zip(_RESOURCES, fields) if field.value())
+            for source, dest, fields in self._rows
+        )
 
 
 class DonationPoliciesEditor(QWidget):

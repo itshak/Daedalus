@@ -72,3 +72,10 @@ The engine web-service and other protected administrative workflows need audited
 ### Shipment outcome hardening
 
 The shared cargo POST now disables automatic HTTP retries for both checkpointed and ordinary shipments. Only the existing explicit game rejection outcome permits a new attempt; malformed or unknown replies halt for manual reconciliation, and ambiguous checkpoint entries remain unresolved. Focused transport suite: 21 tests and 6 subtests passed. This does not implement the outstanding external-city UI or certify live shipment behavior.
+
+
+### External one-time shipments and worker integration
+
+Both clients' Send resources workflow now discovers eligible external cities by bounded island coordinates and displays actual city and player names in destination dropdowns. Origins remain owned. The engine binds external recipients to the observed island, city and owner identifiers, validates the recipient during prepare and immediately before each cargo POST, and rejects changed ownership or vacation state. Coordinate/account changes invalidate lookup choices. External shipments are not checkpointed or automatically restored. The existing own-city checkpoint contract remains unchanged. The account-worker router now explicitly forwards every reviewed operation's read methods to the correct worker; a regression covers this previously missing integration boundary.
+
+Focused Python/engine/Qt tests: 58 passed, 6 subtests passed. Recurring external consolidation, multiple external island inventories in one form, fleet and ETA previews and live acceptance remain incomplete.
