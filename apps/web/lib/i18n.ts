@@ -2,6 +2,15 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Travel ETA unavailable. Manual recovery only.": "Время доставки неизвестно. Только ручное восстановление.",
+  "Uncovered shortage": "Непокрытый дефицит",
+  "(construction only)": "(только строительство)",
+  "Round up shipment amounts": "Округлять объёмы поставок вверх",
+  "Send supplies only": "Только доставить ресурсы",
+  "Send supplies and build": "Доставить ресурсы и строить",
+  "Self-funded construction": "Строительство из местных запасов",
+  "Owned construction supplier cities": "Свои города-поставщики",
+  "Construction supply (optional)": "Снабжение строительства (необязательно)",
   "Recruitment task started. Verify training queues.": "Задание найма запущено. Проверьте очереди обучения.",
   "Recruitment preview unavailable.": "План найма недоступен.",
   "Later rounds stop if stock, costs or training queue changes. Manual recovery only.": "Следующие раунды прекращаются при изменении запасов, стоимости или очереди. Только ручное восстановление.",

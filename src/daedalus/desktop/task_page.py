@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -142,6 +143,7 @@ class TasksPage(QWidget):
     shipment_preview_requested = Signal(str, object, str)
     buildings_requested = Signal(str, int)
     construction_preview_requested = Signal(str, int, object)
+    construction_supply_preview_requested = Signal(str, int, object, object)
     donation_preview_requested = Signal(str, object, str)
     worker_preview_requested = Signal(str, str, object, str)
     layout_preview_requested = Signal(str, object, str)
@@ -389,6 +391,26 @@ class TasksPage(QWidget):
         self.building_table.setMaximumHeight(320)
         self.building_table.itemChanged.connect(self._mark_form_dirty)
         layout.addWidget(self.building_table)
+        self.construction_supply_panel = QWidget()
+        supply_layout = QVBoxLayout(self.construction_supply_panel)
+        supply_layout.setContentsMargins(0, 0, 0, 0)
+        supply_layout.addWidget(QLabel("Construction supply (optional)"))
+        self.construction_suppliers = QListWidget()
+        self.construction_suppliers.setAccessibleName("Owned construction supplier cities")
+        self.construction_suppliers.setMaximumHeight(115)
+        self.construction_suppliers.itemChanged.connect(self._mark_form_dirty)
+        supply_layout.addWidget(self.construction_suppliers)
+        self.construction_supply_mode = ComboBox()
+        self.construction_supply_mode.addItems(["Self-funded construction", "Send supplies and build", "Send supplies only"])
+        self.construction_supply_mode.currentIndexChanged.connect(self._mark_form_dirty)
+        supply_layout.addWidget(self.construction_supply_mode)
+        self.construction_freighters = CheckBox("Use freighters")
+        self.construction_round_up = CheckBox("Round up shipment amounts")
+        for checkbox in (self.construction_freighters, self.construction_round_up):
+            checkbox.stateChanged.connect(self._mark_form_dirty)
+            supply_layout.addWidget(checkbox)
+        layout.addWidget(self.construction_supply_panel)
+        self.construction_supply_panel.hide()
         self.construction_preview_button = PushButton("Calculate actual upgrade costs & queue…")
         self.construction_preview_button.clicked.connect(self._request_native_preview)
         self.construction_preview_button.setAccessibleDescription(
@@ -835,11 +857,44 @@ class TasksPage(QWidget):
         self.construction_preview_button.setEnabled(False)
         city_id = self._selected_construction_city()
         account_id = self.selected_account_id()
+        self._populate_construction_suppliers()
         if account_id and city_id:
             self.building_note.setText("Loading real building levels for the chosen city…")
             self.buildings_requested.emit(account_id, city_id)
         else:
             self.building_note.setText("Choose an actual city to inspect its buildings.")
+
+    def _populate_construction_suppliers(self):
+        selected = self._selected_construction_city()
+        with QSignalBlocker(self.construction_suppliers):
+            self.construction_suppliers.clear()
+            for city in self._cities_by_account.get(self.selected_account_id() or "", []):
+                if city["id"] == selected:
+                    continue
+                item = QListWidgetItem(city["name"] + (" · " + city["coords"] if city.get("coords") else ""))
+                item.setData(Qt.UserRole, city["id"])
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.construction_suppliers.addItem(item)
+        with QSignalBlocker(self.construction_supply_mode):
+            self.construction_supply_mode.setCurrentIndex(0)
+        for checkbox in (self.construction_freighters, self.construction_round_up):
+            with QSignalBlocker(checkbox):
+                checkbox.setChecked(False)
+
+    def _construction_supply_draft(self):
+        from daedalus.reviewed_operations import validated_construction_supply
+
+        mode = self.construction_supply_mode.currentIndex()
+        if mode == 0:
+            return None
+        return validated_construction_supply(self._selected_construction_city(), {
+            "source_ids": [self.construction_suppliers.item(i).data(Qt.UserRole)
+                           for i in range(self.construction_suppliers.count())
+                           if self.construction_suppliers.item(i).checkState() == Qt.Checked],
+            "useFreighters": self.construction_freighters.isChecked(),
+            "round_up": self.construction_round_up.isChecked(), "supply_only": mode == 2,
+        })
 
     def set_buildings(self, account_id: str, city_id: int,
                       buildings: list[dict[str, object]]) -> None:
@@ -1361,6 +1416,7 @@ class TasksPage(QWidget):
             return
         try:
             upgrades = self._selected_building_upgrades()
+            supply = self._construction_supply_draft()
         except ValueError as exc:
             QMessageBox.warning(self, "Choose upgrades", str(exc))
             return
@@ -1368,23 +1424,28 @@ class TasksPage(QWidget):
         self._pending_preview_key = (
             account_id, city_id,
             tuple((row["position"], row["target_level"]) for row in upgrades),
+            supply,
         )
         self.construction_preview_button.setEnabled(False)
         self.building_note.setText(
             "Reading IkaBot's actual building costs and queue durations. "
             "No upgrade or shipment has started."
         )
-        self.construction_preview_requested.emit(account_id, city_id, upgrades)
+        if supply is None:
+            self.construction_preview_requested.emit(account_id, city_id, upgrades)
+        else:
+            self.construction_supply_preview_requested.emit(account_id, city_id, upgrades, supply)
 
     def set_construction_preview(self, result: dict[str, object]) -> None:
         account_id, city_id = result.get("account_id"), result.get("city_id")
         try:
             upgrades = self._selected_building_upgrades()
+            supply = self._construction_supply_draft()
         except ValueError:
             return
         scope = (account_id, city_id, tuple(
             (row["position"], row["target_level"]) for row in upgrades
-        ))
+        ), supply)
         if (self.selected_task_name() != "constructionList"
                 or self._pending_preview_key != scope
                 or self.selected_account_id() != account_id
@@ -1396,6 +1457,9 @@ class TasksPage(QWidget):
         if not isinstance(config, dict):
             self.set_construction_preview_unavailable(account_id, city_id)
             return
+        if supply is not None and (not isinstance(result.get("supply"), dict) or result["supply"].get("options") != supply):
+            self.set_construction_preview_unavailable(account_id, city_id)
+            return
         self._construction_prepared = config if ready else None
         key, ttl = result.get("preview_id"), result.get("expires_in")
         self._construction_ticket = (
@@ -1403,7 +1467,7 @@ class TasksPage(QWidget):
             if ready and isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
             and type(ttl) is int and 0 < ttl <= 120 else None
         )
-        self._construction_preview_ready = ready
+        self._construction_preview_ready = ready and (supply is None or self._construction_ticket is not None)
         names = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
         costs, missing = result["costs"], result["missing"]
         cost_text = " · ".join(f"{name} {qty:,}" for name, qty in zip(names, costs))
@@ -1413,7 +1477,21 @@ class TasksPage(QWidget):
         seconds = result["estimated_seconds"]
         description = (f"Actual IkaBot costs: {cost_text}. Estimated queue: "
                        f"{seconds // 3600}h {(seconds % 3600) // 60}m. ")
-        if ready:
+        if supply is not None:
+            observation = result["supply"]
+            fleet = observation.get("shipment")
+            description += "\n" + ("Supply only." if supply["supply_only"] else "Supply, then build when resources arrive.")
+            if fleet:
+                description += f"\n{'Freighters' if supply['useFreighters'] else 'Trade ships'}: {fleet['available_ships']} free / {fleet['total_ships']} total; capacity {fleet['capacity']:,} each."
+                for row in fleet["routes"]:
+                    amounts = ", ".join(f"{name} {n:,}" for name,n in zip(names,row["resources"]) if n)
+                    description += f"\n{row['origin_name']} → {row['destination_name']}: {amounts}; minimum loads {row['minimum_loads']}."
+            if any(observation["remaining"]):
+                description += "\nUncovered shortage: " + ", ".join(f"{n} {v:,}" for n,v in zip(names,observation["remaining"]) if v)
+            description += "\nTravel ETA unavailable. Manual recovery only."
+            if not ready:
+                description += " Cannot start: choose more suppliers, check storage and fleet, or use self-funded construction."
+        elif ready:
             description += "Resources are sufficient. Review and approve the queue to start."
         else:
             description += (f"Missing: {shortages}. Supply the shortages, then preview again. "
@@ -2067,6 +2145,7 @@ class TasksPage(QWidget):
             self._city_review_nonce = None
             self.building_note.setText("Preview the chosen city and settings before approval.")
         if self.selected_task_name() == "constructionList":
+            self._construction_ticket = None
             self._construction_prepared = None
             self._construction_preview_ready = False
             self._pending_preview_key = None
@@ -2093,6 +2172,9 @@ class TasksPage(QWidget):
         show_buildings = name == "constructionList"
         self.building_header.setVisible(show_buildings)
         self.building_table.setVisible(show_buildings)
+        self.construction_supply_panel.setVisible(show_buildings)
+        if show_buildings:
+            self._populate_construction_suppliers()
         self.building_note.setVisible(show_buildings or name in CITY_REVIEW_TASKS)
         self.construction_preview_button.setVisible(show_buildings or name in CITY_REVIEW_TASKS)
         self.construction_preview_button.setText(
@@ -2791,7 +2873,7 @@ class TasksPage(QWidget):
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Invalid automation settings", str(exc))
             return
-        params = self.building_note.text() if task in CITY_REVIEW_TASKS else configuration_summary(config)
+        params = self.building_note.text() if task in CITY_REVIEW_TASKS | {"constructionList"} else configuration_summary(config)
         if task == "resourceTransportManager" and config.get("mode") == "consolidate":
             editor = self._form_inputs.get("destination_city")
             names = {c["id"]:c["name"] for c in self._cities_by_account.get(account_id, [])}
@@ -2810,7 +2892,7 @@ class TasksPage(QWidget):
             self, "Review automation",
             f"Start {_friendly_task(task)} for "
             f"{self._account_description(account_id)}?\n\n"
-            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy'} | WORKER_TASKS else params[:600]}\n\n"
+            f"Settings: {params if task in {'sendResources', 'stationArmy', 'trainArmy', 'constructionList'} | WORKER_TASKS else params[:600]}\n\n"
             "This automation can change game state. "
             "You can stop a running task on this page.",
             QMessageBox.Yes | QMessageBox.No,

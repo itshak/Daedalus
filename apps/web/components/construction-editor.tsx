@@ -2,11 +2,10 @@
 import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect, useRef, useState} from "react";
 import {useLanguage} from "./language-provider";
+import {scopedConstructionPlan,validSupply,type ConstructionPlan,type SupplyOptions,type Target} from "@/lib/construction-contract";
 import {scopedCities, type City} from "@/lib/native-task-contract";
 
 type Building = {position:number; name:string; level:number; busy:boolean; can_upgrade:boolean};
-type Target = {position:number;target_level:number};
-type Plan = {account_id:string;city_id:number;city_name:string;ready:boolean;costs:number[];available:number[];missing:number[];estimated_seconds:number;buildings:{name:string;position:number;current_level:number;target_level:number}[];preview_id:string|null;expires_in:number|null};
 async function request(path:string, body?:unknown):Promise<unknown>{
   const r=await fetch("/api/controller/"+path,{cache:"no-store",...(body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})});
   if(!r.ok)throw new Error("Request unavailable");
@@ -18,7 +17,10 @@ export function ConstructionEditor({account,accountName,enabled,role}:{account:s
   const [city,setCity]=useState(0);
   const [buildings,setBuildings]=useState<Building[]>([]);
   const [targets,setTargets]=useState<Target[]>([]);
-  const [plan,setPlan]=useState<Plan|null>(null);
+  const [plan,setPlan]=useState<ConstructionPlan|null>(null);
+  const [supplyMode,setSupplyMode]=useState("self");
+  const [sources,setSources]=useState<number[]>([]);
+  const [freighters,setFreighters]=useState(false),[roundUp,setRoundUp]=useState(false);
   const [approved,setApproved]=useState(false);
   const [busy,setBusy]=useState(false);
   const [locked,setLocked]=useState(false);
@@ -48,12 +50,13 @@ export function ConstructionEditor({account,accountName,enabled,role}:{account:s
     return ()=>window.clearTimeout(id);
   },[plan]);
   const invalidate=()=>{revision.current++;setPlan(null);setApproved(false);setMessage("");};
-  const changeCity=(id:number)=>{invalidate();setCity(id);setBuildings([]);setTargets([]);setLoadError(false);};
+  const changeCity=(id:number)=>{invalidate();setCity(id);setBuildings([]);setTargets([]);setSources([]);setSupplyMode("self");setFreighters(false);setRoundUp(false);setLoadError(false);};
   const changeTarget=(position:number,level:number|null)=>{
     invalidate();
     setTargets(old=>level===null?old.filter(x=>x.position!==position):old.some(x=>x.position===position)?old.map(x=>x.position===position?{position,target_level:level}:x):[...old,{position,target_level:level}]);
   };
-  const valid=cities.some(c=>c.id===city)&&targets.length>0&&targets.length<=12&&targets.every(x=>{
+  const supply:SupplyOptions|undefined=supplyMode==="self"?undefined:{source_ids:sources,useFreighters:freighters,round_up:roundUp,supply_only:supplyMode==="only"};
+  const valid=(!supply||validSupply(supply,city)&&sources.every(id=>cities.some(c=>c.id===id)))&&cities.some(c=>c.id===city)&&targets.length>0&&targets.length<=12&&targets.every(x=>{
     const b=buildings.find(y=>y.position===x.position);
     return !!b&&Number.isInteger(x.target_level)&&x.target_level>b.level&&x.target_level<=Math.min(150,b.level+10);
   });
@@ -62,10 +65,9 @@ export function ConstructionEditor({account,accountName,enabled,role}:{account:s
     if(disabled||!valid||inFlight.current)return;
     invalidate();const key=revision.current;inFlight.current=true;setBusy(true);
     try{
-      const result=await request(prefix+"/cities/"+city+"/construction-plan",{upgrades:targets}) as Plan;
+      const result=await request(prefix+"/cities/"+city+"/construction-plan",{upgrades:targets,...(supply?{supply}:{})});
       if(revision.current!==key)return;
-      if(result.account_id!==account||result.city_id!==city||!Array.isArray(result.buildings)||!Array.isArray(result.costs)||!Array.isArray(result.missing))throw new Error("Invalid preview");
-      setPlan(result);
+      setPlan(scopedConstructionPlan(result,account,city,targets,supply,cities.map(c=>c.id)));
     }catch{if(revision.current===key)setMessage("Construction preview unavailable.");}
     finally{inFlight.current=false;setBusy(false);}
   };
@@ -88,13 +90,23 @@ export function ConstructionEditor({account,accountName,enabled,role}:{account:s
         return <div key={b.position} className="building-item"><label className="check-label"><input type="checkbox" checked={!!target} disabled={!target&&targets.length>=12} onChange={e=>changeTarget(b.position,e.target.checked?b.level+1:null)}/>{b.name} · {t("Level")} {b.level}</label>{target&&<label className="field"><span>{t("Target level")}</span><input type="number" min={b.level+1} max={Math.min(150,b.level+10)} value={Number.isNaN(target.target_level)?"":target.target_level} onChange={e=>changeTarget(b.position,e.target.value===""?NaN:Number(e.target.value))}/></label>}</div>;
       })}
       {targets.length>0&&<ol>{targets.map(x=><li key={x.position}>{buildings.find(b=>b.position===x.position)?.name} → {x.target_level}<button type="button" className="secondary-button" disabled={targets[0].position===x.position} onClick={()=>{invalidate();setTargets(old=>{const copy=[...old];const i=copy.findIndex(y=>y.position===x.position);[copy[i-1],copy[i]]=[copy[i],copy[i-1]];return copy;});}}>{t("Move up")}</button></li>)}</ol>}
+      <label className="field"><span>{t("Construction supply (optional)")}</span><select value={supplyMode} onChange={e=>{invalidate();setSupplyMode(e.target.value);}}><option value="self">{t("Self-funded construction")}</option><option value="build">{t("Send supplies and build")}</option><option value="only">{t("Send supplies only")}</option></select></label>
+      {supplyMode!=="self"&&<fieldset><legend>{t("Owned construction supplier cities")}</legend>
+      <button type="button" className="secondary-button" disabled={!city||cities.length>21} onClick={()=>{invalidate();setSources(cities.filter(c=>c.id!==city).map(c=>c.id));}}>{t("Select all cities")}</button>
+      {cities.filter(c=>c.id!==city).map(c=><label className="check-label" key={c.id}><input type="checkbox" checked={sources.includes(c.id)} disabled={!city||(!sources.includes(c.id)&&sources.length>=20)} onChange={e=>{invalidate();setSources(old=>e.target.checked?[...old,c.id]:old.filter(id=>id!==c.id));}}/>{c.name}{c.coords?" · "+c.coords:""}</label>)}
+      <label className="check-label"><input type="checkbox" checked={freighters} onChange={e=>{invalidate();setFreighters(e.target.checked);}}/>{t("Use freighters")}</label>
+      <label className="check-label"><input type="checkbox" checked={roundUp} onChange={e=>{invalidate();setRoundUp(e.target.checked);}}/>{t("Round up shipment amounts")}</label>
+      </fieldset>}
       <button type="button" className="secondary-button" disabled={disabled||!valid} onClick={()=>void prepare()}>{t("Preview construction queue")}</button>
     </fieldset>
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.city_name}</h4>
       <ol>{plan.buildings.map(b=><li key={b.position}>{b.name}: {b.current_level} → {b.target_level}</li>)}</ol>
       <div className="table-scroll"><table><thead><tr><th>{t("Resource")}</th><th>{t("Required")}</th><th>{t("Missing")}</th></tr></thead><tbody>{resources.map((name,i)=><tr key={name}><td>{t(name)}</td><td>{plan.costs[i]}</td><td>{plan.missing[i]}</td></tr>)}</tbody></table></div>
-      <p>{t("Estimated duration (seconds)")}: {plan.estimated_seconds}</p>
-      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="constructionList" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+plan.buildings.map(b=>b.name+": "+b.current_level+" → "+b.target_level).join("; ")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p role="alert">{t("Construction cannot start with this preview.")}</p>}
+      <p>{t("Estimated duration (seconds)")}: {plan.estimated_seconds} {plan.supply&&t("(construction only)")}</p>
+      {plan.supply&&<><p>{t(plan.supply.options.supply_only?"Send supplies only":"Send supplies and build")}</p>
+        {plan.supply.shipment&&<><p>{t(plan.supply.options.useFreighters?"Freighters":"Trade ships")} · {plan.supply.shipment.available_ships}/{plan.supply.shipment.total_ships} · {t("Capacity")}: {plan.supply.shipment.capacity}</p><div className="table-scroll"><table><thead><tr><th>{t("Route")}</th><th>{t("Cargo")}</th><th>{t("Minimum loads")}</th></tr></thead><tbody>{plan.supply.shipment.routes.map(r=><tr key={r.from}><td>{r.origin_name} → {r.destination_name}</td><td>{r.resources.map((n,i)=>n?t(resources[i])+" "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.minimum_loads??t("Unavailable")}</td></tr>)}</tbody></table></div></>}
+        <p>{t("Uncovered shortage")}: {plan.supply.remaining.map((n,i)=>n?t(resources[i])+" "+n.toLocaleString():null).filter(Boolean).join("; ")||t("None")}</p><p>{t("Travel ETA unavailable. Manual recovery only.")}</p></>}
+      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="constructionList" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+plan.buildings.map(b=>b.name+": "+b.current_level+" → "+b.target_level).join("; ")+(plan.supply?"\n"+t(plan.supply.options.supply_only?"Send supplies only":"Send supplies and build")+"\n"+(plan.supply.shipment?.routes??[]).map(r=>r.origin_name+" → "+r.destination_name+" · "+r.resources.map((n,i)=>n?t(resources[i])+" "+n.toLocaleString():null).filter(Boolean).join("; ")).join("\n"):"")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p role="alert">{t("Construction cannot start with this preview.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

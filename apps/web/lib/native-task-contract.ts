@@ -285,7 +285,7 @@ export type ShipmentObservation = {from:number;to:number;origin_name:string;dest
   resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null};
 export type ShipmentPlan = {account_id:string;routes:ShipmentObservation[];useFreighters:boolean;
   capacity:number;available_ships:number;total_ships:number;ready:boolean;preview_id:string|null;expires_in:number|null};
-export function scopedShipmentPlan(value:unknown,account:string,config:unknown):ShipmentPlan {
+function shipmentObservation(value:unknown,account:string,config:unknown,requireTicket:boolean):ShipmentPlan {
   if (!validNativeConfig("sendResources",config)||!obj(config)||!obj(value)||value.account_id!==account||
       value.useFreighters!==config.useFreighters||!integer(value.capacity,0,1e8)||!integer(value.total_ships,0,1e8)||
       !integer(value.available_ships,0,value.total_ships)||value.ready!==Boolean(value.capacity&&value.total_ships)||
@@ -312,7 +312,15 @@ export function scopedShipmentPlan(value:unknown,account:string,config:unknown):
     if(sum.some((n,j)=>n>previous.stock[j]))throw new Error("Insufficient stock");
     stocks.set(id,{stock:previous.stock,sum});
   }
-  if(value.ready&&(typeof value.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(value.preview_id)||!integer(value.expires_in,1,120)))
+  if(requireTicket&&value.ready&&(typeof value.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(value.preview_id)||!integer(value.expires_in,1,120)))
     throw new Error("Invalid shipment ticket");
   return value as unknown as ShipmentPlan;
+}
+
+
+export function scopedShipmentPlan(value:unknown,account:string,config:unknown):ShipmentPlan{
+  return shipmentObservation(value,account,config,true);
+}
+export function scopedShipmentObservation(value:unknown,account:string,config:unknown):Omit<ShipmentPlan,"preview_id"|"expires_in">{
+  return shipmentObservation(value,account,config,false);
 }

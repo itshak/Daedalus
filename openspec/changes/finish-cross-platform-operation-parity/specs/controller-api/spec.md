@@ -38,3 +38,19 @@ The controller SHALL expose bounded ordered recruitment rounds and repeat cycles
 #### Scenario: A later training round is uncertain
 - **WHEN** a submitted round cannot be observed in the training queue or the reviewed inventory changes
 - **THEN** later rounds stop and are not automatically replayed
+
+
+### Requirement: Reviewed construction supply
+The controller SHALL support optional owned-city suppliers, bounded exact shortages, optional rounded cargo, trade ships or freighters, and explicit supply-only or supply-then-build execution. It SHALL expose source allocation, remaining shortages and observed fleet and storage capacity. A supplied construction job SHALL NOT be launched from raw configuration or automatically replayed after interruption.
+
+#### Scenario: Supply is insufficient
+- **WHEN** the selected sources or destination storage cannot cover the required shortage, or the fleet is unavailable
+- **THEN** no launch ticket is issued
+
+#### Scenario: A shipment outcome is uncertain
+- **WHEN** a reviewed supply dispatch cannot be confirmed
+- **THEN** subsequent construction is not attempted and the job requires manual reconciliation
+
+#### Scenario: Supplies are dispatched
+- **WHEN** a combined plan has dispatched its exact cargo
+- **THEN** the worker verifies sufficient destination stock and the reviewed construction state before upgrades

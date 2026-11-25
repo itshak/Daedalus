@@ -355,7 +355,8 @@ class APIWorker(QThread):
                 upgrades = self.task_payload.get("upgrades")
                 if type(city_id) is not int or not isinstance(upgrades, list):
                     raise ValueError("Invalid construction preview")
-                result = self.client.construction_preview(self.account_id, city_id, upgrades)
+                supply = self.task_payload.get("supply")
+                result = self.client.construction_preview(self.account_id, city_id, upgrades, supply=supply) if supply is not None else self.client.construction_preview(self.account_id, city_id, upgrades)
             elif self.action == "military_overview" and self.account_id:
                 result = self.client.military_overview(self.account_id)
             elif self.action == "military_movements" and self.account_id:
@@ -629,7 +630,7 @@ class MainWindow(FluentWindow):
         self._pending_miracles: str | None = None
         self._pending_shrine: str | None = None
         self._pending_piracy: str | None = None
-        self._pending_construction_preview: tuple[str, int, list[dict[str, int]]] | None = None
+        self._pending_construction_preview: tuple[str, int, list[dict[str, int]], dict[str, object] | None] | None = None
         self._pending_batch_status: list[str] | None = None
         self._pending_native_login_challenge: dict[str, object] | None = None
         self._selenium_worker: SeleniumLoginWorker | None = None
@@ -859,6 +860,7 @@ class MainWindow(FluentWindow):
             view.shrine_requested.connect(self._queue_shrine)
             view.pirate_fortresses_requested.connect(self._queue_piracy)
             view.construction_preview_requested.connect(self._queue_construction_preview)
+            view.construction_supply_preview_requested.connect(self._queue_construction_preview)
             view.vacation_preview_requested.connect(
                 lambda aid, city, nonce: self._request("task_vacation_preview", account_id=aid,
                     task_payload={"city_id": city, "nonce": nonce})
@@ -1829,12 +1831,13 @@ class MainWindow(FluentWindow):
 
     def _queue_construction_preview(
         self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+        supply: dict[str, object] | None = None,
     ) -> None:
         """Prepare a read-only queue for the currently selected account and city."""
         if (self.client is None or self.tasks_page.selected_account_id() != account_id
                 or self.tasks_page.selected_task_name() != "constructionList"):
             return
-        self._pending_construction_preview = (account_id, city_id, upgrades)
+        self._pending_construction_preview = (account_id, city_id, upgrades, supply)
         self._run_next_construction_preview()
 
     def _run_next_construction_preview(self) -> None:
@@ -1846,7 +1849,7 @@ class MainWindow(FluentWindow):
                 and self.tasks_page.selected_task_name() == "constructionList"):
             self._launch(
                 self.client, "task_construction_preview", account_id=scope[0],
-                task_payload={"city_id": scope[1], "upgrades": scope[2]},
+                task_payload={"city_id": scope[1], "upgrades": scope[2], "supply": scope[3]},
             )
 
     def _queue_workshop(self, account_id: str, city_id: int) -> None:

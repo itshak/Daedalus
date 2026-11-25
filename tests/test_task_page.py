@@ -1076,3 +1076,36 @@ def test_worker_editor_reviews_both_projects_in_selected_cities(page):
     assert "Another" in page.building_note.text()
     page._form_inputs["additional_city_ids"].item(1).setCheckState(Qt.Unchecked)
     assert not page.start_button.isEnabled()
+
+
+def test_construction_supplier_choices_are_scoped_and_invalidate_ticket(page):
+    from PySide6.QtCore import Qt
+
+    fields = [{"name": name, "type": "json", "required": True}
+              for name in ("city_id", "city_name", "buildings", "shipments",
+                           "expand_overall", "wait_resources", "construction_queue", "total_time")]
+    page.set_capabilities([{"name": "constructionList", "kind": "background_task",
+                            "config_fields": fields}], enabled=True)
+    page.set_cities("alpha", [{"id": 101, "name": "Target"}, {"id": 102, "name": "Supplier"}])
+    page._form_inputs["city_id"].setCurrentIndex(1)
+    page.set_buildings("alpha", 101, [{"position": 2, "level": 10, "name": "Town Hall",
+                                       "building": "townHall", "busy": False, "can_upgrade": True}])
+    page.set_preflight({"account_id": "alpha", "task": "constructionList",
+                        "ready": True, "reason": "none", "unresolved_request": False})
+    page.building_table.item(0,0).setCheckState(Qt.Checked)
+    page.building_table.cellWidget(0,4).setValue(11)
+    page.construction_supply_mode.setCurrentIndex(1)
+    assert page.construction_suppliers.count() == 1
+    page.construction_suppliers.item(0).setCheckState(Qt.Checked)
+    requests = []
+    page.construction_supply_preview_requested.connect(lambda *args: requests.append(args))
+    page._request_construction_preview()
+    assert requests[-1][3] == {"source_ids": [102], "useFreighters": False,
+                               "round_up": False, "supply_only": False}
+    page._construction_ticket = ("a"*43, 999999999)
+    page._construction_preview_ready = True
+    page.construction_round_up.setChecked(True)
+    assert page._construction_ticket is None and not page._construction_preview_ready
+    page._form_inputs["city_id"].setCurrentIndex(2)
+    assert page.construction_suppliers.item(0).data(Qt.UserRole) == 101
+    assert page.construction_supply_mode.currentIndex() == 0

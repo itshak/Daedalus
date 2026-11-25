@@ -25,3 +25,5 @@
 
 - [x] Implement ordered native recruitment rounds, cycles and selected-city review tickets, bounded costs, queue observation and non-retried worker submission.
 - [x] Correct CI archive inventory reporting and platform-independent IPC path assertion.
+
+- [x] Implement exact owned-city construction supply allocation, rounded amounts, fleet/storage review, supply-only and supply-then-build in both clients; stop on uncertain dispatch and verify actual stock before upgrading.

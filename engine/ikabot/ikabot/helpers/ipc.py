@@ -1049,7 +1049,8 @@ class IPCServer:
             reviewed.append({
                 "position": item["position"], "target_level": item["target_level"]
             })
-        result = preview_native_construction(session, city_id, reviewed)
+        result = (preview_native_construction(session, city_id, reviewed, request["supply"])
+                  if "supply" in request else preview_native_construction(session, city_id, reviewed))
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
             "username": session.username, "city_id": city_id,

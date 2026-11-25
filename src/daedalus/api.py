@@ -716,7 +716,7 @@ def create_app(
         if demo_mode or ipc_client is None:
             raise HTTPException(status_code=503, detail="Real construction planner unavailable")
         upgrades = payload.get("upgrades")
-        if (set(payload) != {"upgrades"}
+        if (set(payload) not in ({"upgrades"}, {"upgrades", "supply"})
                 or not isinstance(upgrades, list) or not 0 < len(upgrades) <= 12):
             raise HTTPException(status_code=422, detail="Choose valid building targets")
         for upgrade in upgrades:
@@ -728,7 +728,13 @@ def create_app(
                     or not 1 <= upgrade["target_level"] <= 150):
                 raise HTTPException(status_code=422, detail="Invalid building target")
         try:
-            plan = ipc_client.construction_preview(account, city_id, upgrades)
+            if "supply" in payload:
+                from daedalus.reviewed_operations import validated_construction_supply
+
+                supply = validated_construction_supply(city_id, payload["supply"])
+                plan = ipc_client.construction_preview(account, city_id, upgrades, supply=supply)
+            else:
+                plan = ipc_client.construction_preview(account, city_id, upgrades)
             ticket = (operation_previews.issue(account_id, "constructionList", plan["config"])
                       if plan.get("ready") is True and task_controller is not None else None)
             return {**plan, "preview_id": ticket,
@@ -1007,6 +1013,7 @@ def create_app(
                  "target_level": row["upgradeTo"], "position": row["position"]}
                 for row in buildings
             ],
+            **({"supply": plan["supply"]} if "supply" in plan else {}),
             "preview_id": ticket, "expires_in": operation_previews.ttl if ticket else None,
         }
 
@@ -1504,6 +1511,10 @@ def create_app(
     ) -> dict[str, object]:
         if isinstance(payload.get("task"), str) and payload["task"] in CITY_REVIEW_TASKS:
             raise HTTPException(status_code=422, detail="Use the reviewed operation endpoint")
+        if payload.get("task") == "constructionList":
+            config = payload.get("config")
+            if isinstance(config, dict) and ("supply_review" in config or config.get("shipments")):
+                raise HTTPException(status_code=422, detail="Review construction supplies first")
         if payload.get("task") == "sendResources":
             config = payload.get("config")
             routes = config.get("routes") if isinstance(config, dict) else None

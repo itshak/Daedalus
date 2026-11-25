@@ -888,6 +888,7 @@ class DaedalusClient:
 
     def construction_preview(
         self, account_id: str, city_id: int, upgrades: list[dict[str, int]],
+        *, supply: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Ask the existing IkaBot worker for a read-only, account-scoped plan."""
         if (not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int
@@ -900,9 +901,16 @@ class DaedalusClient:
                     or type(upgrade["position"]) is not int
                     or type(upgrade["target_level"]) is not int):
                 raise ValueError("Invalid construction preview target")
+        from daedalus.reviewed_operations import (
+            validate_construction_supply,
+            validated_construction_supply,
+        )
+
+        if supply is not None:
+            supply = validated_construction_supply(city_id, supply)
         data = self._write(
             f"accounts/{account_id}/cities/{city_id}/construction-preview",
-            {"upgrades": upgrades},
+            {"upgrades": upgrades, **({"supply": supply} if supply is not None else {})},
         )
         if (data.get("account_id") != account_id or data.get("city_id") != city_id
                 or type(data.get("ready")) is not bool
@@ -911,6 +919,15 @@ class DaedalusClient:
                        or len(data[name]) != 5 for name in ("costs", "missing", "available"))
                 or type(data.get("estimated_seconds")) is not int):
             raise APIConnectionError("Backend returned an invalid construction preview")
+        if supply is not None:
+            try:
+                validate_construction_supply(city_id, supply, data, data, data["config"])
+            except (ValueError, KeyError, TypeError) as exc:
+                raise APIConnectionError("Invalid construction supply preview") from exc
+            if data["ready"] and (not isinstance(data.get("preview_id"), str)
+                                   or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+                                   or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+                raise APIConnectionError("Invalid construction supply ticket")
         return data
 
     def workshop_upgrades(self, account_id: str, city_id: int) -> dict[str, object]:

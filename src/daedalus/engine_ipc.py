@@ -149,6 +149,7 @@ class ExistingIPCClient:
     def request(self, action: str, *, account: Account | None = None,
                 city_id: int | None = None,
                 upgrades: list[dict[str, int]] | None = None,
+                construction_supply: dict[str, object] | None = None,
                 train_troops: bool | None = None,
                 resource_type: int | None = None,
                 market_side: str | None = None,
@@ -197,6 +198,10 @@ class ExistingIPCClient:
                             or type(upgrade["target_level"]) is not int):
                         raise ValueError("Invalid construction upgrade")
                 payload["upgrades"] = upgrades
+                if construction_supply is not None:
+                    from daedalus.reviewed_operations import validated_construction_supply
+
+                    payload["supply"] = validated_construction_supply(city_id, construction_supply)
             elif upgrades is not None:
                 raise ValueError("Upgrades are allowed only in a construction preview")
             if action == "list_trainables_existing":
@@ -246,6 +251,8 @@ class ExistingIPCClient:
             payload.update(validated_attack_draft(city_id, attack_draft))
         elif attack_draft is not None:
             raise ValueError("Unexpected manual attack draft")
+        if construction_supply is not None and action != "preview_construction_existing":
+            raise ValueError("Unexpected construction supply")
         if action == "island_destinations_existing":
             if not isinstance(coordinates, tuple) or len(coordinates) != 2:
                 raise ValueError("Choose an island")
@@ -620,15 +627,26 @@ class ExistingIPCClient:
 
     def construction_preview(
         self, account: Account, city_id: int, upgrades: list[dict[str, int]],
+        *, supply: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """One strictly read-only engine calculation, bound to an owned city."""
         if type(city_id) is not int or city_id <= 0:
             raise ValueError("Invalid preview city")
-        if city_id not in {row["id"] for row in self.cities(account)}:
+        from daedalus.reviewed_operations import (
+            validate_construction_supply,
+            validated_construction_supply,
+        )
+
+        owned = {row["id"] for row in self.cities(account)}
+        if city_id not in owned:
             raise ValueError("Construction city is not owned by this account")
+        if supply is not None:
+            supply = validated_construction_supply(city_id, supply)
+            if not set(supply["source_ids"]) <= owned:
+                raise ValueError("Construction supplier is not owned")
         data = self.request(
             "preview_construction_existing", account=account, city_id=city_id,
-            upgrades=upgrades,
+            upgrades=upgrades, construction_supply=supply,
         )
         if (str(data.get("world", "")).casefold() != account.world.casefold()
                 or str(data.get("username", "")).casefold() != account.player.casefold()
@@ -650,13 +668,14 @@ class ExistingIPCClient:
             "city_id", "city_name", "buildings", "shipments", "expand_overall",
             "wait_resources", "construction_queue", "total_time",
         }
+        if supply is not None:
+            expected_keys.add("supply_review")
         if (not isinstance(config, dict) or set(config) != expected_keys
                 or config.get("city_id") != city_id
                 or not isinstance(config.get("city_name"), str)
                 or not 0 < len(config["city_name"]) <= 100
-                or config.get("shipments") != []
-                or config.get("expand_overall") is not True
-                or config.get("wait_resources") is not False
+                or (supply is None and (config.get("shipments") != []
+                    or config.get("expand_overall") is not True or config.get("wait_resources") is not False))
                 or not isinstance(config.get("buildings"), list)
                 or not 0 < len(config["buildings"]) <= 12
                 or not isinstance(config.get("construction_queue"), list)
@@ -665,6 +684,14 @@ class ExistingIPCClient:
                 or type(config.get("total_time")) is not int
                 or config["total_time"] < 0):
             raise EngineIPCUnavailable("IkaBot returned an invalid prepared plan")
+        extra = {}
+        if supply is not None:
+            try:
+                extra["supply"] = validate_construction_supply(city_id, supply, numbers, plan, config)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise EngineIPCUnavailable("Invalid construction supply preview") from exc
+        elif "supply" in plan:
+            raise EngineIPCUnavailable("Unexpected construction supply preview")
         allowed_building_keys = {
             "position", "name", "building", "level", "isBusy", "upgradeTo",
             "constructionTime", "constructionTimes",
@@ -694,7 +721,7 @@ class ExistingIPCClient:
             raise EngineIPCUnavailable("IkaBot returned an invalid construction time")
         return {
             "account_id": account.id, "city_id": city_id, "ready": plan["ready"],
-            "config": config, "estimated_seconds": seconds, **numbers,
+            "config": config, "estimated_seconds": seconds, **numbers, **extra,
         }
 
     def workshop_upgrades(self, account: Account, city_id: int) -> dict[str, object]:

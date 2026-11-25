@@ -544,3 +544,65 @@ def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, 
             raise ValueError("Insufficient source stock")
         totals[row["from"]] = (total, stock)
     return {k:plan[k] for k in ("routes","useFreighters","capacity","available_ships","total_ships","ready")}
+
+
+
+def validated_construction_supply(city_id, value):
+    if (not isinstance(value, dict) or set(value) != {"source_ids", "useFreighters", "round_up", "supply_only"}
+            or any(type(value[k]) is not bool for k in ("useFreighters", "round_up", "supply_only"))
+            or not isinstance(value["source_ids"], list) or not 1 <= len(value["source_ids"]) <= 20
+            or any(type(v) is not int or not 0 < v < 10**12 or v == city_id for v in value["source_ids"])
+            or len(set(value["source_ids"])) != len(value["source_ids"])):
+        raise ValueError("Invalid construction suppliers")
+    return value
+
+
+def validate_construction_supply(city_id, options, numbers, plan, config):
+    """Independently verify shortage coverage, storage and exact reviewed cargo."""
+    supply = plan.get("supply")
+    if (not isinstance(supply, dict) or set(supply) != {"options", "target", "remaining", "shipment", "destination_space"}
+            or supply["options"] != options or not _resources(supply["target"])
+            or not _resources(supply["remaining"]) or not _resources(supply["destination_space"])
+            or config.get("supply_review") != {"options": options, "costs": numbers["costs"]}
+            or config.get("expand_overall") is not (not options["supply_only"])
+            or config.get("wait_resources") is not (not options["supply_only"])
+            or not isinstance(config.get("shipments"), list)):
+        raise ValueError("Invalid construction supply preview")
+    missing = [max(0, a-b) for a,b in zip(numbers["costs"], numbers["available"])]
+    if numbers["missing"] != missing:
+        raise ValueError("Invalid construction shortage")
+    def round_up(n):
+        unit = 100 if n < 1000 else 500 if n < 10000 else 1000
+        return (n+unit-1)//unit*unit
+    target = [min(space, round_up(n) if options["round_up"] else n)
+              for space,n in zip(supply["destination_space"], missing)]
+    if supply["target"] != target:
+        raise ValueError("Invalid supply target")
+    routes = config["shipments"]
+    shipment = supply["shipment"]
+    if routes:
+        clean = validated_shipment_draft({"routes": routes, "useFreighters": options["useFreighters"]})
+        if any(set(r) != {"from", "to", "resources"} or r["to"] != city_id
+               or r["from"] not in options["source_ids"] for r in routes):
+            raise ValueError("Invalid construction supply route")
+        origins = [r["from"] for r in routes]
+        if origins != [cid for cid in options["source_ids"] if cid in origins]:
+            raise ValueError("Invalid construction supplier order")
+        verified = validate_shipment_plan(clean, shipment)
+        left = target.copy()
+        for route, row in zip(routes, verified["routes"]):
+            if row["destination_space"] != supply["destination_space"] or route["resources"] != [
+                min(n, stock, 10**9) for n,stock in zip(left, row["stock"])
+            ]:
+                raise ValueError("Invalid construction cargo allocation")
+            left = [n-v for n,v in zip(left, route["resources"])]
+        sent = [a-b for a,b in zip(target,left)]
+    else:
+        if shipment is not None:
+            raise ValueError("Unexpected construction cargo")
+        verified = None
+        sent = [0]*5
+    remaining = [max(0, a-b) for a,b in zip(missing,sent)]
+    if supply["remaining"] != remaining or plan["ready"] is not (not any(remaining) and bool(verified and verified["ready"])):
+        raise ValueError("Invalid construction supply readiness")
+    return supply

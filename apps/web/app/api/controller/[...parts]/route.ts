@@ -1,3 +1,4 @@
+import {validSupply} from "@/lib/construction-contract";
 import {validTrainingDraft} from "@/lib/training-contract";
 import {REVIEW_START_ROUTES} from "@/lib/generated-operation-contract";
 import { NextRequest, NextResponse } from "next/server";
@@ -13,7 +14,7 @@ const responseHeaders = { "Cache-Control": "private, no-store, max-age=0", "Prag
 const buildingTargets = z.object({ upgrades: z.array(z.object({
   position: z.number().int().min(0).max(80),
   target_level: z.number().int().min(1).max(150)
-}).strict()).min(1).max(12) }).strict();
+}).strict()).min(1).max(12), supply: z.unknown().optional() }).strict();
 
 const donationDraft = z.object({project:z.enum(["resource","tradegood"]),amount:z.number().int().min(1).max(1_000_000_000)}).strict();
 const constructionStart = z.object({ preview_id: z.string().regex(/^[A-Za-z0-9_-]{43}$/), request_id: z.uuid(), confirmed: z.literal(true) }).strict();
@@ -56,8 +57,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid independent reviews"},{status:422,headers:responseHeaders});
     if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
-    if (parts.at(-1) === "construction-plan" && !buildingTargets.safeParse(value).success)
-      return NextResponse.json({ error: "Invalid construction targets" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) === "construction-plan") {
+      const parsed=buildingTargets.safeParse(value);
+      if(!parsed.success||(parsed.data.supply!==undefined&&!validSupply(parsed.data.supply,Number(parts[3]))))
+        return NextResponse.json({ error: "Invalid construction targets or suppliers" }, { status: 422, headers: responseHeaders });
+    }
     if (parts.at(-1) === "training-plan" && !validTrainingDraft(value,Number(parts[3])))
       return NextResponse.json({error:"Invalid recruitment draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "worker-plan") {
