@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "./language-provider";
@@ -247,7 +248,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
         <table><thead><tr><th>{t("Route")}</th><th>{t("Origin stock")}</th><th>{t("First load limit")}</th><th>{t("Minimum loads")}</th></tr></thead><tbody>{shipment.routes.map((r,i)=><tr key={i}><td>{r.origin_name} → {r.destination_name}{r.destination_space===null&&<p>{t("Recipient storage unknown")}</p>}</td><td>{r.stock.map((n,j)=>r.resources[j]?materialName(MATERIALS[j])+": "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.first_load_limit.toLocaleString()}</td><td>{r.minimum_loads??t("Unavailable")}</td></tr>)}</tbody></table>
         <p>{t("Individual route limits share the same fleet. Waiting and ETA are not predicted.")}</p>{!shipment.ready&&<p role="alert">{t("No usable fleet")}</p>}</>}
       <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy||(task==="sendResources"&&!shipment?.ready)} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
-      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button></section>}
+      <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{task==="sendResources"&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {batchReceipts.length>0&&<section className="preview-panel"><h4>{t("Batch receipts")}</h4><ul>{batchReceipts.map(r=><li key={r.account}>{batchTargets?.find(a=>a.id===r.account)?.name??r.account} · {t(r.status)}</li>)}</ul><p>{t("Check Activity before starting any further task.")}</p></section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect, useRef, useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities, type City} from "@/lib/native-task-contract";
@@ -93,7 +94,7 @@ export function ConstructionEditor({account,accountName,enabled,role}:{account:s
       <ol>{plan.buildings.map(b=><li key={b.position}>{b.name}: {b.current_level} → {b.target_level}</li>)}</ol>
       <div className="table-scroll"><table><thead><tr><th>{t("Resource")}</th><th>{t("Required")}</th><th>{t("Missing")}</th></tr></thead><tbody>{resources.map((name,i)=><tr key={name}><td>{t(name)}</td><td>{plan.costs[i]}</td><td>{plan.missing[i]}</td></tr>)}</tbody></table></div>
       <p>{t("Estimated duration (seconds)")}: {plan.estimated_seconds}</p>
-      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button></>:<p role="alert">{t("Construction cannot start with this preview.")}</p>}
+      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="constructionList" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+plan.buildings.map(b=>b.name+": "+b.current_level+" → "+b.target_level).join("; ")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p role="alert">{t("Construction cannot start with this preview.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

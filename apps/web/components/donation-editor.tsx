@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {MAX_AMOUNT,scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -74,7 +75,7 @@ export function DonationEditor({account,accountName,enabled,role}:{account:strin
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName}</h4><p>{plan.city_name} · {plan.project_name} · {t("Level")} {plan.level}</p>
       <p>{t("Wood available")}: {plan.stock.toLocaleString()} · {t("Project remaining")}: {plan.remaining.toLocaleString()}</p>
       <p>{t("Wood to donate")}: {plan.amount.toLocaleString()}</p>
-      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button></>:<p role="alert">{t("Project is upgrading or the amount is unavailable.")}</p>}
+      {plan.ready&&plan.preview_id?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="donate" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+plan.project_name+" · "+plan.amount.toLocaleString()+" wood"} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p role="alert">{t("Project is upgrading or the amount is unavailable.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

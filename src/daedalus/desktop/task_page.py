@@ -70,6 +70,7 @@ from daedalus.desktop.task_presentation import (
     present_fields,
     task_explanation,
 )
+from daedalus.reviewed_batch import BATCH_REVIEW_TASKS, validated_batch_entries
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS as ENGINE_REVIEW_TASKS
 from daedalus.reviewed_operations import WORKER_TASKS, validated_worker_draft
 
@@ -135,6 +136,7 @@ class TasksPage(QWidget):
     reconcile_requested = Signal(str, str)
     batch_status_requested = Signal(object)
     batch_launch_requested = Signal(object, str, object)
+    reviewed_batch_requested = Signal(object)
     cities_requested = Signal(str)
     island_destinations_requested = Signal(str, int, int, str)
     shipment_preview_requested = Signal(str, object, str)
@@ -179,6 +181,8 @@ class TasksPage(QWidget):
         self._form_dirty = False
         self._reviewed = False
         self._pending_launch = False
+        self._review_queue = {}
+        self._construction_ticket = None
         self._bulk_account_ids: list[str] = []
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
@@ -413,6 +417,9 @@ class TasksPage(QWidget):
         )
         self.start_button.clicked.connect(self._start)
         launch_row.addWidget(self.start_button)
+        self.queue_review_button = PushButton("Add reviewed account to batch")
+        self.queue_review_button.clicked.connect(self._queue_review)
+        launch_row.addWidget(self.queue_review_button)
         self.configure_footer = CardWidget(configure_root)
         self.configure_footer.setAccessibleName("Review and launch automation")
         footer_layout = QVBoxLayout(self.configure_footer)
@@ -534,6 +541,23 @@ class TasksPage(QWidget):
         layout.addWidget(self.multi_summary)
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
         layout.addWidget(self.multi_table, 1)
+        layout.addWidget(SubtitleLabel("Independently reviewed account batch"))
+        self.review_queue_note = CaptionLabel("Configure and approve each account separately, then add its review. Tickets expire after two minutes.")
+        self.review_queue_note.setWordWrap(True)
+        layout.addWidget(self.review_queue_note)
+        self.review_queue_table = _table(["Account", "Operation", "Reviewed settings"])
+        self.review_queue_table.setMinimumHeight(110)
+        layout.addWidget(self.review_queue_table, 1)
+        queue_actions = QHBoxLayout()
+        self.review_queue_remove = PushButton("Remove selected review")
+        self.review_queue_remove.clicked.connect(self._remove_review)
+        self.review_queue_clear = PushButton("Clear reviews")
+        self.review_queue_clear.clicked.connect(self._clear_review_queue)
+        self.review_queue_start = PrimaryPushButton("Review and start batch…")
+        self.review_queue_start.clicked.connect(self._start_reviewed_batch)
+        for button in (self.review_queue_remove, self.review_queue_clear, self.review_queue_start):
+            queue_actions.addWidget(button)
+        layout.addLayout(queue_actions)
 
         # The capability catalog belongs to this same workspace. It is not
         # a separate operations window with a second selection lifecycle.
@@ -573,6 +597,7 @@ class TasksPage(QWidget):
     def reset_backend_context(self) -> None:
         """Discard account IDs, task drafts and reviews after backend origin changes."""
         self._selection_generation += 1
+        self._clear_review_queue()
         self._pending_launch = False
         self._prereq_ready = None
         self._unresolved = False
@@ -587,6 +612,7 @@ class TasksPage(QWidget):
         self._show_section(0)
 
     def set_accounts(self, accounts: list[dict[str, object]]) -> None:
+        self._clear_review_queue()
         previous = self.selected_account_id()
         # Read-only "All accounts" includes disabled accounts; only enabled
         # accounts can be offered as candidates for task mutation.
@@ -600,6 +626,7 @@ class TasksPage(QWidget):
         self._cities_by_account.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -854,6 +881,8 @@ class TasksPage(QWidget):
         self._invalidate_review()
 
     def _reset_construction_preview(self) -> None:
+        self._construction_ticket = None
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -1324,6 +1353,12 @@ class TasksPage(QWidget):
             self.set_construction_preview_unavailable(account_id, city_id)
             return
         self._construction_prepared = config if ready else None
+        key, ttl = result.get("preview_id"), result.get("expires_in")
+        self._construction_ticket = (
+            (key, time.monotonic() + ttl)
+            if ready and isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
+            and type(ttl) is int and 0 < ttl <= 120 else None
+        )
         self._construction_preview_ready = ready
         names = ("Wood", "Wine", "Marble", "Crystal", "Sulfur")
         costs, missing = result["costs"], result["missing"]
@@ -1662,6 +1697,91 @@ class TasksPage(QWidget):
                if error_count else "")
         )
 
+    def _current_review_ticket(self):
+        task = self.selected_task_name()
+        if task == "constructionList":
+            return self._construction_ticket
+        if task in CITY_REVIEW_TASKS and self._city_review_plan:
+            return self._city_review_plan.get("preview_id"), self._city_review_expires
+        return None
+
+    def _update_review_queue_controls(self):
+        ticket = self._current_review_ticket()
+        task = self.selected_task_name()
+        account = self.selected_account_id()
+        self.queue_review_button.setVisible(task in BATCH_REVIEW_TASKS)
+        self.queue_review_button.setEnabled(bool(
+            ticket and ticket[0] and ticket[1] > time.monotonic() and account
+            and self.start_button.isEnabled() and self._reviewed and self.confirm_box.isChecked()
+            and (account in self._review_queue or len(self._review_queue) < 32)))
+        self.review_queue_remove.setEnabled(bool(self._review_queue) and not self._pending_launch)
+        self.review_queue_clear.setEnabled(bool(self._review_queue) and not self._pending_launch)
+        self.review_queue_start.setEnabled(bool(self._review_queue) and self._dispatch_enabled and not self._pending_launch)
+
+    def _render_review_queue(self):
+        _populate(self.review_queue_table, [
+            [self._account_names.get(aid, aid), _friendly_task(row["task"]), row["summary"]]
+            for aid,row in self._review_queue.items()
+        ])
+        self.review_queue_note.setText(
+            f"{len(self._review_queue)} independently approved accounts. Expired reviews block the whole batch; no job starts until all checks pass."
+            if self._review_queue else "Configure and approve each account separately, then add its review. Tickets expire after two minutes.")
+        self._update_review_queue_controls()
+
+    def _clear_review_queue(self):
+        self._review_queue.clear()
+        self._render_review_queue()
+
+    def _remove_review(self):
+        index = self.review_queue_table.currentRow()
+        if 0 <= index < len(self._review_queue):
+            self._review_queue.pop(list(self._review_queue)[index])
+            self._render_review_queue()
+
+    def _queue_review(self):
+        ticket = self._current_review_ticket()
+        account, task = self.selected_account_id(), self.selected_task_name()
+        if (not self.queue_review_button.isEnabled() or not ticket or not account
+                or task not in BATCH_REVIEW_TASKS or time.monotonic() >= ticket[1]):
+            return
+        # For construction include the exact queue of named building targets.
+        summary = self.building_note.text()
+        if task == "constructionList" and self._construction_prepared:
+            buildings = self._construction_prepared.get("buildings", [])
+            summary = "; ".join(f"{b['name']} {b['level']} → {b['upgradeTo']}" for b in buildings) + ". " + summary
+        row = {"account_id": account, "task": task, "preview_id": ticket[0]}
+        validated_batch_entries([row])
+        self._review_queue[account] = {**row, "summary": summary, "expires": ticket[1]}
+        self._city_review_plan = None
+        self._construction_ticket = None
+        self._construction_prepared = None
+        self._construction_preview_ready = False
+        self._invalidate_review()
+        self._render_review_queue()
+        self._show_section(3)
+
+    def _start_reviewed_batch(self):
+        if not self.review_queue_start.isEnabled():
+            return
+        if any(aid not in self._account_ids or row["expires"] <= time.monotonic()
+               for aid,row in self._review_queue.items()):
+            self.review_queue_note.setText("One or more reviews expired or the account is unavailable. Replace those reviews before starting.")
+            return
+        entries = validated_batch_entries([
+            {k:row[k] for k in ("account_id", "task", "preview_id")}
+            for row in self._review_queue.values()
+        ])
+        summaries = "\n\n".join(self._account_description(aid) + " · " + _friendly_task(row["task"]) +
+                                 "\n" + row["summary"] for aid,row in self._review_queue.items())
+        answer = QMessageBox.question(self, "Review independent account batch",
+            summaries + "\n\nStart these exact independently approved operations? All tickets and prerequisites are checked first. Dispatch stops on uncertainty.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self._pending_launch = True
+            self._clear_review_queue()
+            self.reviewed_batch_requested.emit(entries)
+            self._invalidate_review()
+
     def _start_selected(self) -> None:
         # Preserve current form's explicit approval; all accounts get independent
         # server preflight and separate UUIDs inside the off-thread API worker.
@@ -1920,6 +2040,7 @@ class TasksPage(QWidget):
         self._form_inputs.clear()
         self._buildings_scope = None
         self._building_rows = []
+        self._construction_ticket = None
         self._construction_prepared = None
         self._construction_preview_ready = False
         self._pending_preview_key = None
@@ -2557,6 +2678,7 @@ class TasksPage(QWidget):
             and bool(selected_request.get("request_id"))
         )
         self._update_bulk_buttons()
+        self._update_review_queue_controls()
 
     def _refresh(self) -> None:
         account_id = self.selected_account_id()
@@ -2601,7 +2723,13 @@ class TasksPage(QWidget):
             elif task == "constructionList":
                 if not self._construction_preview_ready or self._construction_prepared is None:
                     raise ValueError("Calculate and approve the actual IkaBot construction preview first")
-                config = dict(self._construction_prepared)
+                if self._construction_ticket is not None:
+                    key, expires = self._construction_ticket
+                    if time.monotonic() >= expires:
+                        raise ValueError("Construction review expired; prepare a new preview")
+                    config = {"preview_id": key}
+                else:
+                    config = dict(self._construction_prepared)
             else:
                 config = self._form_config()
         except (ValueError, TypeError) as exc:

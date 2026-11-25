@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
+import { validReviewBatch } from "@/lib/reviewed-batch";
 import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +50,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     if (raw.length > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
+    if (parts.join("/") === "tasks/reviewed-batch-check" && !validReviewBatch(value))
+      return NextResponse.json({error:"Invalid independent reviews"},{status:422,headers:responseHeaders});
     if (request.method === "POST" && parts.length === 3 && parts[2] === "tasks" && !validNativeLaunch(value))
       return NextResponse.json({ error: "Invalid task confirmation" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "construction-plan" && !buildingTargets.safeParse(value).success)

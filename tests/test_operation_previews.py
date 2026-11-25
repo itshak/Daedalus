@@ -93,11 +93,27 @@ def test_reviewed_construction_api_uses_opaque_scoped_plan(tmp_path):
         assert client.post(target.replace("alpha", "beta"), headers=auth, json=payload).status_code == 409
         assert client.post(target, headers=auth, json={**payload, "config": {}}).status_code == 422
         assert not starts
+        check = "/api/v1/tasks/reviewed-batch-check"
+        entry = {"account_id": "alpha", "task": "constructionList", "preview_id": plan["preview_id"]}
+        other = client.post(path.replace("alpha", "beta").replace("/1/", "/2/"),
+                            headers=auth, json={"upgrades": [{"position": 0, "target_level": 4}]}).json()
+        second = {**entry, "account_id": "beta", "preview_id": other["preview_id"]}
+        assert client.post(check, json={"entries": [entry]}).status_code == 401
+        assert client.post(check, headers=auth, json={"entries": [entry, entry]}).status_code == 422
+        assert client.post(check, headers=auth, json={"entries": [entry, second]}).json() == {
+            "account_ids": ["alpha", "beta"], "blocked": []}
+        bad = {**second, "preview_id": "x" * 43}
+        assert client.post(check, headers=auth, json={"entries": [entry, bad]}).json() == {
+            "account_ids": ["alpha", "beta"],
+            "blocked": [{"account_id": "beta", "reason": "review_unavailable"}]}
+        assert not starts
         response = client.post(target, headers=auth, json=payload)
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "started"
         assert starts[0][:2] == ("alpha", "constructionList")
         assert starts[0][2]["city_id"] == 1
+        assert client.post(check, headers=auth, json={"entries": [entry]}).json()["blocked"] == [
+            {"account_id": "alpha", "reason": "review_unavailable"}]
         assert client.post(target, headers=auth, json=payload).status_code == 200
         assert len(starts) == 1
         assert client.post(target, headers=auth, json={

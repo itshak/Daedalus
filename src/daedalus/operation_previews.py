@@ -60,6 +60,15 @@ class OperationPreviews:
             )
             return key
 
+    def check_unused(self, key: str, account_id: str, operation: str) -> None:
+        """Read-only check; a claimed or expired ticket cannot join a new batch."""
+        with self._mutex:
+            self._prune(self._clock())
+            preview = self._entries.get(key)
+            if (preview is None or preview.account_id != account_id
+                    or preview.operation != operation or preview.request_id is not None):
+                raise PreviewUnavailable("Review expired or unavailable; prepare a new preview")
+
     def claim(
         self, key: str, account_id: str, operation: str, request_id: str,
     ) -> dict[str, object]:

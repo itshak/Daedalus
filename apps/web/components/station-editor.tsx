@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -66,7 +67,7 @@ export function StationEditor({account,accountName,enabled,role}:{account:string
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.city_name} → {plan.destination_name}</h4>
       <p>{plan.total.toLocaleString()} · {t(plan.ground?"All available ground troops":"All available fleet units")}</p>
       {plan.ground&&<p>{t("Cargo weight")}: {plan.weight?.toLocaleString()} / {t("Transport capacity")}: {plan.capacity?.toLocaleString()}</p>}
-      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button></>:<p>{t("No available units or insufficient transport capacity.")}</p>}
+      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="stationArmy" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" → "+plan.destination_name+" · "+plan.total+" "+(plan.ground?"ground troops":"fleet units")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p>{t("No available units or insufficient transport capacity.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

@@ -67,7 +67,7 @@ Focused vacation tests (engine/API/Qt) passed. Live vacation behavior and policy
 
 ## Still open
 
-The engine web-service and other protected administrative workflows need audited adapters. Interactive menu-only operations, external-city transport, fleet capacity/ETA, authoritative effect previews beyond the construction slice, independently authored city-bound batch plans, full upstream option parity and shared versioned contracts are incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.
+The engine web-service and other protected administrative workflows need audited adapters. See the subsequent implementation slices below for external transport, capacity, city previews and independent batch coverage. Full upstream option parity, route-specific ETA and generated shared contracts remain incomplete. Native browser/E2E, macOS installer and real-account acceptance remain unverified. Keep this change active; do not archive or mark the aggregate tasks complete.
 
 ### Shipment outcome hardening
 
@@ -98,3 +98,10 @@ Focused history/API/Qt regressions: 7 passed. Web suite: 40 passed; TypeScript p
 
 Both native Resource Transport Manager editors now offer owned or discovered external receiving cities in many-to-one mode. A complete island/city/recipient identity is required for external native launches. The engine verifies the recipient at prepare, at each scheduled cycle and before every cargo request, and rechecks owned sources; changed ownership or vacation state stops the job. The original reserve/fixed-amount, cadence, fleet and notification policies remain available. External jobs are manual-recovery only. The existing CLI export remains compatible. This does not implement unsupported one-to-many foreign destinations or prove live acceptance.
 Focused transport/Qt/recovery regression: 53 passed, plus 2 new recurring-external tests. Integration fixes restored the previous checkpoint mock contract and added notification/vacation round-trip fixtures; focused engine regressions passed (16 tests).
+
+
+### Independent per-account reviewed batch
+
+Both clients queue independently approved, account-specific tickets for twelve reviewed operations: construction, one-time shipments, donations, the three worker assignments, layout, new building, station, automatic/manual barbarian operations, and vacation activation. Up to 32 distinct accounts may be queued. Desktop construction previews now also issue tickets (the existing compatible config remains available); the web preview remains opaque. A read-only batch endpoint verifies each ticket's scope, expiry and unused status and the current controller preflight, then rechecks all tickets before allowing dispatch. Clients submit separate request identities sequentially and stop on the first uncertain receipt. A batch is not atomic; earlier starts cannot be rolled back. Each launch still claims its own ticket and performs its own authoritative worker checks, so a changed game state can stop a batch partway through. No tickets are persisted in browser storage. Queues are cleared when the account/backend context is refreshed.
+
+Full integration regression at 366e4ce (before recurring external transport and independent batch): 749 Python passed, 11 skipped; 412 engine passed, 9 skipped, 126 subtests passed; production web build, 40 web tests and typecheck passed. Batch-specific Python/API/manifest tests: 12 passed; dedicated Qt interaction test: 1 passed; web suite: 44 passed, TypeScript passed, lint had no errors and 14 existing warnings. Live account and browser acceptance remain open.

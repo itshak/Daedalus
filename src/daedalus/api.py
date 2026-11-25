@@ -728,7 +728,11 @@ def create_app(
                     or not 1 <= upgrade["target_level"] <= 150):
                 raise HTTPException(status_code=422, detail="Invalid building target")
         try:
-            return ipc_client.construction_preview(account, city_id, upgrades)
+            plan = ipc_client.construction_preview(account, city_id, upgrades)
+            ticket = (operation_previews.issue(account_id, "constructionList", plan["config"])
+                      if plan.get("ready") is True and task_controller is not None else None)
+            return {**plan, "preview_id": ticket,
+                    "expires_in": operation_previews.ttl if ticket else None}
         except ValueError as exc:
             raise HTTPException(
                 status_code=422, detail="Construction preview rejected invalid city or targets"
@@ -991,9 +995,7 @@ def create_app(
         buildings = config.get("buildings")
         if not isinstance(buildings, list) or not buildings:
             raise HTTPException(status_code=503, detail="Construction targets unavailable")
-        ticket = None
-        if plan.get("ready") is True and task_controller is not None:
-            ticket = operation_previews.issue(account_id, "constructionList", config)
+        ticket = plan.get("preview_id")
         return {
             "account_id": account_id, "city_id": city_id,
             "city_name": config.get("city_name"),
@@ -1484,6 +1486,41 @@ def create_app(
             raise HTTPException(status_code=503, detail="Existing authenticated task worker unavailable") from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
+
+    @app.post("/api/v1/tasks/reviewed-batch-check", dependencies=[Depends(authorized)])
+    def reviewed_batch_check(payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        from daedalus.reviewed_batch import validated_batch_entries
+
+        if set(payload) != {"entries"}:
+            raise HTTPException(status_code=422, detail="Invalid independent reviews")
+        try:
+            entries = validated_batch_entries(payload["entries"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid independent reviews") from exc
+        blocked = []
+        for row in entries:
+            aid, task = row["account_id"], row["task"]
+            try:
+                operation_previews.check_unused(row["preview_id"], aid, task)
+                controller = require_task_controller(aid)
+                readiness = controller.preflight(aid, task)
+                if readiness.get("ready") is not True or readiness.get("unresolved_request") is not False:
+                    blocked.append({"account_id": aid, "reason": "prerequisites"})
+            except PreviewUnavailable:
+                blocked.append({"account_id": aid, "reason": "review_unavailable"})
+            except (HTTPException, ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError):
+                blocked.append({"account_id": aid, "reason": "unavailable"})
+        # A long preflight must not silently leave earlier tickets expired.
+        blocked_ids = {row["account_id"] for row in blocked}
+        for row in entries:
+            if row["account_id"] not in blocked_ids:
+                try:
+                    operation_previews.check_unused(row["preview_id"], row["account_id"], row["task"])
+                except PreviewUnavailable:
+                    blocked.append({"account_id": row["account_id"], "reason": "review_unavailable"})
+        # No claims or game writes. Every eventual start still claims its own
+        # ticket, checks prerequisites and revalidates its game data.
+        return {"account_ids": [r["account_id"] for r in entries], "blocked": blocked}
 
     @app.post(
         "/api/v1/accounts/{account_id}/tasks/construction-start",

@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -67,7 +68,7 @@ export function LayoutEditor({account,accountName,enabled,role}:{account:string;
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.template_name} → {plan.city_name}</h4>
       {plan.moves.length?<><ol>{plan.moves.map((m,i)=><li key={i}>{m.building} · {m.from} → {m.to} ({m.displaced})</li>)}</ol>
       <label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
-      <button className="primary-button" type="button" disabled={disabled||!approved||!plan.ready} onClick={()=>void start()}>{t("Start automation")}</button></>:<p>{t("No applicable layout swaps.")}</p>}
+      <button className="primary-button" type="button" disabled={disabled||!approved||!plan.ready} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="reorganizeCityBuildings" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.template_name+" → "+plan.city_name+" · "+plan.moves.map(m=>m.building+": "+m.from+" → "+m.to).join("; ")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p>{t("No applicable layout swaps.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

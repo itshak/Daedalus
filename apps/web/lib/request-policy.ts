@@ -29,6 +29,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     return parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "policy";
   }
   if (method === "POST") {
+    if (parts.join("/") === "tasks/reviewed-batch-check") return params.size===0;
     if (parts.length === 3 && parts.join("/") === "recovery/policy/bulk") return true;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery"
       && ["pause","unpause","resume-now","import-saved-token"].includes(parts[3])) return true;

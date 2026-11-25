@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -70,7 +71,7 @@ export function GrindEditor({account,accountName,enabled,role}:{account:string;a
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.city_name} → {plan.target_name}</h4>
       <p>{t("Village level")}: {plan.level} · {t("Ships")}: {plan.available_ships}/{plan.required_ships}</p>
       <table><thead><tr><th>{t("Unit")}</th><th>{t("Available")}</th><th>{t("Required")}</th></tr></thead><tbody>{plan.requirements.map((r,i)=><tr key={i}><td>{r.name}</td><td>{r.available}</td><td>{r.required}</td></tr>)}</tbody></table>
-      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button></>:<p>{t("Village destroyed or prerequisites missing.")}</p>}
+      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="autoBarbarians" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" → "+plan.target_name+" · village level "+plan.level+" · "+plan.requirements.map(r=>r.name+" × "+r.required).join(", ")+" · notifications "+(plan.send_notifications?"on":"off")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p>{t("Village destroyed or prerequisites missing.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -66,7 +67,7 @@ export function VacationEditor({account,accountName,enabled,role}:{account:strin
       <p>{t("Active jobs")}: {plan.active_jobs} · {t("Automatic recovery")}: {t(plan.recovery_disabled?"Disabled":"Enabled")}</p>
       {(plan.active_jobs>0||plan.managed_active)&&<p>{t("Stop all active account jobs first.")}</p>}
       {!plan.recovery_disabled&&<p>{t("Disable automatic recovery in Recovery settings first.")}</p>}
-      {plan.ready&&<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve activating vacation mode for this entire account")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Activate vacation mode")}</button></>}
+      {plan.ready&&<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve activating vacation mode for this entire account")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Activate vacation mode")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="vacationMode" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · activate vacation mode for the entire account"} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

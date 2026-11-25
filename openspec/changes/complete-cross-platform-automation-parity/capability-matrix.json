@@ -51,7 +51,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -61,7 +63,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -109,17 +113,21 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
     "constructionList": {
       "desktop": "native",
       "web": "native",
-      "review": "engine_preview_web_ticket",
+      "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -155,7 +163,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -248,7 +258,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -258,7 +270,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -268,7 +282,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -286,7 +302,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -336,7 +354,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -367,7 +387,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },
@@ -451,7 +473,9 @@
       "review": "ticket",
       "coverage": "partial",
       "scopes": [
-        "current"
+        "current",
+        "selected",
+        "all"
       ],
       "live_accepted": false
     },

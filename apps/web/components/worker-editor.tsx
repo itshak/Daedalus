@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,validWorkerDraft,type WorkerTask,type City} from "@/lib/native-task-contract";
@@ -80,7 +81,7 @@ export function WorkerEditor({account,accountName,task,enabled,role}:{account:st
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.city_name}</h4>
       <p>{t("Current workers")}: {plan.current??t("Unknown")} · {t("Normal capacity")}: {plan.maximum} · {t("Extra capacity")}: {plan.extra}</p><p><strong>{t("Target workers")}: {plan.target}</strong></p>
       <p>{t("The game may reject the assignment if population is insufficient.")}</p>
-      <label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button>
+      <label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button type="button" className="primary-button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task={task} previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+(plan.project??task)+" · "+plan.target+" workers · "+plan.percentage+"% · overcharge "+(plan.overcharge?"on":"off")} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/>
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

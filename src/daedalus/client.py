@@ -183,12 +183,37 @@ class DaedalusClient:
     def task_control_status(self) -> dict[str, object]:
         return self._read("task-control")
 
+    def reviewed_batch_check(self, entries: list[dict[str, str]]) -> dict[str, object]:
+        from daedalus.reviewed_batch import validate_batch_check, validated_batch_entries
+
+        clean = validated_batch_entries(entries)
+        result = self._write("tasks/reviewed-batch-check", {"entries": clean})
+        try:
+            return validate_batch_check(result, clean)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid independent review check") from exc
+
+    def start_reviewed_task(self, account_id: str, task: str, preview_id: str,
+                            request_id: str) -> dict[str, object]:
+        if task == "constructionList":
+            if not _ACCOUNT_ID.fullmatch(account_id) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", preview_id):
+                raise ValueError("Invalid construction review")
+            return self._write(f"accounts/{account_id}/tasks/construction-start", {
+                "preview_id": preview_id, "request_id": request_id, "confirmed": True,
+            })
+        return self.start_task(account_id, task, {"preview_id": preview_id},
+                               request_id, confirmed=True)
+
     def start_task(
         self, account_id: str, task: str, config: dict[str, object],
         request_id: str, *, confirmed: bool,
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
+        if task == "constructionList" and set(config) == {"preview_id"}:
+            return self._write(f"accounts/{account_id}/tasks/construction-start", {
+                "preview_id": config["preview_id"], "request_id": request_id, "confirmed": confirmed,
+            })
         if task == "sendResources" and set(config) == {"preview_id"}:
             return self._write(f"accounts/{account_id}/tasks/shipment-start", {
                 "preview_id": config["preview_id"], "request_id": request_id, "confirmed": confirmed,

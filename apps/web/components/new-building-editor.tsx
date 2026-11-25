@@ -1,4 +1,5 @@
 "use client";
+import {QueueReviewButton} from "./reviewed-batch-queue";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
 import {scopedCities,readyPreflight,type City} from "@/lib/native-task-contract";
@@ -79,7 +80,7 @@ export function NewBuildingEditor({account,accountName,enabled,role}:{account:st
     </fieldset>
     {plan&&<section className="preview-panel"><h4>{t("Review automation")} · {accountName} · {plan.city_name}</h4><p>{plan.name} · {t("Slot")} {plan.position}</p>
       <table><thead><tr><th>{t("Resource")}</th><th>{t("Cost")}</th><th>{t("Available")}</th><th>{t("Missing")}</th></tr></thead><tbody>{resources.map((r,i)=><tr key={r}><td>{t(r)}</td><td>{plan.costs[i].toLocaleString()}</td><td>{plan.available[i].toLocaleString()}</td><td>{plan.missing[i].toLocaleString()}</td></tr>)}</tbody></table>
-      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button></>:<p>{t("City is busy or materials are missing.")}</p>}
+      {plan.ready?<><label className="check-label"><input type="checkbox" checked={approved} disabled={disabled} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label><button className="primary-button" type="button" disabled={disabled||!approved} onClick={()=>void start()}>{t("Start automation")}</button><QueueReviewButton key={plan.preview_id} account={account} accountName={accountName} task="constructBuilding" previewId={plan.preview_id} ttl={plan.expires_in} summary={plan.city_name+" · "+plan.name+" · slot "+plan.position} disabled={disabled||!approved||!valid||!plan.ready} onQueued={()=>{setLocked(true);setApproved(false);}}/></>:<p>{t("City is busy or materials are missing.")}</p>}
     </section>}
     {message&&<p role="status">{t(message)}</p>}
   </section>;

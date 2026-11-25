@@ -453,6 +453,9 @@ class APIWorker(QThread):
                                        "requests": data.get("requests", [])})
                     except (ValueError, APIConnectionError):
                         result.append({"account_id": aid, "error": True})
+            elif self.action == "reviewed_batch" and self.task_payload is not None:
+                from daedalus.reviewed_batch import dispatch_reviewed_batch
+                result = dispatch_reviewed_batch(self.client, self.task_payload["entries"])
             elif self.action == "task_start_batch" and self.task_payload is not None:
                 import uuid
 
@@ -918,6 +921,9 @@ class MainWindow(FluentWindow):
                 lambda ids: self._request(
                     "task_list_batch", task_payload={"account_ids": ids},
                 )
+            )
+            view.reviewed_batch_requested.connect(
+                lambda entries: self._request("reviewed_batch", task_payload={"entries": entries})
             )
             view.batch_launch_requested.connect(
                 lambda ids, task, config: self._request(
@@ -1744,11 +1750,15 @@ class MainWindow(FluentWindow):
         self, action: str, *, account_id: str | None = None,
         task_payload: dict[str, object] | None = None,
     ) -> None:
-        if self.client is None:
-            self._notice("Not connected", "Connect to a Daedalus backend first.")
-            return
-        if self._worker is not None:
-            self._notice("Request in progress", "Another backend request is still running.")
+        if self.client is None or self._worker is not None:
+            if action == "reviewed_batch":
+                for view in self._task_views:
+                    view.set_batch_launch_result({"account_ids": [], "submitted": [],
+                                                  "blocked": [{"reason": "unavailable"}]})
+            if self.client is None:
+                self._notice("Not connected", "Connect to a Daedalus backend first.")
+            else:
+                self._notice("Request in progress", "Another backend request is still running.")
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
@@ -2451,7 +2461,7 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_task_report(successful, len(payload) - successful)
             logger.info("Multi-account read-only managed task statuses refreshed")
-        elif action == "task_start_batch":
+        elif action in {"task_start_batch", "reviewed_batch"}:
             assert isinstance(payload, dict)
             for view in self._task_views:
                 view.set_batch_launch_result(payload)
@@ -2697,10 +2707,10 @@ class MainWindow(FluentWindow):
             generation = request.get("generation") if isinstance(request, dict) else None
             if generation is None or generation == self.tasks_page._selection_generation:
                 self.tasks_page.set_preflight_unavailable()
-        if action in {"task_start_batch", "task_start"}:
+        if action in {"task_start_batch", "reviewed_batch", "task_start"}:
             for view in self._task_views:
                 view.finish_launch()
-        if action == "task_start_batch":
+        if action in {"task_start_batch", "reviewed_batch"}:
             # Failure could have happened after an irreversible request;
             # do not rerun or automatically acknowledge a task.
             self._pending_batch_status = None

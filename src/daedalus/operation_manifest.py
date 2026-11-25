@@ -6,6 +6,7 @@ includes this versioned information for both clients.
 """
 from __future__ import annotations
 
+from daedalus.reviewed_batch import BATCH_REVIEW_TASKS
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
 MANIFEST_VERSION = 1
@@ -39,12 +40,11 @@ ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PENDING |
 def operation_workflow(name: str) -> dict[str, object]:
     """Return explicitly reviewed coverage and execution policy for one name."""
     if name in _NATIVE:
-        review = ("ticket" if name in CITY_REVIEW_TASKS or name == "sendResources" else
-                  "engine_preview_web_ticket" if name == "constructionList" else "native_draft")
+        review = "ticket" if name in BATCH_REVIEW_TASKS else "native_draft"
         return {
             "desktop": "native", "web": "native", "review": review,
             "coverage": "partial", "scopes": (
-                ["current", "selected", "all"] if name in {"alertAttacks", "alertLowWine"}
+                ["current", "selected", "all"] if name in BATCH_REVIEW_TASKS | {"alertAttacks", "alertLowWine"}
                 else ["current"]
             ),
             "live_accepted": False,
