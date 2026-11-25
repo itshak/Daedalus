@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useRef,useState} from "react";
 import {useLanguage} from "./language-provider";
-import {MAX_AMOUNT, type City, type DomainTask, scopedCities, readyPreflight,validNativeConfig} from "@/lib/native-task-contract";
+import {MAX_AMOUNT, type City, type DomainTask, scopedCities, readyPreflight,validNativeConfig,scopedStudyChoices,type StudyChoice} from "@/lib/native-task-contract";
 
 type Row=Record<string,unknown>;
 type Draft=Record<string,unknown>;
@@ -17,6 +17,7 @@ async function api(path:string,body?:unknown):Promise<unknown>{
 export function NativeDomainEditor({account,accountName,task,enabled,role}:{account:string;accountName:string;task:DomainTask;enabled:boolean;role:string}){
   const {t}=useLanguage();
   const [cities,setCities]=useState<City[]>([]);
+  const [studies,setStudies]=useState<StudyChoice[]|null>(null),[studyIndex,setStudyIndex]=useState(-1);
   const [data,setData]=useState<unknown>(null);
   const [ready,setReady]=useState(false);
   const [loading,setLoading]=useState(Boolean(account&&enabled));
@@ -71,6 +72,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
       if(field){
         if(!record(d)||d.account_id!==account||d.synthetic_demo===true){setError(true);return;}
         setData(d[field]);
+        if(task==="research")setStudies(scopedStudyChoices(d.studies));
       }
     }).catch(()=>{if(live)setError(true);}).finally(()=>{if(live)setLoading(false);});
     return ()=>{live=false;mounted.current=false;};
@@ -90,10 +92,17 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
       config={wine_city:city,wood_city:wood||null,luxury_city:luxury||null,favour_tasks:choices,collect_ambrosia:extra};
       scoped=owned(city)&&(!wood||owned(wood))&&(!luxury||owned(luxury));
       summary=t("Daily wine reward city")+": "+cityLabel(city)+"\n"+t("Wood reward city")+": "+(wood?cityLabel(wood):t("Skip"))+"\n"+t("Luxury reward city")+": "+(luxury?cityLabel(luxury):t("Skip"))+"\n"+choices.map(v=>t(favour.find(x=>x[0]===v)?.[1]??v)).join(", ")+(extra?"\n"+t("Collect ambrosia"):"");break;
-    case "research":
+    case "research": {
+      if(studyIndex>=0){
+        const choice=studies?.find(r=>r.index===studyIndex);
+        config=choice?{study_choice:choice}:{};
+        scoped=!!choice;summary=choice?t("Study")+": "+choice.name+"\n"+t("One-time research submission. Verify the advisor after launch."):"";
+        break;
+      }
       config={cities_ids:chosen,qty:all?null:count};
       scoped=selectedRows.length===chosen.length&&(!all?selectedRows.length===1&&Number(selectedRows[0].crystal)>=300000:true);
       summary=rowNames+"\n"+(all?t("Automatic experiments"):t("Experiments")+": "+count);break;
+    }
     case "tavernManager":
       config={cities_ids:all?null:chosen,run_hours:interval,notification_mode:policy};
       scoped=all?rows.some(row=>row.has_tavern===true):selectedRows.length===chosen.length&&selectedRows.every(row=>row.has_tavern===true);
@@ -133,7 +142,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
   const toggleChoice=(id:string,checked:boolean)=>setChoices(old=>checked?[...old,id]:old.filter(x=>x!==id));
   const missionSelect=(label:string,value:number,set:(v:number)=>void)=>select(label,value,[[0,t("Choose mission")],...missions.map(m=>[Number(m.number),t("Mission")+" "+m.number+" · "+m.duration_seconds+" "+t("seconds")] as [number,string])],v=>set(Number(v)));
   const launch=async()=>{
-    if(!canReview||!review||!approved||inFlight.current)return;
+    if(!canReview||!review||!approved||inFlight.current||JSON.stringify(review.config)!==JSON.stringify(config))return;
     inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);
     try{
       const p=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
@@ -148,7 +157,7 @@ export function NativeDomainEditor({account,accountName,task,enabled,role}:{acco
     {loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:error||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
     <fieldset disabled={disabled}><legend>{t("Settings")}</legend>
       {task==="loginDaily"&&<>{citySelect("Daily wine reward city",city,setCity)}{citySelect("Wood reward city",wood,setWood,true)}{citySelect("Luxury reward city",luxury,setLuxury,true)}{favour.map(([id,name])=><div key={id}>{toggle(name,choices.includes(id),v=>toggleChoice(id,v))}</div>)}{toggle("Collect ambrosia",extra,setExtra)}</>}
-      {task==="research"&&<>{rows.map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={chosen.includes(Number(r.city_id))} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {String(r.crystal)} {t("Glass")} · {t(r.cooldown?"Cooling down":"Ready")}</label>)}{toggle("Automatic experiments",all,setAll)}{!all&&numeric("Experiments",count,setCount,1,10000)}</>}
+      {task==="research"&&<>{select("Research action",studyIndex,[[-1,t("Academy experiments")],...(studies??[]).map(r=>[r.index,t("Study")+": "+r.name] as [number,string])],v=>setStudyIndex(Number(v)))}{studies===null&&<p>{t("Study advisor unavailable; experiments remain available.")}</p>}{studyIndex<0&&<>{rows.map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={chosen.includes(Number(r.city_id))} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {String(r.crystal)} {t("Glass")} · {t(r.cooldown?"Cooling down":"Ready")}</label>)}{toggle("Automatic experiments",all,setAll)}{!all&&numeric("Experiments",count,setCount,1,10000)}<p>{t("Each experiment requires at least 300,000 crystal and has an approximately four-hour cooldown.")}</p></>}</>}
       {task==="tavernManager"&&<>{toggle("All cities with taverns",all,setAll)}{rows.filter(r=>r.has_tavern===true).map(r=><label key={String(r.city_id)} className="check-label"><input type="checkbox" checked={all||chosen.includes(Number(r.city_id))} disabled={all} onChange={e=>{change();choose(Number(r.city_id),e.target.checked);}}/>{String(r.city_name)} · {t("Wine")}: {String(r.wine)} · {t("Wine per hour")}: {String(r.wine_per_hour??"—")} · {t("Population")}: {String(r.population??"—")}</label>)}{numeric("Repeat every (hours; 0 once)",interval,setInterval,0,24)}{select("Notifications",policy,[[1,t("Every change")],[2,t("Only errors")],[3,t("None")]],v=>setPolicy(Number(v)))}</>}
       {task==="activateMiracle"&&<>{select("Wonder",wonder,[["",t("Choose wonder")],...rows.map(r=>[String(r.wonder),String(r.wonder_name)+" · "+String(r.temple_city)+" · "+t("Level")+" "+r.level+" · "+r.available_in_seconds+" "+t("seconds")] as [string,string])],setWonder)}{numeric("Activations",count,setCount,1,100)}</>}
       {task==="activateShrine"&&<>{record(data)&&<p>{String(data.city_name)} · {t("Current favour")}: {String(data.favor??"—")}</p>}{gods.map((g,i)=><div key={g}>{toggle(g,chosen.includes(i+1),v=>choose(i+1,v))}</div>)}<p>{t("Favour per cycle")}: {chosen.length*100}</p>{select("Activation schedule",policy,[[1,t("Fixed activations")],[2,t("Automatic repetition")],[3,t("Fixed then automatic")]],v=>setPolicy(Number(v)))}{policy!==2&&numeric("Activations",count,setCount,1,10)}</>}

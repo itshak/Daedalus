@@ -1196,7 +1196,7 @@ class IPCServer:
     def _list_academies_existing(self, request):
         """Return owned academy buildings, real crystal stock and cooldown state."""
         from ikabot.config import actionRequest, city_url
-        from ikabot.function.research import find_academy_cities
+        from ikabot.function.research import find_academy_cities, get_studies, native_study_choices
         from ikabot.helpers.getJson import getCity
         from ikabot.helpers.pedirInfo import getIdsOfCities
 
@@ -1246,9 +1246,15 @@ class IPCServer:
                     stock[3] >= 300000 and "experimentCooldown" not in cooldown_html
                 ),
             })
+        studies = None
+        try:
+            studies = native_study_choices(get_studies(session))
+        except (ValueError, KeyError, IndexError, TypeError):
+            # Advisor failure does not disable verified experiment controls.
+            pass
         return {
             "status": "ok", "world": f"s{session.mundo}-{session.servidor}",
-            "username": session.username, "academies": academies,
+            "username": session.username, "academies": academies, "studies": studies,
         }
 
     def _list_taverns_existing(self, request):
@@ -1896,7 +1902,7 @@ class IPCServer:
             except ValueError:
                 if existing_only and canonical_name in {
                     "donate", "modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers",
-                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot",
+                    "reorganizeCityBuildings", "constructBuilding", "stationArmy", "trainArmy", "autoBarbarians", "attackBarbarians", "vacationMode", "sendResources", "testTelegramBot", "testDiscordBot", "research",
                 }:
                     return {"status": "rejected", "reason": "invalid_configuration"}
                 raise

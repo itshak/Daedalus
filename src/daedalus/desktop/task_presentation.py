@@ -35,7 +35,7 @@ TASK_DESCRIPTIONS: dict[str, str] = {
     "donationBot": "Coordinate supported island donations across configured cities.",
     "dumpWorld": "Export an allowed portion of the world map.",
     "loginDaily": "Perform the supported daily collection routine.",
-    "research": "Run automatic academy experiments with a validated research configuration.",
+    "research": "Choose an available study or run verified academy experiments.",
     "testTelegramBot": "Send one fixed test message to the configured Telegram bot and chat. Credentials are shared by the login; no credentials are shown.",
     "testDiscordBot": "Send one fixed test message to the configured Discord webhook. Credentials are shared by the login; no credentials are shown.",
     "resourceTransportManager": "Manage validated resource transport routes and intervals.",
@@ -241,6 +241,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("resourceTransportManager", "info"): {"type": "hidden_derived"},
     ("resourceTransportManager", "telegram_enabled"): {"type": "hidden_derived"},
     ("resourceTransportManager", "notify_on_start"): {"type": "hidden_derived"},
+    ("research", "study_choice"): {"type": "hidden_derived"},
     ("research", "qty"): {"type": "hidden_derived"},
     ("research", "mode"): {"type": "hidden_derived"},
     ("research", "experiments"): {"type": "hidden_derived"},
@@ -350,7 +351,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
     ("tavernManager", "run_hours"): {"type": "hidden_derived"},
     ("tavernManager", "notification_mode"): {"type": "hidden_derived"},
     ("research", "cities_ids"): {
-        "type": "academy_research", "label": "Academy experiments",
+        "type": "academy_research", "label": "Research and academy experiments",
         "help": "Choose actual academies; see current crystal and cooldown.",
     },
     ("alertLowWine", "hours"): {
@@ -482,6 +483,14 @@ _SUMMARY_SAFE_SCALARS = frozenset({
 
 def configuration_summary(config: dict[str, object]) -> str:
     """Human-readable, secret-free summary; never print arbitrary game data."""
+    if set(config) == {"study_choice"}:
+        from daedalus.research_choices import validate_study_choice
+
+        try:
+            choice = validate_study_choice(config["study_choice"])
+            return f"Study: {choice['name']} (one-time submission; verify advisor afterward)"
+        except ValueError:
+            return "Invalid research advisor choice"
     if not config:
         return "Use registered defaults"
     items = []

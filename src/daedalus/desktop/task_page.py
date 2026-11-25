@@ -1606,7 +1606,7 @@ class TasksPage(QWidget):
             return
         editor = self._form_inputs.get("cities_ids")
         if isinstance(editor, AcademyResearchEditor):
-            editor.set_academies(result["academies"])
+            editor.set_academies(result["academies"], result.get("studies"))
 
     def set_academies_unavailable(self, account_id: str) -> None:
         if account_id != self.selected_account_id():

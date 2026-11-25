@@ -2,6 +2,12 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Each experiment requires at least 300,000 crystal and has an approximately four-hour cooldown.": "Для каждого эксперимента требуется не менее 300 000 хрусталя; интервал составляет около четырёх часов.",
+  "Study advisor unavailable; experiments remain available.": "Советник по исследованиям недоступен; эксперименты доступны.",
+  "One-time research submission. Verify the advisor after launch.": "Однократное изучение. Проверьте советника после запуска.",
+  "Study": "Изучить",
+  "Academy experiments": "Эксперименты в академии",
+  "Research action": "Действие исследования",
   "Human challenge handling": "Обработка проверок человеком",
   "Managed piracy stops at a game challenge. Complete the challenge manually before a new reviewed launch.": "Управляемая задача пиратства останавливается при проверке игры. Пройдите проверку вручную перед новым подтверждённым запуском.",
   "Read challenge policy": "Загрузить правила обработки проверок",

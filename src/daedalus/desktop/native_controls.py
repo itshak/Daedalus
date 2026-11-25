@@ -1158,6 +1158,11 @@ class AcademyResearchEditor(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.study_picker = ComboBox()
+        self.study_picker.setAccessibleName("Available research advisor study")
+        self.study_picker.addItem("Academy experiments")
+        self.study_picker.currentIndexChanged.connect(self.changed.emit)
+        layout.addWidget(self.study_picker)
         self.table = _table((
             "Use", "Academy city", "Crystal on hand", "Cooldown", "Ready now",
         ))
@@ -1182,7 +1187,15 @@ class AcademyResearchEditor(QWidget):
         layout.addWidget(self.description)
         self._academies: list[dict[str, object]] | None = None
 
-    def set_academies(self, academies: list[dict[str, object]]) -> None:
+    def set_academies(self, academies: list[dict[str, object]], studies=None) -> None:
+        from daedalus.research_choices import validate_studies
+
+        with QSignalBlocker(self.study_picker):
+            self.study_picker.clear()
+            self.study_picker.addItem("Academy experiments")
+            for row in validate_studies(studies) or []:
+                self.study_picker.addItem("Study: " + row["name"], userData=row)
+            self.study_picker.setCurrentIndex(0)
         self._academies = list(academies)
         with QSignalBlocker(self.table):
             self.table.setRowCount(len(academies))
@@ -1210,6 +1223,8 @@ class AcademyResearchEditor(QWidget):
 
     def set_unavailable(self) -> None:
         self._academies = None
+        self.study_picker.clear()
+        self.study_picker.addItem("Academy experiments")
         self.table.setRowCount(0)
         self.description.setText(
             "Academy information is unavailable for this account. "
@@ -1220,6 +1235,11 @@ class AcademyResearchEditor(QWidget):
     def to_config(self) -> dict[str, object]:
         if self._academies is None:
             raise ValueError("Load actual academies for the selected account")
+        choice = self.study_picker.currentData()
+        if isinstance(choice, dict):
+            from daedalus.research_choices import validate_study_choice
+
+            return {"study_choice": validate_study_choice(choice)}
         chosen = [
             self._academies[row] for row in range(len(self._academies))
             if self.table.item(row, 0) is not None

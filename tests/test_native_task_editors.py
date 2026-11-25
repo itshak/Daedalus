@@ -1008,3 +1008,19 @@ def test_reviewed_recruitment_widget_rounds_and_selected_cities(app):
     finally:
         editor.close()
         editor.deleteLater()
+
+
+def test_study_uses_named_verified_choice_and_resets_on_refresh(app):
+    editor = AcademyResearchEditor()
+    choice = {"index": 0, "name": "Navigation", "research_type": "seafaring"}
+    try:
+        editor.set_academies(ACADEMIES, [choice])
+        editor.study_picker.setCurrentIndex(1)
+        assert editor.to_config() == {"study_choice": choice}
+        editor.set_academies(ACADEMIES, [])
+        assert editor.study_picker.count() == 1
+        with pytest.raises(ValueError, match="Choose at least"):
+            editor.to_config()
+    finally:
+        editor.close()
+        editor.deleteLater()

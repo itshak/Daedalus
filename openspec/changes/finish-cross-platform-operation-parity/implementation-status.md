@@ -74,3 +74,9 @@ Verification: 13 focused extension and notification/admin tests, 11 desktop/regi
 Managed piracy always stops upon a game challenge, regardless of legacy solver configuration. Both clients provide an account-scoped compare-and-set stop or notify-and-stop preference. Notify-and-stop requires a supported configured notification destination; the worker sends at most one fixed notice without challenge contents. No automated solver, solver credentials, answer submission or automated restart is exposed. Legacy local solver configuration is not migrated to the remote surface.
 
 Verification: four dedicated policy, worker halt and authenticated controller tests passed; nine existing engine piracy tests passed; 57 web tests passed, TypeScript and Ruff passed.
+
+## Research study submenu
+
+Both native Research editors now distinguish existing experiments from named available advisor studies. The existing authenticated academy inventory optionally includes a bounded projection of the upstream advisor view; it exposes neither arbitrary AJAX requests nor HTML. The controller validates exact study configuration, the worker rechecks the current choice before start and before submission, and the existing upstream study action is submitted without transport-layer retry. No alternate study or experiment is inferred from a stale choice. Receipts record dispatch, not game-side research success. Real advisor responses remain subject to owner-operated acceptance. Existing experiment stock and cooldown behavior is retained.
+
+Focused Python/Qt/engine study and experiment tests: 14 passed; web tests: 58 passed. Proxy deferral is independently tracked in issue #98.

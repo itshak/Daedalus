@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import json
+import re
 import traceback
 
 from ikabot.config import *
@@ -28,7 +29,7 @@ def get_studies(session):
     return resp[2][1]
 
 
-def study(session, studies, num_study):
+def study(session, studies, num_study, *, reviewed=False):
     html = session.get()
     city = getCity(html)
     city_id = city["id"]
@@ -38,7 +39,48 @@ def study(session, studies, num_study):
     url = "action=Advisor&function=doResearch&actionRequest={}&type={}&backgroundView=city&currentCityId={}&templateView=researchAdvisor&ajax=1".format(
         actionRequest, research_type, city_id
     )
-    session.post(url)
+    if reviewed:
+        session.post(url, retry_on_failure=False)
+    else:
+        session.post(url)
+
+
+def native_study_choices(studies):
+    """Project only the current available advisor entries used by the upstream menu."""
+    if not isinstance(studies, dict) or len(studies) > 2000:
+        raise ValueError("Research advisor unavailable")
+    rows = []
+    for key in studies:
+        if not isinstance(key, str):
+            raise ValueError("Invalid research advisor key")
+        match = re.fullmatch(r"js_researchAdvisorProgressTxt([0-9]{1,2})", key)
+        if not match:
+            continue
+        index = int(match.group(1))
+        name = studies.get(f"js_researchAdvisorNextResearchName{index}")
+        link = studies.get(f"js_researchAdvisorChangeResearchType{index}")
+        request = link.get("ajaxrequest") if isinstance(link, dict) else None
+        kind = request.split("=")[-1] if isinstance(request, str) and "=" in request else None
+        if (not isinstance(name, str) or not 0 < len(name) <= 160
+                or any(ord(c) < 32 or c in "<>" for c in name)
+                or not isinstance(kind, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", kind)):
+            raise ValueError("Research advisor entry unavailable")
+        rows.append({"index": index, "name": name, "research_type": kind})
+    if (len(rows) > 16 or len({row["index"] for row in rows}) != len(rows)
+            or len({row["research_type"] for row in rows}) != len(rows)):
+        raise ValueError("Ambiguous research advisor")
+    return sorted(rows, key=lambda row: row["index"])
+
+
+def reviewed_study(session, choice):
+    if (not isinstance(choice, dict) or set(choice) != {"index", "name", "research_type"}
+            or type(choice["index"]) is not int or not 0 <= choice["index"] <= 99
+            or not isinstance(choice["name"], str) or not isinstance(choice["research_type"], str)):
+        raise ValueError("Invalid research choice")
+    studies = get_studies(session)
+    if choice not in native_study_choices(studies):
+        raise ValueError("Research advisor changed; prepare a new review")
+    return studies
 
 
 def experiment(session, experiments, automatic):
@@ -217,7 +259,7 @@ def academy_city(session, city_id):
     return {"cityID": city["id"], "cityName": city["name"], "pos": pos}
 
 
-def prepare_research(session, cities_ids=None, qty=None, mode=None, experiments=None, automatic=None, cities=None, info=""):
+def prepare_research(session, cities_ids=None, qty=None, mode=None, experiments=None, automatic=None, cities=None, info="", study_choice=None):
     """Checks the config of a research (experiments) task started from the CLI
     Parameters
     ----------
@@ -234,6 +276,12 @@ def prepare_research(session, cities_ids=None, qty=None, mode=None, experiments=
     -------
     config : dict
     """
+    if study_choice is not None:
+        if any(v is not None for v in (cities_ids, qty, mode, experiments, automatic, cities)) or info:
+            raise ValueError("Study and experiments must be reviewed separately")
+        reviewed_study(session, study_choice)
+        return {"study_choice": dict(study_choice)}
+
     if cities_ids is None and qty is None:
         cities_ids, qty = ids_from_saved_config(experiments, cities)
     if qty is not None:
@@ -270,7 +318,7 @@ def prepare_research(session, cities_ids=None, qty=None, mode=None, experiments=
 
 
 @task("research", prepare=prepare_research)
-def do_it(session, cities_ids=None, qty=None, mode=None, experiments=None, automatic=None, cities=None, info=""):
+def do_it(session, cities_ids=None, qty=None, mode=None, experiments=None, automatic=None, cities=None, info="", study_choice=None):
     """
     Parameters
     ----------
@@ -282,6 +330,12 @@ def do_it(session, cities_ids=None, qty=None, mode=None, experiments=None, autom
     mode, experiments, automatic, cities, info
         a config saved by an older menu
     """
+    if study_choice is not None:
+        studies = reviewed_study(session, study_choice)
+        study(session, studies, study_choice["index"], reviewed=True)
+        session.setStatus("Study submitted; verify current research advisor")
+        return
+
     if cities_ids is None and qty is None:
         cities_ids, qty = ids_from_saved_config(experiments, cities)
     if cities_ids is None:

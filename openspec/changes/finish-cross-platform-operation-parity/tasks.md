@@ -46,3 +46,5 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Implement host-approved extension inventory and owner-only compare-and-set registration/unregistration, with bounded hash verification, no paths in responses, no upload or remote code execution, and legacy override protection.
 
 - [x] Implement account-scoped human challenge stop or notify-and-stop controls, force managed piracy to stop before challenge retrieval/solving, and require fresh reviewed manual launch. Legacy automated solver setup remains outside remote controls.
+
+- [x] Implement the upstream Study submenu in the existing native Research editor, with named account-scoped advisor choices, strict projection, explicit review, stale-choice rejection and non-retried submission.

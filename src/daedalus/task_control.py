@@ -402,6 +402,12 @@ class TaskController:
             raise ValueError("Unsupported engine task")
         clean, _ = validated_configuration(config)
         clean = dict(clean)
+        if task == "research" and "study_choice" in clean:
+            from daedalus.research_choices import validate_study_choice
+
+            if set(clean) != {"study_choice"}:
+                raise ValueError("Study and experiments must be reviewed separately")
+            clean["study_choice"] = validate_study_choice(clean["study_choice"])
         is_fixed = False
         if task == "sendResources" and self._recovery_store is not None:
             from daedalus.recovery_reconcile import canonical_fixed_transfer

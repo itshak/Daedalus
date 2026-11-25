@@ -1017,6 +1017,13 @@ class DaedalusClient:
                 or len(result["academies"]) > 100
                 or any(not isinstance(row, dict) for row in result["academies"])):
             raise APIConnectionError("Backend returned invalid academy research inventory")
+        from daedalus.research_choices import validate_studies
+
+        try:
+            if "studies" in result:
+                result["studies"] = validate_studies(result["studies"])
+        except ValueError:
+            raise APIConnectionError("Invalid research advisor inventory") from None
         return result
 
     def taverns(self, account_id: str) -> dict[str, object]:

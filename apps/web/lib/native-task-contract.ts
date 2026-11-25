@@ -39,6 +39,20 @@ const buyQuote=(v:unknown):v is Obj=>obj(v)&&exact(v,["ciudadDestino","jugadorAC
 const sellQuote=(v:unknown):v is unknown[]=>Array.isArray(v)&&v.length===6&&boundedText(v[0])&&boundedText(v[1])
   &&integer(v[2],1,1e12)&&integer(v[3],1,1e12)&&integer(v[4],0,1e12)&&integer(v[5],1,1e12);
 const positive = (v: (number | null)[]) => v.some(n => typeof n === "number" && n > 0);
+export type StudyChoice = {index:number;name:string;research_type:string};
+export function validStudyChoice(value:unknown):value is StudyChoice{
+  return obj(value)&&exact(value,["index","name","research_type"])&&integer(value.index,0,99)
+    &&typeof value.name==="string"&&value.name.length>0&&value.name.length<=160
+    &&Array.from(value.name).every(c=>c.charCodeAt(0)>=32&&c!=="<"&&c!==">")
+    &&typeof value.research_type==="string"&&/^[A-Za-z0-9_-]{1,40}$/.test(value.research_type);
+}
+export function scopedStudyChoices(value:unknown):StudyChoice[]|null{
+  if(value===undefined||value===null)return null;
+  if(!Array.isArray(value)||value.length>16||!value.every(validStudyChoice)
+    ||new Set(value.map(r=>r.index)).size!==value.length||new Set(value.map(r=>r.research_type)).size!==value.length)
+    throw new Error("Invalid research advisor inventory");
+  return value;
+}
 export function isNativeTask(task: unknown): task is NativeTask {
   return typeof task === "string" && (NATIVE_TASKS as readonly string[]).includes(task);
 }
@@ -74,6 +88,7 @@ export function validNativeConfig(task: unknown, c: unknown): boolean {
         && new Set(c.favour_tasks).size===c.favour_tasks.length
         && c.favour_tasks.every(x=>["resource","look","online","complete"].includes(x));
     case "research":
+      if(exact(c,["study_choice"]))return validStudyChoice(c.study_choice);
       return exact(c,["cities_ids","qty"]) && ids(c.cities_ids,1)
         && (c.qty===null || (c.cities_ids.length===1&&integer(c.qty,1,10000)));
     case "tavernManager":

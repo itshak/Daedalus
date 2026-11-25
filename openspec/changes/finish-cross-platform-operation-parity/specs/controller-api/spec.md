@@ -66,3 +66,10 @@ A shipment review MAY model delivery of all loads using the observed port and fl
 #### Scenario: Multiple loads can be modeled
 - **WHEN** a single owned route has a complete timing observation, sufficient storage and the whole fleet available
 - **THEN** the review displays a conditional final delivery calculation including intervening return journeys and the last partial load
+
+### Requirement: Exact research advisor choices
+The authenticated academy inventory SHALL include a bounded projection of available study choices when the upstream research advisor can be observed. Both native clients SHALL expose a named study selection separately from experiments. The worker SHALL revalidate the exact current advisor entry before launch and before the single non-retried study submission. Missing or changed observations MUST NOT cause an alternate study or experiment to execute.
+
+#### Scenario: Study availability changes
+- **WHEN** the selected advisor entry no longer matches the reviewed name and research type
+- **THEN** the worker rejects the selection without a study mutation

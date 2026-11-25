@@ -955,7 +955,15 @@ class ExistingIPCClient:
                 "city_id": ident, "city_name": name, "position": position,
                 "crystal": crystal, "cooldown": cooldown, "can_experiment_now": ready,
             })
-        return {"account_id": account.id, "academies": result}
+        response = {"account_id": account.id, "academies": result}
+        if "studies" in data:
+            from daedalus.research_choices import validate_studies
+
+            try:
+                response["studies"] = validate_studies(data["studies"])
+            except ValueError as exc:
+                raise EngineIPCUnavailable("Invalid research advisor inventory") from exc
+        return response
 
     def taverns(self, account: Account) -> dict[str, object]:
         """Account-local wine, servings and satisfaction observations."""
