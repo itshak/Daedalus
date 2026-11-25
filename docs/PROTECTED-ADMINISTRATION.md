@@ -13,3 +13,7 @@ These controls never run arbitrary code. Upstream local custom modules execute w
 ## Releases
 
 Settings can check the fixed public Daedalus GitHub release catalog for a published Mac preview containing both the DMG and its SHA-256 checksum. It never installs an update. The published preview is ad-hoc signed, not notarized. Follow [MACOS-BUILD.md](MACOS-BUILD.md) and the host rollout and rollback procedure in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md). Synthetic demo stays offline.
+
+### Human challenge handling
+
+Managed piracy stops at a game challenge. Set the selected account's policy to stop (default) or notify-and-stop in Settings. The latter requires a configured supported notification destination and sends one fixed notice without challenge contents. Complete the challenge manually before starting a new reviewed task. Legacy automated solver configuration is not available through either remote client.

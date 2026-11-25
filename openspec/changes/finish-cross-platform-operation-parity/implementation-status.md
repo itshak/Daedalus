@@ -68,3 +68,9 @@ Focused release/packaging/desktop/registry tests: 26 passed. Web suite: 55 passe
 Settings on both platforms can list a bounded host-installed approved catalog and register/unregister exactly one reviewed extension with explicit worker-global consent. The worker rechecks locally installed file hashes, rejects symlinks and unsafe POSIX permissions, compares the previously observed registration state, and preserves legacy registrations and unrelated global settings. Selected-account legacy overrides block changes. Source code and absolute paths are never transmitted. The browser owner role is required for mutation. Registration is not execution, installation or code deletion; host-local approval and review are required. Unreviewed legacy modules remain protected-local. A changed source file cannot be newly registered from the UI.
 
 Verification: 13 focused extension and notification/admin tests, 11 desktop/registry tests, 56 web tests and TypeScript/Ruff passed. No actual host extensions were installed or registered.
+
+## Human-controlled challenge policy
+
+Managed piracy always stops upon a game challenge, regardless of legacy solver configuration. Both clients provide an account-scoped compare-and-set stop or notify-and-stop preference. Notify-and-stop requires a supported configured notification destination; the worker sends at most one fixed notice without challenge contents. No automated solver, solver credentials, answer submission or automated restart is exposed. Legacy local solver configuration is not migrated to the remote surface.
+
+Verification: four dedicated policy, worker halt and authenticated controller tests passed; nine existing engine piracy tests passed; 57 web tests passed, TypeScript and Ruff passed.

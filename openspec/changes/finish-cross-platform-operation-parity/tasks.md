@@ -44,3 +44,5 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Expose authenticated public release lookup, exact Mac DMG and checksum references, installed build revision when stamped, and safe developer/connection diagnostics; never execute an update command from either client.
 
 - [x] Implement host-approved extension inventory and owner-only compare-and-set registration/unregistration, with bounded hash verification, no paths in responses, no upload or remote code execution, and legacy override protection.
+
+- [x] Implement account-scoped human challenge stop or notify-and-stop controls, force managed piracy to stop before challenge retrieval/solving, and require fresh reviewed manual launch. Legacy automated solver setup remains outside remote controls.

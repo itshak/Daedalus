@@ -1062,6 +1062,21 @@ class DaedalusClient:
         except (ValueError, APIConnectionError):
             raise APIConnectionError("Provider configuration unavailable or outcome uncertain") from None
 
+    def challenge_policy(self, account_id: str, draft=None):
+        from daedalus.challenge_policy import (
+            validate_challenge_policy,
+            validate_challenge_policy_draft,
+        )
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/challenge-policy"
+        result = self._read(path) if draft is None else self._write(path, validate_challenge_policy_draft(draft))
+        try:
+            return validate_challenge_policy(result, account_id)
+        except ValueError:
+            raise APIConnectionError("Invalid human challenge policy") from None
+
     def extension_settings(self, account_id: str, draft=None):
         from daedalus.extension_settings import validate_extension_draft, validate_extension_status
 

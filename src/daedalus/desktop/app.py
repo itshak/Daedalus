@@ -178,6 +178,8 @@ class APIWorker(QThread):
                     ),
                     "connected_accounts": _known_ikabot_workers(self.client),
                 }
+            elif self.action == "challenge_policy" and self.account_id:
+                result = self.client.challenge_policy(self.account_id, self.task_payload)
             elif self.action == "extension_settings" and self.account_id:
                 result = self.client.extension_settings(self.account_id, self.task_payload)
             elif self.action == "release_status":
@@ -738,6 +740,8 @@ class MainWindow(FluentWindow):
         )
         self.connection_page.reconnect_requested.connect(self._reconnect)
         self.connection_page.forget_requested.connect(self._forget_connection)
+        self.appearance_page.challenge_policy_requested.connect(
+            lambda aid, draft: self._request("challenge_policy", account_id=aid, task_payload=draft))
         self.appearance_page.extension_settings_requested.connect(
             lambda aid, draft: self._request("extension_settings", account_id=aid, task_payload=draft))
         self.appearance_page.release_status_requested.connect(lambda: self._request("release_status"))
@@ -1782,6 +1786,12 @@ class MainWindow(FluentWindow):
         task_payload: dict[str, object] | None = None,
     ) -> None:
         if self.client is None or self._worker is not None:
+            if action == "challenge_policy":
+                self.appearance_page.set_challenge_unavailable(account_id)
+            if action == "extension_settings":
+                self.appearance_page.set_extension_unavailable(account_id)
+            if action == "release_status":
+                self.appearance_page.set_release_unavailable()
             if action == "notification_settings" and task_payload is not None:
                 task_payload.get("settings", {}).clear()
                 self.appearance_page.set_notification_unavailable(account_id)
@@ -2179,6 +2189,8 @@ class MainWindow(FluentWindow):
             logger.info("Accounts refreshed")
             # Session and worker presence require separate authoritative reads.
             self._recovery_followup = ("connected_accounts", "")
+        elif action == "challenge_policy":
+            self.appearance_page.set_challenge_policy(payload)
         elif action == "extension_settings":
             self.appearance_page.set_extension_status(payload)
         elif action == "release_status":
@@ -2611,6 +2623,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "challenge_policy":
+            self.appearance_page.set_challenge_unavailable(getattr(self._worker, "account_id", None))
         if action == "extension_settings":
             self.appearance_page.set_extension_unavailable(getattr(self._worker, "account_id", None))
         if action == "release_status":

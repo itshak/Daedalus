@@ -1084,6 +1084,30 @@ class ExistingIPCClient:
         except ValueError as exc:
             raise EngineIPCUnavailable("Invalid provider configuration receipt") from exc
 
+    def challenge_policy(self, account: Account, draft=None) -> dict[str, object]:
+        from daedalus.challenge_policy import (
+            validate_challenge_policy,
+            validate_challenge_policy_draft,
+        )
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "challenge_policy_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="set_challenge_policy_existing", draft=validate_challenge_policy_draft(draft))
+        reply = self._exchange(payload)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid human challenge policy scope")
+        try:
+            value = validate_challenge_policy({**reply["result"], "account_id": account.id}, account.id)
+            if draft is not None and value["mode"] != draft["mode"]:
+                raise ValueError("Human challenge policy result unconfirmed")
+            return value
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid human challenge policy") from exc
+
     def extension_settings(self, account: Account, draft=None) -> dict[str, object]:
         from daedalus.extension_settings import validate_extension_draft, validate_extension_status
 

@@ -1,4 +1,5 @@
 // Pure allowlist — safe to exercise outside the Next.js runtime.
+import {challengeRoute} from "./challenge-policy.ts";
 import {extensionRoute} from "./extension-settings.ts";
 import {notificationRoute} from "./notification-settings.ts";
 import {REVIEW_START_ROUTES} from "./generated-operation-contract.ts";
@@ -11,7 +12,7 @@ const safeNumber = /^[1-9][0-9]{0,11}$/;
 export function allowedRequest(method: string, parts: string[], params: URLSearchParams): boolean {
   if (parts.some(part => !safePart.test(part))) return false;
   if (method === "GET") {
-    if (extensionRoute(parts)) return params.size===0;
+    if (extensionRoute(parts)||challengeRoute(parts)) return params.size===0;
     if (parts.join("/") === "release-status") return params.size===0;
     if (parts.length === 1 && simpleRead.has(parts[0])) return true;
     if (parts.length === 2 && parts[0] === "warehouses") return true;
@@ -35,7 +36,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     return parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "policy";
   }
   if (method === "POST") {
-    if (extensionRoute(parts)) return params.size===0;
+    if (extensionRoute(parts)||challengeRoute(parts)) return params.size===0;
     if (notificationRoute(parts)) return params.size===0;
     if (parts.join("/") === "tasks/reviewed-batch-check") return params.size===0;
     if (parts.length === 3 && parts.join("/") === "recovery/policy/bulk") return true;

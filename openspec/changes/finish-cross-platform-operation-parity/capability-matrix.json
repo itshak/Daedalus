@@ -135,11 +135,14 @@
       "live_accepted": false
     },
     "decaptchaConf": {
-      "desktop": "pending",
-      "web": "protected_local",
+      "desktop": "existing_view",
+      "web": "existing_view",
+      "view": "settings",
       "review": "admin_review",
-      "coverage": "boundary_pending",
-      "scopes": [],
+      "coverage": "partial",
+      "scopes": [
+        "current"
+      ],
       "live_accepted": false
     },
     "developer": {

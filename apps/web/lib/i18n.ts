@@ -2,6 +2,17 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Human challenge handling": "Обработка проверок человеком",
+  "Managed piracy stops at a game challenge. Complete the challenge manually before a new reviewed launch.": "Управляемая задача пиратства останавливается при проверке игры. Пройдите проверку вручную перед новым подтверждённым запуском.",
+  "Read challenge policy": "Загрузить правила обработки проверок",
+  "Challenge policy": "Правила обработки проверок",
+  "Stop for human attention": "Остановиться для ручной проверки",
+  "Notify and stop": "Уведомить и остановиться",
+  "Notification destination configured.": "Получатель уведомлений настроен.",
+  "Configure a supported notification destination before choosing notify and stop.": "Настройте поддерживаемый получатель уведомлений перед выбором уведомления и остановки.",
+  "Save human challenge policy": "Сохранить правила ручной проверки",
+  "Save the selected account's human-attention stop policy?": "Сохранить правила остановки для ручной проверки выбранной учётной записи?",
+  "Challenge policy unavailable or changed. Refresh before retrying.": "Правила проверки недоступны или изменились. Обновите данные перед повторной попыткой.",
   "Proxy settings and challenge handling must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.": "Настройки прокси и проверки выполняются на узле рабочего процесса. Браузер не предоставляет необработанный игровой сервис, cookie разработчика или непроверенные команды обновления.",
   "Change the worker-global extension registration without executing code?": "Изменить общую регистрацию расширения без запуска кода?",
   "Extension settings unavailable or changed. Refresh before retrying.": "Настройки расширений недоступны или изменились. Обновите данные перед повторной попыткой.",

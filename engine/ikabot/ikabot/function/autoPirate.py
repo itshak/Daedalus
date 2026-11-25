@@ -110,6 +110,7 @@ def prepare_autoPirate(
     convertPerMission=0,
     maxRandomWaitingTime=0,
     piracyCities=None,
+    manual_challenge=False,
 ):
     """Checks the config of an autoPirate task started from the CLI
     Parameters
@@ -182,6 +183,10 @@ def prepare_autoPirate(
         raise ValueError("Selected pirate fortress is not eligible for these missions")
     # The engine independently verifies that this fortress can run the highest mission.
     config["piracyCities"] = [{"id": selected_id}]
+    if type(manual_challenge) is not bool:
+        raise ValueError("Invalid human challenge flag")
+    if manual_challenge:
+        config["manual_challenge"] = True
     return config
 
 
@@ -201,6 +206,7 @@ def do_pirate_missions(
     convertPerMission=0,
     maxRandomWaitingTime=0,
     piracyCities=None,
+    manual_challenge=False,
 ):
     cachedCityId = piracyCities[0]["id"] if piracyCities else None
     while pirateCount > 0:
@@ -249,11 +255,17 @@ def do_pirate_missions(
             piracyCities[0]["id"],
             actionRequest,
         )
-        html = session.post(url)
+        html = session.post(url, retry_on_failure=False) if manual_challenge else session.post(url)
 
         if (
             "function=createCaptcha" in html or "js_captchaImage" in html
         ):
+            if manual_challenge:
+                from ikabot.helpers.nativeChallengePolicy import stop_at_challenge
+
+                stop_at_challenge(session)
+                return
+
             try:
                 for i in range(20):
                     session.setStatus("Resolving captcha " + str(i) + "/20")

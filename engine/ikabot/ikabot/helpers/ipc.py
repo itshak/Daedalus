@@ -849,6 +849,17 @@ class IPCServer:
                                 "username": session.username, "result": result}
                     except Exception:
                         return {"status": "error", "error": "Protected extension registration unavailable"}
+                if action in {"challenge_policy_existing", "set_challenge_policy_existing"}:
+                    try:
+                        from ikabot.helpers import nativeChallengePolicy
+
+                        session = self._existing_session(request)
+                        result = (nativeChallengePolicy.status(session) if action == "challenge_policy_existing"
+                                  else nativeChallengePolicy.configure(session, request.get("draft")))
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Human challenge policy unavailable"}
                 if action == "administrative_status_existing":
                     from ikabot.helpers.nativeAdminStatus import administrative_status
 
@@ -1830,6 +1841,10 @@ class IPCServer:
         canonical_name, task_func = _resolve_task(task_name)
         if existing_only and task_func.__module__ != f"ikabot.function.{canonical_name}":
             raise ValueError("Only built-in IkaBot task implementations are allowed")
+        if existing_only and canonical_name == "autoPirate":
+            # The remote controller never invokes automated challenge solvers,
+            # even if a legacy local provider is configured.
+            config_dict = {**config_dict, "manual_challenge": True}
         try:
             clean_config = _validate_task_config(canonical_name, task_func, config_dict)
         except (ValueError, TypeError):

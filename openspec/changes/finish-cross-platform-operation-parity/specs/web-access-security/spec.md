@@ -34,3 +34,15 @@ Desktop and web SHALL expose a bounded, redacted catalog of locally installed, h
 #### Scenario: A previously registered extension is removed from the menu
 - **WHEN** the owner confirms unregistering an approved entry
 - **THEN** the shared registration is removed without deleting or executing its source file
+
+
+### Requirement: Human-controlled managed game challenges
+Managed piracy SHALL stop on encountering a game challenge without retrieving or solving the challenge or retrying the submission. Both clients SHALL expose an account-scoped stop or notify-and-stop preference, using compare-and-set and explicit confirmation. Browser writes SHALL require owner authorization. Notify-and-stop SHALL require a supported configured notification destination and send at most one fixed notice without challenge material. Managed restart SHALL require a fresh reviewed launch.
+
+#### Scenario: A managed game challenge occurs
+- **WHEN** the worker observes a challenge during a managed piracy mission
+- **THEN** it stops without invoking an automated solver, fetching challenge material, or submitting an answer
+
+#### Scenario: A preference is changed
+- **WHEN** a caller submits a stale, foreign, unsupported or unauthorized policy
+- **THEN** no preference is modified

@@ -33,6 +33,7 @@ class AppearancePage(QWidget):
     notification_settings_requested = Signal(str, str, object)
     release_status_requested = Signal()
     extension_settings_requested = Signal(str, object)
+    challenge_policy_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -159,6 +160,29 @@ class AppearancePage(QWidget):
         self.notification_secret.textChanged.connect(self._notification_controls)
         self.notification_chat.textChanged.connect(self._notification_controls)
         self._notification_changed()
+        layout.addWidget(SubtitleLabel("Human challenge handling"))
+        challenge_note = CaptionLabel(
+            "Managed piracy stops at a game challenge. You can request one fixed notification, "
+            "then complete the challenge manually and review a new launch. No solver credentials are accepted.")
+        challenge_note.setWordWrap(True)
+        layout.addWidget(challenge_note)
+        self.challenge_read = PushButton("Read challenge policy")
+        self.challenge_read.setEnabled(False)
+        self.challenge_read.clicked.connect(self._request_challenge_policy)
+        layout.addWidget(self.challenge_read)
+        self.challenge_mode = ComboBox()
+        self.challenge_mode.addItems(["Stop for human attention", "Notify and stop"])
+        self.challenge_mode.setEnabled(False)
+        self.challenge_mode.currentIndexChanged.connect(self._challenge_controls)
+        layout.addWidget(self.challenge_mode)
+        self.challenge_save = PushButton("Save human challenge policy…")
+        self.challenge_save.setEnabled(False)
+        self.challenge_save.clicked.connect(self._save_challenge_policy)
+        layout.addWidget(self.challenge_save)
+        self.challenge_status = CaptionLabel()
+        self.challenge_status.setWordWrap(True)
+        layout.addWidget(self.challenge_status)
+        self._challenge_policy = None
         layout.addWidget(SubtitleLabel("Host-approved extensions"))
         self.extension_note = CaptionLabel(
             "Only extensions installed and hash-approved by the host administrator are listed. "
@@ -183,8 +207,8 @@ class AppearancePage(QWidget):
         self._extension_rows = []
         self._extension_override = True
         boundary = CaptionLabel(
-             "Proxy configuration, challenge handling and legacy unreviewed extensions "
-            "are managed on the authenticated worker host. The raw engine web service, developer "
+             "Proxy configuration is deferred. Legacy automated challenge providers and unreviewed extensions "
+            "are not exposed. The raw engine web service, developer "
             "cookie dump and unverified update commands are not exposed. Use Daedalus for remote control "
             "and the reviewed release workflow for updates.")
         boundary.setWordWrap(True)
@@ -256,6 +280,8 @@ class AppearancePage(QWidget):
             self._notification_changed()
         if hasattr(self, "extension_picker"):
             self._reset_extensions()
+        if hasattr(self, "challenge_status"):
+            self._reset_challenge_policy()
 
     def _notification_changed(self, *_args):
         self.notification_secret.clear()
@@ -306,6 +332,62 @@ class AppearancePage(QWidget):
         if account == self.admin_account.currentData():
             self.admin_rows.clear()
             self.notification_note.setText("Configuration unavailable or outcome uncertain. Refresh status before retrying.")
+
+    def _reset_challenge_policy(self):
+        self._challenge_policy = None
+        self.challenge_read.setEnabled(isinstance(self.admin_account.currentData(), str))
+        self.challenge_mode.setEnabled(False)
+        self.challenge_save.setEnabled(False)
+        self.challenge_status.clear()
+
+    def _request_challenge_policy(self):
+        account = self.admin_account.currentData()
+        if isinstance(account, str):
+            self._reset_challenge_policy()
+            self.challenge_status.setText("Reading account challenge policy…")
+            self.challenge_policy_requested.emit(account, None)
+
+    def _challenge_controls(self, *_args):
+        mode = "stop" if self.challenge_mode.currentIndex() == 0 else "notify_and_stop"
+        current = getattr(self, "_challenge_policy", None)
+        self.challenge_save.setEnabled(bool(current and mode != current["mode"] and
+                                            (mode == "stop" or current["notification_ready"])))
+
+    def _save_challenge_policy(self):
+        account = self.admin_account.currentData()
+        if not isinstance(account, str) or not self.challenge_save.isEnabled() or not self._challenge_policy:
+            return
+        mode = "stop" if self.challenge_mode.currentIndex() == 0 else "notify_and_stop"
+        if QMessageBox.question(self, "Human challenge policy",
+                "Save the selected account's human-attention stop policy?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        draft = {"mode": mode, "expected_mode": self._challenge_policy["mode"], "confirmed": True}
+        self._reset_challenge_policy()
+        self.challenge_status.setText("Updating account challenge policy…")
+        self.challenge_policy_requested.emit(account, draft)
+
+    def set_challenge_policy(self, value):
+        from daedalus.challenge_policy import validate_challenge_policy
+
+        account = self.admin_account.currentData()
+        if not isinstance(value, dict) or value.get("account_id") != account:
+            return
+        try:
+            self._challenge_policy = validate_challenge_policy(value, account)
+        except ValueError:
+            self.set_challenge_unavailable(account)
+            return
+        self.challenge_mode.setCurrentIndex(0 if value["mode"] == "stop" else 1)
+        self.challenge_mode.setEnabled(True)
+        self.challenge_status.setText("Notification destination configured." if value["notification_ready"]
+                                      else "Configure a supported notification destination before choosing notify and stop.")
+        self._challenge_controls()
+
+    def set_challenge_unavailable(self, account):
+        if self.admin_account.currentData() == account:
+            self._reset_challenge_policy()
+            self.challenge_status.setText("Challenge policy unavailable or changed. Refresh before retrying.")
 
     def _reset_extensions(self):
         self._extension_rows = []

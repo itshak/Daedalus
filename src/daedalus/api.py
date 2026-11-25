@@ -1216,6 +1216,35 @@ def create_app(
         except (ValueError, EngineIPCUnavailable):
             raise HTTPException(status_code=503, detail="Administrative status unavailable") from None
 
+    def human_challenge_policy(account_id, draft=None):
+        from daedalus.challenge_policy import validate_challenge_policy
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None or (draft is not None and task_controller is None):
+            raise HTTPException(status_code=503, detail="Human challenge policy unavailable")
+        try:
+            return validate_challenge_policy(ipc_client.challenge_policy(account, draft), account_id)
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Human challenge policy unavailable or changed") from None
+
+    @app.get("/api/v1/accounts/{account_id}/challenge-policy", dependencies=[Depends(authorized)])
+    def get_human_challenge_policy(account_id: str):
+        return human_challenge_policy(account_id)
+
+    @app.post("/api/v1/accounts/{account_id}/challenge-policy", dependencies=[Depends(authorized)])
+    def set_human_challenge_policy(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.challenge_policy import validate_challenge_policy_draft
+
+        try:
+            draft = validate_challenge_policy_draft(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid human challenge policy") from None
+        return human_challenge_policy(account_id, draft)
+
     def reviewed_extensions(account_id, draft=None):
         from daedalus.extension_settings import validate_extension_status
 
