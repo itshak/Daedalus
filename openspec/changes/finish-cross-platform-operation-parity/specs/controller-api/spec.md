@@ -54,3 +54,15 @@ The controller SHALL support optional owned-city suppliers, bounded exact shorta
 #### Scenario: Supplies are dispatched
 - **WHEN** a combined plan has dispatched its exact cargo
 - **THEN** the worker verifies sufficient destination stock and the reviewed construction state before upgrades
+
+
+### Requirement: Conditional transport delivery model
+A shipment review MAY model delivery of all loads using the observed port and fleet parameters when the entire fleet is available, the single route has verified owned-city storage for all cargo and the timing observation is complete. The clients SHALL state the exclusive-fleet, symmetric-return and unchanged-loading assumptions and MUST NOT present the estimate as a guaranteed arrival. Missing observations and concurrent or multiple routes MUST NOT produce a fabricated combined arrival time.
+
+#### Scenario: The reviewed cargo becomes unavailable
+- **WHEN** source identity or stock changes between route selection and reservation
+- **THEN** the worker stops before reserving or sending the changed cargo
+
+#### Scenario: Multiple loads can be modeled
+- **WHEN** a single owned route has a complete timing observation, sufficient storage and the whole fleet available
+- **THEN** the review displays a conditional final delivery calculation including intervening return journeys and the last partial load

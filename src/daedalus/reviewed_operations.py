@@ -516,7 +516,7 @@ def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, 
             or not isinstance(plan.get("routes"), list) or len(plan["routes"]) != len(draft["routes"])):
         raise ValueError("Invalid fleet observation")
     for requested, row in zip(draft["routes"], plan["routes"]):
-        if (not isinstance(row, dict) or set(row) - {"first_load_timing"} != {"from", "to", "origin_name", "destination_name",
+        if (not isinstance(row, dict) or set(row) - {"first_load_timing", "full_route_model"} != {"from", "to", "origin_name", "destination_name",
                 "resources", "stock", "destination_space", "first_load_limit", "minimum_loads"}
                 or any(row[k] != requested[k] for k in ("from", "to", "resources"))
                 or any(not isinstance(row[k], str) or not 0 < len(row[k]) <= 250
@@ -543,6 +543,23 @@ def validate_shipment_plan(draft: dict[str, object], plan: object) -> dict[str, 
                     or timing["travel_seconds"] <= 0
                     or timing["total_seconds"] != sum(timing[k] for k in seconds[1:])):
                 raise ValueError("Invalid first-load timing")
+        model = row.get("full_route_model")
+        if model is not None and (not isinstance(model, dict) or set(model) != {
+                "loads", "last_cargo", "last_loading_seconds", "delivery_seconds"}
+                or any(type(n) is not int for n in model.values())
+                or timing is None or len(plan["routes"]) != 1
+                or plan["available_ships"] != plan["total_ships"]
+                or row["destination_space"] is None
+                or any(a > b for a, b in zip(row["resources"], row["destination_space"]))
+                or not expected or model["loads"] != loads
+                or model["last_cargo"] != cargo - (loads - 1) * expected
+                or not 0 <= model["last_loading_seconds"] <= timing["loading_seconds"]
+                or not timing["total_seconds"] <= model["delivery_seconds"] <= 365 * 86400
+                or model["delivery_seconds"] != timing["queue_seconds"]
+                + (loads - 1) * timing["loading_seconds"] + model["last_loading_seconds"]
+                + (2 * loads - 1) * timing["travel_seconds"]):
+            raise ValueError("Invalid full-route model")
+
 
     totals = {}
     for row in plan["routes"]:

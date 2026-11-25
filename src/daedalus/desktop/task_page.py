@@ -1071,7 +1071,10 @@ class TasksPage(QWidget):
                              f"travel {timing['travel_seconds']:,} s).")
             else:
                 lines.append("First-load timing unavailable.")
-        lines.append("Route limits share one fleet; full multi-load ETA is not predicted.")
+            model = row.get("full_route_model")
+            if model:
+                lines.append(f"Modeled final delivery: {model['delivery_seconds']:,} s ({model['loads']} sequential loads).")
+        lines.append("Model assumes exclusive available fleet, symmetric return travel, unchanged loading and storage, no extra waits. Multiple routes share the fleet; no combined ETA.")
         if not result["ready"]:
             lines.append("No usable fleet; choose another fleet or acquire ships.")
         self.building_note.setText("\n".join(lines))
@@ -1498,9 +1501,12 @@ class TasksPage(QWidget):
                         description += f" First-load estimate: {timing['total_seconds']:,} s."
                     else:
                         description += " First-load timing unavailable."
+                    model = row.get("full_route_model")
+                    if model:
+                        description += f" Modeled final delivery: {model['delivery_seconds']:,} s."
             if any(observation["remaining"]):
                 description += "\nUncovered shortage: " + ", ".join(f"{n} {v:,}" for n,v in zip(names,observation["remaining"]) if v)
-            description += "\nFull multi-load ETA unavailable. Manual recovery only."
+            description += "\nModel assumes exclusive fleet and unchanged route conditions; no combined ETA. Manual recovery only."
             if not ready:
                 description += " Cannot start: choose more suppliers, check storage and fleet, or use self-funded construction."
         elif ready:

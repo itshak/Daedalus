@@ -12,3 +12,6 @@ The original proposal, design, tasks and specification targets are retained verb
 
 ## Impact
 Controller, engine, desktop, web, security, tests, docs and release workflow. No live game mutation is authorized by this proposal.
+
+
+**Owner scope decision (2026-11-26):** proxy configuration and connectivity testing are deferred; nonsecret proxy status is retained. Other open requirements remain subject to their verification gates.

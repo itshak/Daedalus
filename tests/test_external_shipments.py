@@ -230,6 +230,11 @@ def test_first_load_timing_requires_attested_view():
     session.get.assert_called_with(params={"view": "transport", "destinationCityId": "2",
                                           "position": 2, "currentCityId": "1", "ajax": 1})
     assert shipments._transport_timing(session, source, "2", 100, True)["travel_seconds"] == 400
+    modeled = shipments._transport_timing(session, source, "2", 100, False, full_cargo=250)
+    model = modeled.pop("full_route_model")
+    assert modeled == timing
+    assert model == {"loads": 3, "last_cargo": 50, "last_loading_seconds": 5, "delivery_seconds": 125}
+
     assert shipments._transport_timing(session, source, "3", 100, False) is None
     session.get.return_value = json.dumps([["changeView", markup.replace("'loadingSpeed': 10,", "'loadingSpeed': 0,")]])
     assert shipments._transport_timing(session, source, "2", 100, False) is None
@@ -246,3 +251,23 @@ def test_first_load_timing_requires_attested_view():
     row["first_load_timing"] = {**timing, "total_seconds": 31}
     with pytest.raises(ValueError, match="timing"):
         validate_shipment_plan(draft, plan)
+
+
+def test_full_route_model_rejects_unsafe_assumptions():
+    from daedalus.reviewed_operations import validate_shipment_plan, validated_shipment_draft
+
+    draft = validated_shipment_draft({"routes": [{"from": 1, "to": 2, "resources": [250,0,0,0,0]}],
+                                     "useFreighters": False})
+    row = {**draft["routes"][0], "origin_name":"A", "destination_name":"B", "stock":[250]*5,
+           "destination_space":[250]*5, "first_load_limit":100, "minimum_loads":3,
+           "first_load_timing":{"cargo":100,"total_seconds":30,"loading_seconds":10,"travel_seconds":20,"queue_seconds":0},
+           "full_route_model":{"loads":3,"last_cargo":50,"last_loading_seconds":5,"delivery_seconds":125}}
+    plan = {"routes":[row],"capacity":100,"available_ships":1,"total_ships":1,"ready":True,"useFreighters":False}
+    assert validate_shipment_plan(draft, plan) == plan
+    row["full_route_model"]["delivery_seconds"] = 124
+    with pytest.raises(ValueError, match="full-route model"):
+        validate_shipment_plan(draft,plan)
+    row["full_route_model"]["delivery_seconds"] = 125
+    row["destination_space"][0] = 249
+    with pytest.raises(ValueError, match="full-route model"):
+        validate_shipment_plan(draft,plan)

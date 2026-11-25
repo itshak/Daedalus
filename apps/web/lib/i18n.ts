@@ -2,6 +2,10 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Modeled final delivery (seconds)": "Расчёт последней доставки (секунды)",
+  "Model assumes an exclusive fleet, symmetric return travel, unchanged loading and storage, and no extra waits. No combined multi-route ETA.": "Расчёт предполагает свободный флот, одинаковое время обратного пути, неизменную погрузку и вместимость без дополнительных ожиданий. Общий срок нескольких маршрутов не рассчитывается.",
+  "Model assumes an exclusive fleet and unchanged route conditions. Manual recovery only.": "Расчёт предполагает свободный флот и неизменные условия маршрута. Только ручное восстановление.",
+
   "Invalid provider settings": "Некорректные настройки провайдера",
   "Configuration unavailable or outcome uncertain. Refresh status before retrying.": "Настройка недоступна или результат неизвестен. Обновите статус перед повторной попыткой.",
   "Worker-global notification default cleared.": "Общие настройки уведомлений очищены.",

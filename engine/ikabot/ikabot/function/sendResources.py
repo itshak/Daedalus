@@ -208,7 +208,7 @@ class _TransportIdentity(HTMLParser):
             self.ids[attrs["name"]].add(attrs.get("value"))
 
 
-def _transport_timing(session, source, destination, cargo, freighters):
+def _transport_timing(session, source, destination, cargo, freighters, *, full_cargo=None):
     """Optional first-load estimate; never send a transport action."""
     if not cargo:
         return None
@@ -256,8 +256,21 @@ def _transport_timing(session, source, destination, cargo, freighters):
                 for n in (total, loading, travel, queue))
                 or travel <= 0 or total != loading + travel + queue):
             return None
-        return {"cargo": cargo, "total_seconds": total, "loading_seconds": loading,
-                "travel_seconds": travel, "queue_seconds": queue}
+        observation = {"cargo": cargo, "total_seconds": total, "loading_seconds": loading,
+                       "travel_seconds": travel, "queue_seconds": queue}
+        if full_cargo is not None and full_cargo >= cargo:
+            loads = (full_cargo + cargo - 1) // cargo
+            last_cargo = full_cargo - (loads - 1) * cargo
+            _, last_loading, last_travel, _ = getTransportLoadingAndTravelTime(
+                html, totalResources=last_cargo, useFreighters=freighters)
+            elapsed = queue + (loads - 1) * loading + last_loading + (2 * loads - 1) * travel
+            if (last_travel == travel and 0 <= last_loading <= loading
+                    and total <= elapsed <= 365 * 86400):
+                observation["full_route_model"] = {
+                    "loads": loads, "last_cargo": last_cargo,
+                    "last_loading_seconds": last_loading, "delivery_seconds": elapsed,
+                }
+        return observation
     except (ValueError, TypeError, AttributeError, KeyError, IndexError, ArithmeticError):
         return None
 
@@ -310,12 +323,19 @@ def preview_native_shipments(session, routes, useFreighters):
         first = min(cargo, free * capacity)
         if space is not None:
             first = min(first, sum(min(a, b) for a, b in zip(item["resources"], space)))
+        model_cargo = (cargo if len(routes) == 1 and free == total and first > 0
+                       and space is not None and all(a <= b for a, b in zip(item["resources"], space))
+                       else None)
+        timing = _transport_timing(session, source, destination, first, useFreighters,
+                                   full_cargo=model_cargo)
+        model = timing.pop("full_route_model", None) if timing is not None else None
         rows.append({"from": route["from"], "to": route["to"],
                      "origin_name": decodeUnicodeEscape(own_cities[origin]["name"])[:120],
                      "destination_name": name, "resources": item["resources"],
                      "stock": stock, "destination_space": space,
                      "first_load_limit": first,
-                     "first_load_timing": _transport_timing(session, source, destination, first, useFreighters),
+                     "first_load_timing": timing,
+                     "full_route_model": model,
                      "minimum_loads": (cargo + total * capacity - 1) // (total * capacity)
                      if total and capacity else None})
     return {"routes": rows, "useFreighters": useFreighters, "capacity": capacity,

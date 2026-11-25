@@ -85,14 +85,26 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             shiptype = "usedFreightersShips"
             data[shiptype] = ships
             data["transporters"] = "0"
-        # add amounts of resources to send
-        for i in range(len(send)):
-            if city["availableResources"][i] > 0:
-                key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
-                data[key] = send[i]
-
         if verify_recipient is not None:
             verify_recipient(route_index)
+        # Re-read after changing the selected city and recipient verification.
+        # Never silently omit a resource that vanished after the route planner
+        # chose the chunk: its checkpoint would otherwise record phantom cargo.
+        city = getCity(session.get(city_url + originCityId))
+        if (str(city.get("id")) != str(originCityId)
+                or not isinstance(send, (list, tuple)) or len(send) != 5
+                or any(type(n) is not int or n < 0 for n in send)
+                or not any(send)
+                or not isinstance(city.get("availableResources"), list)
+                or len(city["availableResources"]) != 5
+                or any(type(n) is not int or n < wanted
+                       for n, wanted in zip(city["availableResources"], send))):
+            raise RuntimeError("Transport source changed; review remaining cargo before retrying")
+        for i, amount in enumerate(send):
+            if amount:
+                key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
+                data[key] = amount
+
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.

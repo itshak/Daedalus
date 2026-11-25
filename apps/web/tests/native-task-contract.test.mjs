@@ -142,6 +142,19 @@ test("shipment capacity preview binds account, exact cargo and fleet arithmetic"
 
 });
 
+test("full-route delivery is a conditional model, not a guaranteed ETA",()=>{
+  const config={routes:[{from:1,to:2,resources:[250,0,0,0,0]}],useFreighters:false};
+  const row={...config.routes[0],origin_name:"A",destination_name:"B",stock:[250,0,0,0,0],
+    destination_space:[250,0,0,0,0],first_load_limit:100,minimum_loads:3,
+    first_load_timing:{cargo:100,total_seconds:30,loading_seconds:10,travel_seconds:20,queue_seconds:0},
+    full_route_model:{loads:3,last_cargo:50,last_loading_seconds:5,delivery_seconds:125}};
+  const plan={account_id:"a",routes:[row],useFreighters:false,capacity:100,total_ships:1,available_ships:1,
+    ready:true,preview_id:"a".repeat(43),expires_in:120};
+  assert.equal(scopedShipmentPlan(plan,"a",config).routes[0].full_route_model.delivery_seconds,125);
+  assert.throws(()=>scopedShipmentPlan({...plan,routes:[{...row,full_route_model:{...row.full_route_model,delivery_seconds:124}}]},"a",config));
+  assert.throws(()=>scopedShipmentPlan({...plan,routes:[{...row,destination_space:[249,0,0,0,0]}]},"a",config));
+});
+
 test("notification tests allow no custom payload or credentials",()=>{
   for(const task of ["testTelegramBot","testDiscordBot"]){
     assert.equal(validNativeConfig(task,{}),true);

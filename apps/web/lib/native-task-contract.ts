@@ -282,8 +282,9 @@ export function mergeIslandCities(rows:LocatedExternalCity[],incoming:ExternalCi
 }
 
 export type FirstLoadTiming = {cargo:number;total_seconds:number;loading_seconds:number;travel_seconds:number;queue_seconds:number};
+export type FullRouteModel = {loads:number;last_cargo:number;last_loading_seconds:number;delivery_seconds:number};
 export type ShipmentObservation = {from:number;to:number;origin_name:string;destination_name:string;
-  resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null;first_load_timing?:FirstLoadTiming|null};
+  resources:number[];stock:number[];destination_space:number[]|null;first_load_limit:number;minimum_loads:number|null;first_load_timing?:FirstLoadTiming|null;full_route_model?:FullRouteModel|null};
 export type ShipmentPlan = {account_id:string;routes:ShipmentObservation[];useFreighters:boolean;
   capacity:number;available_ships:number;total_ships:number;ready:boolean;preview_id:string|null;expires_in:number|null};
 function shipmentObservation(value:unknown,account:string,config:unknown,requireTicket:boolean):ShipmentPlan {
@@ -316,6 +317,19 @@ function shipmentObservation(value:unknown,account:string,config:unknown,require
         throw new Error("Invalid first-load timing");
     }
 
+    const model=row.full_route_model;
+    if(model!==undefined&&model!==null){
+      if(!obj(model)||Object.keys(model).length!==4||!obj(timing)||value.routes.length!==1||
+         value.available_ships!==value.total_ships||!Array.isArray(space)||row.resources.some((n,j)=>n>space[j])||
+         !integer(model.loads,1,1e15)||model.loads!==row.minimum_loads||!integer(model.last_cargo,1,1e15)||
+         model.last_cargo!==cargo-(model.loads-1)*(row.first_load_limit as number)||
+         !integer(timing.loading_seconds,0,31536000)||!integer(timing.travel_seconds,1,31536000)||
+         !integer(timing.queue_seconds,0,31536000)||!integer(timing.total_seconds,0,31536000)||
+         !integer(model.last_loading_seconds,0,timing.loading_seconds)||
+         !integer(model.delivery_seconds,timing.total_seconds,31536000)||
+         model.delivery_seconds!==timing.queue_seconds+(model.loads-1)*timing.loading_seconds+model.last_loading_seconds+(2*model.loads-1)*timing.travel_seconds)
+        throw new Error("Invalid full-route model");
+    }
     const id=r.from as number,previous=stocks.get(id)??{stock:row.stock,sum:[0,0,0,0,0]};
     if(previous.stock.some((n,j)=>n!==(row.stock as number[])[j]))throw new Error("Stock changed");
     const sum=previous.sum.map((n,j)=>n+(row.resources as number[])[j]);

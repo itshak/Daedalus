@@ -115,6 +115,17 @@ class TestShipmentOutcome(unittest.TestCase):
         self.assertEqual(len(cargo), 1)
         self.assertIs(cargo[0].kwargs["retry_on_failure"], False)
 
+    def test_stock_changes_before_cargo_never_reserve_or_submit(self):
+        original = {"id": "1", "availableResources": [100] * 5}
+        depleted = {"id": "1", "availableResources": [0, 100, 100, 100, 100]}
+        with patch("ikabot.helpers.planRoutes.getCity", side_effect=[original, original, depleted]):
+            with self.assertRaisesRegex(RuntimeError, "source changed"):
+                sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0],
+                          checkpoint=self.checkpoint, route_index=0)
+        self.checkpoint.reserve.assert_not_called()
+        self.assertEqual(self.session.post.call_count, 1)
+        self.assertEqual(self.session.post.call_args.kwargs["params"]["function"], "changeCurrentCity")
+
     def test_ambiguous_response_never_replays_and_leaves_checkpoint_unresolved(self):
         self.session.post.side_effect = ["ok", RuntimeError("lost reply")]
         with self.assertRaises(RuntimeError):
