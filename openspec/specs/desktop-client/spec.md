@@ -138,7 +138,7 @@ The native warehouse view SHALL display real typed snapshots from an existing au
 
 ### Requirement: Native GUI task controls require confirmation
 The desktop SHALL offer a Tasks interface with a configured account, a built-in
-background task selector, a bounded JSON configuration editor, and explicit
+background task selector, dedicated native configuration controls, and explicit
 operator confirmation before sending a mutating request.
 
 #### Scenario: Operator selects task start
@@ -164,7 +164,7 @@ before stopping a selected running task.
 - **THEN** the backend requests termination only of that tracked task
 
 ### Requirement: Native task creation requires user confirmation
-The Fluent GUI SHALL provide a discoverable Tasks page with a generic JSON task config editor, and MUST require an explicit authorization checkbox and confirmation dialog before sending a game task request.
+The Fluent GUI SHALL provide a discoverable Tasks page with task-specific native fields, and MUST require an explicit authorization checkbox and confirmation dialog before sending a game task request.
 
 #### Scenario: User does not confirm
 - **WHEN** the user opens Tasks but leaves confirmation unchecked
@@ -226,13 +226,13 @@ The desktop SHALL render per-task parameter controls derived from validated buil
 #### Scenario: A complex task has nested parameters
 - **GIVEN** the engine registry cannot infer a parameter type from a public signature
 - **WHEN** the user selects that task
-- **THEN** the GUI offers an explicitly JSON-typed form input plus the advanced JSON editor without guessing a game value
+- **THEN** the GUI provides a dedicated native editor backed by verified game data; if unavailable it disables launch and explains the limitation, without exposing serialized inputs
 
 ### Requirement: Explicit form review before task dispatch
 The desktop MUST NOT launch a task using unreviewed form inputs, and must retain checkbox, confirmation dialog and backend validation for every game-state-changing request.
 
 #### Scenario: A parameter form has edits that have not been applied
-- **WHEN** the user clicks Start task after editing form fields without building/reviewing their JSON
+- **WHEN** the user clicks Start task after editing form fields without reviewing the new configuration
 - **THEN** the desktop refuses to emit the start action until the draft is reviewed
 
 ### Requirement: Native account metadata editor
@@ -357,7 +357,7 @@ operator confirmations, task status and targeted stop/reconciliation safeguards.
 
 ### Requirement: Guided account-first desktop automations
 
-The native Mac desktop SHALL provide account-first navigation, quick access to warehouse and automation workflows, categorized searchable operation selection, and native typed parameter controls. Advanced JSON SHALL be optional. Every task start SHALL remain subject to a separate explicit user confirmation and independently validated backend readiness.
+The native Mac desktop SHALL provide account-first navigation, quick access to warehouse and automation workflows, categorized searchable operation selection, and native typed parameter controls. User-editable JSON configuration, imports and overrides MUST NOT be exposed. Every task start SHALL remain subject to a separate explicit user confirmation and independently validated backend readiness.
 
 #### Scenario: User starts a supported automation without writing JSON
 
@@ -622,7 +622,7 @@ The desktop SHALL default to short titles and compact task controls and SHALL re
 #### Scenario: User configures an automation
 - **WHEN** a user opens Automations
 - **THEN** the account and validated task selectors remain available without an expanded discovery gallery
-- **AND** the gallery and advanced JSON remain available on request
+- **AND** the gallery remains available on request, and all settings use native fields
 - **AND** Start still requires backend readiness and explicit review.
 
 ### Requirement: Compact, understandable account identity and status
@@ -638,3 +638,17 @@ backup of previously saved Mac logins.
 - **WHEN** the Accounts view is rendered
 - **THEN** the email and the Russian flag with S58 appear along with clear
   check/X/unknown status indicators
+
+
+### Requirement: Native-only automation settings
+The desktop SHALL expose actual account-owned cities by name in origin and destination selectors, including route tables, and use native resource amount, building, unit, schedule and policy controls for supported operations. Internal serialized API payloads MUST NOT be displayed as editable settings or importable configuration. Operations without complete required native controls SHALL be clearly marked unavailable and blocked from single-account and batch launch until their dedicated editor is implemented.
+
+#### Scenario: Operator configures a shipment
+- **WHEN** the operator selects a transport action and loads cities for the current account
+- **THEN** source and destination controls list the actual cities by name and resource amounts are entered in numeric controls
+- **AND** underlying identifiers are derived from the selected game records and the backend independently validates the route.
+
+#### Scenario: A task requires an unsupported complex plan
+- **WHEN** the operator selects a task without a complete native editor
+- **THEN** a clear availability explanation is shown and launch is disabled for every account scope
+- **AND** there is no configuration code editor or raw plan import override.
