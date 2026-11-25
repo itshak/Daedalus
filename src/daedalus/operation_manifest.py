@@ -27,10 +27,10 @@ _READ_VIEWS = {
     "killTasks": "activity",
 }
 _LOCAL_BOUNDARIES = frozenset({
-    "importExportCookie", "proxyConf",
+    "importExportCookie",
 })
 _PROTECTED_SETTINGS = frozenset({"updateTelegramData", "updateDiscordData", "developer",
-                                "update", "checkForUpdate", "webServer", "loadCustomModule", "decaptchaConf"})
+                                "update", "checkForUpdate", "webServer", "loadCustomModule", "decaptchaConf", "proxyConf"})
 _PENDING = frozenset()
 AUXILIARY_OPERATIONS = frozenset({"checkForUpdate", "show_proxy"})
 ALL_REVIEWED_NAMES = _NATIVE | set(_READ_VIEWS) | _LOCAL_BOUNDARIES | _PROTECTED_SETTINGS | _PENDING | {"logs", "show_proxy"}

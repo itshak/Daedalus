@@ -44,6 +44,7 @@ class AppearancePage(QWidget):
     release_status_requested = Signal()
     extension_settings_requested = Signal(str, object)
     challenge_policy_requested = Signal(str, object)
+    proxy_profiles_requested = Signal(str, object)
     world_reports_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
@@ -238,8 +239,34 @@ class AppearancePage(QWidget):
         self.world_note.setWordWrap(True)
         layout.addWidget(self.world_note)
         self._world_metadata = []
+        layout.addWidget(SubtitleLabel("Approved proxy profiles"))
+        proxy_note = CaptionLabel("Choose a host-approved network profile for this idle account. "
+                                  "The connection test uses a fixed public HTTPS endpoint without game credentials. "
+                                  "No automatic switching or reconnect. Provision endpoints and authentication locally.")
+        proxy_note.setWordWrap(True)
+        layout.addWidget(proxy_note)
+        self.proxy_read = PushButton("Read approved profiles")
+        self.proxy_read.setEnabled(False)
+        self.proxy_read.clicked.connect(self._read_proxy_profiles)
+        layout.addWidget(self.proxy_read)
+        self.proxy_picker = ComboBox()
+        self.proxy_picker.setAccessibleName("Approved network profile")
+        self.proxy_picker.currentIndexChanged.connect(self._proxy_controls)
+        layout.addWidget(self.proxy_picker)
+        self.proxy_test = PushButton("Test selected profile…")
+        self.proxy_test.setEnabled(False)
+        self.proxy_test.clicked.connect(lambda: self._submit_proxy_profile("test"))
+        layout.addWidget(self.proxy_test)
+        self.proxy_save = PushButton("Test and save profile…")
+        self.proxy_save.setEnabled(False)
+        self.proxy_save.clicked.connect(lambda: self._submit_proxy_profile("save"))
+        layout.addWidget(self.proxy_save)
+        self.proxy_note = CaptionLabel()
+        self.proxy_note.setWordWrap(True)
+        layout.addWidget(self.proxy_note)
+        self._proxy_status = None
         boundary = CaptionLabel(
-             "Proxy configuration is deferred. Legacy automated challenge providers and unreviewed extensions "
+             "Unapproved proxy endpoints are not exposed. Legacy automated challenge providers and unreviewed extensions "
             "are not exposed. The raw engine web service, developer "
             "cookie dump and unverified update commands are not exposed. Use Daedalus for remote control "
             "and the reviewed release workflow for updates.")
@@ -316,6 +343,8 @@ class AppearancePage(QWidget):
             self._reset_challenge_policy()
         if hasattr(self, "world_picker"):
             self._reset_world_reports()
+        if hasattr(self, "proxy_picker"):
+            self._reset_proxy_profiles()
 
     def _notification_changed(self, *_args):
         self.notification_secret.clear()
@@ -366,6 +395,85 @@ class AppearancePage(QWidget):
         if account == self.admin_account.currentData():
             self.admin_rows.clear()
             self.notification_note.setText("Configuration unavailable or outcome uncertain. Refresh status before retrying.")
+
+    def _reset_proxy_profiles(self):
+        self._proxy_status = None
+        self.proxy_picker.clear()
+        self.proxy_read.setEnabled(isinstance(self.admin_account.currentData(), str))
+        self.proxy_test.setEnabled(False)
+        self.proxy_save.setEnabled(False)
+        self.proxy_note.clear()
+
+    def _proxy_controls(self, *_args):
+        status = getattr(self, "_proxy_status", None)
+        selected = self.proxy_picker.currentData()
+        allowed = bool(status and not status["busy"] and self.proxy_picker.currentIndex() >= 0
+                       and selected != "unselected")
+        self.proxy_test.setEnabled(allowed)
+        self.proxy_save.setEnabled(allowed and (selected != status["current"] or
+                                                (selected is None and status["enabled"])))
+
+    def _read_proxy_profiles(self):
+        account = self.admin_account.currentData()
+        if isinstance(account, str):
+            self._reset_proxy_profiles()
+            self.proxy_note.setText("Reading approved profiles…")
+            self.proxy_profiles_requested.emit(account, None)
+
+    def _submit_proxy_profile(self, action):
+        account = self.admin_account.currentData()
+        if not isinstance(account, str) or not self._proxy_status or not (
+                self.proxy_test.isEnabled() if action == "test" else self.proxy_save.isEnabled()):
+            return
+        choice = self.proxy_picker.currentData()
+        label = self.proxy_picker.currentText()
+        if QMessageBox.question(self, "Approved network profile",
+                f"{'Test' if action == 'test' else 'Test and save'} {label} for the selected account? "
+                "The check contacts a fixed public HTTPS endpoint without game credentials. "
+                "Saving changes future network requests, without forcing a reconnect.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        draft = {"action": action, "profile": choice, "revision": self._proxy_status["revision"], "confirmed": True}
+        self._reset_proxy_profiles()
+        self.proxy_note.setText("Checking network profile…")
+        self.proxy_profiles_requested.emit(account, draft)
+
+    def set_proxy_profiles(self, value):
+        from daedalus.proxy_profiles import validate_proxy_status
+
+        account = self.admin_account.currentData()
+        if not isinstance(value, dict) or value.get("account_id") != account:
+            return
+        self._reset_proxy_profiles()
+        try:
+            status = validate_proxy_status(value, account)
+        except ValueError:
+            self.set_proxy_unavailable(account)
+            return
+        self._proxy_status = status
+        with QSignalBlocker(self.proxy_picker):
+            self.proxy_picker.addItem("Choose approved profile", userData="unselected")
+            if status["allow_direct"]:
+                self.proxy_picker.addItem("Direct connection (host approved)", userData=None)
+            for row in status["profiles"]:
+                self.proxy_picker.addItem(f"{row['label']} · {row['protocol']}", userData=row["id"])
+            for i in range(1, self.proxy_picker.count()):
+                if self.proxy_picker.itemData(i) == status["current"]:
+                    self.proxy_picker.setCurrentIndex(i)
+                    break
+        current = next((r["label"] for r in status["profiles"] if r["id"] == status["current"]), None)
+        description = current or ("Legacy proxy (manage locally)" if status["enabled"] else "Direct connection")
+        outcome = {"observed": "", "tested": "HTTPS test passed; settings unchanged. ",
+                   "saved": "Profile saved after HTTPS test. "}[status["result"]]
+        self.proxy_note.setText(outcome + "Current: " + description +
+                               (". Stop active tasks before changing profiles." if status["busy"] else
+                                ". Game-side connectivity is not tested."))
+        self._proxy_controls()
+
+    def set_proxy_unavailable(self, account):
+        if self.admin_account.currentData() == account:
+            self._reset_proxy_profiles()
+            self.proxy_note.setText("Network profile unavailable or outcome uncertain. Refresh before retrying.")
 
     def _reset_world_reports(self):
         self._world_metadata = []

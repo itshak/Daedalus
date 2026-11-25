@@ -46,3 +46,15 @@ Managed piracy SHALL stop on encountering a game challenge without retrieving or
 #### Scenario: A preference is changed
 - **WHEN** a caller submits a stale, foreign, unsupported or unauthorized policy
 - **THEN** no preference is modified
+
+
+### Requirement: Account-approved network profiles
+Both clients SHALL expose redacted host-approved account-specific proxy profiles, with explicit test and save operations. Host-local manifests SHALL control available profiles and whether direct connection is permitted. Browser writes and connectivity tests SHALL require owner authorization. The controller and worker MUST reject caller-supplied endpoints, credentials, arbitrary test destinations and stale or foreign reviews. Before a save, the worker SHALL verify the account has no observed active tasks, make a single fixed public HTTPS test with TLS verification, no redirects and no game authentication, then recheck the approved catalog and saved profile state. Changes SHALL affect only the chosen account's upstream saved network preference and MUST NOT force a reconnect, rotate proxies automatically or bypass game challenges. Provisioning authenticated proxies remains host-local.
+
+#### Scenario: A profile test is unsuccessful
+- **WHEN** the fixed HTTPS connectivity check fails or a reviewed state changes during testing
+- **THEN** no proxy preference is changed and the caller must refresh before attempting another review
+
+#### Scenario: An account is active or a network profile is unapproved
+- **WHEN** a caller attempts to test or save an unapproved profile or the selected account has an observed running task
+- **THEN** the worker rejects the request without contacting the proposed endpoint or changing the preference

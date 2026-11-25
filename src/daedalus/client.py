@@ -1069,6 +1069,18 @@ class DaedalusClient:
         except (ValueError, APIConnectionError):
             raise APIConnectionError("Provider configuration unavailable or outcome uncertain") from None
 
+    def proxy_profiles(self, account_id: str, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_draft, validate_proxy_result
+
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid account")
+        path = f"accounts/{account_id}/proxy-settings"
+        result = self._read(path) if draft is None else self._write(path, validate_proxy_draft(draft))
+        try:
+            return validate_proxy_result(result, account_id, draft)
+        except ValueError:
+            raise APIConnectionError("Invalid network profile result") from None
+
     def challenge_policy(self, account_id: str, draft=None):
         from daedalus.challenge_policy import (
             validate_challenge_policy,

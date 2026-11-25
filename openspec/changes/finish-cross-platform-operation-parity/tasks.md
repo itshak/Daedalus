@@ -33,11 +33,11 @@
 - [x] Add conditional game-parameter first-load timing to shipment and construction-supply reviews; fail closed on missing route identity or timing fields. Full multi-load timing and live verification remain open.
 
 
-## Owner-approved deferral (2026-11-26)
+## Proxy scope history (2026-11-26)
 
-Proxy configuration and proxy connectivity testing are excluded from this completion scope at the owner's request. The existing nonsecret read-only proxy status remains available. No proxy mutation endpoint is added.
+The owner initially deferred proxy configuration and connectivity testing, then explicitly restored them to scope. The earlier deferral is superseded. The approved profile workflow below is implemented; live verification and approval of protected local provisioning remain open.
 
-- [x] Record proxy configuration deferral without falsely asserting implementation.
+- [x] Record the original proxy deferral (historical; superseded by the later owner decision).
 - [x] Provide a bounded full-route sequential delivery model for a single fully supplied owned-city route with the entire fleet available; validate its arithmetic independently and label its assumptions in both clients.
 - [x] Recheck source identity and exact cargo stock before reservation and mutation; do not record missing cargo as delivered.
 
@@ -53,3 +53,5 @@ Proxy configuration and proxy connectivity testing are excluded from this comple
 - [x] Expose the upstream fixed-percent tavern serving submenu in both clients, with observed options, exact named before/after effects, stale-state halt and non-retried one-time updates.
 - [x] Complete external-island monitoring selection, scoped verification, explicit all-owned option, stale-response invalidation and strict coordinate revalidation.
 - [x] Generate private account-bound aggregate reports from managed world scans, validate and paginate completed data, provide complete CSV exports in desktop Settings and web Activity; prevent raw identifying dump export and correct radius-zero scope.
+
+- [x] Implement account-bound host-approved proxy profile selection, fixed credential-free HTTPS test, owner-authorized browser changes, explicit review, stale-state rejection and idle-account-only persistence in both clients. Arbitrary endpoint and authentication provisioning remain host-local.

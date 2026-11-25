@@ -1245,6 +1245,35 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid map report request")
         return scoped_world_reports(account_id, report_id, offset)
 
+    def reviewed_proxy_profiles(account_id, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_result
+
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account disabled")
+        if demo_mode or ipc_client is None or (draft is not None and task_controller is None):
+            raise HTTPException(status_code=503, detail="Approved network profiles unavailable")
+        try:
+            return validate_proxy_result(ipc_client.proxy_profiles(account, draft), account_id, draft)
+        except (EngineIPCUnavailable, ValueError):
+            raise HTTPException(status_code=503, detail="Network profile unavailable or outcome uncertain") from None
+
+    @app.get("/api/v1/accounts/{account_id}/proxy-settings", dependencies=[Depends(authorized)])
+    def get_proxy_profiles(account_id: str):
+        return reviewed_proxy_profiles(account_id)
+
+    @app.post("/api/v1/accounts/{account_id}/proxy-settings", dependencies=[Depends(authorized)])
+    def set_proxy_profile(account_id: str, payload: Annotated[dict[str, object], Body()]):
+        from daedalus.proxy_profiles import validate_proxy_draft
+
+        try:
+            draft = validate_proxy_draft(payload)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid network profile review") from None
+        return reviewed_proxy_profiles(account_id, draft)
+
     def human_challenge_policy(account_id, draft=None):
         from daedalus.challenge_policy import validate_challenge_policy
 

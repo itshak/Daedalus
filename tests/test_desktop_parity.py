@@ -322,3 +322,26 @@ def test_protected_admin_settings_scope(qt_app):
         assert not page.admin_rows.text()
     finally:
         _dispose(page, qt_app)
+
+
+def test_proxy_profile_editor_rejects_foreign_status_and_busy_account(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
+
+    page = AppearancePage()
+    try:
+        page.set_admin_accounts([{"id":"alpha","player":"Player","world":"s1-en","enabled":True}])
+        page.admin_account.setCurrentIndex(1)
+        observed = {"account_id":"alpha","revision":"a"*64,"enabled":False,"current":None,
+                    "allow_direct":True,"busy":False,"result":"observed",
+                    "profiles":[{"id":"office","label":"Office network","protocol":"http"}]}
+        page.set_proxy_profiles({**observed,"account_id":"beta"})
+        assert page.proxy_picker.count() == 0
+        page.set_proxy_profiles(observed)
+        assert page.proxy_picker.count() == 3
+        page.proxy_picker.setCurrentIndex(2)
+        assert page.proxy_test.isEnabled() and page.proxy_save.isEnabled()
+        page.set_proxy_profiles({**observed,"busy":True})
+        page.proxy_picker.setCurrentIndex(2)
+        assert not page.proxy_test.isEnabled() and not page.proxy_save.isEnabled()
+    finally:
+        _dispose(page, qt_app)

@@ -180,6 +180,8 @@ class APIWorker(QThread):
                 }
             elif self.action == "world_reports" and self.account_id:
                 result = self.client.world_reports(self.account_id, (self.task_payload or {}).get("report_id"))
+            elif self.action == "proxy_profiles" and self.account_id:
+                result = self.client.proxy_profiles(self.account_id, self.task_payload)
             elif self.action == "challenge_policy" and self.account_id:
                 result = self.client.challenge_policy(self.account_id, self.task_payload)
             elif self.action == "extension_settings" and self.account_id:
@@ -744,6 +746,8 @@ class MainWindow(FluentWindow):
         self.connection_page.forget_requested.connect(self._forget_connection)
         self.appearance_page.world_reports_requested.connect(
             lambda aid, rid: self._request("world_reports", account_id=aid, task_payload={"report_id": rid}))
+        self.appearance_page.proxy_profiles_requested.connect(
+            lambda aid, draft: self._request("proxy_profiles", account_id=aid, task_payload=draft))
         self.appearance_page.challenge_policy_requested.connect(
             lambda aid, draft: self._request("challenge_policy", account_id=aid, task_payload=draft))
         self.appearance_page.extension_settings_requested.connect(
@@ -1795,6 +1799,8 @@ class MainWindow(FluentWindow):
                     view.set_island_destinations_unavailable(account_id, task_payload["nonce"])
             if action == "world_reports":
                 self.appearance_page.set_world_report_unavailable(account_id)
+            if action == "proxy_profiles":
+                self.appearance_page.set_proxy_unavailable(account_id)
             if action == "challenge_policy":
                 self.appearance_page.set_challenge_unavailable(account_id)
             if action == "extension_settings":
@@ -2203,6 +2209,8 @@ class MainWindow(FluentWindow):
                 self.appearance_page.set_world_reports(payload)
             else:
                 self.appearance_page.set_world_export(payload)
+        elif action == "proxy_profiles":
+            self.appearance_page.set_proxy_profiles(payload)
         elif action == "challenge_policy":
             self.appearance_page.set_challenge_policy(payload)
         elif action == "extension_settings":
@@ -2638,6 +2646,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if action == "proxy_profiles":
+            self.appearance_page.set_proxy_unavailable(getattr(self._worker, "account_id", None))
         if action == "world_reports":
             self.appearance_page.set_world_report_unavailable(getattr(self._worker, "account_id", None))
         if action == "challenge_policy":

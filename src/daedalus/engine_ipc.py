@@ -1100,6 +1100,24 @@ class ExistingIPCClient:
         except ValueError as exc:
             raise EngineIPCUnavailable("Invalid provider configuration receipt") from exc
 
+    def proxy_profiles(self, account: Account, draft=None):
+        from daedalus.proxy_profiles import validate_proxy_draft, validate_proxy_result
+
+        if not account.enabled:
+            raise ValueError("Account disabled")
+        payload = {"action": "proxy_profiles_existing", "world": account.world, "player": account.player}
+        if draft is not None:
+            payload.update(action="configure_proxy_profile_existing", draft=validate_proxy_draft(draft))
+        reply = self._exchange(payload, read_timeout=20.0)
+        if (str(reply.get("world", "")).casefold() != account.world.casefold()
+                or str(reply.get("username", "")).casefold() != account.player.casefold()
+                or not isinstance(reply.get("result"), dict)):
+            raise EngineIPCUnavailable("Invalid network profile scope")
+        try:
+            return validate_proxy_result({**reply["result"], "account_id": account.id}, account.id, draft)
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid network profile result") from exc
+
     def challenge_policy(self, account: Account, draft=None) -> dict[str, object]:
         from daedalus.challenge_policy import (
             validate_challenge_policy,

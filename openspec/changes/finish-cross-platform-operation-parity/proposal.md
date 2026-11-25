@@ -14,4 +14,4 @@ The original proposal, design, tasks and specification targets are retained verb
 Controller, engine, desktop, web, security, tests, docs and release workflow. No live game mutation is authorized by this proposal.
 
 
-**Owner scope decision (2026-11-26):** proxy configuration and connectivity testing are deferred; nonsecret proxy status is retained. Other open requirements remain subject to their verification gates.
+**Owner scope decision (2026-11-26, superseded):** proxy configuration was initially deferred (issue #98); the owner subsequently restored it to scope. Implement host-approved account-specific profiles, fixed credential-free HTTPS tests and explicit idle-account changes. Arbitrary endpoint and authentication provisioning remain protected host-local; live acceptance and other outstanding requirements remain open.

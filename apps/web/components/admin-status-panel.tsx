@@ -1,4 +1,5 @@
 "use client";
+import {ProxyProfilesPanel} from "./proxy-profiles-panel";
 import {ChallengePolicyPanel} from "./challenge-policy-panel";
 import {ExtensionPanel} from "./extension-panel";
 import {useState,useRef} from "react";
@@ -59,8 +60,9 @@ export function AdminStatusPanel({accounts,role="viewer"}:{accounts:{id:string;n
       <div className="report-tools"><button type="button" className="primary-button" disabled={!consent||!validNotificationSettings(provider,provider==="telegram"?{mode:"replace",bot_token:secret.trim(),chat_id:chat.trim()}:{mode:"replace",webhook_url:secret.trim()})} onClick={()=>void configure(false)}>{t("Test and save")}</button><button type="button" className="secondary-button" disabled={!consent} onClick={()=>void configure(true)}>{t("Clear configured default")}</button></div>
     </fieldset>}
     {notice&&<p role="status">{t(notice)}</p>}
+    <ProxyProfilesPanel key={"proxy:"+account+":"+role} account={account} role={role}/>
     <ChallengePolicyPanel key={"challenge:"+account+":"+role} account={account} role={role}/>
     <ExtensionPanel key={account+":"+role} account={account} role={role}/>
-    <p className="subtle-message">{t("Proxy changes are deferred; legacy automated challenge providers are not exposed. The browser does not expose raw game services, developer cookies or unverified update commands.")}</p>
+    <p className="subtle-message">{t("Unapproved proxy endpoints and legacy automated challenge providers are not exposed. The browser does not expose raw game services, developer cookies or unverified update commands.")}</p>
   </section>;
 }

@@ -838,6 +838,23 @@ class IPCServer:
                                 "username": session.username, "result": result}
                     except Exception:
                         return {"status": "error", "error": "Provider configuration unavailable or outcome uncertain"}
+                if action in {"proxy_profiles_existing", "configure_proxy_profile_existing"}:
+                    try:
+                        from ikabot.helpers import nativeProxyProfiles
+
+                        session = self._existing_session(request)
+                        world, player = self._task_entry(request)
+                        busy = any(entry["world"].casefold() == world
+                                   and entry["player"].casefold() == player
+                                   and entry["process"].is_alive()
+                                   for entry in self._daedalus_tasks.values())
+                        result = (nativeProxyProfiles.status(session) if action == "proxy_profiles_existing"
+                                  else nativeProxyProfiles.configure(session, request.get("draft"), managed_busy=busy))
+                        result["busy"] = result["busy"] or busy
+                        return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                                "username": session.username, "result": result}
+                    except Exception:
+                        return {"status": "error", "error": "Approved network profile unavailable or outcome uncertain"}
                 if action in {"extension_status_existing", "extension_registration_existing"}:
                     try:
                         from ikabot.helpers import nativeExtensions
