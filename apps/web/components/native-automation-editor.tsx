@@ -3,7 +3,7 @@ import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "./language-provider";
-import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, type BatchTarget, type BatchReceipt, launchAlertBatch, scopedCities, readyPreflight, validNativeConfig, scopedExternalCities, type ExternalCity, scopedShipmentPlan, type ShipmentPlan } from "@/lib/native-task-contract";
+import { MATERIALS, MAX_AMOUNT, type City, type NativeTask, type BatchTarget, type BatchReceipt, launchAlertBatch, scopedCities, readyPreflight, validNativeConfig, scopedExternalCities, type LocatedExternalCity, removeIslandCities, mergeIslandCities, scopedShipmentPlan, type ShipmentPlan } from "@/lib/native-task-contract";
 
 type Config = Record<string,unknown>;
 type Route = {key:number; from:number; to:number; resources:number[]};
@@ -29,7 +29,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [routes,setRoutes]=useState<Route[]>([route(1)]);
   const nextRoute=useRef(2);
   const [islandX,setIslandX]=useState(1),[islandY,setIslandY]=useState(1);
-  const [external,setExternal]=useState<ExternalCity[]>([]);
+  const [external,setExternal]=useState<LocatedExternalCity[]>([]);
   const [lookupMessage,setLookupMessage]=useState("");
   const [lookingUp,setLookingUp]=useState(false);
   const lookupRevision=useRef(0);
@@ -79,7 +79,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const byId=new Map(cities.map(c=>[c.id,c.name+(c.coords?" · "+c.coords:"")]));
   const externalById=new Map(external.filter(r=>!byId.has(r.id)).map(r=>[r.id,r]));
   const actual=(id:number)=>byId.has(id);
-  const destinationName=(id:number)=>{const r=externalById.get(id);return r?r.name+" — "+r.owner+" ("+islandX+":"+islandY+")":cityName(id);};
+  const destinationName=(id:number)=>{const r=externalById.get(id);return r?r.name+" — "+r.owner+" ("+r.x+":"+r.y+")":cityName(id);};
   const cityName=(id:number)=>byId.get(id)??t("Choose a city");
   const materialName=(m:string)=>t(m==="crystal"?"Glass":m[0].toUpperCase()+m.slice(1));
   const resourceSummary=(a:(number|null)[],keep=false)=>a.map((v,i)=>
@@ -137,6 +137,9 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     }catch{if(mounted.current)setMessage("Shipment preview unavailable. Check stock, recipients and fleet.");}
     finally{if(mounted.current)setBusy(false);inFlight.current=false;}
   };
+  const cancelLookup=()=>{
+    lookupRevision.current++;setLookingUp(false);setLookupMessage("");
+  };
   const resetExternal=()=>{
     lookupRevision.current++;setExternal([]);setLookingUp(false);setLookupMessage("");
     setRoutes(old=>old.map(r=>actual(r.to)?r:{...r,to:0}));
@@ -145,12 +148,23 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   };
   const lookup=async()=>{
     if(lookingUp||!enabled||role==="viewer"||!Number.isInteger(islandX)||islandX<1||islandX>100||!Number.isInteger(islandY)||islandY<1||islandY>100)return;
-    resetExternal();const revision=lookupRevision.current;setLookingUp(true);
+    cancelLookup();
+    const retained=task==="sendResources"?removeIslandCities(external,islandX,islandY):[];
+    if(new Set(retained.map(r=>r.x+":"+r.y)).size>=10){setLookupMessage("Clear external cities before searching more than ten islands.");return;}
+    const retainedIds=new Set(retained.map(r=>r.id));
+    setExternal(retained);
+    setRoutes(old=>old.map(r=>actual(r.to)||retainedIds.has(r.to)?r:{...r,to:0}));
+    if(task==="resourceTransportManager"&&!actual(single))setSingle(0);
+    edit();
+    const revision=lookupRevision.current;setLookingUp(true);
     try{
       const value=await api(prefix+"/island-destinations?x="+islandX+"&y="+islandY);
       if(mounted.current&&revision===lookupRevision.current){
         const rows=scopedExternalCities(value,account,islandX,islandY).filter(r=>!actual(r.id));
-        setExternal(rows);setLookupMessage(rows.length?"Select a destination from the verified island.":"No eligible external cities on this island.");
+        const merged=mergeIslandCities(retained,rows,islandX,islandY);
+        const invalidated=new Set(merged.invalidated);
+        setRoutes(old=>old.map(r=>invalidated.has(r.to)?{...r,to:0}:r));
+        setExternal(merged.cities);setLookupMessage(rows.length?"Select a destination from the verified island.":"No eligible external cities on this island.");
       }
     }catch{if(mounted.current&&revision===lookupRevision.current)setLookupMessage("Island lookup unavailable.");}
     finally{if(mounted.current&&revision===lookupRevision.current)setLookingUp(false);}
@@ -199,9 +213,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       {task==="alertAttacks"&&numeric(t("Check for attacks every (minutes)"),minutes,setMinutes,3,1440)}
       {task==="alertLowWine"&&<>{numeric(t("Warn when wine has less than (hours)"),hours,setHours,1,720)}<label className="check-label"><input type="checkbox" checked={autoTransfer} onChange={e=>{edit();setAutoTransfer(e.target.checked);}}/>{t("Automatic wine transfer")}</label>{autoTransfer&&numeric(t("Wine to transfer"),transferAmount,setTransferAmount,1,MAX_AMOUNT)}</>}
       {(task==="sendResources"||(task==="resourceTransportManager"&&mode==="consolidate"))&&<fieldset><legend>{t("Find external cities")}</legend>
-          <label className="field"><span>{t("Island X")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandX)?"":islandX} onChange={e=>{resetExternal();setIslandX(e.target.value===""?NaN:Number(e.target.value));}}/></label>
-          <label className="field"><span>{t("Island Y")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandY)?"":islandY} onChange={e=>{resetExternal();setIslandY(e.target.value===""?NaN:Number(e.target.value));}}/></label>
+          <label className="field"><span>{t("Island X")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandX)?"":islandX} onChange={e=>{(task==="sendResources"?cancelLookup:resetExternal)();setIslandX(e.target.value===""?NaN:Number(e.target.value));}}/></label>
+          <label className="field"><span>{t("Island Y")}</span><input type="number" min={1} max={100} step={1} value={Number.isNaN(islandY)?"":islandY} onChange={e=>{(task==="sendResources"?cancelLookup:resetExternal)();setIslandY(e.target.value===""?NaN:Number(e.target.value));}}/></label>
           <button type="button" className="secondary-button" disabled={lookingUp||!cities.length||!Number.isInteger(islandX)||islandX<1||islandX>100||!Number.isInteger(islandY)||islandY<1||islandY>100} onClick={()=>void lookup()}>{t(lookingUp?"Looking up cities…":"Find external cities")}</button>
+          {task==="sendResources"&&<><button type="button" className="secondary-button" disabled={!external.length} onClick={resetExternal}>{t("Clear external cities")}</button><p>{external.length} {t("Verified external cities")}. {t("Search another island to add destinations.")}</p></>}
           {lookupMessage&&<p role="status">{t(lookupMessage)}</p>}
         </fieldset>}
       {task==="sendResources"&&<>

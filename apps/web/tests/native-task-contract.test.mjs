@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities,scopedShipmentPlan} from "../lib/native-task-contract.ts";
+import {validNativeConfig,validNativeLaunch,playerNames,scopedCities,readyPreflight,MAX_AMOUNT,launchAlertBatch,validWorkerDraft,validWorkerLaunch,scopedExternalCities,scopedShipmentPlan,mergeIslandCities,removeIslandCities} from "../lib/native-task-contract.ts";
 test("fixed shipment: strict route shape, positive quantities, distinct cities, no unverified external/raw override",()=>{
   const route={from:1,to:2,resources:[5,0,0,0,0]};
   const config={routes:[route],useFreighters:false};
@@ -149,4 +149,17 @@ test("recurring consolidation allows only a complete verified external identity"
   assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44}),false);
   assert.equal(validNativeConfig("resourceTransportManager",{...base,recipient:7}),false);
   assert.equal(validNativeConfig("resourceTransportManager",{...base,island:44,recipient:0}),false);
+});
+
+test("multiple islands retain prior routes but invalidate refreshed and moved recipients",()=>{
+  const first={id:9,island:44,recipient:7,name:"Town",owner:"Other"};
+  const second={id:10,island:45,recipient:8,name:"Second",owner:"Another"};
+  const a=mergeIslandCities([], [first],50,60);
+  const b=mergeIslandCities(a.cities,[second],51,60);
+  assert.deepEqual(b.cities.map(c=>[c.id,c.x,c.y]),[[9,50,60],[10,51,60]]);
+  assert.deepEqual(b.invalidated,[]);
+  const c=mergeIslandCities(b.cities,[{...first,island:45,recipient:99}],51,60);
+  assert.deepEqual(c.invalidated,[9,10]);
+  assert.deepEqual(c.cities.map(r=>r.recipient),[99]);
+  assert.deepEqual(removeIslandCities(b.cities,51,60),a.cities);
 });

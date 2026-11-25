@@ -14,7 +14,6 @@ from urllib.parse import urlsplit
 import httpx
 
 from daedalus.reviewed_operations import (
-    WORKER_TASKS,
     validate_attack_inventory,
     validate_attack_plan,
     validate_build_inventory,
@@ -195,12 +194,9 @@ class DaedalusClient:
 
     def start_reviewed_task(self, account_id: str, task: str, preview_id: str,
                             request_id: str) -> dict[str, object]:
-        if task == "constructionList":
-            if not _ACCOUNT_ID.fullmatch(account_id) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", preview_id):
-                raise ValueError("Invalid construction review")
-            return self._write(f"accounts/{account_id}/tasks/construction-start", {
-                "preview_id": preview_id, "request_id": request_id, "confirmed": True,
-            })
+        from daedalus.reviewed_batch import validated_batch_entries
+
+        validated_batch_entries([{"account_id": account_id, "task": task, "preview_id": preview_id}])
         return self.start_task(account_id, task, {"preview_id": preview_id},
                                request_id, confirmed=True)
 
@@ -210,70 +206,19 @@ class DaedalusClient:
     ) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id):
             raise ValueError("Invalid account ID")
-        if task == "constructionList" and set(config) == {"preview_id"}:
-            return self._write(f"accounts/{account_id}/tasks/construction-start", {
-                "preview_id": config["preview_id"], "request_id": request_id, "confirmed": confirmed,
-            })
-        if task == "sendResources" and set(config) == {"preview_id"}:
-            return self._write(f"accounts/{account_id}/tasks/shipment-start", {
-                "preview_id": config["preview_id"], "request_id": request_id, "confirmed": confirmed,
-            })
-        if task in WORKER_TASKS:
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the worker assignment first")
-            return self._write(f"accounts/{account_id}/tasks/worker-start", {
-                "task": task, "preview_id": config["preview_id"],
-                "request_id": request_id, "confirmed": confirmed,
-            })
-        if task == "vacationMode":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the vacation mode first")
-            return self._write(f"accounts/{account_id}/tasks/vacation-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "attackBarbarians":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the manual attack first")
-            return self._write(f"accounts/{account_id}/tasks/attack-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "autoBarbarians":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the automatic attack first")
-            return self._write(f"accounts/{account_id}/tasks/grind-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "stationArmy":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the deployment first")
-            return self._write(f"accounts/{account_id}/tasks/station-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "constructBuilding":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the building first")
-            return self._write(f"accounts/{account_id}/tasks/build-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "reorganizeCityBuildings":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the layout first")
-            return self._write(f"accounts/{account_id}/tasks/layout-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
-        if task == "donate":
-            if set(config) != {"preview_id"} or not isinstance(config["preview_id"], str):
-                raise ValueError("Review the donation first")
-            return self._write(f"accounts/{account_id}/tasks/donation-start", {
-                "preview_id": config["preview_id"], "request_id": request_id,
-                "confirmed": confirmed,
-            })
+        from daedalus.reviewed_batch import PREVIEW_ID_PATTERN, REVIEW_ENDPOINTS
+
+        endpoint = REVIEW_ENDPOINTS.get(task)
+        # Keep legacy own-city construction/shipment clients compatible.
+        if endpoint and (task not in {"constructionList", "sendResources"} or set(config) == {"preview_id"}):
+            if (set(config) != {"preview_id"} or not isinstance(config["preview_id"], str)
+                    or not re.fullmatch(PREVIEW_ID_PATTERN, config["preview_id"])):
+                raise ValueError("Prepare a valid operation review first")
+            payload = {"preview_id": config["preview_id"], "request_id": request_id,
+                       "confirmed": confirmed}
+            if endpoint == "worker-start":
+                payload["task"] = task
+            return self._write(f"accounts/{account_id}/tasks/{endpoint}", payload)
         return self._write(f"accounts/{account_id}/tasks", {
             "task": task, "config": config, "request_id": request_id,
             "confirmed": confirmed,

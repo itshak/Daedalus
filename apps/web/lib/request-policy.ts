@@ -1,4 +1,5 @@
 // Pure allowlist — safe to exercise outside the Next.js runtime.
+import {REVIEW_START_ROUTES} from "./generated-operation-contract.ts";
 const simpleRead = new Set(["health", "accounts", "capabilities", "task-control", "account-config", "recovery"]);
 const accountResources = new Set(["session", "cities", "academies", "taverns", "miracles", "shrine-status", "pirate-fortresses", "military", "ship-movements", "tasks"]);
 const cityResources = new Set(["buildings", "build-options", "attack-options", "trainable-units", "workshop-upgrades", "market-quotes"]);
@@ -37,7 +38,7 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "shipment-plan") return params.size===0;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "tasks") return true;
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "cities" && safeNumber.test(parts[3]) && ["construction-plan","donation-plan","worker-plan","layout-plan","build-plan","station-plan","grind-plan","attack-plan","vacation-plan"].includes(parts[4]) && params.size === 0) return true;
-    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && ["construction-start","donation-start","worker-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","shipment-start"].includes(parts[3]) && params.size === 0) return true;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && REVIEW_START_ROUTES.includes(parts[3]) && params.size === 0) return true;
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "tasks" && parts[4] === "stop") return true;
     if (parts.length === 6 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "requests" && parts[5] === "acknowledge") return true;
   }

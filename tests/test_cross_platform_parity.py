@@ -37,3 +37,12 @@ def test_versioned_coverage_manifest_matches_source_and_committed_matrix():
         assert operation["live_accepted"] is False
         assert operation["desktop"] in {"native", "existing_view", "protected_local", "pending"}
         assert operation["web"] in {"native", "existing_view", "protected_local", "pending"}
+
+
+def test_generated_web_launch_contract_matches_python():
+    import runpy
+
+    root = Path(__file__).resolve().parents[1]
+    generator = runpy.run_path(str(root / "scripts/generate_operation_contract.py"))
+    expected = generator["render"]()
+    assert (root / "apps/web/lib/generated-operation-contract.ts").read_text() == expected

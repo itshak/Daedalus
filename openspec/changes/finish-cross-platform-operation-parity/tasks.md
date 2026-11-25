@@ -12,3 +12,9 @@
 - [ ] Owner performs real-account acceptance, approves remaining security boundaries and verifies production readiness. No real game actions in CI.
 - [ ] Verify backend rollout, Vercel deployment, Mac DMG and rollback; publish exact versions/links only after acceptance.
 - [ ] Close every outstanding original criterion in original-tasks.md with evidence, update docs and matrix, and archive this successor only after verification.
+
+
+## Implemented follow-up slices (2026-11-25)
+
+- [x] Preserve verified destinations across multiple island lookups in one-time shipment editors; invalidate refreshed, moved or cleared recipient selections, retain authoritative worker revalidation and limit lookup inventory to ten islands.
+- [x] Generate the versioned web native launch inventory, reviewed ticket endpoints, batch size and ticket syntax from the Python contract; consume the shared endpoint mapping in the desktop client and BFF and enforce drift in pytest.

@@ -1,8 +1,6 @@
 // Native web task contracts: only reviewed operations may use the web launch route.
-export const NATIVE_TASKS = ["sendResources", "distributeResources", "consolidateResources",
-  "resourceTransportManager", "alertAttacks", "alertLowWine", "loginDaily", "research",
-  "tavernManager", "activateMiracle", "activateShrine", "donationBot", "autoPirate",
-  "searchForIslandSpaces", "dumpWorld", "trainArmy", "UpgradeUnits", "buyResources", "sellResources", "testTelegramBot", "testDiscordBot"] as const;
+import {NATIVE_TASKS} from "./generated-operation-contract.ts";
+export {NATIVE_TASKS};
 export type NativeTask = typeof NATIVE_TASKS[number];
 export const DOMAIN_TASKS = ["loginDaily","research","tavernManager","activateMiracle","activateShrine","donationBot","autoPirate","searchForIslandSpaces","dumpWorld"] as const;
 export const CITY_TASKS = ["trainArmy","UpgradeUnits","buyResources","sellResources"] as const;
@@ -275,6 +273,18 @@ export function scopedExternalCities(value:unknown,account:string,x:number,y:num
       new Set(value.cities.map(r=>r.id)).size!==value.cities.length || new Set(value.cities.map(r=>r.island)).size>1)
     throw new Error("Invalid island inventory");
   return value.cities as ExternalCity[];
+}
+
+export type LocatedExternalCity = ExternalCity & {x:number;y:number};
+export function removeIslandCities(rows:LocatedExternalCity[],x:number,y:number):LocatedExternalCity[]{
+  return rows.filter(r=>r.x!==x||r.y!==y);
+}
+export function mergeIslandCities(rows:LocatedExternalCity[],incoming:ExternalCity[],x:number,y:number):{cities:LocatedExternalCity[];invalidated:number[]}{
+  const found=new Set(incoming.map(r=>r.id));
+  const keep=removeIslandCities(rows,x,y).filter(r=>!found.has(r.id));
+  if(new Set(keep.map(r=>r.x+":"+r.y)).size>=10)throw new Error("Island limit reached");
+  const invalidated=rows.filter(r=>!keep.includes(r)).map(r=>r.id);
+  return {cities:[...keep,...incoming.map(r=>({...r,x,y}))],invalidated};
 }
 
 export type ShipmentObservation = {from:number;to:number;origin_name:string;destination_name:string;

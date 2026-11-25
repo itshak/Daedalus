@@ -6,11 +6,28 @@ from uuid import uuid4
 
 from daedalus.reviewed_operations import CITY_REVIEW_TASKS
 
-BATCH_REVIEW_TASKS = CITY_REVIEW_TASKS | {"constructionList", "sendResources"}
+REVIEW_ENDPOINTS = {
+    "constructionList": "construction-start",
+    "sendResources": "shipment-start",
+    "donate": "donation-start",
+    "modifyProduction": "worker-start",
+    "modifyAcademyWorkers": "worker-start",
+    "modifyTempleWorkers": "worker-start",
+    "reorganizeCityBuildings": "layout-start",
+    "constructBuilding": "build-start",
+    "stationArmy": "station-start",
+    "autoBarbarians": "grind-start",
+    "attackBarbarians": "attack-start",
+    "vacationMode": "vacation-start",
+}
+BATCH_REVIEW_TASKS = frozenset(REVIEW_ENDPOINTS)
+assert BATCH_REVIEW_TASKS == CITY_REVIEW_TASKS | {"constructionList", "sendResources"}
+MAX_REVIEW_BATCH = 32
+PREVIEW_ID_PATTERN = r"[A-Za-z0-9_-]{43}"
 
 
 def validated_batch_entries(entries: object) -> list[dict[str, str]]:
-    if not isinstance(entries, list) or not 1 <= len(entries) <= 32:
+    if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_REVIEW_BATCH:
         raise ValueError("Select 1 to 32 independently reviewed accounts")
     seen_accounts, seen_tickets = set(), set()
     for row in entries:
@@ -19,7 +36,7 @@ def validated_batch_entries(entries: object) -> list[dict[str, str]]:
                 or not re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", row["account_id"])
                 or not isinstance(row["task"], str) or row["task"] not in BATCH_REVIEW_TASKS
                 or not isinstance(row["preview_id"], str)
-                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", row["preview_id"])
+                or not re.fullmatch(PREVIEW_ID_PATTERN, row["preview_id"])
                 or row["account_id"] in seen_accounts or row["preview_id"] in seen_tickets):
             raise ValueError("Invalid independent account review")
         seen_accounts.add(row["account_id"])

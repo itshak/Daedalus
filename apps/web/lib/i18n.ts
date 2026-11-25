@@ -2,6 +2,10 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Clear external cities before searching more than ten islands.": "Очистите чужие города перед поиском более десяти островов.",
+  "Search another island to add destinations.": "Найдите другой остров, чтобы добавить города назначения.",
+  "Verified external cities": "Проверенные чужие города",
+  "Clear external cities": "Очистить чужие города",
   "Notification credentials, proxy settings, challenge handling and custom extensions must be managed on the authenticated worker host. The browser does not expose raw game services, developer cookies or unverified update commands.": "Учётные данные уведомлений, прокси, проверки и расширения настраиваются на узле авторизованного рабочего процесса. Браузер не предоставляет прямой доступ к игровому серверу, cookie разработчика или непроверенным командам обновления.",
   "unsupported": "Не поддерживается",
   "not configured": "Не настроено",

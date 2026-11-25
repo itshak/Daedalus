@@ -1,16 +1,16 @@
-const endpoints:Record<string,string>={constructionList:"construction-start",sendResources:"shipment-start",donate:"donation-start",
-  modifyProduction:"worker-start",modifyAcademyWorkers:"worker-start",modifyTempleWorkers:"worker-start",reorganizeCityBuildings:"layout-start",
-  constructBuilding:"build-start",stationArmy:"station-start",autoBarbarians:"grind-start",attackBarbarians:"attack-start",vacationMode:"vacation-start"};
+import {REVIEW_ENDPOINTS,MAX_REVIEW_BATCH,PREVIEW_ID_PATTERN} from "./generated-operation-contract.ts";
+const endpoints:Readonly<Record<string,string>>=REVIEW_ENDPOINTS;
+const previewPattern=new RegExp("^"+PREVIEW_ID_PATTERN+"$");
 export type ReviewEntry={account_id:string;task:string;preview_id:string};
 export type QueuedReview=ReviewEntry&{accountName:string;summary:string;expiresAt:number};
 export type BatchResult={account_id:string;status:"started"|"blocked"|"unconfirmed"|"not attempted";request_id?:string;reason?:string};
 function obj(v:unknown):v is Record<string,unknown>{return typeof v==="object"&&v!==null&&!Array.isArray(v);}
 export function validReviewBatch(v:unknown):boolean{
-  if(!obj(v)||Object.keys(v).length!==1||!Array.isArray(v.entries)||v.entries.length<1||v.entries.length>32)return false;
+  if(!obj(v)||Object.keys(v).length!==1||!Array.isArray(v.entries)||v.entries.length<1||v.entries.length>MAX_REVIEW_BATCH)return false;
   const accounts=new Set(),tickets=new Set();
   for(const row of v.entries){
     if(!obj(row)||Object.keys(row).length!==3||typeof row.account_id!=="string"||!/^[a-z][a-z0-9_-]{0,47}$/.test(row.account_id)
-       ||typeof row.task!=="string"||!Object.hasOwn(endpoints,row.task)||typeof row.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(row.preview_id)
+       ||typeof row.task!=="string"||!Object.hasOwn(endpoints,row.task)||typeof row.preview_id!=="string"||!previewPattern.test(row.preview_id)
        ||accounts.has(row.account_id)||tickets.has(row.preview_id))return false;
     accounts.add(row.account_id);tickets.add(row.preview_id);
   }

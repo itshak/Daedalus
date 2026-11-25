@@ -888,9 +888,31 @@ def test_external_city_selection_rejects_stale_lookup_and_preserves_own_origins(
                                    "resources": [50, 0, 0, 0, 0]}]
     assert "Town — Other" in editor.summary()
     editor.x.setValue(51)
+    assert target.currentData() == 999
+    assert "50:60" in target.currentText()
+    editor._lookup()
+    editor.set_external(result, calls[0][2])
+    assert target.currentData() == 999
+    editor.set_external({"x": 51, "y": 60, "cities": [
+        {"id": 1000, "recipient": 777, "island": 45, "name": "Second", "owner": "Another"}
+    ]}, calls[-1][2])
+    editor.add_route()
+    editor.table.cellWidget(1, 0).setCurrentIndex(1)
+    editor.table.cellWidget(1, 1).setCurrentIndex(3)
+    editor.table.cellWidget(1, 2).setValue(20)
+    assert [r["island"] for r in editor.to_config()] == [44,45]
+    assert "51:60" in editor.table.cellWidget(1, 1).currentText()
+    editor._lookup()
+    assert target.currentData() == 999
+    assert editor.table.cellWidget(1, 1).currentIndex() == 0
+    editor.set_external({"x": 51, "y": 60, "cities": [
+        {"id": 999, "recipient": 555, "island": 45, "name": "Moved", "owner": "Changed"}
+    ]}, calls[-1][2])
     assert target.currentIndex() == 0
     with pytest.raises(ValueError):
         editor.to_config()
+    editor.clear_external_button.click()
+    assert target.count() == 2
     editor.close()
 
 

@@ -108,10 +108,13 @@ class ShipmentRoutesEditor(QWidget):
             field.setMaximum(100)
             search.addWidget(QLabel(label))
             search.addWidget(field)
-            field.valueChanged.connect(self._invalidate_external)
+            field.valueChanged.connect(self._cancel_lookup)
         self.lookup_button = PushButton("Find external cities")
         self.lookup_button.clicked.connect(self._lookup)
         search.addWidget(self.lookup_button)
+        self.clear_external_button = PushButton("Clear external cities")
+        self.clear_external_button.clicked.connect(self._invalidate_external)
+        search.addWidget(self.clear_external_button)
         layout.addLayout(search)
         self.lookup_note = QLabel("Optional: find another player's city by island coordinates.")
         self.lookup_note.setWordWrap(True)
@@ -139,6 +142,7 @@ class ShipmentRoutesEditor(QWidget):
         self.add_button.setEnabled(bool(self._cities) and (len(self._cities) >= 2 or bool(self._external)) and len(self._rows) < 20)
         self.remove_button.setEnabled(bool(self._rows))
         self.lookup_button.setEnabled(bool(self._cities))
+        self.clear_external_button.setEnabled(bool(self._external))
 
     def set_cities(self, cities: list[dict[str, object]]) -> None:
         # On account/session refresh the previous row IDs must be discarded.
@@ -210,7 +214,7 @@ class ShipmentRoutesEditor(QWidget):
     def _destination_choices(self):
         return self._cities + [
             {"id": row["id"], "name": f"{row['name']} — {row['owner']}",
-             "coords": f"{self.x.value()}:{self.y.value()}"}
+             "coords": row["coords"]}
             for row in self._external if row["id"] not in {c["id"] for c in self._cities}
         ]
 
@@ -229,6 +233,11 @@ class ShipmentRoutesEditor(QWidget):
         self._controls()
         self.changed.emit()
 
+    def _cancel_lookup(self, *_args):
+        self._lookup_nonce = None
+        self._lookup_coords = None
+        self.lookup_note.setText("Search another island; verified destinations remain available until refreshed or cleared.")
+
     def _invalidate_external(self, *_args):
         self._lookup_nonce = None
         self._lookup_coords = None
@@ -237,7 +246,15 @@ class ShipmentRoutesEditor(QWidget):
         self._refresh_destinations()
 
     def _lookup(self):
-        self._invalidate_external()
+        self._cancel_lookup()
+        coords = f"{self.x.value()}:{self.y.value()}"
+        # A refreshed island must be selected again. Other island drafts survive.
+        self._external = [r for r in self._external if r["coords"] != coords]
+        if len({r["coords"] for r in self._external}) >= 10:
+            self.lookup_note.setText("Clear external cities before searching more than ten islands.")
+            self._refresh_destinations()
+            return
+        self._refresh_destinations()
         self._lookup_nonce = str(uuid.uuid4())
         self._lookup_coords = (self.x.value(), self.y.value())
         self.lookup_note.setText("Looking up cities on the selected island…")
@@ -248,8 +265,15 @@ class ShipmentRoutesEditor(QWidget):
             return
         self._lookup_nonce = None
         owned = {c["id"] for c in self._cities}
-        self._external = [r for r in result["cities"] if r["id"] not in owned]
-        self.lookup_note.setText(f"{len(self._external)} eligible external cities. Choose a destination in each route.")
+        coords = f"{result['x']}:{result['y']}"
+        rows = [{**r, "coords": coords} for r in result["cities"] if r["id"] not in owned]
+        # If a city appears at a different island, never silently retarget an
+        # existing route; remove the old selection before adding the new record.
+        found = {r["id"] for r in rows}
+        self._external = [r for r in self._external if r["id"] not in found]
+        self._refresh_destinations()
+        self._external.extend(rows)
+        self.lookup_note.setText(f"{len(self._external)} eligible external cities across searched islands. Choose a destination in each route.")
         self._refresh_destinations()
 
     def lookup_failed(self, nonce):

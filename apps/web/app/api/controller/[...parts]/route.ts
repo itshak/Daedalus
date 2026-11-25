@@ -1,3 +1,4 @@
+import {REVIEW_START_ROUTES} from "@/lib/generated-operation-contract";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
@@ -83,8 +84,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
       return NextResponse.json({error:"Invalid layout draft"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "donation-plan" && !donationDraft.safeParse(value).success)
       return NextResponse.json({ error: "Invalid donation draft" }, { status: 422, headers: responseHeaders });
-    if (["construction-start","donation-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","shipment-start"].includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
-      return NextResponse.json({ error: "Explicit construction review required" }, { status: 422, headers: responseHeaders });
+    if (parts.at(-1) !== "worker-start" && REVIEW_START_ROUTES.includes(parts.at(-1)??"") && !constructionStart.safeParse(value).success)
+      return NextResponse.json({ error: "Explicit operation review required" }, { status: 422, headers: responseHeaders });
     if (parts.at(-1) === "acknowledge" && JSON.stringify(value) !== '{"confirmed":true}')
       return NextResponse.json({ error: "Explicit confirmation required" }, { status: 422, headers: responseHeaders });
     if (parts[0] === "recovery" && parts[1] === "policy" && parts[2] === "bulk" && !recoveryBulk.safeParse(value).success)
