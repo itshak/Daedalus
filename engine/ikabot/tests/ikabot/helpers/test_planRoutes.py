@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
-from ikabot.helpers.planRoutes import sendGoods, splitCargoBetweenFleets
+from ikabot.helpers.planRoutes import sendGoods, splitCargoBetweenFleets, transport_feedback
 
 
 class TestSplitCargoBetweenFleets(unittest.TestCase):
@@ -151,9 +151,9 @@ class TestShipmentOutcome(unittest.TestCase):
         self.session._daedalus_cookies_only = True
         self.session.get.return_value = "currentCityId: 7, not a city view"
         self.session._daedalus_reviewed_transport_post.side_effect = [
-            "ok", '[null,null,null,[null,[{"type":10}]]]']
+            "ok", '[["provideFeedback",[{"type":10}]],["updateGlobalData",{}]]']
         guard = Mock()
-        with patch("ikabot.helpers.planRoutes.getCity", return_value={
+        with patch("ikabot.helpers.planRoutes.getAvailableShips", return_value=1), patch("ikabot.helpers.planRoutes.getCity", return_value={
             "id": "1", "availableResources": [100] * 5
         }) as parser:
             sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0], before_send=guard)
@@ -162,7 +162,23 @@ class TestShipmentOutcome(unittest.TestCase):
         self.assertEqual(calls[0].args[0]["currentCityId"], "7")
         self.assertEqual(calls[1].args[0]["cargo_resource"], 10)
         guard.assert_called_once()
+        self.assertEqual(calls[1].args[0]["normalTransportersMax"], 1)
         self.session.post.assert_not_called()
+
+    def test_named_feedback_is_not_position_dependent(self):
+        self.assertEqual(transport_feedback('[["provideFeedback",[{"type":10}]],["updateGlobalData",{}]]'), "accepted")
+        self.assertEqual(transport_feedback('[["updateGlobalData",{}],["provideFeedback",[{"type":10}]]]'), "accepted")
+
+    def test_feedback_errors_and_unknown_are_never_success(self):
+        for response, expected in [
+            ('[["provideFeedback",[{"type":11}]]]', "transport_rejected"),
+            ('[["provideFeedback",[{"type":10},{"type":11}]]]', "transport_rejected"),
+            ('[["updateGlobalData",{"type":10}]]', "transport_feedback_unconfirmed"),
+            ('[["provideFeedback",[{"type":99}]]]', "transport_feedback_unconfirmed"),
+            ('<html>private</html>', "invalid_transport_response"),
+            ('[["provideFeedback",[{"type":"10"}]]]', "invalid_transport_response"),
+        ]:
+            self.assertEqual(transport_feedback(response), expected)
 
     def test_confirmed_shipment_records_exact_cargo(self):
         self.session.post.side_effect = ["ok", '[null,null,null,[null,[{"type":10}]]]']

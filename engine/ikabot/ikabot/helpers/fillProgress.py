@@ -2,7 +2,9 @@
 STAGES = ("initializing", "preparing", "checking_destination", "waiting_ships",
           "checking_source", "checking_current_city", "switching_city",
           "checking_guard", "verifying_token", "submitting", "verifying_cargo",
-          "finished", "capacity_reached", "checking_transport_response")
+          "finished", "capacity_reached", "checking_transport_response",
+          "invalid_transport_response", "transport_rejected",
+          "transport_feedback_unconfirmed", "transport_source_mismatch")
 
 def mark(session, stage, submitted=None, verified=None):
     progress = getattr(session, "_daedalus_fill_progress", None)

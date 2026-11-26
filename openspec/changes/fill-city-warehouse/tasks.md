@@ -17,3 +17,7 @@
 - [x] Instrument bounded execution stages and submitted versus verified cargo; show progress in both clients.
 - [x] Avoid parsing the default view as a complete city for reviewed cookie transport.
 - [ ] Prove the precise live execution failure is resolved, including observed shipments and final stock.
+
+- [x] Classify named game feedback without relying on response-array offset; distinguish rejected and unknown outcomes.
+- [x] Complete destination checks before final source selection and attest source context at submission.
+- [ ] Verify the response correction on a real reviewed shipment.

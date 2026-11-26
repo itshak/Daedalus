@@ -1535,6 +1535,11 @@ class Session:
         html = self.get()
         if not attest_player_from_world_html(html, self.username):
             raise RuntimeError("Reviewed transport account verification failed")
+        if params["action"] == "transportOperations":
+            selected = re.search(r"currentCityId:\s*(\d+),", html)
+            if selected is None or selected.group(1) != str(params.get("currentCityId")):
+                mark(self, "transport_source_mismatch")
+                raise RuntimeError("Reviewed transport source context changed")
         match = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
         if match is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", match.group(1)):
             raise RuntimeError("Reviewed transport request token unavailable")

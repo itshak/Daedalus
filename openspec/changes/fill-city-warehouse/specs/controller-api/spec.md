@@ -34,3 +34,7 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: A managed transfer fails or waits for ships
 - **WHEN** the warehouse worker is running or exits before its reviewed cargo is confirmed
 - **THEN** the controller SHALL expose a bounded execution stage and separately observed submitted and advisor-verified quantities, and the clients MUST NOT equate worker launch or exit with arrival
+
+#### Scenario: Transport feedback commands are reordered or rejected
+- **WHEN** the game returns a reviewed transport response
+- **THEN** the worker SHALL classify named feedback independently of command ordering, distinguish rejection from unconfirmed response, verify selected source context before submission, and MUST NOT count unknown outcomes as successful or replay them automatically.

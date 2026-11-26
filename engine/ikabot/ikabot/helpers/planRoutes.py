@@ -16,6 +16,35 @@ from ikabot.helpers.fillProgress import mark
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
+def transport_feedback(response):
+    """Read named game feedback, independent of command ordering.
+
+    Never infer success from a generic state update or arbitrary nested type.
+    The raw response and localized server text must not cross the IPC boundary.
+    """
+    try:
+        rows = json.loads(response, strict=False)
+    except (ValueError, TypeError):
+        return "invalid_transport_response"
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+        return "invalid_transport_response"
+    feedback = []
+    for entry in rows:
+        if not isinstance(entry, list) or not entry or entry[0] != "provideFeedback":
+            continue
+        if len(entry) != 2 or not isinstance(entry[1], list) or len(entry[1]) > 100:
+            return "invalid_transport_response"
+        for item in entry[1]:
+            if not isinstance(item, dict) or type(item.get("type")) is not int:
+                return "invalid_transport_response"
+            feedback.append(item["type"])
+    if 11 in feedback:
+        return "transport_rejected"
+    if feedback and all(kind == 10 for kind in feedback):
+        return "accepted"
+    return "transport_feedback_unconfirmed"
+
+
 def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None, before_send=None):
     """This function will execute one route
     Parameters
@@ -45,6 +74,11 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             html = session.get()
             currId = getCity(html)["id"]
         city = getCity(session.get(city_url + originCityId))
+        if cookie_review:
+            # The guard reads the destination city and advisor. Those views can
+            # change selected-city context. Complete them before selecting origin.
+            before_send()
+            currId = getCurrentCityId(session)
 
         # Change from the city the bot is sitting right now to the city we want to load resources from
         data = {
@@ -92,6 +126,11 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         if useFreighters is False:
             shiptype = "transporters"
             data[shiptype] = ships
+            if cookie_review:
+                available = getAvailableShips(session)
+                if type(available) is not int or available < ships:
+                    raise RuntimeError("Reviewed fleet changed; review before retry")
+                data["normalTransportersMax"] = available
         else:
             shiptype = "usedFreightersShips"
             data[shiptype] = ships
@@ -116,7 +155,7 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = amount
 
-        if before_send is not None:
+        if before_send is not None and not cookie_review:
             before_send()
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
@@ -126,6 +165,12 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         resp = (session._daedalus_reviewed_transport_post(data) if cookie_review
                 else session.post(params=data, retry_on_failure=False))
         mark(session, "checking_transport_response")
+        if cookie_review:
+            feedback = transport_feedback(resp)
+            if feedback != "accepted":
+                mark(session, feedback)
+                raise RuntimeError("Reviewed transport not confirmed; reconcile before retry")
+            break
         try:
             outcome = json.loads(resp, strict=False)[3][1][0]["type"]
         except (ValueError, TypeError, KeyError, IndexError):

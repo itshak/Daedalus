@@ -84,13 +84,13 @@ def test_reviewed_cookie_transport_attests_identity_and_posts_once():
     from ikabot.config import actionRequest
     from unittest.mock import Mock
 
-    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> currentCityId: 123, actionRequest: "abcdefgh1234"')
     session = session_with_existing_cookie(http)
     session.username = "ExamplePlayer"
     http.post = Mock(return_value=SimpleNamespace(
         url=session.urlBase, status_code=200, text="[]", content=b"[]", history=[]))
     params = {"action": "transportOperations", "function": "loadTransportersWithFreight",
-              "actionRequest": actionRequest, "cargo_resource": 50}
+              "actionRequest": actionRequest, "cargo_resource": 50, "currentCityId": "123"}
     with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
         assert session._daedalus_reviewed_transport_post(params) == "[]"
     http.post.assert_called_once_with(session.urlBase, params=dict(params, actionRequest="abcdefgh1234"),
@@ -115,3 +115,17 @@ def test_reviewed_cookie_transport_never_retries_timeout_or_wrong_identity():
     with pytest.raises(RuntimeError, match="verification failed"):
         session._daedalus_reviewed_transport_post(params)
     assert http.post.call_count == 1
+
+
+def test_reviewed_cookie_transport_refuses_changed_source_before_post():
+    from ikabot.config import actionRequest
+    from unittest.mock import Mock
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> currentCityId: 456, actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock()
+    with pytest.raises(RuntimeError, match="source context changed"):
+        session._daedalus_reviewed_transport_post({
+            "action": "transportOperations", "function": "loadTransportersWithFreight",
+            "actionRequest": actionRequest, "currentCityId": "123"})
+    http.post.assert_not_called()

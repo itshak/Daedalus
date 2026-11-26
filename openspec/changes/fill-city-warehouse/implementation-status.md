@@ -40,3 +40,7 @@ review is not a shipment; repaired live dispatch and delivery remain open.
 ### Execution diagnostics follow-up
 
 A live launch reached the child process but exited without observed incoming cargo. The managed process now exposes a bounded stage and cumulative submitted/verified cargo counts. Default game views are not assumed to contain full city data. Real dispatch and arrival acceptance remain open; a process start is not shipment success.
+
+### Transport response follow-up
+
+Live execution reached response checking, but no cargo was observed. The raw response was not retained or accessed. Replace positional feedback parsing for reviewed cookie shipments with named provideFeedback classification; check source context after destination guard and include the observed normal fleet limit. Distinguish explicit rejection, invalid response, unconfirmed feedback and changed source. Live acceptance is still open.
