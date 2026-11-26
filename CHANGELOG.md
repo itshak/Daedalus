@@ -8,6 +8,7 @@ Python version: `0.1.0b1`. Web version: `0.1.0-beta.1`. This entry describes the
 - Shared multi-account Python controller, native macOS Fluent application and private Next.js web control center.
 - Account-scoped warehouse and military reports, filtering, sorting, exports and printing, with an online-only two-minute warehouse cache.
 - Typed reviewed automation editors, independent batch scopes, activity receipts, managed stop, protected administrative views and localization.
+- Warehouse account selectors, table, search, and reports display game player names instead of login emails; duplicate names retain world/account disambiguation.
 - Compact desktop workspace, six settings sections, improved account/military tables and 142 automated synthetic screenshots covering all 33 operation editors.
 - Server-side operator-allowlisted sign-in, bounded gateway bodies and redacted audit metadata.
 - Headless-first Mac login, encrypted verified session handoff, default-on delayed recovery and durable safe-job reconciliation including confirmed owned-city fixed cargo.
