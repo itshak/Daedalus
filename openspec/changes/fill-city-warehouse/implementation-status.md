@@ -44,3 +44,7 @@ A live launch reached the child process but exited without observed incoming car
 ### Transport response follow-up
 
 Live execution reached response checking, but no cargo was observed. The raw response was not retained or accessed. Replace positional feedback parsing for reviewed cookie shipments with named provideFeedback classification; check source context after destination guard and include the observed normal fleet limit. Distinguish explicit rejection, invalid response, unconfirmed feedback and changed source. Live acceptance is still open.
+
+### Upstream CLI parity review
+
+Compared public stable 3ea1e0e, pinned PR #499 062feec and its current head 55d8877. All retain the same sendGoods payload and shared transport routine; the upstream JSON task normalizes routes before executing them. Restore the explicit zero cargo fields for positive source stock and do not introduce non-upstream fleet form fields. The reviewed warehouse planner retains its own storage guard and no-replay policy. Synthetic parity tests compare normalized arguments and exact request dictionaries. The historical server rejection is not conclusively diagnosed.

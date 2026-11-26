@@ -285,3 +285,40 @@ def test_progress_retains_failure_stage(offline, monkeypatch):
         worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
     assert snapshot(offline._daedalus_fill_progress) == {
         "stage": "checking_source", "submitted": 0, "verified": 0}
+
+
+def test_fill_json_load_matches_upstream_send_resources_cli(offline, monkeypatch):
+    """Both entrypoints produce the same normalized city and cargo arguments."""
+    from ikabot.function import sendResources as upstream
+    from ikabot.helpers.ipc import _validate_task_config, parse_config_arg
+
+    # Simulate the same JSON round-trip the authenticated IPC performs.
+    draft = {**DRAFT, "resource": "marble", "reviewed_sources": [{"city_id": 101, "amount": 100}]}
+    fill_config = _validate_task_config("fillCityWarehouse", worker.fill,
+                                       parse_config_arg(json.dumps(draft)))
+    cli_config = parse_config_arg(json.dumps({
+        "routes": [{"from": 101, "to": 103, "resources": {"marble": 100}}],
+        "useFreighters": False,
+    }))
+    names = {str(cid): {"name": name} for cid, name in NAMES.items()}
+    monkeypatch.setattr(upstream, "getIdsOfCities", lambda *_: (list(names), names))
+    monkeypatch.setattr(upstream, "requireOwnCity", lambda _s, cid, _n: str(cid))
+    monkeypatch.setattr(upstream, "getCityById", lambda _s, cid: CITIES[int(cid)])
+    monkeypatch.setattr(upstream, "setInfoSignal", Mock())
+    execute = Mock()
+    monkeypatch.setattr(upstream, "executeRoutes", execute)
+    prepared = upstream.prepare_sendResources(offline, **cli_config)
+    upstream.do_it.__wrapped__(offline, **prepared)
+    route = execute.call_args.args[1][0]
+    pending = [20]
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: pending[0])
+    def sender(*args, **kwargs):
+        kwargs["before_send"]()
+        pending[0] += args[5][2]
+    capture = Mock(side_effect=sender)
+    monkeypatch.setattr(worker, "sendGoods", capture)
+    worker.fill.__wrapped__(offline, **fill_config)
+    args = capture.call_args.args
+    assert (args[1], args[2], args[3], args[5], args[6]) == (
+        route[0]["id"], route[1]["id"], route[2], list(route[3:]), prepared["useFreighters"])
+    assert args[4] == 1

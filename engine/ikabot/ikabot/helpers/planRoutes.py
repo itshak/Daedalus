@@ -130,7 +130,6 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 available = getAvailableShips(session)
                 if type(available) is not int or available < ships:
                     raise RuntimeError("Reviewed fleet changed; review before retry")
-                data["normalTransportersMax"] = available
         else:
             shiptype = "usedFreightersShips"
             data[shiptype] = ships
@@ -151,7 +150,9 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                        for n, wanted in zip(city["availableResources"], send))):
             raise RuntimeError("Transport source changed; review remaining cargo before retrying")
         for i, amount in enumerate(send):
-            if amount:
+            # Preserve upstream sendGoods form semantics, including explicit
+            # zeros for resource inputs present in the source city.
+            if city["availableResources"][i] > 0:
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = amount
 
