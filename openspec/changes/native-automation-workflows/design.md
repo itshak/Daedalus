@@ -161,3 +161,13 @@ Use the operation-specific upstream queue/cooldown implementation for all suppor
 ## Engine parity and compatibility boundary
 
 Use the merged upstream CLI/IPC import ba6aaba as the comparison baseline. Preserve upstream operation helpers verbatim where possible; when an interactive configurator contains an inline request, extract that exact request once for CLI and reviewed callers. Keep native planning, scope validation, and no-replay behavior separate from gameplay request construction. Dedicated nativeReadForms validates the existing bounded read-only AJAX forms at the cookie-session boundary; the operation should not substitute a different game endpoint. Retain the original upstream wait, recruitment, workshop, building, market and calculation functions, with source guards for preserved helpers. See docs/UPSTREAM-ENGINE-PARITY.md for the full source inventory and outstanding cookie-session integration risks.
+
+
+## Military protected-read regression (PR #109)
+
+The upstream `cityMilitary` form was missing from the saved-cookie session
+read allowlist, causing fallback into the legacy session path. Add only the
+exact form to `nativeReadForms` and reuse the existing protected transport;
+keep `viewArmy` request construction and parsing unchanged under ADR-006.
+Record military-specific diagnostics without raw engine errors. The canonical
+engine, controller and desktop specifications define this contract.

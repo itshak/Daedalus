@@ -379,3 +379,15 @@ Consolidation, recurring transport, donation, island monitoring, aggregate repor
 #### Scenario: An operator queues multiple accounts
 - **WHEN** each account is independently reviewed
 - **THEN** each launch uses its own expiring ticket and durable request identifier without sharing another account's configuration
+
+### Requirement: Military read failure and observation contract
+The authenticated account-scoped military and ship-movements endpoints SHALL return bounded, source-backed observations for the exact existing session, with verified city membership and observation timestamps. They SHALL return a sanitized unavailable result when an observation cannot be verified, rather than invent zero counts or start a game login or order. Backend diagnostics SHALL identify the failing military read and configured account scope using nonsecret error categories without exposing raw engine exceptions, cookies, tokens or game HTML.
+
+#### Scenario: Successful empty movements versus unavailable inventory
+- **WHEN** an authenticated movement read succeeds with no movements, or a military read fails
+- **THEN** the successful empty result is distinguishable from a failed read, and the latter returns HTTP 503 with a military-specific safe error and backend warning
+
+#### Scenario: Production read-only acceptance
+- **WHEN** an authorized operator validates the deployed military feature using an existing authenticated account
+- **THEN** actual owned cities and unit counts are observed through the API, the movements endpoint is checked, and a subsequent read verifies that the worker remains available; no game orders are issued
+- **AND** public CI uses offline synthetic fixtures only

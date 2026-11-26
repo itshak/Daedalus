@@ -33,3 +33,10 @@ Every item starts unchecked. Keep this proposal active until implementation, aut
 - [ ] Configure Vercel project on default `daedalus-web-chi.vercel.app` (not Cloudflare DNS); preserve `daedalus.tongrix.com` and `daedalus-api.tongrix.com` as backend ingress; verify live authorized browser→BFF→FastAPI only after dedicated admin provisioning.
 - [ ] Document developer/setup/security/operational rollback; obtain owner acceptance of live workflows and Apple-quality interactions before production release.
 - [ ] Reconcile canonical OpenSpec and docs and archive this change only after verified completion; never mark unperformed live acceptance tasks done.
+
+
+## Warehouse dashboard usability and cache
+- [x] Restore the last valid workspace page after reload without persisting game snapshots.
+- [x] Use a sortable TanStack warehouse table with island/world, resource and stock threshold filters, search, filtered totals and exports.
+- [x] Reuse online per-account successful snapshots in volatile memory for 120 seconds, deduplicate requests, invalidate on refresh/offline and test expiry and isolation.
+- [ ] Verify the authenticated deployed dashboard interaction and visual layout.

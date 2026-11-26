@@ -78,3 +78,12 @@ while any checked product scope remains unresolved.
 - [x] Restore the upstream fleet timing helper and consolidate duplicated original request construction for building, layout, deployment and market resource selection.
 - [x] Isolate bounded read-only form validation from gameplay logic and test original request shapes and preserved helper source guards.
 - [ ] Finish individual verified-cookie integration and live acceptance for other state-changing operation POSTs; do not imply live coverage from read-only/parity tests.
+
+
+## Military read regression verification (PR #109)
+- [x] Add exact upstream `cityMilitary` form to the protected read adapter; reject extra fields and mismatched city IDs, retaining the upstream parser.
+- [x] Add offline regression coverage through the original helper and real cookie-session transport; add military-specific client and backend diagnostics.
+- [x] Verify deployed read-only inventory and movements endpoints against an existing authenticated account, including subsequent worker availability; owner confirmed the military feature works in the macOS GUI. No account identifiers, counts or runtime logs retained here.
+- [ ] Separately verify updated diagnostic presentation in released desktop and web builds; this is not established by the successful inventory refresh.
+- [x] Implement dedicated web troop/fleet row projection and tests instead of generic nested-object placeholders.
+- [ ] Verify the new web rendering in the authenticated deployed interface.

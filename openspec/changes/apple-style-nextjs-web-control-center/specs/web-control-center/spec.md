@@ -75,7 +75,7 @@ The web MUST reuse server preflight, per-account independent plans, durable uniq
 - **THEN** its outcome is shown as uncertain and replay remains blocked until authoritative reconciliation
 
 ### Requirement: Private network-only game state in PWA
-The PWA MAY cache public static shell files but MUST NOT store or replay privileged HTML, game snapshots, account details, auth responses or game mutations offline.
+The PWA MAY cache public static shell files but MUST NOT store or replay privileged HTML, game snapshots, account details, auth responses or game mutations offline. A mounted authenticated dashboard MAY reuse account-scoped successful observations in volatile memory for at most 120 seconds while online; no privileged data SHALL be persisted in browser storage.
 
 #### Scenario: PWA offline
 - **WHEN** the device is disconnected
