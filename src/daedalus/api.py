@@ -7,6 +7,7 @@ returns 503 rather than fabricated values.
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from collections.abc import Callable
@@ -66,6 +67,8 @@ from daedalus.task_control import (
     TaskUnavailable,
 )
 from daedalus.warehouse import CityWarehouseSnapshot
+
+logger = logging.getLogger("daedalus.api")
 
 SnapshotProvider = Callable[[str], list[CityWarehouseSnapshot]]
 
@@ -1493,6 +1496,8 @@ def create_app(
         try:
             data = ipc_client.military_overview(account)
         except (EngineIPCUnavailable, ValueError) as exc:
+            logger.warning("Authenticated military read failed for account %s (%s)",
+                           account_id, type(exc).__name__)
             raise HTTPException(
                 status_code=503, detail="Authenticated military data unavailable"
             ) from exc
@@ -1514,6 +1519,8 @@ def create_app(
         try:
             data = ipc_client.ship_movements(account)
         except (EngineIPCUnavailable, ValueError) as exc:
+            logger.warning("Authenticated ship movements read failed for account %s (%s)",
+                           account_id, type(exc).__name__)
             raise HTTPException(
                 status_code=503, detail="Authenticated movement data unavailable"
             ) from exc

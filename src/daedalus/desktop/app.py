@@ -73,6 +73,9 @@ def _safe_api_failure(reason: str) -> str:
     """Allow reviewed client errors in diagnostics, never arbitrary API bodies."""
     permitted = {
         "Cannot connect to Daedalus backend",
+        "Backend snapshot is not available yet",
+        "Invalid military overview response",
+        "Invalid ship movements response",
         "Backend task request was rejected",
         "Backend returned invalid task JSON",
         "Backend returned invalid task receipt",
@@ -2436,6 +2439,7 @@ class MainWindow(FluentWindow):
             account_id = getattr(worker, "account_id", None)
             if isinstance(account_id, str):
                 self.military_page.set_result(account_id, action, payload)
+                logger.info("Military %s refreshed", "inventory" if action == "military_overview" else "movements")
         elif action == "server_activity":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(payload, dict) and isinstance(request, dict):
