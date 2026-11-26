@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0-beta.1 — planned prerelease
+## 0.1.0 — first public prerelease
 
-Python version: `0.1.0b1`. Web version: `0.1.0-beta.1`. This entry describes the beta baseline, not a published versioned release.
+Python, web and macOS application version: `0.1.0`. This is a beta-quality first release, not stable certification. The publication status is authoritative on GitHub Releases.
 
 ### Added
 - Shared multi-account Python controller, native macOS Fluent application and private Next.js web control center.
@@ -12,6 +12,10 @@ Python version: `0.1.0b1`. Web version: `0.1.0-beta.1`. This entry describes the
 - Compact desktop workspace, six settings sections, improved account/military tables and 142 automated synthetic screenshots covering all 33 operation editors.
 - Server-side operator-allowlisted sign-in, bounded gateway bodies and redacted audit metadata.
 - Headless-first Mac login, encrypted verified session handoff, default-on delayed recovery and durable safe-job reconciliation including confirmed owned-city fixed cargo.
+
+### Release engineering
+- Version-gated Vercel builds: ordinary pushes skip deployment; version increments and explicit manual deployments remain supported.
+- Reproducible release staging with exact CI, Mac package provenance and SHA-256 verification; server-only wheel smoke testing.
 
 ### Safety and compatibility
 - Upstream-first IkaBot request, parser, shipment and fleet-wait reuse.

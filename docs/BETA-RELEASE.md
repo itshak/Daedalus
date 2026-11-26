@@ -1,6 +1,6 @@
 # First beta release preparation
 
-Target: Git tag `v0.1.0-beta.1`, Python `0.1.0b1`, web `0.1.0-beta.1`. This document prepares a prerelease, not stable certification or evidence of publication.
+Target: Git tag `v0.1.0`, Python `0.1.0`, web `0.1.0`. The owner requested the exact numeric version; the GitHub release SHALL remain marked as a prerelease pending live acceptance. This document prepares a prerelease, not stable certification or evidence of publication.
 
 ## Build and verification
 

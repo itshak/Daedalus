@@ -86,7 +86,7 @@ def web_stack(tmp_path):
                 return self.reply({},401)
             counts[path]+=1
             if path=="/api/v1/accounts":return self.reply({"accounts":accounts})
-            if path=="/api/v1/health":return self.reply({"mode":"task_control_opt_in","version":"0.1.0b1"})
+            if path=="/api/v1/health":return self.reply({"mode":"task_control_opt_in","version":"0.1.0"})
             if path=="/api/v1/capabilities":return self.reply({"operations":[{"name":"alertAttacks","workflow":{"web":"native"}}]})
             if path.startswith("/api/v1/warehouses/"):
                 aid=path.split("/")[-1];is_a=aid=="alpha"

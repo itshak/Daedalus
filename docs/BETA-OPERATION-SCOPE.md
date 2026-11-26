@@ -1,4 +1,4 @@
-# Beta operation scope — 0.1.0-beta.1
+# Beta operation scope — 0.1.0
 
 This is a source-backed option inventory, not a live support certification. Registry fields below are upstream task contracts, including hidden derived fields; they are not all editable or directly accepted as a raw launch payload. All 49 operations retain partial coverage or a protected-local boundary. Experimental legacy submission paths are not certified for cookie-only sessions. Do not assume a launch receipt establishes success or retry an uncertain outcome.
 

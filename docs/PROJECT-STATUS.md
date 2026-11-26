@@ -1,6 +1,6 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-26**, against merged desktop and beta baseline `f22f098` and final preparation work. The repository is preparing beta `0.1.0b1` (web SemVer `0.1.0-beta.1`); stable release is **NOT TESTED / NOT APPROVED**.
+Last reviewed: **2026-11-26**, against merged desktop and beta baseline `f22f098` and final preparation work. The repository is preparing beta `0.1.0` (web SemVer `0.1.0`); stable release is **NOT TESTED / NOT APPROVED**.
 
 ## Current engineering backlog
 
