@@ -21,14 +21,18 @@ export async function serverSupabase() {
   });
 }
 
+export async function operatorRole(supabase: NonNullable<Awaited<ReturnType<typeof serverSupabase>>>, userId: string) {
+  const { data: row, error } = await supabase.from("web_operators")
+    .select("role").eq("user_id", userId).eq("disabled", false).maybeSingle();
+  return !error && row && ["owner", "operator", "viewer"].includes(row.role) ? String(row.role) : null;
+}
+
 export async function authorizedOperator() {
   const supabase = await serverSupabase();
   if (!supabase) return { state: "not-configured" as const };
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return { state: "unauthenticated" as const };
-  const { data: row, error: roleError } = await supabase.from("web_operators")
-    .select("role").eq("user_id", user.id).eq("disabled", false).maybeSingle();
-  if (roleError || !row || !["owner", "operator", "viewer"].includes(row.role))
-    return { state: "forbidden" as const };
-  return { state: "authorized" as const, user, role: String(row.role) };
+  const role = await operatorRole(supabase, user.id);
+  if (!role) return { state: "forbidden" as const };
+  return { state: "authorized" as const, user, role };
 }

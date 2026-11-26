@@ -77,7 +77,7 @@ Daedalus uses the vendored public IkaBot 7.7.2 engine plus reviewed experimental
 
 ## Beta limitations
 
-- Full upstream option-level parity and live acceptance of all game-changing operations are not certified. See the [operation coverage matrix](docs/operation-coverage.json).
+- Full upstream option-level parity and live acceptance of all game-changing operations are not certified. See the [operation coverage matrix](docs/operation-coverage.json) and [beta operation scope and experimental limitations](docs/BETA-OPERATION-SCOPE.md).
 - Recovery defaults on only for eligible monitored backends and enabled accounts; explicit disables/pauses, missing protected credentials, unresolved receipts and identity checks take precedence. Unsupported or ambiguous jobs are not automatically replayed. Confirmed fixed cargo dispatch is not proof of delivery. See [automatic recovery](docs/AUTOMATIC-RECOVERY.md).
 - Real browser takeover, game-effect testing, full host reboot and physical Mac/VoiceOver acceptance remain separately tracked in [issue #60](https://github.com/itshak/Daedalus/issues/60). Use an isolated authorized account and do not assume a successful launch receipt proves game completion.
 - Native macOS DMGs are preview packages; other desktop platforms can be developed from source, but equivalent native distributions are not certified.
@@ -122,6 +122,6 @@ OpenSpec requirements live in [openspec/specs](openspec/specs/). See [engineerin
 
 ## License
 
-Daedalus-original code is GPL-3.0-only ([LICENSE](LICENSE)). The vendored IkaBot engine retains its original MIT license ([engine license](engine/ikabot/LICENSE)). See [upstream provenance](docs/UPSTREAM.md). Daedalus is independently developed and is not affiliated with Gameforge or the upstream IkaBot maintainers.
+Daedalus-original code is GPL-3.0-only ([LICENSE](LICENSE)). The vendored IkaBot engine retains its original MIT license ([engine license](engine/ikabot/LICENSE)). See [upstream provenance](engine/UPSTREAM.md). Daedalus is independently developed and is not affiliated with Gameforge or the upstream IkaBot maintainers.
 
 Release engineering: [first beta preparation](docs/BETA-RELEASE.md).

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { serverSupabase } from "@/lib/supabase";
+import { serverSupabase, operatorRole } from "@/lib/supabase";
 import { readBoundedBody } from "@/lib/bounded-body";
 import { loginTraffic } from "@/lib/traffic-guard";
 import { z } from "zod";
@@ -20,6 +20,11 @@ export async function POST(request:NextRequest){
     const supabase=await serverSupabase();if(!supabase)return denied();
     const {data,error}=await supabase.auth.signInWithPassword(parsed.data);
     if(error||!data.user)return denied();
+    // Valid provider credentials alone do not confer membership. Do not report
+    // success or retain a session for an uninvited or disabled operator.
+    let role: string|null = null;
+    try { role = await operatorRole(supabase, data.user.id); } catch { /* fail closed */ }
+    if(!role){ await supabase.auth.signOut({scope:"local"}); return denied(); }
     // Never return Supabase access/refresh tokens to JavaScript. Operator
     // membership is checked on every privileged request by authorizedOperator.
     return NextResponse.json({signedIn:true},{headers});

@@ -150,7 +150,9 @@ def test_browser_envelope_interoperates_with_python_worker(system):
 const v=JSON.parse(process.argv[1]); console.log(JSON.stringify(await sealNotificationSettings(v.challenge,"alpha","telegram",v.settings)));"""
     result = subprocess.run([node, "--experimental-strip-types", "--input-type=module", "-e", script,
         json.dumps({"challenge": challenge, "settings": SETTINGS})], cwd=root,
-        capture_output=True, text=True, timeout=15, check=False)
+        # Cold Node startup on hosted Windows can exceed 15s. Keep this
+        # bounded below the actual 120s challenge lifetime.
+        capture_output=True, text=True, timeout=60, check=False)
     if result.returncode and ("bad option" in result.stderr or "unknown option" in result.stderr):
         pytest.skip("Node.js does not support TypeScript stripping")
     assert result.returncode == 0, "Browser crypto interoperability failed"

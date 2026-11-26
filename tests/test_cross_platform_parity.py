@@ -47,3 +47,11 @@ def test_generated_web_launch_contract_matches_python():
     generator = runpy.run_path(str(root / "scripts/generate_operation_contract.py"))
     expected = generator["render"]()
     assert (root / "apps/web/lib/generated-operation-contract.ts").read_text() == expected
+
+
+def test_beta_scope_records_every_registered_operation():
+    root = Path(__file__).resolve().parents[1]
+    scope = (root / "docs/BETA-OPERATION-SCOPE.md").read_text(encoding="utf-8")
+    names = re.findall(r"^\| `([^`]+)` \|", scope, re.MULTILINE)
+    assert len(names) == len(set(names))
+    assert set(names) == set(coverage_manifest()["operations"])

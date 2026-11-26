@@ -142,6 +142,15 @@ def web_stack(tmp_path):
 def test_authenticated_dashboard_browser(web_stack):
     context,origin,counts,state=web_stack
     assert context.request.get(origin+"/api/controller/accounts").status==401
+    # A valid provider login is insufficient without a non-disabled allowlist row.
+    state["disabled"]=True
+    login={"email":USER["email"],"password":"fixture-only-password"}
+    denied=context.request.post(origin+"/api/login",headers={"Origin":origin},data=login)
+    assert denied.status==401 and denied.json()=={"error":"Unable to sign in"}
+    assert not any(c["name"].startswith("sb-") for c in context.cookies())
+    assert context.request.get(origin+"/api/controller/accounts").status==401
+    assert context.request.post(origin+"/api/login",headers={"Origin":"https://foreign.invalid"},data=login).status==403
+    state["disabled"]=False
     page=context.new_page();page.set_default_timeout(10_000);page.goto(origin+"/login")
     page.get_by_label("Email address").fill(USER["email"])
     page.get_by_label("Password",exact=True).fill("fixture-only-password")

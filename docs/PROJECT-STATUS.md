@@ -1,12 +1,12 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-26**, against consolidation baseline `8ac3b18` and beta engineering work. The repository is preparing beta `0.1.0b1` (web SemVer `0.1.0-beta.1`); stable release is **NOT TESTED / NOT APPROVED**.
+Last reviewed: **2026-11-26**, against merged desktop and beta baseline `f22f098` and final preparation work. The repository is preparing beta `0.1.0b1` (web SemVer `0.1.0-beta.1`); stable release is **NOT TESTED / NOT APPROVED**.
 
 ## Current engineering backlog
 
 **Exactly one active OpenSpec implementation change:** [`finish-v010-engineering`](../openspec/changes/finish-v010-engineering/tasks.md). Six prior proposals were archived as superseded, not certified complete; all 122 previously unchecked tasks have a disposition. See [reconciliation and evidence](V010-RECONCILIATION.md), [permanent operation coverage](operation-coverage.json) and [owner-only acceptance](V010-OWNER-ACCEPTANCE.md) ([issue #60](https://github.com/itshak/Daedalus/issues/60)). Engineering closure does not waive stable release acceptance. E3 automated integration coverage, E4 recovery engineering and E5 automated UI QA are implemented; E1 remaining upstream compatibility, E2 deployment security and E6 release engineering remain open.
 
-The latest main had seven successful CI workflows, a published matching Mac preview DMG/checksum and a READY Vercel production deployment. The live backend was healthy in a read-only check; its checkout had identical backend/engine source to main. Actual game-changing task effects, full reboot, live restoration and final authenticated UI acceptance remain unverified. No new production changes were performed for the consolidation.
+Merged revision `f22f098` has a published Mac preview DMG/checksum, successful native desktop, engine, package, web and security workflows. A Windows Python 3.12 post-merge test hit a cold Node subprocess timeout; the final preparation change extends that bounded test allowance and requires a fresh CI result. The live backend was healthy in a read-only check; its checkout had identical backend/engine source to main. Actual game-changing task effects, full reboot, live restoration and final authenticated UI acceptance remain unverified. No new production changes were performed for the consolidation.
 
 ### Implemented baseline
 

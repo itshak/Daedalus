@@ -25,3 +25,12 @@ Tracking: [issue #60](https://github.com/itshak/Daedalus/issues/60). The owner e
 - [ ] Approve exact coordinated release and cutover only after required engineering CI and remaining applicable owner tests pass; document any explicitly accepted limitations separately.
 
 Detailed historical acceptance instructions: [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md), [WAREHOUSE-E2E.md](WAREHOUSE-E2E.md), [AUTOMATIC-RECOVERY.md](AUTOMATIC-RECOVERY.md). The source proposals are indexed in [V010-RECONCILIATION.md](V010-RECONCILIATION.md).
+
+## Start here for the first beta
+
+1. Obtain the exact matching DMG/checksum from GitHub Releases. Use the offline demo first; check all eight destinations and operation editors at compact and normal window sizes, in light and dark. The automated suite generated 142 synthetic screenshots.
+2. Connect to the approved backend, sign in to one existing account and compare read-only warehouses/military with the game. Try selected/all scopes before launching anything.
+3. Review the [beta operation scope](BETA-OPERATION-SCOPE.md). Use a single explicitly chosen account and a small reviewed task; observe actual completion and receipt history. Do not retry an uncertain action. Experimental legacy submission paths are engineering limitations, not completed tests.
+4. Test controlled takeover/recovery and actual Mac behavior; confirm coordinated rollout separately.
+
+Provider-level configuration: verify open signup and anonymous sign-in are disabled in the Supabase dashboard. The Free plan does not include compromised-password protection; upgrade only with explicit owner approval. Use unique strong operator passwords. Verify invitation, login/revocation and no unauthorized access after deployment.
