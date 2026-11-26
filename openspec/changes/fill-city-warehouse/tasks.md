@@ -31,3 +31,5 @@
 - [x] Compare upstream fleet waiting and restore the exact AJAX advisor request at the cookie-session boundary.
 - [x] Test three consecutive loads with the actual shared fleet waiting routine and protected AJAX request, no live network.
 - [ ] Verify real fleet return, subsequent load and final delivery after deploying the fleet-wait correction.
+
+- [x] Audit shared fleet waiting call sites and replace both Resource Transport Manager duplicate ship-availability polling loops with upstream waitForArrival.

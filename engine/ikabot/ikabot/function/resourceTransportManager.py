@@ -13,10 +13,9 @@ from ikabot.helpers.botComm import *
 from ikabot.helpers.getJson import getCity, getIsland
 from ikabot.helpers.gui import *
 from ikabot.helpers.pedirInfo import *
-from ikabot.helpers.planRoutes import executeRoutes
+from ikabot.helpers.planRoutes import executeRoutes, waitForArrival
 from ikabot.helpers.decorators import configurator, task
 from ikabot.helpers.signals import setInfoSignal
-from ikabot.helpers.naval import getAvailableShips, getAvailableFreighters
 from ikabot.helpers.varios import addThousandSeparator, getDateTime
 from ikabot.helpers.taskConfig import asBool, asId, asInt, requireOwnCity
 from ikabot.function.sendResources import RESOURCE_KEYS, get_island, _verify_recipient, _destination_id
@@ -1215,32 +1214,17 @@ def do_it(session, origin_cities, destination_city, island, interval_hours, reso
             
             # Send resources if there's anything to send
             if total_to_send > 0:
-                # Check for available ships every 2 minutes until we can send
+                # Use the shared upstream fleet wait before acquiring the
+                # shipping lock; executeRoutes rechecks availability under it.
                 ship_type = 'freighters' if useFreighters else 'merchant ships'
-                ships_available = False
-                ship_check_start = time.time()
-                
-                while not ships_available:
-                    # Check ship availability
-                    if useFreighters:
-                        available_ships = getAvailableFreighters(session)
-                    else:
-                        available_ships = getAvailableShips(session)
-                    
-                    if available_ships > 0:
-                        ships_available = True
-                        session.setStatus(
-                            f"{origin_city['name']} -> {destination_city['name']} | Found {available_ships} {ship_type}, attempting to send..."
-                        )
-                    else:
-                        # No ships available, wait 2 minutes and check again
-                        wait_time = 120
-                        elapsed = int(time.time() - ship_check_start)
-                        session.setStatus(
-                            f"{origin_city['name']} -> {destination_city['name']} | Waiting for {ship_type} (checked for {elapsed}s)..."
-                        )
-                        time.sleep(wait_time)
-                
+                session.setStatus(
+                    f"{origin_city['name']} -> {destination_city['name']} | Waiting for {ship_type}..."
+                )
+                available_ships = waitForArrival(session, useFreighters)
+                session.setStatus(
+                    f"{origin_city['name']} -> {destination_city['name']} | Found {available_ships} {ship_type}, attempting to send..."
+                )
+
                 # Try to acquire shipping lock with retries
                 max_retries = 3
                 retry_count = 0
@@ -1427,30 +1411,17 @@ def do_it_distribute(session, origin_city, destination_cities, interval_hours, r
             
             # Send resources if there's anything to send
             if total_to_send > 0:
-                # Check for available ships
+                # Use the shared upstream fleet wait before acquiring the
+                # shipping lock; executeRoutes rechecks availability under it.
                 ship_type = 'freighters' if useFreighters else 'merchant ships'
-                ships_available = False
-                ship_check_start = time.time()
-                
-                while not ships_available:
-                    if useFreighters:
-                        available_ships = getAvailableFreighters(session)
-                    else:
-                        available_ships = getAvailableShips(session)
-                    
-                    if available_ships > 0:
-                        ships_available = True
-                        session.setStatus(
-                            f"{origin_city['name']} -> {destination_city['name']} | Found {available_ships} {ship_type}, attempting to send..."
-                        )
-                    else:
-                        wait_time = 120
-                        elapsed = int(time.time() - ship_check_start)
-                        session.setStatus(
-                            f"{origin_city['name']} -> {destination_city['name']} | Waiting for {ship_type} (checked for {elapsed}s)..."
-                        )
-                        time.sleep(wait_time)
-                
+                session.setStatus(
+                    f"{origin_city['name']} -> {destination_city['name']} | Waiting for {ship_type}..."
+                )
+                available_ships = waitForArrival(session, useFreighters)
+                session.setStatus(
+                    f"{origin_city['name']} -> {destination_city['name']} | Found {available_ships} {ship_type}, attempting to send..."
+                )
+
                 # Try to acquire shipping lock with retries
                 max_retries = 3
                 retry_count = 0

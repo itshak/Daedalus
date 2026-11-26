@@ -50,3 +50,7 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: Reviewed shipment exhausts available vessels
 - **WHEN** a verified load occupies all available vessels and reviewed cargo remains
 - **THEN** the shared upstream waitForArrival mechanism SHALL use its original military-advisor AJAX request through the protected cookie session, await the next fleet event, recheck available vessels, and continue the same reviewed allocation only when ships are available
+
+#### Scenario: Resource Transport Manager waits for vessels
+- **WHEN** a recurring consolidation or distribution shipment requires available vessels
+- **THEN** it SHALL use the same shared upstream fleet-wait helper as ordinary shipments and warehouse filling before acquiring its shipping lock; the shared route executor SHALL recheck fleet availability before sending
