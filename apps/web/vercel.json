@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "if [ \"${VERCEL_ENV:-}\" = production ] && [ \"${VERCEL_GIT_COMMIT_REF:-}\" = main ] && [ -f scripts/vercel-ignore-build.mjs ]; then test \"$(node scripts/vercel-ignore-build.mjs)\" != DEPLOY; else exit 0; fi"
+}
