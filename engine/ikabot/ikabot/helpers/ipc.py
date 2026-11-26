@@ -447,7 +447,7 @@ def _validate_task_config(task_name, task_func, config_dict):
     return clean
 
 
-def _run_ipc_task(task_name, session, task_config, started=None):
+def _run_ipc_task(task_name, session, task_config, started=None, registered=None):
     """Child-process entry point for tasks launched via CLI/IPC."""
     if started is not None:
         # arguments are unpickled by now: the launching process may exit
@@ -459,13 +459,21 @@ def _run_ipc_task(task_name, session, task_config, started=None):
     except Exception:
         pass
 
+    if registered is not None:
+        # Never perform a reviewed shipment until its parent registered the child.
+        if not registered.wait(timeout=_TASK_STARTUP_TIMEOUT):
+            raise RuntimeError("Warehouse child registration unavailable")
+        session._daedalus_managed_fill = True
     setLoggedInPlayer(getattr(session, "username", ""))
     set_child_mode(session)
     _, task_func = _resolve_task(task_name)
     try:
         task_func(session=session, **task_config)
     except Exception:
-        logger.error("Unhandled exception in IPC task %s", task_name, exc_info=True)
+        if registered is not None:
+            logger.error("Managed warehouse execution failed or needs reconciliation")
+        else:
+            logger.error("Unhandled exception in IPC task %s", task_name, exc_info=True)
         raise
 
 
@@ -1582,7 +1590,11 @@ class IPCServer:
             f"&backgroundView=city&currentCityId={city_id}"
             f"&actionRequest={config.actionRequest}&ajax=1"
         )
-        raw = json.loads(session.post(url), strict=False)
+        if getattr(session, "_daedalus_cookies_only", False) is True:
+            from ikabot.function.fillCityWarehouse import _advisor_data
+            raw = _advisor_data(session, city_id)
+        else:
+            raw = json.loads(session.post(url), strict=False)
         movements = raw[1][1][2]["viewScriptParams"]["militaryAndFleetMovements"]
         server_now = int(raw[0][1]["time"])
         if not isinstance(movements, list) or len(movements) > 250:
@@ -1780,6 +1792,9 @@ class IPCServer:
                 **({"outcome": "accepted" if proc.exitcode == 0 else "failed_or_uncertain"}
                    if entry["task"] in {"testTelegramBot", "testDiscordBot"}
                    and entry["status"] == "finished" and proc.exitcode is not None else {}),
+                **({"outcome": "failed_or_uncertain"}
+                   if entry["task"] == "fillCityWarehouse" and entry["status"] == "finished"
+                   and proc.exitcode not in (None, 0) else {}),
             })
         return {"status": "ok", "tasks": rows, "world": request["world"],
                 "player": request["player"]}
@@ -1996,9 +2011,11 @@ class IPCServer:
             clean_config["managed_report_id"] = task_id
 
         started = multiprocessing.Event()
+        registered = (multiprocessing.Event()
+                      if existing_only and canonical_name == "fillCityWarehouse" else None)
         proc = multiprocessing.Process(
             target=_run_ipc_task,
-            args=(canonical_name, session, clean_config, started),
+            args=(canonical_name, session, clean_config, started, registered),
             name=canonical_name,
         )
         proc.start()
@@ -2042,6 +2059,8 @@ class IPCServer:
             }
             response["task_id"] = task_id
             self._daedalus_requests[request_id] = (fingerprint, dict(response))
+            if registered is not None:
+                registered.set()
         else:
             # Keep the original upstream CLI response intact.
             response["email"] = session.mail

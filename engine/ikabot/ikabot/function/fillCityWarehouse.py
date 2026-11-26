@@ -241,5 +241,7 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
                     time.sleep(2)
             else:
                 session.setStatus(f"Submitted {sent:,}; incoming cargo unconfirmed. Review before retrying.")
+                if getattr(session, "_daedalus_managed_fill", False) is True:
+                    raise RuntimeError("Warehouse cargo unconfirmed; reconcile before retrying")
                 return
     session.setStatus(f"Warehouse fill finished; submitted {sent:,} {resource}")

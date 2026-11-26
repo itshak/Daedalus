@@ -205,3 +205,54 @@ def test_per_account_parallel_task_limit(prepared):
     rejected = engine.handle_request(command(request_id=str(uuid4())))
     assert rejected["status"] == "error"
     assert len(FakeProcess.created) == 16
+
+
+def test_warehouse_child_gate_released_only_after_registration(prepared):
+    engine, update = prepared
+
+    class Gate(FakeEvent):
+        def __init__(self):
+            self.released = False
+
+        def set(self):
+            self.released = True
+
+    def fill(session, destination_city):
+        pass
+
+    fill.__module__ = "ikabot.function.fillCityWarehouse"
+    fill.prepare = None
+
+    def check_registration(*args, **kwargs):
+        assert not FakeProcess.created[-1].args[4].released
+
+    update.side_effect = check_registration
+    with (patch("ikabot.helpers.ipc._resolve_task", return_value=("fillCityWarehouse", fill)),
+          patch("ikabot.helpers.ipc.multiprocessing.Event", Gate)):
+        reply = engine.handle_request(command(task="fillCityWarehouse", config={"destination_city": 42}))
+    assert reply["status"] == "ok"
+    assert FakeProcess.created[-1].args[4].released
+
+
+def test_warehouse_registration_failure_never_releases_gate(prepared):
+    engine, update = prepared
+
+    class Gate(FakeEvent):
+        def __init__(self):
+            self.released = False
+
+        def set(self):
+            self.released = True
+
+    def fill(session, destination_city):
+        pass
+
+    fill.__module__ = "ikabot.function.fillCityWarehouse"
+    fill.prepare = None
+    update.side_effect = RuntimeError("synthetic registration failure")
+    with (patch("ikabot.helpers.ipc._resolve_task", return_value=("fillCityWarehouse", fill)),
+          patch("ikabot.helpers.ipc.multiprocessing.Event", Gate)):
+        reply = engine.handle_request(command(task="fillCityWarehouse", config={"destination_city": 42}))
+    assert reply["status"] == "error"
+    assert not FakeProcess.created[-1].args[4].released
+    assert FakeProcess.created[-1].terminated

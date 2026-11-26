@@ -316,6 +316,9 @@ class TaskController:
 
     def _lease(self, account: Account) -> tuple[OwnedAccountSession, bool]:
         owned = self._owned.get(account.id)
+        if owned is not None and owned.phase is SessionPhase.CLOSED:
+            self._owned.pop(account.id, None)
+            owned = None
         if owned is not None:
             if owned.phase is not SessionPhase.AUTHENTICATED:
                 raise TaskUnavailable("Account needs explicit session recovery")
@@ -323,6 +326,12 @@ class TaskController:
                 owned.transition(SessionPhase.NEEDS_ASSISTANCE)
                 raise TaskUnavailable("Existing game session requires assistance")
             return owned, False
+        # Browser-cookie workers already hold the authoritative local lease.
+        # Do not acquire a competing lock or trust a remote identity alone.
+        existing = self._coordinator.active_lease(account.id)
+        if existing is not None:
+            self.adopt_verified_saved_worker(account.id, existing)
+            return existing, False
         owned = self._coordinator.acquire(account.id)
         try:
             if not self._is_validated(account):
@@ -348,13 +357,16 @@ class TaskController:
             if (
                 lease.account != account
                 or lease._coordinator is not self._coordinator
-                or self._coordinator._active.get(account_id) is not lease
+                or self._coordinator.active_lease(account_id) is not lease
                 or lease.phase is not SessionPhase.AUTHENTICATED
                 or account_id in self._owned
             ):
                 raise TaskUnavailable("Worker lease is not a verified local account owner")
             if not self._is_validated(account):
                 raise TaskUnavailable("Restored session does not match protected engine IPC")
+            if (self._coordinator.active_lease(account_id) is not lease
+                    or lease.phase is not SessionPhase.AUTHENTICATED):
+                raise TaskUnavailable("Worker lease changed during verification")
             self._owned[account_id] = lease
 
     def observe_existing(self, account_id: str, *, confirmed: bool) -> dict[str, str]:
@@ -455,6 +467,9 @@ class TaskController:
             prereq = self._ipc.preflight_task(account, task)
             if not prereq["ready"]:
                 raise TaskPrerequisiteMissing(prereq["reason"])
+            # Lease validation cannot submit a game task. Reject before reserving
+            # a dispatch so a local ownership failure cannot become unconfirmed.
+            self._lease(account)
             if is_fixed and track_desired:
                 # Record the immutable original intent before engine dispatch.
                 try:
@@ -466,7 +481,6 @@ class TaskController:
                 # Never dispatch again after an ambiguous failure or controller restart.
                 return receipt
             try:
-                self._lease(account)
                 started = self._ipc.start_managed_task(account, task, clean, request_id)
             except EngineTaskRejected as exc:
                 # This specific typed IPC reply proves there was no process

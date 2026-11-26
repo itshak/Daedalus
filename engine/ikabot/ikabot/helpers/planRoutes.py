@@ -32,6 +32,8 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
     send : list
         array of resources to send
     """
+    cookie_review = (before_send is not None
+                     and getattr(session, "_daedalus_cookies_only", False) is True)
     # this can fail if a random request is made in between this two posts
     while True:
         html = session.get()
@@ -51,7 +53,10 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             "ajax": "1",
         }
 
-        session.post(params=data)
+        if cookie_review:
+            session._daedalus_reviewed_transport_post(data)
+        else:
+            session.post(params=data)
 
         # Request to send the resources from the origin to the target
         data = {
@@ -111,7 +116,8 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.
         # Never replay this non-idempotent POST at the transport layer.
-        resp = session.post(params=data, retry_on_failure=False)
+        resp = (session._daedalus_reviewed_transport_post(data) if cookie_review
+                else session.post(params=data, retry_on_failure=False))
         try:
             outcome = json.loads(resp, strict=False)[3][1][0]["type"]
         except (ValueError, TypeError, KeyError, IndexError):
@@ -271,8 +277,12 @@ def getMinimumWaitingTime(session):
     url = "view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city&currentCityId={}&actionRequest={}&ajax=1".format(
         idCiudad, actionRequest
     )
-    posted = session.post(url)
-    postdata = json.loads(posted, strict=False)
+    if getattr(session, "_daedalus_cookies_only", False) is True:
+        from ikabot.function.fillCityWarehouse import _advisor_data
+        postdata = _advisor_data(session, idCiudad)
+    else:
+        posted = session.post(url)
+        postdata = json.loads(posted, strict=False)
     militaryMovements = postdata[1][1][2]["viewScriptParams"][
         "militaryAndFleetMovements"
     ]
