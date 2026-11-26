@@ -1018,7 +1018,14 @@ def _run_supplied_construction(session, config):
         if time.monotonic() >= deadline:
             raise ValueError("Supplied resources not observed within 24 hours; reconcile manually")
         session.setStatus("Waiting for reviewed construction supplies to arrive")
-        wait(60)
+        # Reuse the upstream fleet-arrival estimate used by expandBuilding.
+        # A zero estimate is not evidence of delivery; retain a bounded
+        # observation interval until the reviewed stock or deadline is reached.
+        seconds = getMinimumWaitingTime(session)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("Supplied resources not observed within 24 hours; reconcile manually")
+        wait(min(remaining, max(5, seconds + 5) if seconds > 0 else 60))
     queue = list(prepared["construction_queue"])
     for building in prepared["buildings"]:
         expandBuilding(session, str(city_id), building, False, queue, reviewed=True)

@@ -42,7 +42,8 @@ def offline(monkeypatch):
     monkeypatch.setattr(routes, "getCity", lambda city: city)
     monkeypatch.setattr(upstream, "setInfoSignal", Mock())
     monkeypatch.setattr(worker, "setInfoSignal", Mock())
-    monkeypatch.setattr(worker.time, "sleep", Mock())
+    monkeypatch.setattr(worker, "wait", Mock())
+    monkeypatch.setattr(routes.time, "sleep", Mock())
     return session
 
 

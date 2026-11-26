@@ -153,3 +153,7 @@ transport ETA and other interactive administration tools are still unimplemented
 Readiness, full accessibility evidence, fresh plan fingerprints and
 live-user-accepted game outcomes remain release gates; this change must not
 be archived until those gates are met.
+
+## Reuse upstream gameplay waits
+
+Use the operation-specific upstream queue/cooldown implementation for all supported native workflows. Preserve original upstream scheduling rather than imposing one global wait algorithm. The verified cookie adapter SHALL preserve the original read-only queue AJAX forms for fleet advisor, barracks, shipyard, workshop, temple and building-speedup popup; it SHALL reject extra mutation fields and avoid implicit reauthentication. Reviewed supply uses the shared fleet-arrival estimate but independently verifies actual destination stock before upgrades. Infrastructure timeouts and cancellation remain independent. See docs/UPSTREAM-WAIT-AUDIT.md for the full task inventory and evidence.
