@@ -106,7 +106,7 @@ class TavernManager:
             'actionRequest': tavern_data['action_code'],
             'ajax': '1',
         }
-        if reviewed:
+        if reviewed or getattr(self.session, "_daedalus_cookies_only", False) is True:
             self.session.post(params=params, retry_on_failure=False)
         else:
             self.session.post(params=params)

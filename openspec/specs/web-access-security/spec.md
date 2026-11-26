@@ -130,3 +130,8 @@ Production SHALL be delivered through the requested Vercel project/domain with v
 #### Scenario: Backend unavailable
 - **WHEN** Vercel cannot reach the trusted API over verified TLS
 - **THEN** the UI reports unavailable and no alternate insecure backend URL is tried
+
+#### Scenario: Database default grants are overly broad
+- **GIVEN** the dedicated web database has default grants to anonymous or authenticated roles
+- **WHEN** provisioning the operator, preference and reserved audit tables
+- **THEN** the migration SHALL revoke those grants before granting only the required privileges, and MUST NOT permit direct operator modifications or truncation of any protected table

@@ -12,6 +12,8 @@ import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
 import { controllerQuery } from "@/lib/request-policy";
+import { readBoundedBody, BodyLimitExceeded } from "@/lib/bounded-body";
+import { gatewayAuditRecord } from "@/lib/gateway-audit";
 import { gatewayTraffic } from "@/lib/traffic-guard";
 import { validReviewBatch } from "@/lib/reviewed-batch";
 import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
@@ -62,8 +64,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
   let body: string | undefined;
   if (request.method !== "GET") {
     if (Number(request.headers.get("content-length") ?? 0) > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
-    const raw = await request.text();
-    if (raw.length > 16000) return NextResponse.json({ error: "Request too large" }, { status: 413, headers: responseHeaders });
+    let raw:string;
+    try{raw=await readBoundedBody(request.body,16000);}catch(error){return NextResponse.json({error:error instanceof BodyLimitExceeded?"Request too large":"Invalid request"},{status:error instanceof BodyLimitExceeded?413:400,headers:responseHeaders});}
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 400, headers: responseHeaders }); }
     if (proxyProfileRoute(parts)&&!validProxyDraft(value))return NextResponse.json({error:"Invalid network profile review"},{status:422,headers:responseHeaders});
@@ -127,23 +129,26 @@ async function proxy(request: NextRequest, context: RouteContext) {
     body = JSON.stringify(value);
   }
   const query = controllerQuery(request.method,parts,url.searchParams);
+  const audit=(status:number)=>{const event=gatewayAuditRecord(request.method,parts,operator.role,status,operator.user.id);if(event)console.info(JSON.stringify(event));};
   try {
     const upstream = await fetch(origin + "/api/v1/" + parts.map(encodeURIComponent).join("/") + query, {
       method: request.method, body,
       headers: { "Authorization": "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) },
       redirect: "error", cache: "no-store", signal: AbortSignal.timeout(controllerTimeout(parts,request.method))
     });
-    const text = await upstream.text();
-    if (text.length > 2_000_000) return NextResponse.json({ error: "Response exceeds limit" }, { status: 502, headers: responseHeaders });
+    const text = await readBoundedBody(upstream.body,2_000_000);
     let result: unknown;
-    try { result = JSON.parse(text); } catch { return NextResponse.json({error: request.method === "GET" ? "Invalid backend response" : "Request outcome uncertain — check Activity before retrying"},{status:502,headers:responseHeaders}); }
+    try { result = JSON.parse(text); } catch { audit(502); return NextResponse.json({error: request.method === "GET" ? "Invalid backend response" : "Request outcome uncertain — check Activity before retrying"},{status:502,headers:responseHeaders}); }
     if (!upstream.ok) {
+      audit(upstream.status);
       const detail=parts.at(-1)==="reward-distribution-plan"&&upstream.status===503&&result&&typeof result==="object"&&"detail" in result?fillPreviewMessage(result.detail):null;
       const militaryError=upstream.status===503&&parts.length===3&&parts[0]==="accounts"?(parts[2]==="military"?"Military inventory unavailable. Check account connection and refresh.":parts[2]==="ship-movements"?"Military movements unavailable. Check account connection and refresh.":null):null;
       return NextResponse.json({error:detail??militaryError??"Backend request could not complete",status:upstream.status},{status:upstream.status>=400&&upstream.status<=599?upstream.status:502,headers:responseHeaders});
     }
+    audit(upstream.status);
     return NextResponse.json(result, { status: upstream.status, headers: responseHeaders });
   } catch {
+    audit(503);
     return NextResponse.json({ error: isReviewPreview(parts,request.method) ? "Preview timed out. No automation was started." : request.method === "GET" ? "Backend temporarily unreachable" : "Request outcome uncertain — check Activity before retrying" }, { status: 503, headers: responseHeaders });
   }
 }

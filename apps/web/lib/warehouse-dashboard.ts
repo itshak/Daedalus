@@ -28,6 +28,25 @@ export function filterWarehouseRows(rows: WarehouseCity[], filters: {query: stri
     return true;
   });
 }
+const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
+const amount=(v:unknown):v is number|null=>v===null||(typeof v==="number"&&Number.isSafeInteger(v)&&v>=0);
+function resourceMap(v:unknown):Record<string,number|null>{
+  if(!record(v)||!WAREHOUSE_RESOURCES.every(k=>amount(v[k])))throw new Error("Warehouse response unavailable");
+  return Object.fromEntries(WAREHOUSE_RESOURCES.map(k=>[k,v[k] as number|null]));
+}
+/** Project only the fixed warehouse DTO. Never render malformed numbers or cross-account rows. */
+export function parseWarehouseResult(value:unknown,accountId:string):WarehouseResult{
+  if(!record(value)||value.account_id!==accountId||!Array.isArray(value.cities)||value.cities.length>100)throw new Error("Warehouse response unavailable");
+  const seen=new Set<number>();
+  const cities=value.cities.map((row:unknown):WarehouseCity=>{
+    if(!record(row)||row.account_id!==accountId||typeof row.city_id!=="number"||!Number.isSafeInteger(row.city_id)||row.city_id<=0||seen.has(row.city_id)||typeof row.city_name!=="string"||!row.city_name.trim()||row.city_name.length>120||!record(row.resources)||!amount(row.resources.capacity))throw new Error("Warehouse response unavailable");
+    if(row.island!==undefined&&row.island!==null&&(typeof row.island!=="string"||!/^(?:[0-9]{1,3}:[0-9]{1,3}|\[[0-9]{1,3}:[0-9]{1,3}\])$/.test(row.island)))throw new Error("Warehouse response unavailable");
+    if(row.captured_at!==undefined&&(typeof row.captured_at!=="string"||row.captured_at.length>64||!Number.isFinite(Date.parse(row.captured_at))))throw new Error("Warehouse response unavailable");
+    seen.add(row.city_id);
+    return {account_id:accountId,city_id:row.city_id,city_name:row.city_name,island:row.island as string|null|undefined,captured_at:row.captured_at as string|undefined,resources:{unsecured:resourceMap(row.resources.unsecured),capacity:row.resources.capacity,...(row.resources.total===undefined?{}:{total:resourceMap(row.resources.total)})}};
+  });
+  return {account_id:accountId,cities,synthetic_demo:value.synthetic_demo===true};
+}
 /** Private, mounted-dashboard memory only. No browser storage or offline replay. */
 export class WarehouseCache {
   private entries = new Map<string, {value: WarehouseResult; at: number}>();
@@ -37,7 +56,7 @@ export class WarehouseCache {
   constructor(now: () => number = Date.now) { this.now = now; }
   fresh(key: string) {
     const entry = this.entries.get(key);
-    if (entry && this.now() - entry.at < WAREHOUSE_TTL_MS) return entry;
+    if (entry && this.now() >= entry.at && this.now() - entry.at < WAREHOUSE_TTL_MS) return entry;
     if (entry) this.entries.delete(key);
     return undefined;
   }
@@ -50,9 +69,10 @@ export class WarehouseCache {
     this.entries.delete(key);
     const generation = this.generation;
     const request = Promise.resolve().then(fetcher).then(value => {
-      if (value.account_id !== accountId || !Array.isArray(value.cities) || value.cities.some(city => city.account_id !== accountId)) throw new Error("Warehouse response unavailable");
-      if (this.generation === generation) this.entries.set(key, {value, at: this.now()});
-      return value;
+      if(this.generation!==generation)throw new Error("Warehouse response unavailable");
+      const parsed=parseWarehouseResult(value,accountId);
+      this.entries.set(key,{value:parsed,at:this.now()});
+      return parsed;
     }).finally(() => { if (this.pending.get(key) === request) this.pending.delete(key); });
     this.pending.set(key, request);
     return request;

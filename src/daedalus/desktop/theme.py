@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScrollArea
 from qfluentwidgets import isDarkTheme, qconfig
 
 
@@ -37,8 +37,19 @@ def apply_app_palette() -> None:
     palette.setColor(QPalette.Highlight, accent)
     palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
+    # Fluent's stacked stylesheet can retain a resolved light palette on
+    # already-created native Qt scroll areas. Their auto-filled viewports and
+    # content widgets then paint a light surface underneath dark-mode text.
+    # Synchronize only these native surfaces; leave Fluent cards, tables and
+    # semantic control palettes to their own theme-specific styles.
+    for top in app.topLevelWidgets():
+        for scroll in top.findChildren(QScrollArea):
+            scroll.setPalette(palette)
+            scroll.viewport().setPalette(palette)
+            if scroll.widget() is not None:
+                scroll.widget().setPalette(palette)
 
 
 def init_app_theme() -> None:
     apply_app_palette()
-    qconfig.themeChanged.connect(apply_app_palette)
+    qconfig.themeChangedFinished.connect(apply_app_palette)

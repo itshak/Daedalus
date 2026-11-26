@@ -303,3 +303,97 @@ def test_inconclusive_ipc_errors_never_trigger_recovery(system):
     w.router.validate_account=probe
     s.tick()
     assert j.event(a) is None
+
+
+def test_revoked_during_worker_start_does_not_restore_job(system):
+    a,j,_c,w,ctl,s,t=system
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    original=w.start
+    def revoke(account):
+        original(account)
+        j.set_policy(account,enabled=False,auto_resume=False)
+    w.start=revoke
+    j.record_loss(a)
+    t[0]+=300
+    s.tick()
+    assert w.starts==[a.id]
+    assert ctl.started==[] and j.event(a) is None
+
+
+def test_simultaneous_account_loss_serialized_and_failed_account_isolated(system):
+    a,j,c,w,ctl,_s,t=system
+    b=Account("account-b","s53-ru","Other synthetic player","Other",True)
+    supervisor=RecoverySupervisor([a,b],j,w,ctl,c,clock=lambda:t[0])
+    j.record_loss(a);j.record_loss(b)
+    original=w.start
+    def start(account):
+        original(account)
+        if account.id==a.id:
+            raise RecoveryWorkerError("synthetic worker failure")
+    w.start=start
+    t[0]+=300
+    supervisor.tick()
+    assert w.starts==[a.id,b.id]
+    assert j.event(a)["phase"]=="failed" and j.event(b)["phase"]=="restored"
+
+
+def test_stopped_job_during_grace_is_not_restored(system):
+    a,j,_c,w,ctl,s,t=system
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    j.record_loss(a)
+    assert j.stop_task(a,"old")==1
+    t[0]+=300
+    s.tick()
+    assert w.starts==[a.id] and ctl.started==[] and j.receipts(a)==[]
+
+
+def test_dead_worker_is_definitive_loss_even_without_ipc_probe(system):
+    a,j,_c,w,_ctl,s,t=system
+    class Lease:
+        phase=SessionPhase.AUTHENTICATED
+        def transition(self,phase):self.phase=phase
+    w.running=SimpleNamespace(alive=lambda:False,lease=Lease())
+    s.tick()
+    assert j.event(a)["due_at"]==t[0]+300
+    assert w.running.lease.phase==SessionPhase.NEEDS_ASSISTANCE
+    assert w.starts==[]
+
+
+def test_restart_with_zero_workers_only_recovers_previously_verified_account(system, monkeypatch):
+    a,j,c,w,ctl,s,t=system
+    other=Account("account-b", "s53-ru", "Other synthetic player", "Other", True)
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    j.record_loss(a)
+    attempt=j.claim_due(a,force=True)
+    j.outcome(a,attempt["epoch"],success=True)
+    reopened=RecoveryStore(j.path,clock=lambda:t[0])
+    s=RecoverySupervisor([a,other],reopened,w,ctl,c,clock=lambda:t[0])
+    # Exercise startup reconciliation without an uncontrolled background thread.
+    class DormantThread:
+        def __init__(self,**_):pass
+        def start(self):pass
+    monkeypatch.setattr("daedalus.recovery_runtime.threading.Thread",DormantThread)
+    s.start()
+    assert reopened.event(a)["phase"]=="grace"
+    assert reopened.event(a)["due_at"]==t[0]+300
+    assert reopened.event(other) is None
+    t[0]+=299
+    s.tick()
+    assert w.starts==[]
+    t[0]+=1
+    s.tick()
+    assert w.starts==[a.id]
+    assert len(ctl.started)==1
+
+
+def test_identity_change_during_grace_never_starts_replacement_player(system):
+    a,j,c,w,ctl,s,t=system
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    j.record_loss(a)
+    replacement=Account(a.id,a.world,"Other synthetic player",a.label,True)
+    s=RecoverySupervisor([replacement],j,w,ctl,c,clock=lambda:t[0])
+    t[0]+=300
+    s.tick()
+    assert not w.starts and not ctl.started
+    assert j.event(replacement) is None
+    assert not j.desired(replacement)

@@ -594,7 +594,8 @@ def test_accounts_table_first_and_small_mac_layout(app, monkeypatch):
         # panel is allowed to occupy half the account table.
         assert not hasattr(window.accounts_page, "master_detail")
         assert window.accounts_page.layout().indexOf(window.accounts_page.table) >= 0
-        assert window.accounts_page.table.minimumHeight() >= 290
+        # The table retains a useful minimum while recovery remains visible at 900x650.
+        assert 140 <= window.accounts_page.table.minimumHeight() <= 200
         assert window.accounts_page.advanced_recovery_panel.isHidden()
         window._show_accounts(accounts(5))
         assert window.accounts_page.table.rowCount() == 5
@@ -878,3 +879,44 @@ def test_server_activity_history_account_scope_and_filter(app):
     assert calls[-1] == ("beta",None,"all")
     assert not page.server_copy.isEnabled()
     page.close()
+
+
+def test_warehouse_selected_action_is_keyboard_accessible(app):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    page=WarehousesPage()
+    try:
+        page.set_accounts(accounts(3))
+        page.set_selected_accounts(["account-0", "account-2"])
+        selected=[]
+        page.load_selected_requested.connect(selected.append)
+        page.show()
+        page.load_selected_button.setFocus(Qt.TabFocusReason)
+        app.processEvents()
+        assert page.load_selected_button.accessibleName()=="Load warehouses for selected accounts"
+        assert page.load_selected_button.hasFocus()
+        QTest.keyClick(page.load_selected_button, Qt.Key_Space)
+        assert selected==[["account-0", "account-2"]]
+    finally:
+        _dispose(page,app)
+
+
+def test_compact_accounts_recovery_actions_fit_without_overlap(app):
+    from PySide6.QtCore import QPoint
+
+    from daedalus.desktop.pages import AccountsPage
+
+    page = AccountsPage()
+    try:
+        page.resize(820, 550)
+        page.set_accounts(accounts(3))
+        page.show()
+        app.processEvents()
+        buttons = (page.recovery_import_button, page.recovery_policy_button, page.recovery_pause_button,
+                   page.recovery_resume_button, page.recovery_jobs_button, page.recovery_bulk_button)
+        rects = [button.rect().translated(button.mapTo(page, QPoint())) for button in buttons]
+        assert all(page.rect().contains(rect) for rect in rects)
+        assert not any(left.intersects(right) for i, left in enumerate(rects) for right in rects[i+1:])
+    finally:
+        _dispose(page, app)

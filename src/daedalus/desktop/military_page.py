@@ -6,7 +6,7 @@ game mutations. All data arrives via authenticated Daedalus read endpoints.
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -42,7 +42,7 @@ class MilitaryPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 22)
-        layout.setSpacing(13)
+        layout.setSpacing(9)
         layout.addWidget(PageHeading(
             "Military", "Inspect current troops, fleets and movements without issuing orders."
         ))
@@ -53,7 +53,7 @@ class MilitaryPage(QWidget):
         self.account_combo.setAccessibleName("Military account scope")
         self.account_combo.currentIndexChanged.connect(self._render)
         scope.addWidget(self.account_combo, 1)
-        self.refresh_button = PrimaryPushButton("Refresh military data")
+        self.refresh_button = PrimaryPushButton("Refresh")
         self.refresh_button.setAccessibleName("Read current military data for selected accounts")
         self.refresh_button.clicked.connect(self.refresh)
         scope.addWidget(self.refresh_button)
@@ -82,11 +82,21 @@ class MilitaryPage(QWidget):
         for table, name in zip(self.tables, self._MODES):
             table.setAccessibleName(f"Read-only {name} by verified account")
             table.setSortingEnabled(True)
+            header = table.horizontalHeader()
+            header.setStretchLastSection(False)
+            if name == "movements":
+                for column in (0, 1, 2, 3):
+                    header.setSectionResizeMode(column, QHeaderView.Stretch)
+                for column in (4, 5, 6):
+                    table.setColumnWidth(column, 88)
+            else:
+                for column in (0, 1, 2):
+                    header.setSectionResizeMode(column, QHeaderView.Stretch)
+                table.setColumnWidth(3, 105)
             self.stack.addWidget(table)
         layout.addWidget(self.stack, 1)
         self.note = CaptionLabel(
-            "This view is read-only. Unknown or disconnected accounts are never shown as zero. "
-            "Military orders remain separate, explicitly reviewed automations."
+            "Read-only · Unavailable accounts are not counted as zero."
         )
         self.note.setWordWrap(True)
         layout.addWidget(self.note)

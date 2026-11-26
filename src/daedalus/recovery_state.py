@@ -144,8 +144,8 @@ class RecoveryStore:
                 "pause_indefinite": False, "revision": 0,
             }
         return {
-            "account_id": account.id, "enabled": bool(row["enabled"]),
-            "auto_resume": bool(row["auto_resume"]), "grace_seconds": row["grace"],
+            "account_id": account.id, "enabled": account.enabled and bool(row["enabled"]),
+            "auto_resume": account.enabled and bool(row["enabled"]) and bool(row["auto_resume"]), "grace_seconds": row["grace"],
             "pause_until": row["pause_until"],
             "pause_indefinite": bool(row["pause_indefinite"]), "revision": row["revision"],
         }
@@ -180,7 +180,8 @@ class RecoveryStore:
                 ON CONFLICT(account_id) DO UPDATE SET
                     identity=excluded.identity, enabled=excluded.enabled,
                     auto_resume=excluded.auto_resume, grace=excluded.grace,
-                    pause_until=NULL, pause_indefinite=0,
+                    pause_until=CASE WHEN policies.identity=excluded.identity AND excluded.enabled=1 THEN policies.pause_until ELSE NULL END,
+                    pause_indefinite=CASE WHEN policies.identity=excluded.identity AND excluded.enabled=1 THEN policies.pause_indefinite ELSE 0 END,
                     revision=excluded.revision,updated_at=excluded.updated_at
             """, (account.id, identity(account), int(enabled), int(auto_resume),
                   grace_seconds, next_rev, now))
@@ -415,9 +416,24 @@ class RecoveryStore:
             conn.commit()
             return changed == 1
 
+    def _resume_permitted(self, conn, account: Account, epoch: str) -> bool:
+        policy = self._policy(conn, account)
+        event = self._event(conn, account)
+        return bool(policy["enabled"] and policy["auto_resume"] and event
+                    and event["epoch"] == epoch and event["phase"] == "restored"
+                    and not policy["pause_indefinite"]
+                    and (policy["pause_until"] is None or policy["pause_until"] <= self._clock()))
+
+    def resume_permitted(self, account: Account, epoch: str) -> bool:
+        with self._mutex, self._db() as conn:
+            return self._resume_permitted(conn, account, epoch)
+
     def begin_resume(self, account: Account, job_id: str, epoch: str) -> dict[str,str] | None:
         with self._mutex,self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if not self._resume_permitted(conn, account, epoch):
+                conn.rollback()
+                return None
             row=conn.execute("""SELECT * FROM desired_jobs WHERE account_id=?
                 AND identity=? AND logical_id=?""",
                 (account.id,identity(account),job_id)).fetchone()
@@ -428,7 +444,8 @@ class RecoveryStore:
                 conn.rollback()
                 return None
             old=conn.execute("""SELECT * FROM resume_receipts WHERE account_id=?
-                AND logical_id=? AND epoch=?""",(account.id,job_id,epoch)).fetchone()
+                AND logical_id=? AND (epoch=? OR status IN ('dispatching','unconfirmed'))""",
+                (account.id,job_id,epoch)).fetchone()
             if old:
                 conn.rollback()
                 return None
@@ -462,8 +479,10 @@ class RecoveryStore:
     def receipts(self, account: Account) -> list[dict[str,object]]:
         with self._mutex,self._db() as conn:
             rows=conn.execute("""SELECT logical_id,epoch,request_id,status,engine_task_id
-                FROM resume_receipts WHERE account_id=? ORDER BY updated_at DESC LIMIT 100""",
-                (account.id,)).fetchall()
+                FROM resume_receipts WHERE account_id=? AND logical_id IN (
+                    SELECT logical_id FROM desired_jobs WHERE account_id=? AND identity=?
+                ) ORDER BY updated_at DESC LIMIT 100""",
+                (account.id, account.id, identity(account))).fetchall()
         return [dict(x) for x in rows]
 
     def summary(self, account: Account) -> dict[str,object]:

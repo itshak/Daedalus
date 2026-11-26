@@ -167,7 +167,10 @@ def test_reconciler_starts_fresh_remaining_target_and_fences_receipt(tmp_path):
         [ACCOUNT], journal, workers, controller,
         SimpleNamespace(available=lambda _: True),
     )
-    epoch = "recovery-epoch"
+    journal.record_loss(ACCOUNT)
+    attempt = journal.claim_due(ACCOUNT, force=True)
+    journal.outcome(ACCOUNT, attempt["epoch"], success=True)
+    epoch = attempt["epoch"]
     result = supervisor._resume_jobs(ACCOUNT, epoch)
     assert result["restored"] == 1
     assert len(controller.started) == 1
@@ -195,9 +198,13 @@ def test_reconciler_can_complete_without_mutating_game(tmp_path):
         [ACCOUNT], journal, SimpleNamespace(), Controller(),
         SimpleNamespace(),
     )
-    assert supervisor._resume_jobs(ACCOUNT, "e")["completed"] == 1
+    journal.record_loss(ACCOUNT)
+    attempt = journal.claim_due(ACCOUNT, force=True)
+    journal.outcome(ACCOUNT, attempt["epoch"], success=True)
+    epoch = attempt["epoch"]
+    assert supervisor._resume_jobs(ACCOUNT, epoch)["completed"] == 1
     assert journal.desired(ACCOUNT)[0]["desired_state"] == "completed"
-    assert supervisor._resume_jobs(ACCOUNT, "e")["completed"] == 0
+    assert supervisor._resume_jobs(ACCOUNT, epoch)["completed"] == 0
 
 def test_even_a_reported_final_level_is_not_complete_while_busy():
     ipc = ConstructionIPC(current=6, busy=True)

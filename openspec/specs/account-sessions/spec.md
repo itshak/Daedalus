@@ -455,6 +455,11 @@ For each exactly configured enabled world/player identity, Daedalus SHALL defaul
 - **WHEN** one network timeout, generic 5xx or malformed game response occurs
 - **THEN** Daedalus SHALL record an inconclusive check without starting the rotation countdown or acquiring another game login
 
+#### Scenario: Inconclusive legacy monitor check
+- **GIVEN** a verified existing session and a temporary IPC validation failure
+- **WHEN** the legacy assistance monitor observes the failure
+- **THEN** it SHALL retain ownership without creating a rotation ticket; independently validated new task dispatch SHALL remain blocked until verification succeeds
+
 #### Scenario: API restart during a grace period
 - **GIVEN** a confirmed loss and persisted grace deadline
 - **WHEN** the backend restarts or its wall clock changes

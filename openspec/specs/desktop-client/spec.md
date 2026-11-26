@@ -1008,3 +1008,17 @@ account or pretending that all accounts were processed.
 - **WHEN** multi-account preflight runs
 - **THEN** no account in that cohort receives a new start request, and the user
   sees exactly which account requires attention
+
+### Requirement: Theme changes preserve readable native scroll surfaces
+Switching the Fluent appearance SHALL synchronize the palette of existing native Qt scroll viewports and content surfaces without overriding semantic Fluent widget styles. Warehouse scope controls SHALL expose descriptive accessible names and support keyboard activation.
+
+#### Scenario: Appearance changes at runtime
+- **WHEN** the user switches from light to dark and back with native content already created
+- **THEN** native scroll surfaces SHALL use the matching palette instead of retaining the previous theme background
+
+### Requirement: Compact account-scoped native workspaces
+At the supported minimum window size, account recovery actions SHALL remain reachable without overlapping, and settings SHALL be grouped into clear sections sharing an explicit selected account where required. Automation forms SHALL reserve usable vertical space for parameters and retain review and approval controls. Tables SHALL preserve full source values and expose elided values without changing export semantics.
+
+#### Scenario: Operator changes protected settings section
+- **WHEN** the operator selects an account and changes settings sections
+- **THEN** the selected account SHALL remain explicit and no settings mutation SHALL be triggered by navigation alone

@@ -153,6 +153,15 @@ def test_authenticated_dashboard_browser(web_stack):
     nav.get_by_role("button",name="Warehouses").click()
     page.get_by_role("cell",name="Athens").wait_for()
     page.get_by_role("cell",name="Sparta").wait_for()
+    wood=page.get_by_role("columnheader",name="Wood",exact=True)
+    sort=wood.get_by_role("button")
+    sort.focus();page.keyboard.press("Enter")
+    assert wood.get_attribute("aria-sort")=="descending"
+    assert page.locator(".warehouse-data-table tbody tr").first.get_by_role("cell",name="Athens").count()==1
+    page.keyboard.press("Enter")
+    assert wood.get_attribute("aria-sort")=="ascending"
+    assert page.locator(".warehouse-data-table tbody tr").first.get_by_role("cell",name="Sparta").count()==1
+    assert page.evaluate("document.activeElement.matches(':focus-visible')")
     baseline=sum(n for path,n in counts.items() if "/warehouses/" in path)
     page.get_by_label("Search warehouses").fill("Athens")
     page.get_by_role("cell",name="Sparta").wait_for(state="detached")
@@ -179,6 +188,12 @@ def test_authenticated_dashboard_browser(web_stack):
     page.get_by_label("Choose single account").select_option("beta")
     page.get_by_role("cell",name="Sparta").wait_for()
     page.get_by_role("cell",name="Athens").wait_for(state="detached")
+    page.get_by_role("button",name="Selected",exact=True).click()
+    picker=page.locator(".selected-picker").get_by_role("checkbox")
+    assert picker.count()==2
+    picker.first.check()
+    page.get_by_role("cell",name="Athens").wait_for()
+    page.get_by_role("cell",name="Sparta").wait_for()
     page.get_by_role("button",name="All accounts",exact=True).click()
     page.get_by_role("cell",name="Athens").wait_for()
     # Basic responsive navigation and language/appearance behavior.
@@ -187,6 +202,10 @@ def test_authenticated_dashboard_browser(web_stack):
     page.get_by_label("Language").select_option("ru")
     assert page.locator("html").get_attribute("lang")=="ru"
     page.get_by_label("Язык").select_option("en")
+    page.emulate_media(reduced_motion="reduce",contrast="more")
+    assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    assert page.evaluate("getComputedStyle(document.querySelector('.scope-row')).transitionDuration") in ("0s", "0s, 0s")
+    assert page.evaluate("getComputedStyle(document.querySelector('.scope-row')).borderTopWidth")=="2px"
     page.set_viewport_size({"width":390,"height":844})
     page.get_by_role("button",name="Open navigation").click()
     nav.get_by_role("button",name="Overview").click()

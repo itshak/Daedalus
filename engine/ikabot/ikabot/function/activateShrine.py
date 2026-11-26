@@ -92,7 +92,10 @@ def donateShrine(session, godid, cityid, pos, selected_gods):
     selected_gods : str
     """
     url = f"action=DonateFavorToGod&godId={godid}&position={pos}&backgroundView=city&currentCityId={cityid}&templateView=shrineOfOlympus&currentTab=tabOverview&actionRequest={actionRequest}&ajax=1"
-    session.post(url)
+    if getattr(session, "_daedalus_cookies_only", False) is True:
+        session.post(url, retry_on_failure=False)
+    else:
+        session.post(url)
     current_favor = getFavor(session, cityid, pos)
     last_donation_time = getDateTime()
     last_donation_status = f"Activated {selected_gods} @{last_donation_time}, current favor: {current_favor}"

@@ -155,3 +155,11 @@ The task reconciler SHALL expose per-account totals of desired, restored, observ
 #### Scenario: Server starts with zero authenticated workers
 - **WHEN** Daedalus reloads a persisted desired task catalog with no live game session
 - **THEN** the API SHALL remain healthy and list the desired tasks as waiting, without starting them before authenticated recovery and owner policy checks
+
+### Requirement: Recovery reservation preserves current policy and epoch
+An automatic restoration reservation SHALL require the current restored account identity and recovery epoch, an enabled unpaused auto-resume policy, and no earlier unresolved reservation for the same logical job. Edits to unrelated policy fields SHALL NOT clear an explicit browser-use pause.
+
+#### Scenario: A crash or policy change occurs while restoring
+- **GIVEN** an approved job and an earlier unresolved recovery receipt, a disabled account, or a superseded recovery epoch
+- **WHEN** the supervisor considers the job for automatic restoration
+- **THEN** it SHALL not reserve a new dispatch; an unresolved receipt SHALL stay visible only to its original account identity and require operator reconciliation

@@ -151,26 +151,39 @@ def test_nonrestartable_jobs_never_get_auto_resume_receipt(item):
     assert store.begin_resume(account, manual, "epoch") is None
 
 
+def restore_epoch(store, account, now):
+    store.record_loss(account)
+    now[0] += 300
+    attempt = store.claim_due(account)
+    assert attempt is not None
+    store.outcome(account, attempt["epoch"], success=True)
+    return attempt["epoch"]
+
+
 def test_new_epoch_single_atomic_receipt_and_revision_fence(item):
-    store, account, _ = item
+    store, account, now = item
     job = store.capture_started(account, "alertAttacks", {"notify": True}, "task-1")
-    first = store.begin_resume(account, job, "new-epoch")
+    epoch = restore_epoch(store, account, now)
+    first = store.begin_resume(account, job, epoch)
     assert first and first["request_id"] != "task-1"
     assert first["config"] == {"notify": True}
-    assert store.begin_resume(account, job, "new-epoch") is None
+    assert store.begin_resume(account, job, epoch) is None
     store.stop_task(account, "task-1")
-    store.finish_resume(account, job, "new-epoch", status="started",
+    store.finish_resume(account, job, epoch, status="started",
                         task_id="task-2", revision=first["revision"])
     assert store.desired(account)[0]["desired_state"] == "stopped"
     assert store.receipts(account)[0]["status"] == "started"
 
 
 def test_unknown_outcome_is_not_replayed(item):
-    store, account, _ = item
+    store, account, now = item
     job = store.capture_started(account, "alertAttacks", {}, "old")
-    assert store.begin_resume(account, job, "ep") is not None
-    store.finish_resume(account, job, "ep", status="unconfirmed")
-    assert store.begin_resume(account, job, "ep") is None
+    epoch = restore_epoch(store, account, now)
+    assert store.begin_resume(account, job, epoch) is not None
+    store.finish_resume(account, job, epoch, status="unconfirmed")
+    assert store.begin_resume(account, job, epoch) is None
+    second = restore_epoch(store, account, now)
+    assert second != epoch and store.begin_resume(account, job, second) is None
     assert store.receipts(account)[0]["status"] == "unconfirmed"
 
 
@@ -237,3 +250,35 @@ def test_explicit_disable_survives_restart_even_though_default_is_on(item):
     assert after_restart.policy(account)["enabled"] is False
     assert after_restart.policy(account)["auto_resume"] is False
     assert after_restart.record_loss(account) is None
+
+
+def test_policy_pause_and_disabled_account_are_authoritative(item):
+    store, account, now = item
+    enable(store, account)
+    job = store.capture_started(account, "alertAttacks", {}, "old")
+    epoch = restore_epoch(store, account, now)
+    store.pause(account, seconds=None)
+    store.set_policy(account, enabled=True, auto_resume=True, grace_seconds=600)
+    assert store.policy(account)["pause_indefinite"]
+    assert store.begin_resume(account, job, epoch) is None
+    store.unpause(account)
+    disabled = Account(account.id, account.world, account.player, account.label, False)
+    assert not store.policy(disabled)["enabled"]
+    assert store.begin_resume(disabled, job, epoch) is None
+    assert store.begin_resume(account, job, "stale-epoch") is None
+    assert store.begin_resume(account, job, epoch) is not None
+    different = Account(account.id, account.world, "Synthetic other", account.label, True)
+    assert store.receipts(different) == []
+    store.set_policy(account, enabled=False, auto_resume=False)
+    assert not store.resume_permitted(account, epoch)
+
+
+def test_crash_pending_resume_never_replayed_in_new_epoch(item):
+    store, account, now = item
+    job = store.capture_started(account, "alertAttacks", {}, "old")
+    epoch = restore_epoch(store, account, now)
+    assert store.begin_resume(account, job, epoch)
+    reopened = RecoveryStore(store.path, clock=lambda: now[0])
+    second = restore_epoch(reopened, account, now)
+    assert reopened.begin_resume(account, job, second) is None
+    assert reopened.receipts(account)[0]["status"] == "dispatching"

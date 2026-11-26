@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { serverSupabase } from "@/lib/supabase";
+import { readBoundedBody } from "@/lib/bounded-body";
 import { loginTraffic } from "@/lib/traffic-guard";
 import { z } from "zod";
 export const runtime="nodejs";
@@ -12,7 +13,7 @@ export async function POST(request:NextRequest){
   if(!loginTraffic.allow("global",60,60_000))return NextResponse.json({error:"Try again later"},{status:429,headers:{...headers,"Retry-After":"60"}});
   try{
     if(Number(request.headers.get("content-length")??0)>8192)return denied();
-    const raw=await request.text();if(raw.length>8192)return denied();
+    const raw=await readBoundedBody(request.body,8192);
     const parsed=draft.safeParse(JSON.parse(raw));if(!parsed.success)return denied();
     const key=createHash("sha256").update(parsed.data.email.trim().toLowerCase()).digest("hex");
     if(!loginTraffic.allow(key,8,60_000))return NextResponse.json({error:"Try again later"},{status:429,headers:{...headers,"Retry-After":"60"}});

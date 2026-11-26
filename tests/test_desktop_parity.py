@@ -345,3 +345,25 @@ def test_proxy_profile_editor_rejects_foreign_status_and_busy_account(qt_app):
         assert not page.proxy_test.isEnabled() and not page.proxy_save.isEnabled()
     finally:
         _dispose(page, qt_app)
+
+
+def test_settings_sections_keep_common_account_and_scope_visible(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
+
+    page = AppearancePage()
+    try:
+        page.resize(820, 550)
+        page.set_admin_accounts([{"id": "alpha", "player": "Sample", "world": "s1-en", "enabled": True}])
+        page.show()
+        page.admin_account.setCurrentIndex(1)
+        for index, widget in enumerate((page.theme_combo, page.admin_refresh, page.notification_provider,
+                                        page.challenge_mode, page.world_picker, page.proxy_picker)):
+            page.select_section(index)
+            qt_app.processEvents()
+            assert page.section_stack.currentIndex() == index
+            assert widget.isVisible()
+            assert page.admin_bar.isVisible() == (index != 0)
+            assert page.admin_account.currentData() == "alpha"
+            assert widget.width() <= page.width()
+    finally:
+        _dispose(page, qt_app)

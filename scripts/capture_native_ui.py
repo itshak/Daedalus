@@ -13,12 +13,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QToolTip
 from qfluentwidgets import Theme, setTheme
 
 from daedalus.desktop import app as desktop_app
 from daedalus.desktop.theme import apply_app_palette
 from daedalus.gui_preferences import GuiPreferences
+from daedalus.engine_registry import inspect_engine
+from daedalus.operation_manifest import operation_workflow
 
 SYNTHETIC_ACCOUNTS = [
     {
@@ -56,23 +59,10 @@ SYNTHETIC_REPORT = [
     {"account_id": "synthetic-beta", "error": True},
 ]
 
-SYNTHETIC_OPERATIONS = [
-    {"name": "alertAttacks", "kind": "background_task",
-     "config_fields": [{"name": "minutes", "type": "integer", "default": 20}]},
-    {"name": "alertLowWine", "kind": "background_task",
-     "config_fields": [
-         {"name": "hours", "type": "json", "required": True},
-         {"name": "auto_transfer", "type": "boolean", "default": False},
-         {"name": "transfer_amount", "type": "integer", "default": 0},
-     ]},
-    {"name": "tavernManager", "kind": "background_task",
-     "config_fields": [{"name": "run_hours", "type": "json", "required": True}]},
-    {"name": "constructionList", "kind": "background_task",
-     "config_fields": [{"name": "city_id", "type": "json", "required": True}]},
-    {"name": "research", "kind": "background_task",
-     "config_fields": [{"name": "cities_ids", "type": "json", "default": None}]},
-    {"name": "statusMenu", "kind": "interactive_menu"},
-]
+def synthetic_operations():
+    # Static source AST inventory, no IkaBot imports or game networking.
+    return [{**item.to_dict(), "workflow": operation_workflow(item.name)}
+            for item in inspect_engine()]
 
 
 def capture(output_dir: Path) -> list[Path]:
@@ -86,7 +76,10 @@ def capture(output_dir: Path) -> list[Path]:
         patch.object(desktop_app.MainWindow, "_auto_reconnect_securely", lambda self: None),
         patch("daedalus.connection_prefs.load_connection_url", return_value=None),
         patch("daedalus.desktop.ssh_tunnel.load_ssh_destination", return_value=None),
+        patch.object(desktop_app.MainWindow, "_request", lambda *args, **kwargs: None),
     ):
+        setTheme(Theme.LIGHT)
+        apply_app_palette()
         window = desktop_app.MainWindow()
         window.setWindowTitle("Daedalus — SYNTHETIC UI FIXTURES")
         window._show_accounts(SYNTHETIC_ACCOUNTS)
@@ -95,19 +88,45 @@ def capture(output_dir: Path) -> list[Path]:
         window.warehouses_page.set_demo(True)
         window.warehouses_page.set_batch_snapshots(SYNTHETIC_REPORT)
         window._show_capabilities({
-            "operations": SYNTHETIC_OPERATIONS,
-            "structured_engine_dispatch": False,
+            "operations": synthetic_operations(),
+            "structured_engine_dispatch": True,
             "session_monitoring": False,
         })
 
+        window.appearance_page.admin_account.setCurrentIndex(1)
+        window.accounts_page.table.selectRow(0)
+        window.tasks_page.select_task("alertAttacks")
+        window.tasks_page.set_preflight({"account_id": "synthetic-alpha", "task": "alertAttacks", "ready": True})
+        window.tasks_page.set_cities("synthetic-alpha", [{"id": 101, "name": "Athena (sample)"}, {"id": 102, "name": "Delphi (sample)"}])
+        window.military_page.set_result("synthetic-alpha", "military_overview", {
+            "account_id": "synthetic-alpha", "observed_at": 1795160000,
+            "cities": [{"city_id": 101, "city_name": "Athena (sample)",
+                        "troops": [{"unit": "Swordsman", "amount": 125}, {"unit": "Hoplite", "amount": 80}],
+                        "fleet": [{"unit": "Ram ship", "amount": 12}]}],
+        })
+        window.military_page.set_result("synthetic-alpha", "military_movements", {
+            "account_id": "synthetic-alpha", "observed_at": 1795160000,
+            "movements": [{"origin": "Athena (sample)", "destination": "Delphi (sample)",
+                           "mission": "Transport", "hostile": False, "returning": False,
+                           "seconds_remaining": 600, "troops": 0, "ships": 6}],
+        })
+        window.military_page.set_unavailable("synthetic-beta", "military_overview")
+        window.tasks_page.set_tasks({"engine_tasks": [{"task": "alertAttacks", "status": "running", "task_id": "a"*24, "started_at": "2026-11-26 10:00"}], "requests": [{"task": "alertAttacks", "status": "started", "task_id": "a"*24}]})
+        window.tasks_page.set_batch_status([{"account_id": "synthetic-alpha", "engine_tasks": [{"status": "running"}], "requests": []}, {"account_id": "synthetic-beta", "error": True}])
+        window.log_page.add_event("INFO", "Desktop ready")
+        window.log_page.add_event("WARNING", "Synthetic request unavailable")
         destinations = [
-            ("overview", window.home_page),
-            ("accounts", window.accounts_page),
-            ("warehouses", window.warehouses_page),
-            ("automations", window.tasks_page),
-            ("activity", window.log_page),
-            ("connection", window.connection_page),
-            ("settings", window.appearance_page),
+            ("overview", window.home_page, None),
+            ("accounts", window.accounts_page, None),
+            ("warehouses", window.warehouses_page, None),
+            *[("military-" + name, window.military_page, lambda i=i: window.military_page._select_mode(i))
+              for i, name in enumerate(("troops", "fleet", "movements"))],
+            *[("automations-" + name, window.tasks_page, lambda i=i: window.tasks_page._show_section(i))
+              for i, name in enumerate(("configure", "running", "history", "accounts", "catalog"))],
+            ("activity", window.log_page, None),
+            ("connection", window.connection_page, None),
+            *[("settings-" + name, window.appearance_page, lambda i=i: window.appearance_page.select_section(i))
+              for i, name in enumerate(window.appearance_page.section_keys)],
         ]
         created: list[Path] = []
         window.show()
@@ -119,14 +138,34 @@ def capture(output_dir: Path) -> list[Path]:
                 app.processEvents()
                 for width, height in ((900, 650), (1200, 800)):
                     window.resize(width, height)
+                    window.tasks_page.select_task("alertAttacks")
+                    window.tasks_page.set_preflight({"account_id": "synthetic-alpha", "task": "alertAttacks", "ready": True})
                     app.processEvents()
-                    for label, page in destinations:
+                    for label, page, setup in destinations:
                         window.switchTo(page)
+                        if setup is not None:
+                            setup()
+                        # Allow navigation/pivot animations and deferred layout to settle.
+                        QToolTip.hideText()
+                        QTest.qWait(350)
                         app.processEvents()
                         file = output_dir / f"{name}-{width}x{height}-{label}.png"
                         if not window.grab().save(str(file), "PNG"):
                             raise RuntimeError(f"Could not capture synthetic {label} screenshot")
                         created.append(file)
+                    if width == 900:
+                        window.switchTo(window.tasks_page)
+                        window.tasks_page._show_section(0)
+                        for task in list(window.tasks_page._all_task_names):
+                            if not window.tasks_page.select_task(task):
+                                raise RuntimeError(f"Could not select native editor {task}")
+                            window.tasks_page.set_cities("synthetic-alpha", [{"id": 101, "name": "Athena (sample)"}, {"id": 102, "name": "Delphi (sample)"}])
+                            QToolTip.hideText()
+                            QTest.qWait(110)
+                            file = output_dir / f"{name}-{width}x{height}-editor-{task}.png"
+                            if not window.grab().save(str(file), "PNG"):
+                                raise RuntimeError(f"Could not capture synthetic editor {task}")
+                            created.append(file)
         finally:
             window.close()
             window.deleteLater()

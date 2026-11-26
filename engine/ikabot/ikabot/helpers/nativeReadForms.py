@@ -9,7 +9,7 @@ from urllib.parse import parse_qsl
 from ikabot.config import actionRequest
 
 PARAM_VIEWS = frozenset({
-    "barracks", "shipyard", "temple", "buildingSpeedup", "workshop",
+    "barracks", "shipyard", "temple", "tavern", "buildingSpeedup", "workshop",
     "militaryAdvisor", "cityMilitary", "buildingGround", "deployment", "branchOffice", "branchOfficeOwnOffers",
 })
 URL_VIEWS = frozenset("view=" + view for view in (
@@ -28,6 +28,13 @@ def _position(value):
 
 def validate_params(params, *, noIndex=False):
     view = params.get("view")
+    if view == "tavern":
+        if (noIndex or set(params) != {"view", "cityId", "position", "backgroundView", "currentCityId", "ajax"}
+                or not _id(params["cityId"]) or str(params["cityId"]) != str(params["currentCityId"])
+                or not _position(params["position"]) or params["backgroundView"] != "city"
+                or str(params["ajax"]) != "1"):
+            raise ValueError("Unsupported cookie-only tavern view")
+        return
     if view == "cityMilitary":
         if (noIndex or set(params) != {"view", "activeTab", "cityId", "currentTab",
                 "currentCityId", "templateView", "actionRequest", "ajax"}

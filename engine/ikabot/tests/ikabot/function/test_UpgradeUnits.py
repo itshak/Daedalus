@@ -153,3 +153,17 @@ class TestUpgradeTask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_protected_worker_never_repeats_uncertain_upgrade(self, *_mocks):
+        self.session._daedalus_cookies_only = True
+        self.send_upgrade_request.side_effect = lambda *args: (False, "exception")
+        run_city_upgrades(self.session, "111", [{"unitId": "303", "upgradeType": "offensive", "target": 7}])
+        self.send_upgrade_request.assert_called_once()
+
+    def test_protected_worker_requires_observed_queue_before_next_upgrade(self, *_mocks):
+        self.session._daedalus_cookies_only = True
+        with patch("ikabot.function.UpgradeUnits.wait_for_upgrade_start", return_value=False):
+            run_city_upgrades(self.session, "111", [{"unitId": "303", "upgradeType": "offensive", "target": 7}])
+        self.send_upgrade_request.assert_called_once()
+        self.assertIn("unconfirmed", self.session.setStatus.call_args.args[0])

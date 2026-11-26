@@ -122,3 +122,47 @@ def test_reviewed_construction_api_uses_opaque_scoped_plan(tmp_path):
         assert len(starts) == 1
     finally:
         controller.close()
+
+
+def test_every_reviewed_start_route_binds_account_operation_and_ticket(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from daedalus import api
+    from daedalus.reviewed_batch import REVIEW_ENDPOINTS
+
+    now = [100.0]
+    tickets = OperationPreviews(ttl=10, clock=lambda: now[0])
+    monkeypatch.setattr(api, "OperationPreviews", lambda: tickets)
+    config = tmp_path / "accounts.toml"
+    config.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s1-en"\nplayer = "Same player"\n[[accounts]]\nid = "beta"\nworld = "s2-en"\nplayer = "Same player"\n')
+    starts = []
+
+    def start(account_id, task, config, request_id, *, confirmed):
+        assert confirmed
+        starts.append((account_id, task, config, request_id))
+        return {"status": "started", "task": task, "account_id": account_id, "request_id": request_id}
+
+    client = TestClient(create_app(accounts_path=config, api_token="x" * 48,
+                                  task_controller=SimpleNamespace(start=start)))
+    auth = {"Authorization": "Bearer " + "x" * 48}
+    for task, route in REVIEW_ENDPOINTS.items():
+        draft = {"synthetic_plan": task}
+        key = tickets.issue("alpha", task, draft)
+        payload = {"preview_id": key, "request_id": str(uuid.uuid4()), "confirmed": True}
+        if route == "worker-start":
+            payload["task"] = task
+        path = f"/api/v1/accounts/alpha/tasks/{route}"
+        assert client.post(path, json=payload).status_code == 401
+        assert client.post(path.replace("alpha", "beta"), headers=auth, json=payload).status_code == 409
+        assert client.post(path, headers=auth, json={**payload, "confirmed": False}).status_code == 422
+        foreign = tickets.issue("alpha", "foreign-synthetic-operation", draft)
+        assert client.post(path, headers=auth, json={**payload, "preview_id": foreign}).status_code == 409
+        expired = tickets.issue("alpha", task, draft)
+        now[0] += 10
+        assert client.post(path, headers=auth, json={**payload, "preview_id": expired}).status_code == 409
+        key = tickets.issue("alpha", task, draft)
+        result = client.post(path, headers=auth, json={**payload, "preview_id": key})
+        assert result.status_code == 200, (task, result.text)
+        assert starts[-1] == ("alpha", task, draft, payload["request_id"])
+        assert client.post(path, headers=auth, json={**payload, "preview_id": key, "request_id": str(uuid.uuid4())}).status_code == 409
+    assert len(starts) == len(REVIEW_ENDPOINTS)
