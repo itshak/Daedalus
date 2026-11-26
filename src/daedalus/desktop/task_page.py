@@ -319,7 +319,7 @@ class TasksPage(QWidget):
         for index, category in enumerate(("All", "Alerts", "Resources", "Cities", "Military", "Advanced")):
             self.group_tabs.addItem(
                 routeKey=f"group-{index}", text=category,
-                onClick=lambda index=index: self.category_combo.setCurrentIndex(index),
+                onClick=lambda _checked=False, index=index: self.category_combo.setCurrentIndex(index),
             )
         self.group_tabs.setCurrentItem("group-0")
         layout.addWidget(self.group_tabs)
@@ -1098,11 +1098,14 @@ class TasksPage(QWidget):
         self.building_note.setText("\n".join(lines))
         self._invalidate_review()
 
-    def set_reward_distribution_unavailable(self, nonce):
+    def set_reward_distribution_unavailable(self, nonce, reason=None):
+        from daedalus.fill_warehouse_review import FILL_PREVIEW_MESSAGES
+
         if nonce == self._city_review_nonce:
             self._city_review_plan = None
             self._city_review_nonce = None
-            self.building_note.setText("Operation preview unavailable; refresh before retrying.")
+            self.building_note.setText(reason if reason in FILL_PREVIEW_MESSAGES.values()
+                                       else "Operation preview unavailable; refresh before retrying.")
             self._invalidate_review()
 
     def set_shipment_preview(self, result, nonce):

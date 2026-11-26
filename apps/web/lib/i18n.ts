@@ -2,6 +2,18 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Start becomes available after a successful preview and your approval.": "Кнопка запуска станет доступна после успешной проверки и вашего подтверждения.",
+  "Reading current game data. This may take a minute; no automation has started.": "Чтение текущих игровых данных. Это может занять минуту; автоматизация ещё не запущена.",
+  "Preview warehouse transfer": "Предпросмотр заполнения склада",
+  "Checking current game data…": "Проверка текущих игровых данных…",
+  "Review reads current stock, warehouse space and incoming cargo. No transfer starts until you approve.": "Проверка считывает запасы, свободное место на складе и входящие грузы. Перевозка начнётся только после вашего подтверждения.",
+  "Warehouse preview unavailable. No transfer was started. Refresh and try again.": "Предпросмотр склада недоступен. Перевозка не запущена. Обновите данные и повторите попытку.",
+  "Preview settings were rejected. Refresh and review the selected account.": "Настройки проверки отклонены. Обновите данные выбранной учётной записи.",
+  "Preview timed out. No automation was started.": "Истекло время проверки. Автоматизация не запущена.",
+  "Selected fleet is unavailable or its capacity could not be verified.": "Выбранный флот недоступен или его вместимость не подтверждена.",
+  "Source city stock could not be read. Refresh city data and retry.": "Не удалось прочитать запасы города-источника. Обновите данные и повторите попытку.",
+  "Incoming cargo could not be verified. No transfer was started.": "Не удалось проверить входящие грузы. Перевозка не запущена.",
+  "Destination warehouse could not be read. Refresh city data and retry.": "Не удалось прочитать склад города назначения. Обновите данные города и повторите попытку.",
   "Fill only the available warehouse space, accounting for incoming cargo.": "Заполнить только свободное место на складе с учётом входящих грузов.",
   "All other owned cities": "Все остальные свои города",
   "Destination city": "Город назначения",

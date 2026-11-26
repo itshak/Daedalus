@@ -2715,7 +2715,7 @@ class MainWindow(FluentWindow):
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):
                 for view in self._task_views:
-                    view.set_reward_distribution_unavailable(request["nonce"])
+                    view.set_reward_distribution_unavailable(request["nonce"], error)
         if action == "task_shipment_preview":
             request = getattr(self._worker, "task_payload", None)
             if isinstance(request, dict):

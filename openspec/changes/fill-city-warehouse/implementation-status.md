@@ -5,3 +5,7 @@ Desktop and browser: Resources & trade → Fill city warehouse. Select the owned
 Limitations: the game does not expose an atomic destination reservation across independent actors. The budget is an observed bound, not a guarantee that other manual transfers, production or unseen inbound cargo cannot affect capacity at arrival. The conservative visibility check may stop before using all otherwise available space. No production game action or live acceptance was performed.
 
 Focused Python, Qt, API and transport regression: 61 passed. Web unit tests: 67 passed; TypeScript and Ruff passed. Strict OpenSpec validation: 16 passed. Required CI and owner live acceptance remain open.
+
+## Preview and navigation repair
+
+Owner reported a live web preview rejection and macOS category clicks selecting alerts. Actual Qt clicks reproduced the latter: the Fluent boolean signal replaced the captured tab index. Corrected both automation and military tab handlers, with regression tests clicking the visible tabs. Warehouse preview now reports fixed, redacted failure stages; unrelated movement rows without player names no longer invalidate the selected destination's preview, while ambiguous matching cargo still fails closed. Negative free space means zero remaining capacity. Extended only read-only preview gateway timeout and made progress, approval and Start explicit. Synthetic desktop review-to-launch, API, engine and UI regression: 99 passed. The exact live preview failure has not yet been reproduced; no real game action was performed.

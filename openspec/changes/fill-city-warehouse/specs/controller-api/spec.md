@@ -10,3 +10,7 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: Storage becomes unavailable during execution
 - **WHEN** fresh observations cannot support a reviewed load
 - **THEN** the worker stops or reduces that load within the reviewed limit without exceeding the observed remaining budget
+
+#### Scenario: A warehouse preview cannot be verified
+- **WHEN** the selected warehouse, source stock, incoming cargo or fleet observation is unavailable
+- **THEN** the clients show a bounded nonsecret failure reason and no launch is authorized; a pending preview is visibly distinguished from a completed review

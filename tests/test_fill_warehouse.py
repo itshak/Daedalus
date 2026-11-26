@@ -108,7 +108,7 @@ def test_advisor_accounts_for_incoming_returning_and_unknown_cargo():
                 "resources": [{"cssClass": "resource marble", "amount": "12,345"}]}
     returned = {**movement, "origin": movement["target"], "target": movement["origin"],
                 "event": {"isFleetReturning": True}}
-    other = {**movement, "target": {"name": "Sparta", "avatarName": "Mine"}}
+    other = {**movement, "target": {"name": "Sparta", "avatarName": None}, "resources": None}
 
     def respond(rows):
         session.post.return_value = json.dumps([None, [None, [None, None,
@@ -116,6 +116,8 @@ def test_advisor_accounts_for_incoming_returning_and_unknown_cargo():
 
     respond([movement, returned, other])
     assert worker.incoming_amount(session, 103, "Corinth", 2) == 24690
+    respond([{**movement, "target": {"name": "Corinth", "avatarName": None}}])
+    assert worker.incoming_amount(session, 103, "Corinth", 2) == 12345
     respond([{**movement, "resources": None}])
     with pytest.raises(ValueError, match="Incoming cargo unavailable"):
         worker.incoming_amount(session, 103, "Corinth", 2)
@@ -136,3 +138,27 @@ def test_ipc_rejects_missing_or_foreign_source(offline, monkeypatch):
         "sources": o["sources"][:1], "amount": 100}}
     with pytest.raises(EngineIPCUnavailable):
         ipc.fill_preview(account, DRAFT)
+
+def test_overfull_destination_is_safe_noop(offline, monkeypatch):
+    original = CITIES[103]
+    monkeypatch.setitem(CITIES, 103, {**original, "freeSpaceForResources": [0,0,-20,0,0]})
+    result = worker.preview_fill(offline, DRAFT)
+    assert result["free_space"] == result["budget"] == result["amount"] == 0
+    assert validate_fill(DRAFT, result) == result
+
+
+def test_incoming_failure_never_exposes_raw_exception(offline, monkeypatch):
+    def unreadable(*_args):
+        raise ValueError("synthetic private payload")
+    monkeypatch.setattr(worker, "incoming_amount", unreadable)
+    with pytest.raises(worker.FillPreviewError, match="^fill_incoming_unavailable$"):
+        worker.preview_fill(offline, DRAFT)
+
+
+def test_safe_preview_error_contract():
+    from daedalus.engine_ipc import FillPreviewUnavailable
+    from daedalus.fill_warehouse_review import FILL_PREVIEW_MESSAGES
+
+    assert str(FillPreviewUnavailable("fill_incoming_unavailable")) == FILL_PREVIEW_MESSAGES["fill_incoming_unavailable"]
+    with pytest.raises(EngineIPCUnavailable, match="Invalid warehouse preview failure"):
+        FillPreviewUnavailable("synthetic private payload")

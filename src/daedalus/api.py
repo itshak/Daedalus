@@ -31,7 +31,7 @@ from daedalus.account_sessions import (
 from daedalus.accounts import Account, AccountConfigError, load_accounts
 from daedalus.auth_assistance import AssistanceBroker, AssistanceConflict
 from daedalus.demo import demo_accounts, demo_cities, demo_warehouses
-from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient
+from daedalus.engine_ipc import EngineIPCUnavailable, ExistingIPCClient, FillPreviewUnavailable
 from daedalus.engine_registry import inspect_engine
 from daedalus.login_vault import (
     LoginVaultUnavailable,
@@ -688,6 +688,8 @@ def create_app(
             ticket = operation_previews.issue(account_id, task, config)
             return {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
                     "preview_id": ticket, "expires_in": operation_previews.ttl}
+        except FillPreviewUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Operation preview rejected") from exc
         except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError) as exc:

@@ -190,7 +190,11 @@ def test_native_military_page_all_accounts_is_read_only_and_context_isolated():
         assert "Boreas" not in page.tables[0].item(0, 0).text()
         page.set_unavailable("beta", "military_overview")
         assert "unavailable" in page.status.text()
-        page._select_mode(2)
+        page.tabs.widget("fleet").click()
+        assert page.stack.currentIndex() == 1
+        page.tabs.widget("movements").click()
+        assert page.stack.currentIndex() == 2
+        assert page.tabs.currentRouteKey() == "movements"
         page.refresh()
         assert scopes[-1] == (["alpha", "beta"], "military_movements")
         assert page.tables[2].rowCount() == 0

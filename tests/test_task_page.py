@@ -273,6 +273,26 @@ def test_category_pivot_mirrors_existing_canonical_task_filter(page):
     assert page.group_tabs.isEnabled()
 
 
+def test_clicking_visible_category_tabs_filters_actual_catalog(page):
+    groups = {
+        1: ["alertAttacks", "testTelegramBot"],
+        2: ["fillCityWarehouse", "sendResources", "sellResources"],
+        3: ["constructionList", "research"],
+        4: ["trainArmy"],
+        5: ["dumpWorld"],
+    }
+    names = [name for group in groups.values() for name in group]
+    page.set_capabilities([{"name": name, "kind": "background_task"} for name in names], enabled=True)
+    for index in (2, 1, 3, 4, 5, 2):
+        page.group_tabs.widget(f"group-{index}").click()
+        assert page.category_combo.currentIndex() == index
+        assert page.group_tabs.currentRouteKey() == f"group-{index}"
+        assert set(page._task_names) == set(groups[index])
+        assert page.selected_task_name() in groups[index]
+    page.group_tabs.widget("group-0").click()
+    assert set(page._task_names) == set(names)
+
+
 def test_construction_table_renders_real_building_levels_and_draft_target(page):
     requests = []
     page.buildings_requested.connect(lambda account_id, city_id: requests.append((account_id, city_id)))

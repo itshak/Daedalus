@@ -63,7 +63,7 @@ class MilitaryPage(QWidget):
         for i, (name, label) in enumerate(zip(self._MODES, ("Troops", "Fleet", "Movements"))):
             self.tabs.addItem(
                 routeKey=name, text=label,
-                onClick=lambda i=i: self._select_mode(i),
+                onClick=lambda _checked=False, i=i: self._select_mode(i),
             )
         self.tabs.setCurrentItem("troops")
         layout.addWidget(self.tabs)

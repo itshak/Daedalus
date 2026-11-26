@@ -779,8 +779,12 @@ class IPCServer:
                             from ikabot.function.distributeResources import preview_distribution
                             result = preview_distribution(session, request["draft"])
                         elif action == "preview_fill_existing":
-                            from ikabot.function.fillCityWarehouse import preview_fill
-                            result = preview_fill(session, request["draft"])
+                            from ikabot.function.fillCityWarehouse import FillPreviewError, preview_fill
+                            try:
+                                result = preview_fill(session, request["draft"])
+                            except FillPreviewError as exc:
+                                return {"status": "error", "error": "Operation preview unavailable",
+                                        "reason": exc.reason}
                         elif action == "preview_recurring_existing":
                             from ikabot.helpers.nativePolicyReview import preview_recurring
                             result = preview_recurring(session, request["task"], request["draft"])
