@@ -1,6 +1,6 @@
 # Support and troubleshooting
 
-Daedalus is an experimental pre-alpha project, not a production-ready IkaBot replacement. The current desktop GUI and backend have deliberate feature and security limits.
+Daedalus is an experimental beta project, not a production-ready IkaBot replacement. The current desktop GUI and backend have deliberate feature and security limits.
 
 For installation and startup, begin with the [README](README.md). The [synthetic desktop demo](docs/SYNTHETIC-DEMO.md) is the safest way to verify your setup without live accounts. For macOS packaging, see [docs/MACOS-BUILD.md](docs/MACOS-BUILD.md). For what currently works, what is opt-in, and what remains incomplete, see [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md).
 

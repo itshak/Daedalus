@@ -5,244 +5,123 @@
     <img src="assets/brand/png/daedalus-logo-light-1600.png" width="700" alt="Daedalus: golden sun and winged D emblem, with the DAEDALUS name beneath">
   </picture>
 
-  <p><strong>Daedalus for Ikariam — open-source, desktop-first IkaBot control center</strong></p>
+  <p><strong>Daedalus for Ikariam — open-source macOS &amp; web control center for IkaBot</strong></p>
 
   <p>
     <a href="https://github.com/itshak/Daedalus/actions/workflows/ci.yml"><img alt="CI workflow" src="https://github.com/itshak/Daedalus/actions/workflows/ci.yml/badge.svg"></a>
     <a href="LICENSE"><img alt="GPL-3.0-only license" src="https://img.shields.io/badge/license-GPL--3.0--only-blue"></a>
-    <img alt="Pre-alpha status" src="https://img.shields.io/badge/status-pre--alpha-orange">
+    <img alt="Beta status" src="https://img.shields.io/badge/status-beta-blue">
   </p>
 </div>
 
-**Status: native desktop Fluent UI preview with opt-in existing-session task controls and protected account metadata editing.** Daedalus includes a PySide6/Fluent GUI with Overview, Accounts, Warehouses, Automations, Activity, Connection and Settings, credential-free multi-account metadata, and a bearer-authenticated backend. By default the backend is read-only; an explicit `--enable-task-control` flag allows confirmed start/list/stop of built-in tasks on an **already-authenticated IkaBot game session**, without opening another login. The engine combines IkaBot 7.7.2 and experimental [upstream PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499) (including #502 and #511), which is **not an official stable upstream release**. The native Mac Gameforge login dialog, protected one-use HTTPS session
-handoff, server-side player attestation and idle dedicated-worker rebind are
-implemented and pass offline CI. Real human Gameforge/MFA/CAPTCHA, task/rebind
-trial and host reboot remain **untested** in
-[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
-Automatic session recovery and safe-job restoration now default on for enabled accounts with a configured monitored backend; live Gameforge acceptance remains unapproved.
+**Daedalus is an open-source, multi-account management and automation suite for Ikariam, powered by the upstream [IkaBot](https://github.com/Ikabot-Collective/ikabot) engine.** It combines a native macOS application, a responsive web control center, and a self-hosted Python backend. Manage the same accounts and automations from either client, without running a separate bot for each interface.
 
-Daedalus is an open-source, desktop-first control center intended to integrate the [IkaBot](https://github.com/Ikabot-Collective/ikabot) game automation engine with a multi-account backend and a native PySide6 desktop application.
+> **Beta — v0.1.0b1 target.** The core system is implemented and in use, but this is prerelease software. Live game-changing workflows, recovery and physical Mac acceptance are still being validated. No stable-release certification or guarantee of game outcomes is implied. See [current status](docs/PROJECT-STATUS.md) and [known limitations](#beta-limitations).
 
-**Project links:** [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Support](SUPPORT.md) · [Implementation status](docs/PROJECT-STATUS.md). This project is experimental and is not yet ready to replace an existing production bot installation.
+[Download macOS](https://github.com/itshak/Daedalus/releases) · [Web control center](https://daedalus-web-chi.vercel.app) · [Installation and configuration](#getting-started) · [Report a bug](https://github.com/itshak/Daedalus/issues/new/choose)
 
-## Principles
+## Features
 
-- **One game engine:** reuse public IkaBot task implementations instead of reproducing game operations.
-- **One account session owner:** prevent competing logins and duplicate live workers.
-- **Complete desktop control:** preserve and expand the existing Fluent/PySide6 interface.
-- **Local or remote:** the same authenticated backend API works on a user's computer or a remote Linux server.
-- **Authentication recovery:** retain existing Selenium-assisted login, saved cookies, manual login and CAPTCHA assistance; do not assume upstream email/password login works reliably.
-- **Secure by default:** no live user credentials, tokens, cookies, browser profiles, or runtime files in source control or public CI.
+| | What Daedalus offers |
+| --- | --- |
+| Multi-account workspace | One, selected or all accounts; verified session and worker status; account-bound operation reviews. |
+| Warehouses | Actual city resource reports, island grouping, sortable/filterable web table, two-minute online cache, unsecured stock filters, printing and CSV/JSON/TXT exports. |
+| Military | Read-only troop, fleet and ship-movement observations, with city-level unit counts and explicit unavailable states. |
+| Automations | Native, typed editors for construction, recruitment, trade, transport, warehouse filling, research, faith, missions and monitoring; reviewed task start, stop, receipts and history. |
+| Session recovery | Headless-first Mac Gameforge login, human-assisted browser fallback, protected session handoff and default-on delayed recovery for eligible monitored accounts. Safe jobs can resume after reattestation; uncertain effects remain held for review. |
+| Shared backend | Authenticated REST API, host-local exclusive session ownership, persistent receipts and upstream-first IkaBot execution. |
 
-## Development setup
+## Choose your interface
 
-Requires Python 3.11+ and, for OpenSpec, Node.js:
+### Native macOS app
 
-```bash
-python -m pip install -e ".[dev]"
-python -m pip install -e ./engine/ikabot pytest-mock  # optional: install engine CLI; controller tests use checked-out engine
-python -m pytest -q tests
-python -m pytest -q engine/ikabot/tests/ikabot
-python -m ruff check src tests scripts
-daedalus --version
-daedalus doctor
-daedalus engine inventory
-daedalus accounts list --config docs/examples/accounts.toml
-```
+A Fluent/PySide6 desktop app with direct HTTPS connection, macOS Keychain, native reporting, protected Gameforge login and task controls. Download the matching **DMG and SHA-256 checksum** from [GitHub Releases](https://github.com/itshak/Daedalus/releases). Preview DMGs are ad-hoc signed, not Apple-notarized; macOS may display a Gatekeeper warning. Follow the verified, user-initiated installation procedure in [macOS packaging](docs/MACOS-BUILD.md). Never disable system-wide Gatekeeper.
 
-The `engine inventory` command reads engine source files through the Python AST, listing actual IkaBot menu actions and background tasks in JSON. It **does not launch bots or execute tasks**. The upstream CLI/IPC proposal is included, and Daedalus now has an **opt-in existing-session-only read bridge** for city and warehouse data. The controller cannot create new authenticated game workers; already-authenticated compatible workers can run explicitly confirmed built-in tasks only in opt-in task mode.
+### Web control center
 
-See [brand assets and app icons](assets/brand/README.md), including light/dark SVG, macOS ICNS, Windows ICO, and web/mobile exports.
+A responsive Next.js/React dashboard with English/Russian localization, saved navigation, resource filters, military inventory and reviewed automation workflows. The hosted [web control center](https://daedalus-web-chi.vercel.app) is private, invite-only and tied to the operator's backend. Self-hosters can deploy their own instance with Supabase Auth and the server-only controller gateway. Gameforge login and game credentials stay outside the web UI. See [web deployment and configuration](apps/web/README.md).
 
-## Native Mac GUI preview
+### Linux backend
 
-The current desktop reuses Fluent navigation, macOS titlebar treatment, Qt theme, scroll tables and thread-safe logging from our existing Mac GUI. It uses the Daedalus backend API for reports and, only when explicitly enabled, task operations. The reviewed native GUI migration is implemented, but this is still a
-**pre-alpha integration preview**, not a production-ready replacement.
+The shared FastAPI controller owns account metadata, authenticates clients, coordinates compatible IkaBot workers, and maintains durable task/recovery records. Both clients use the same versioned API. Keep the backend and worker IPC private; expose only approved authenticated HTTPS ingress. Task control is an explicit backend capability and every mutation requires the existing reviewed/confirmed workflow.
 
-```bash
-python -m pip install -e ".[desktop]"
-daedalus-desktop
-```
+## Getting started
 
-Open **Connection** and enter a trusted HTTPS backend URL with the Daedalus API bearer. The token is masked and, by default, saved only in the OS Keychain under the exact approved origin for automatic secure reconnection; no Mac SSH tunnel is required for the regular HTTPS path. The separate Gameforge login/browser-assisted recovery is an account-scoped operation, not an API token exchange.
-
-The redesigned interface places **Overview**, **Accounts**, **Warehouses**, **Automations**, and **Activity** in the main sidebar, with unique-icon **Connection** and **Settings** utilities below. Wine and Construction shortcuts live inside Automations, alongside a read-only operation catalog. The GUI keeps task start/stop behind backend capability flags, current account ownership and explicit confirmation.
-
-**Automatic login like the original local IkaBot warehouse bot:** Daedalus reuses verified sessions and the previous bot's saved cookies when safely matched, then uses headless Selenium Chrome to sign into Gameforge automatically with Keychain-backed account credentials. **A CAPTCHA or failed headless login opens a visible Chrome window** for manual correction or challenge completion; successful headless runs stay invisible. A first-time account without local credentials will ask for email/password once. Gameforge secrets stay on the Mac; the selected world's cookie goes only through the existing encrypted one-time handoff to the independently verifying Linux controller. The manual Qt WebEngine flow remains an advanced fallback, not the default.
-
-**One-click all-account warehouse printing:** Open **Warehouses** and click **All accounts**; the GUI loads one combined report for every configured account, labeling unavailable snapshots rather than treating missing resources as zero. Click **Print report…** for the native print-preview dialog, or **Export report** for grouped text, CSV or JSON. Choose a subset with **Choose accounts…** and **Selected (N)**; the existing 220K unsecured-resource filter and island grouping remain available. Read-only all-account and selected-account automation statuses are also available. Bulk task starts require separate cohort review and independent per-account backend preflights.
-
-For a detailed synthetic walkthrough, print instructions, account selection and known UI/production restrictions, see the [macOS Fluent UI preview guide](docs/MAC-UI-GUIDE.md).
-For UI tests, install `.[dev,desktop]`. On Linux use `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py`; on macOS use `QT_QPA_PLATFORM=cocoa python -m pytest tests/test_desktop.py` because Fluent Widgets requires a native macOS window. A dedicated macOS GitHub Actions workflow verifies the Cocoa-backed native Qt controls. See [GUI migration scope](docs/GUI-MIGRATION.md).
-
-**Mac app preview:** Download **`Daedalus-macos-preview.dmg` directly from [GitHub Releases](https://github.com/itshak/Daedalus/releases)** (Assets → newest Desktop Preview), without any ZIP extraction. The DMG now copies BlindBase's HFS+ packaging and **`readme_first.txt` with its exact first-install `xattr -cr` instructions**. For Daedalus, you can also **explicitly run `Install Daedalus.command` from the DMG**: it verifies the app, installs it in `~/Applications` and clears quarantine only on that installed app, avoiding a Privacy & Security approval flow for a trusted preview. If Finder restricts the command, invoke it with `bash "/Volumes/Daedalus/Install Daedalus.command"` in Terminal. Simply dragging the unnotarized app may still trigger Gatekeeper. The DMG cannot auto-run a command; a fully warning-free standard installation requires Apple Developer ID signing and notarization. CI tests the quarantined-copy installer and DMG before release. See [macOS packaging](docs/MACOS-BUILD.md).
-
-## Synthetic Mac desktop demo (no live game session)
-
-To explore the complete native connection/accounts/warehouse reporting and
-export views without any real Ikariam account, start a **separately opted-in**
-synthetic backend. It never opens a game login, reads private account files or
-enables task mutations:
+**Try without a game account:** install the desktop preview and use its synthetic demo, or run the following from a clean Python 3.11+ virtual environment:
 
 ```bash
 python -m pip install -e ".[server,desktop]"
 export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 daedalus serve --demo
-# In another terminal: daedalus-desktop
+# In another terminal:
+daedalus-desktop
 ```
 
-Connect the desktop to `http://127.0.0.1:8765` with the same generated
-bearer token. The window, Connection and Warehouses pages display
-**SYNTHETIC DEMO** to distinguish sample accounts and resources from real
-game observations. Demo mode rejects real account files, IPC connections,
-task execution and metadata editing. See [synthetic Mac demo walkthrough](docs/SYNTHETIC-DEMO.md).
+Connect the desktop to `http://127.0.0.1:8765` using the generated bearer. Synthetic mode displays invented account/city data and cannot dispatch real game tasks. See [demo walkthrough](docs/SYNTHETIC-DEMO.md).
 
-## Read-only local API
+**Configure a real installation:** follow [backend setup and migration](docs/MIGRATION.md), [secure HTTPS](docs/REMOTE-HTTPS.md), [saved-worker setup](docs/SAVED-WORKER.md), [persistent credentials](docs/PERSISTENT-CREDENTIALS.md) and [task control](docs/TASK-CONTROL.md). The default server is read-only; monitored task control and account editing have explicit prerequisites. Never point two independently running workers at the same account. Keep all private configuration outside Git. The Mac [quick start](docs/GUI-QUICKSTART.md) describes the exact-origin token and account sign-in workflows.
 
-The controller implements metadata, existing-session status, city lookup and optional warehouse reporting. With a second explicit task-control opt-in, it can also dispatch built-in background tasks to the same already-authenticated IkaBot process; it never creates a login. It reads account identities from a private TOML file and does **not** allow passwords, Gameforge tokens, cookies, or account email addresses in that file. Start from [the synthetic example](docs/examples/accounts.toml), saving your own metadata **outside the Git checkout** (default: `~/.config/daedalus/accounts.toml`).
+## Architecture
 
-Install the API extra and generate a secret before running it:
+```mermaid
+flowchart LR
+    M[macOS client] -->|Authenticated HTTPS| C[Daedalus controller]
+    W[Web browser] -->|Operator session| B[Next.js gateway]
+    B -->|Server-only HTTPS bearer| C
+    C -->|Protected local IPC| I[IkaBot workers]
+    C --> J[Private task and recovery journals]
+    I --> G[Ikariam]
+```
+
+Daedalus uses the vendored public IkaBot 7.7.2 engine plus reviewed experimental upstream CLI/IPC work ([PR #499](https://github.com/Ikabot-Collective/ikabot/pull/499), #502 and #511). It is not an official stable upstream engine release. [ADR-006](openspec/adr/006-upstream-first-engine-reuse.md) requires upstream helpers, request builders and waiting mechanisms to be reused wherever possible. See [architecture](docs/ARCHITECTURE.md) and [engine provenance](engine/UPSTREAM.md).
+
+## Beta limitations
+
+- Full upstream option-level parity and live acceptance of all game-changing operations are not certified. See the [operation coverage matrix](docs/operation-coverage.json).
+- Recovery defaults on only for eligible monitored backends and enabled accounts; explicit disables/pauses, missing protected credentials, unresolved receipts and identity checks take precedence. Unsupported or ambiguous jobs are not automatically replayed. Confirmed fixed cargo dispatch is not proof of delivery. See [automatic recovery](docs/AUTOMATIC-RECOVERY.md).
+- Real browser takeover, game-effect testing, full host reboot and physical Mac/VoiceOver acceptance remain separately tracked in [issue #60](https://github.com/itshak/Daedalus/issues/60). Use an isolated authorized account and do not assume a successful launch receipt proves game completion.
+- Native macOS DMGs are preview packages; other desktop platforms can be developed from source, but equivalent native distributions are not certified.
+- The web client never exposes arbitrary game IPC, raw automation JSON, Gameforge credentials or unaudited local administrative actions. Certain protected operations remain host-local.
+
+## Development
 
 ```bash
-python -m pip install -e ".[server]"
-export DAEDALUS_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-daedalus serve --host 127.0.0.1 --port 8765
+python -m pip install -e ".[dev]"
+python -m pytest -q tests
+python -m pytest -q engine/ikabot/tests/ikabot
+python -m ruff check src tests scripts
 ```
 
-With the server running, clients use `Authorization: Bearer <your-secret>` for `GET /api/v1/accounts`, `GET /api/v1/capabilities`, and `GET /api/v1/warehouses/{account_id}`. `GET /api/v1/health` returns minimal status without authentication. Without explicit existing-IPC integration (or a separately injected snapshot provider), warehouse queries return HTTP 503; **no fake resources are returned**. The server refuses external listening addresses; normal remote desktop access
-uses a TLS-verified private HTTPS origin and macOS Keychain-saved Daedalus bearer
-token. SSH tunneling is an opt-in advanced fallback, not required on the Mac. No password login, worker creation, task execution, or live Ikariam request is performed by **default startup**. Game task execution requires both `--connect-existing-ipc` and `--enable-task-control`, with an already-authenticated compatible engine session, plus operator confirmation in the GUI.
-
-**Optional account metadata editor:** Start an editing-only backend with `daedalus serve --enable-account-editing`. The Accounts page can add/edit/enable/disable/remove secret-free account records, each requiring confirmation. It uses owner-only atomic TOML, optimistic revisions and account-lease checks. `--enable-account-editing` is incompatible with `--enable-task-control`; neither editing nor read-only startup performs game login. See [account editing setup and limitations](docs/ACCOUNT-EDITING.md).
-
-**Optional existing-session bridge:** Start the backend with `--connect-existing-ipc --accounts-file ~/.config/daedalus/accounts.toml` on the same machine/user as a **compatible, already-running** IkaBot IPC server. The Accounts page can check engine attachment and Warehouses can fetch read-only snapshots. This path never creates another Gameforge login. See [the full existing-IPC requirements, precautions and testing instructions](docs/EXISTING-IPC.md). **Do not use the current production bot installation as a test worker.**
-
-OpenSpec 1.13 is used for spec-driven changes:
+For desktop development install `.[dev,desktop]` and use native Cocoa on macOS or the supported offscreen Linux test environment. For web development use Node.js 22+ (CI uses 24):
 
 ```bash
-npm install -g @fission-ai/openspec@1.13.0
-openspec validate --all --strict --no-interactive
-openspec list
+cd apps/web
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
 
-See [AGENTS.md](AGENTS.md), [implementation and OpenSpec status](docs/PROJECT-STATUS.md), [architecture](docs/ARCHITECTURE.md), [migration policy](docs/MIGRATION.md), [upstream provenance](engine/UPSTREAM.md), and [security](docs/SECURITY.md). Normative capability requirements live in [openspec/specs](openspec/specs/); completed change records live in [openspec/changes/archive](openspec/changes/archive/).
+OpenSpec requirements live in [openspec/specs](openspec/specs/). See [engineering status](docs/PROJECT-STATUS.md), [remaining engineering proposal](openspec/changes/finish-v010-engineering/tasks.md) and [contribution guide](CONTRIBUTING.md). Public tests use synthetic fixtures only; never put live credentials or private game observations into CI.
 
-## Optional task controls — explicit operator opt-in
+## Repository layout
 
-With a compatible already-authenticated IkaBot engine process on the same host, run `daedalus serve --connect-existing-ipc --enable-task-control`. The native **Tasks** page offers a built-in background operation list, JSON configuration, explicit start/stop confirmation and status for Daedalus-managed child processes. **The default service has no task mutations.** Existing IkaBot tasks started outside Daedalus cannot be stopped from this page. The task controller has a restart-safe request ledger; native Mac human login and encrypted handoff are implemented separately. Owner-run real-game acceptance remains open in [issue #60](https://github.com/itshak/Daedalus/issues/60). See the complete [task control setup, API and safeguards](docs/TASK-CONTROL.md).
+| Path | Purpose |
+| --- | --- |
+| `src/daedalus/` | Python API, account/session management, reviewed operations, recovery and CLI |
+| `src/daedalus/desktop/` | Native macOS-focused Fluent interface |
+| `apps/web/` | Next.js web UI, Supabase authentication and typed gateway |
+| `engine/ikabot/` | Vendored IkaBot engine |
+| `packaging/` | macOS build, installer and DMG tooling |
+| `docs/`, `openspec/` | Operational guides, specifications and design history |
 
-## Account-session ownership groundwork
+## Community and security
 
-Daedalus includes a host-local OS file lock and authentication-status state machine to prevent duplicate world/player workers **on the same backend host**. The authenticated API reports nonsecret session states for each account. This is groundwork only: **no Gameforge login, browser handoff, or game worker is started** by these components. The lock is not distributed across multiple servers; assign each account to one authoritative backend. See [session ownership and limitations](docs/SESSION-OWNERSHIP.md).
+[Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Support](SUPPORT.md) · [Changelog](CHANGELOG.md). Report vulnerabilities privately; never post game credentials, cookies, bearer tokens, or private logs in public issues.
 
-## Safe saved-cookie validation (explicit opt-in; no new login)
+## License
 
-Use `daedalus sessions bind-email ACCOUNT_ID` to associate an existing IkaBot saved-user email through the **OS keyring**, then `daedalus sessions probe-saved-cookies ACCOUNT_ID --confirm-read-only-network` to validate old world cookies under the host-local account lease without any lobby loginLink. This performs a genuine read-only world request only when explicitly confirmed; it **never creates or maintains an authenticated game worker**. Use a separate test account and stop unrelated sessions first. See [safe saved-cookie recovery](docs/SAFE-COOKIE-RECOVERY.md).
+Daedalus-original code is GPL-3.0-only ([LICENSE](LICENSE)). The vendored IkaBot engine retains its original MIT license ([engine license](engine/ikabot/LICENSE)). See [upstream provenance](docs/UPSTREAM.md). Daedalus is independently developed and is not affiliated with Gameforge or the upstream IkaBot maintainers.
 
-## Optional monitoring of verified existing IkaBot sessions
-
-Use the --monitor-existing-sessions flag together with --connect-existing-ipc and --enable-task-control only against a compatible already-authenticated IkaBot session on the same host. In Accounts, explicitly confirm Monitor verified session for one account; the backend holds its own host-local lease and checks a fixed read-only world URL. If the session expires, new task starts are blocked and the native desktop receives a nonsecret manual-help notification. Only a trusted worker may validate again. No new login is created and tasks are never automatically replayed. See [existing-session monitoring](docs/EXISTING-SESSION-MONITOR.md).
-
-## Isolated real-account test candidate (live acceptance still open)
-
-The native Accounts page now offers **Host recovery instructions**,
-**Prepare idle worker recovery**, manual-completion acknowledgment and
-**Verify staged cookie and rebind worker**. The visible login/CAPTCHA must
-occur on the authoritative host under the existing dedicated worker's OS
-user; a new cookie stays in a separate protected keyring slot until verified
-against the live game-world response. The API transmits no credentials,
-browser profile or cookie, and neither worker rebind nor UI refresh repeats
-any game task.
-
-**This implementation passed synthetic tests, not real Gameforge account
-validation.** See the
-[owner-supervised isolated test guide](docs/LIVE-ACCEPTANCE.md), use a separate
-authorized account, and keep the current production bot undisturbed. Three
-owner-supervised OpenSpec acceptance tasks remain open until the actual
-workflow is validated and explicit production approval is given.
-
-## Local manual browser-cookie handoff (no remote secret transport)
-
-For an existing IkaBot saved account, a separately authorized local operator can copy an already authenticated world cookie from their own browser and use the hidden terminal action -- daedalus sessions bind-world-cookie ACCOUNT_ID --confirm-read-only-network -- to verify the exact world/player and store it only in the OS keyring. The original browser/CAPTCHA login is completed manually; this does not create a new login, start IkaBot, update an already running worker or send cookies through the controller API. See [local browser-cookie handoff](docs/PRIVATE-WORLD-COOKIE-HANDOFF.md).
-
-## Offline readiness check and synthetic API smoke
-
-Run `daedalus doctor` to see installed preview capabilities and the dependencies actually present. The report marks live account status as not inspected, and does not claim new-worker bootstrap, automatic browser login or production readiness. Use `daedalus doctor --smoke` after installing server/client test dependencies to check the real API routes in-process with only fictional demo data, without Gameforge or an external TCP socket. See [offline readiness instructions](docs/TEST-READINESS.md).
-
-## One-click synthetic Mac demo (no setup or game login)
-
-In the native Connection page, click **Try offline demo — no game login**. Daedalus starts a private loopback-only synthetic backend, connects with an ephemeral in-memory token, shows clearly labeled fictional accounts/cities/resources, and stops the server when the app closes. Neither IkaBot cookies nor real account settings are used. See [native one-click synthetic demo](docs/ONECLICK-DEMO.md).
-
-## Manual authentication assistance protocol (foundation only)
-
-The repository includes a credential-free, lease-bound acknowledgment protocol for **future** trusted worker login assistance. In the native Accounts view, a selected account can request nonsecret assistance status and an explicit manual-step acknowledgment when a compatible trusted in-process broker is injected into the server. This action does **not** authenticate, transfer a cookie, bypass a CAPTCHA, start a login, or resume any game task. The normal CLI does not enable this broker until an actual supervised engine/browser integration is implemented. See [manual authentication assistance and limitations](docs/AUTH-ASSISTANCE.md).
-
-## Candidate public engine CLI (after installing `./engine/ikabot`)
-
-The vendored IkaBot **proposed** CLI supports native task flags such as `--task`, `--config`, `--batch` and `--cities`. To see the supported syntax without logging in, run:
-
-```bash
-python -m ikabot --help
-```
-
-Task execution requires an already-authenticated compatible IkaBot session and explicit operator opt-in. Test it in an isolated engine environment rather than restarting production accounts. The independent `daedalus engine inventory` command is read-only and reports the upstream CLI's presence separately from Daedalus's own dispatch readiness.
-
-See [the precise upstream merge record](engine/UPSTREAM.md), [the archived OpenSpec CLI/IPC integration change](openspec/changes/archive/2026-11-18-integrate-upstream-cli-ipc/proposal.md) and [current implementation status](docs/PROJECT-STATUS.md).
-
-## Existing-session-only bridge
-
-Daedalus can now connect **read-only** to an already-running instance of the Daedalus-vendored IkaBot engine that supports the new restricted IPC actions. The **Accounts** view has a **Check IkaBot sessions** button, and **Warehouses** can read exact unsecured-resource totals. The backend never restores a game login for these requests; the connection is explicitly opted into with `daedalus serve --connect-existing-ipc`. Task start/stop is separately available behind `--enable-task-control`; the Selenium login assistant remains unfinished. Read [the bridge setup and limitations](docs/EXISTING-IPC.md).
-
-## Repository organization
-
-- `src/daedalus/`: application package, local/remote HTTP client, reporting utilities and authenticated read-only API
-- `engine/ikabot/`: public MIT-licensed IkaBot 7.7.2 with proposed, unreleased PR #499 CLI/IPC code
-- `server/`: future supervised account workers, task dispatcher, scheduler and policies; not implemented yet
-- `src/daedalus/desktop/`: reviewed Fluent GUI with multi-account reports, dedicated Wine/Construction task views, private appearance preferences and opt-in task controls; remote recovery and live acceptance pending
-- `openspec/`: normative specifications, architecture decisions and change proposals
-
-## License and provenance
-
-Project-original code is offered under **GPL-3.0-only**. Vendored IkaBot is MIT-licensed; its original [license](engine/ikabot/LICENSE) and notices are preserved. Other dependencies and imported code require license review before distribution. See [docs/UPSTREAM.md](docs/UPSTREAM.md).
-
-This project is independently developed and is not affiliated with Gameforge or the upstream IkaBot maintainers.
-
-### Experimental saved-cookie worker
-
-For explicitly authorized cookie-only startup of one existing authenticated
-IkaBot world session (without lobby login), see
-[the saved-worker guide](docs/SAVED-WORKER.md). This remains an experimental
-path, not a replacement for interactive Gameforge authentication.
-
-## OpenSpec and production scope
-
-The normative, maintained requirements are in [OpenSpec capabilities](openspec/specs/), and completed milestones are preserved under [archived changes](openspec/changes/archive/). Active umbrella changes remain open while their unchecked tasks are genuinely unfinished; they are **not** silently marked complete. The detailed [status and remaining work](docs/PROJECT-STATUS.md) identifies those gaps.
-
-The [saved-cookie worker](docs/SAVED-WORKER.md) is an explicitly opted-in, single-account bootstrap from **previously authenticated** cookies. It does not provide a fresh Gameforge login, browser/CAPTCHA handoff, unattended recovery or live-account certification. The [synthetic demo](docs/SYNTHETIC-DEMO.md) remains the safe first test.
-
-Authentication recovery implementation and limitations: [Human browser recovery](docs/BROWSER-RECOVERY.md).
-
-### Automatic session and managed-job recovery (opt-in; live acceptance pending)
-
-After confirmed loss of the game session (including a browser login elsewhere), the recovery supervisor is enabled by default on configured monitored backends and observes a five-minute grace period before attempting a verified account-bound IkaBot session refresh using a protected server-side lobby credential. Approved managed jobs can resume only after the exact world/player identity is independently verified. The owner can pause recovery while using the browser, disable recovery for an account, or disable the host supervisor with \`--disable-auto-recovery\`. Explicitly saved disables and pauses take precedence over the new defaults.
-
-**Fixed-quantity resource transfers:** For newly approved Daedalus-managed `sendResources` jobs between your own cities, each shipment chunk has a durable write-ahead/accepted receipt. Following reconnect, the worker dispatches only the original quantity **not already confirmed as sent**. Pending, unconfirmed cargo is held for review instead of risking a second shipment. Legacy jobs, shipments to other players, and other one-shot transport modules are not automatically replayed.
-
-See [automatic recovery and fixed-cargo safeguards](docs/AUTOMATIC-RECOVERY.md). These features are not a claim of completed live-game acceptance or active production deployment.
-
-Production engine source review and nonsecret upstream reconciliation: [Engine authentication reconciliation](docs/ENGINE-AUTH-RECONCILIATION.md).
-
-
-## Guided desktop preview
-
-The account-first macOS GUI supports simple Automations settings, direct HTTPS with Keychain token saving and automatic reconnect, read-only
-warehouse reports and explicit task approvals.
-See [Guided native Mac quick start](docs/GUI-QUICKSTART.md) for connection, prerequisites and limitations.
-
-
-### Native Mac authentication
-
-Human Gameforge login/MFA/CAPTCHA is supported in the **client Mac's** temporary embedded browser and the exact-world session is sent as a one-use encrypted payload to the independently verifying Linux worker. No remote VNC or Mac SSH tunnel is needed. Backend opt-in and real-world acceptance are separate. See [native Mac browser login](docs/NATIVE-MAC-LOGIN.md).
-
-
-For unattended Linux deployment, [host-persistent encrypted systemd credentials](docs/PERSISTENT-CREDENTIALS.md) replace volatile desktop-session keyrings without adding a Mac SSH/VNC requirement. The local release preflight and real-owner acceptance checklist remain mandatory.
+Release engineering: [first beta preparation](docs/BETA-RELEASE.md).

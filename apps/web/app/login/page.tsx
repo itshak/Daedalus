@@ -1,6 +1,5 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import { createBrowserClient } from "@supabase/ssr";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import { LanguageSelector, useLanguage } from "@/components/language-provider";
@@ -11,16 +10,12 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!url || !key) { setError("Administrator authentication is not configured."); return; }
     setBusy(true); setError("");
     try {
-      const supabase = createBrowserClient(url, key);
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+      if(!response.ok)throw new Error("Sign in failed");
       window.location.assign("/");
     } catch { setError("Unable to sign in. Check credentials or contact the administrator."); }
     finally { setBusy(false); }

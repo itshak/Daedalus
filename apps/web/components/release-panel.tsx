@@ -2,7 +2,7 @@
 import {useState,useRef} from "react";
 import {useLanguage} from "./language-provider";
 import {parseReleaseStatus,type ReleaseStatus} from "../lib/release-status";
-export function ReleasePanel(){
+export function ReleasePanel({webVersion,webRevision}:{webVersion:string;webRevision:string|null}){
   const {t}=useLanguage();
   const [status,setStatus]=useState<ReleaseStatus|null>(null),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false);
   const flight=useRef(false);
@@ -17,6 +17,8 @@ export function ReleasePanel(){
     finally{flight.current=false;setBusy(false);}
   }
   return <section className="panel settings-panel"><div className="panel-heading"><div><h3>{t("Releases and diagnostics")}</h3><p>{t("Check published Mac previews without changing the backend.")}</p></div></div>
+    <div className="settings-row"><strong>{t("Web version")}</strong><span>{webVersion}</span></div>
+    <div className="settings-row"><strong>{t("Web build revision")}</strong><code>{webRevision??t("Unknown")}</code></div>
     <button type="button" className="secondary-button" disabled={busy} onClick={()=>void check()}>{t(busy?"Loading…":"Check published Mac preview")}</button>
     {failed&&<p role="alert">{t("Release metadata unavailable")}</p>}
     {status&&<><div className="settings-row"><strong>{t("Controller version")}</strong><span>{status.controller_version}</span></div>

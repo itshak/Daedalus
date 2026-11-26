@@ -1,3 +1,3 @@
-"""Daedalus application namespace (bootstrap only; no game automation yet)."""
+"""Daedalus multi-account IkaBot control center."""
 
-__version__ = "0.1.0a0"
+__version__ = "0.1.0b1"

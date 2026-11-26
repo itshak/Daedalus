@@ -5,7 +5,7 @@ import { LOCALE_COOKIE, parseLocale } from "@/lib/i18n";
 import "./globals.css";
 export const metadata: Metadata = {
   title: "Daedalus — Control Center",
-  description: "Private multi-account Ikariam operations and monitoring",
+  description: "Daedalus beta — private multi-account Ikariam web control center",
   robots: { index: false, follow: false },
   manifest: "/manifest.webmanifest",
   applicationName: "Daedalus",

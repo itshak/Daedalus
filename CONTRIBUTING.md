@@ -1,6 +1,6 @@
 # Contributing to Daedalus
 
-Thank you for helping improve Daedalus. The project is **pre-alpha**; its desktop application, API contracts, and upstream IkaBot integration are evolving. Contributions should be focused, reproducible, and safe to test without real accounts.
+Thank you for helping improve Daedalus. The project is **beta**; its desktop application, API contracts, and upstream IkaBot integration are evolving. Contributions should be focused, reproducible, and safe to test without real accounts.
 
 ## Before you start
 

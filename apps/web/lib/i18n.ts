@@ -141,6 +141,8 @@ export const RU: Readonly<Record<string, string>> = {
   "Release notes": "Описание выпуска",
   "Published preview": "Опубликованная версия",
   "Controller build revision": "Ревизия сборки контроллера",
+  "Web version": "Версия веб-интерфейса",
+  "Web build revision": "Ревизия веб-интерфейса",
   "Controller version": "Версия контроллера",
   "Release metadata unavailable": "Данные о выпуске недоступны",
   "Check published Mac preview": "Проверить версию для Mac",

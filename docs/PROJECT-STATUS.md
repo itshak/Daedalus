@@ -1,6 +1,6 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-26**, against main `69d7552` (PR #110). The repository is in development preview (`0.1.0a0`); stable release is **NOT TESTED / NOT APPROVED**.
+Last reviewed: **2026-11-26**, against consolidation baseline `8ac3b18` and beta engineering work. The repository is preparing beta `0.1.0b1` (web SemVer `0.1.0-beta.1`); stable release is **NOT TESTED / NOT APPROVED**.
 
 ## Current engineering backlog
 
@@ -32,7 +32,7 @@ This release does not certify any live automation or backend deployment.
 
 ## Archived implementation and superseded proposals
 
-The following changes have implemented and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
+The following changes have implemented and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Completed requirements and explicit supersession dispositions are recorded; their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |

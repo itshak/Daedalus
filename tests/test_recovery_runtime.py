@@ -276,3 +276,30 @@ def test_broker_trusted_auto_reconnect_clears_stale_assistance(tmp_path):
     assert lease.phase==SessionPhase.AUTHENTICATED
     assert broker.snapshot(a.id)["ticket"] is None
     lease.close()
+
+
+def test_inconclusive_ipc_errors_never_trigger_recovery(system):
+    from daedalus.engine_ipc import EngineIPCUnavailable
+
+    a,j,_c,w,_ctl,s,t=system
+    w.running=SimpleNamespace(alive=lambda:True, lease=SimpleNamespace(phase=SessionPhase.AUTHENTICATED))
+    def unavailable(_):
+        raise EngineIPCUnavailable("synthetic transient timeout")
+    w.router=SimpleNamespace(validate_account=unavailable)
+    for _ in range(4):
+        s.tick()
+        t[0]+=40
+    assert j.event(a) is None
+    assert not w.starts
+    # A negative observation separated by a transport error must not be enough.
+    def probe(_):
+        return False
+    w.router.validate_account=probe
+    s.tick()
+    t[0]+=40
+    w.router.validate_account=unavailable
+    s.tick()
+    t[0]+=40
+    w.router.validate_account=probe
+    s.tick()
+    assert j.event(a) is None
