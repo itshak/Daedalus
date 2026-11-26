@@ -54,11 +54,25 @@ def _city(session, cid):
     return city
 
 
-def incoming_amount(session, target, name, resource):
-    """Conservative matching: duplicate owned city names share reservations."""
+def _advisor_data(session, target):
+    """Read the fixed advisor view without a legacy POST on cookie-only workers."""
+    if getattr(session, "_daedalus_cookies_only", False) is True:
+        # Use the existing protected same-world GET transport; do not
+        # reauthenticate, read stored cookies, or switch to legacy POST.
+        html = session.get(f"view=militaryAdvisor&currentCityId={target}")
+        marker = re.search(r"ajax\.Responder,\s*(?=\[)", html)
+        if marker is None:
+            raise ValueError("Advisor response unavailable")
+        raw, _ = json.JSONDecoder(strict=False).raw_decode(html[marker.end():])
+        return raw
     url = ("view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city"
            f"&currentCityId={target}&actionRequest={actionRequest}&ajax=1")
-    raw = json.loads(session.post(url, retry_on_failure=False), strict=False)
+    return json.loads(session.post(url, retry_on_failure=False), strict=False)
+
+
+def incoming_amount(session, target, name, resource):
+    """Conservative matching: duplicate owned city names share reservations."""
+    raw = _advisor_data(session, target)
     rows = raw[1][1][2]["viewScriptParams"]["militaryAndFleetMovements"]
     if not isinstance(rows, list) or len(rows) > 250:
         raise ValueError("Incoming cargo unavailable")
@@ -121,11 +135,11 @@ def preview_fill(session, draft):
         city = _city(session, target)
         free = _free_space(city["freeSpaceForResources"][i])
         stock_at_target = _amount(city["availableResources"][i])
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         raise FillPreviewError("fill_destination_unavailable") from exc
     try:
         incoming = incoming_amount(session, target, names[target], i)
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         raise FillPreviewError("fill_incoming_unavailable") from exc
     budget = max(0, free-incoming)
     remaining = budget
@@ -133,7 +147,7 @@ def preview_fill(session, draft):
     for cid in sorted(set(names)-{target}):
         try:
             stock = _amount(_city(session, cid)["availableResources"][i])
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             raise FillPreviewError("fill_source_unavailable") from exc
         amount = min(stock, remaining)
         remaining -= amount
@@ -145,7 +159,7 @@ def preview_fill(session, draft):
         available = _amount((getAvailableFreighters if freighters else getAvailableShips)(session))
         if available > total or (budget != remaining and (not capacity or not total)):
             raise ValueError("No usable fleet")
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         raise FillPreviewError("fill_fleet_unavailable") from exc
     return {"destination_city": target, "destination_name": names[target],
             "stock": stock_at_target, "free_space": free, "incoming": incoming,

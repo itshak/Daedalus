@@ -221,3 +221,30 @@ def test_fill_preview_actual_worker_handler_to_controller_api(offline, monkeypat
             assert all(r["action"] != "start_task_existing" for r in requests)
         finally:
             controller.close()
+
+
+def test_cookie_only_advisor_uses_protected_get_and_never_legacy_post():
+    session = Mock(username="Mine")
+    session._daedalus_cookies_only = True
+    session.post.side_effect = AssertionError("legacy POST is not a cookie-only read")
+    movement = {"origin": {"name": "Athens", "avatarName": "Mine"},
+                "target": {"name": "Corinth", "avatarName": "Mine"},
+                "event": {"isFleetReturning": False},
+                "resources": [{"cssClass": "resource_icon wood", "amount": "12,345"}]}
+    data = [None, [None, [None, None, {"viewScriptParams": {"militaryAndFleetMovements": [movement]}}]]]
+    session.get.return_value = "ajax.Responder, " + json.dumps(data) + ");"
+    assert worker.incoming_amount(session, 103, "Corinth", 0) == 12345
+    session.get.assert_called_once_with("view=militaryAdvisor&currentCityId=103")
+    session.post.assert_not_called()
+    session.get.return_value = "missing advisor"
+    with pytest.raises(ValueError, match="Advisor response unavailable"):
+        worker.incoming_amount(session, 103, "Corinth", 0)
+    session.post.assert_not_called()
+
+
+def test_legacy_session_exit_is_stage_specific_and_fails_closed(offline, monkeypatch):
+    def rotated(*_args):
+        raise SystemExit(1)
+    monkeypatch.setattr(worker, "incoming_amount", rotated)
+    with pytest.raises(worker.FillPreviewError, match="^fill_incoming_unavailable$"):
+        worker.preview_fill(offline, DRAFT)
