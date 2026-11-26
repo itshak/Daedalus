@@ -344,3 +344,11 @@ tbody tr:hover {background:var(--surface-alt)}
 
 .launch-success {border:1px solid #9cc9aa;border-radius:11px;background:#edf8f0;color:#235c36;padding:13px 16px;font-weight:600}
 .theme-dark .launch-success {background:#203e2c;color:#b9e5c5;border-color:#477454}
+
+.warehouse-filters {display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:15px 18px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.warehouse-filters .field {flex:1;min-width:140px;margin:0}
+.warehouse-sort {display:flex;align-items:center;gap:7px;width:100%;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;text-align:inherit;cursor:pointer}
+.numeric .warehouse-sort {justify-content:flex-end}
+.warehouse-sort>span:last-child {opacity:.7;font-size:12px}
+.warehouse-data-table th:first-child,.warehouse-data-table td:first-child {white-space:nowrap}
+@media print {.warehouse-filters {display:none!important}.warehouse-sort>span:last-child {display:none}}

@@ -6,6 +6,8 @@ import Image from "next/image";
 import { LanguageSelector, useLanguage } from "@/components/language-provider";
 import { formatNumber, formatDate } from "@/lib/i18n";
 import { militaryInventory, type MilitaryRow } from "@/lib/military-inventory";
+import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
+import { WarehouseCache, WAREHOUSE_TTL_MS, savedPage, filterWarehouseRows, warehouseIsland, type DashboardPage, type WarehouseCity, type WarehouseResult, type WarehouseResource } from "@/lib/warehouse-dashboard";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {WorldReportsPanel} from "./world-reports-panel";
@@ -34,12 +36,7 @@ import {
 } from "lucide-react";
 
 type Account = { id: string; email?: string | null; world?: string; player?: string; label?: string; name?: string; enabled?: boolean; session_status?: string; synthetic?: boolean };
-type WarehouseCity = {
-  account_id: string; city_id: number; city_name: string; island?: string | null; captured_at?: string;
-  resources: { unsecured: Record<string, number | null>; total?: Record<string, number | null>; capacity?: number | null }
-};
-type WarehouseResult = { account_id: string; cities: WarehouseCity[]; synthetic_demo?: boolean };
-type Page = "overview" | "accounts" | "warehouses" | "automations" | "military" | "activity" | "settings";
+type Page = DashboardPage;
 type Result = Record<string, unknown>;
 const NAV: { id: Page; title: string; icon: typeof LayoutDashboard; subtitle: string }[] = [
   { id: "overview", title: "Overview", icon: LayoutDashboard, subtitle: "Your workspace at a glance" },
@@ -173,6 +170,13 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const [warehouseErrors, setWarehouseErrors] = useState<Record<string,string>>({});
   const [reportLoading, setReportLoading] = useState(false);
   const [onlyLarge, setOnlyLarge] = useState(false);
+  const [warehouseQuery, setWarehouseQuery] = useState("");
+  const [islandFilter, setIslandFilter] = useState("all");
+  const [resourceFilter, setResourceFilter] = useState<WarehouseResource | "all">("all");
+  const [minimumResource, setMinimumResource] = useState(0);
+  const [warehouseSorting, setWarehouseSorting] = useState<SortingState>([{id:"island",desc:false},{id:"city",desc:false}]);
+  const [warehouseUpdated, setWarehouseUpdated] = useState<number | null>(null);
+  const warehouseCache = useRef(new WarehouseCache());
   const [accountQuery, setAccountQuery] = useState("");
   const [militaryData, setMilitaryData] = useState<Record<string,Result>>({});
   const [militaryErrors, setMilitaryErrors] = useState<Record<string,string>>({});
@@ -221,9 +225,15 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const [marketSide, setMarketSide] = useState("buy");
 
   useEffect(() => {
-    try { const stored = localStorage.getItem("daedalus-appearance"); if (stored === "dark") setTheme("dark"); } catch {}
+    try { const stored = localStorage.getItem("daedalus-appearance"); if (stored === "dark") setTheme("dark"); setPage(savedPage(localStorage.getItem("daedalus-page"))); } catch {}
   }, []);
   useEffect(() => { try { localStorage.setItem("daedalus-appearance", theme); } catch {} }, [theme]);
+  useEffect(() => {
+    const cache=warehouseCache.current;
+    const clear=()=>{cache.clear();setWarehouseMap({});setWarehouseUpdated(null);};
+    window.addEventListener("offline",clear);
+    return ()=>{window.removeEventListener("offline",clear);cache.clear();};
+  },[email,role]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {e.preventDefault();searchRef.current?.focus();} };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
@@ -234,7 +244,7 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     Promise.allSettled([controller<{accounts:Account[]}>("accounts"), controller<Result>("health"), controller<Result>("capabilities")]).then(results => {
       if(!alive)return;
       if(results[0].status==="fulfilled") setAccounts(results[0].value.accounts ?? []);
-      else setLoadError(results[0].reason instanceof Error ? results[0].reason.message : "Backend unavailable");
+      else { setAccounts([]); warehouseCache.current.clear(); setWarehouseMap({}); setWarehouseUpdated(null); setLoadError(results[0].reason instanceof Error ? results[0].reason.message : "Backend unavailable"); }
       setHealth(results[1].status==="fulfilled"?results[1].value:null);
       setCapabilities(results[2].status==="fulfilled"?results[2].value:null);
       setBusy(false);
@@ -251,19 +261,38 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
   const scopeKey=scopeIds.join("|");
   const filteredAccounts=useMemo(()=>accounts.filter(a=>(name(a)+" "+accountWorld(a)+" "+(a.player||"")).toLowerCase().includes(accountQuery.toLowerCase())),[accounts,accountQuery]);
 
+  const warehouseScope = JSON.stringify(scopeIds.map(id=>{
+    const account=accounts.find(a=>a.id===id);
+    return [id,account?.world,account?.player,account?.session_status,account?.enabled];
+  }));
   useEffect(() => {
-    if(page!=="warehouses")return;
-    let live=true;setReportLoading(true);
-    Promise.allSettled(scopeIds.map(id=>controller<WarehouseResult>("warehouses/"+encodeURIComponent(id)))).then(results=>{
-      if(!live)return;
+    if(page!=="warehouses" || busy)return;
+    let live=true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cache=warehouseCache.current;
+    const identities=JSON.parse(warehouseScope) as [string,string|undefined,string|undefined,string|undefined,boolean|undefined][];
+    const key=(identity: typeof identities[number])=>JSON.stringify([email,role,...identity]);
+    const unavailable=()=>{if(live){setWarehouseMap({});setWarehouseErrors(Object.fromEntries(identities.map(([id])=>[id,"Warehouse response unavailable"])));setWarehouseUpdated(null);setReportLoading(false);}};
+    const load=async()=>{
+      if(timer!==undefined)clearTimeout(timer);
+      if(!navigator.onLine){cache.clear();unavailable();return;}
+      const misses=identities.some(identity=>!cache.fresh(key(identity)));
+      setReportLoading(misses);
+      if(misses){setWarehouseMap(Object.fromEntries(identities.flatMap(identity=>{const entry=cache.fresh(key(identity));return entry?[[identity[0],entry.value]]:[];})));setWarehouseUpdated(null);}
+      const results=await Promise.allSettled(identities.map(identity=>cache.read(key(identity),identity[0],()=>controller<WarehouseResult>("warehouses/"+encodeURIComponent(identity[0])))));
+      if(!live||!navigator.onLine)return;
       const data:Record<string,WarehouseResult>={}, errors:Record<string,string>={};
-      results.forEach((r,i)=>{const id=scopeIds[i];if(r.status==="fulfilled")data[id]=r.value;else errors[id]=r.reason instanceof Error?r.reason.message:"Unavailable";});
+      results.forEach((r,i)=>{const id=identities[i][0];if(r.status==="fulfilled")data[id]=r.value;else errors[id]=r.reason instanceof Error?r.reason.message:"Unavailable";});
       setWarehouseMap(data);setWarehouseErrors(errors);setReportLoading(false);
-    });
-    return ()=>{live=false};
-  // scopeKey is stable only when selected identity changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[page,scopeKey,reload]);
+      const times=identities.flatMap(identity=>{const entry=cache.fresh(key(identity));return entry?[entry.at]:[];});
+      setWarehouseUpdated(times.length?Math.min(...times):null);
+      timer=setTimeout(load, times.length?Math.max(1000,Math.min(...times)+WAREHOUSE_TTL_MS-Date.now()):WAREHOUSE_TTL_MS);
+    };
+    const offline=()=>{if(timer!==undefined)clearTimeout(timer);cache.clear();unavailable();};
+    window.addEventListener("offline",offline);window.addEventListener("online",load);
+    void load();
+    return ()=>{live=false;if(timer!==undefined)clearTimeout(timer);window.removeEventListener("offline",offline);window.removeEventListener("online",load);};
+  },[page,warehouseScope,reload,busy,email,role]);
 
   useEffect(() => {
     if(page!=="military"&&page!=="activity")return;
@@ -322,19 +351,25 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
 
   const automationNames=useMemo(()=>playerNames(accounts),[accounts]);
   const accountById=useMemo(()=>Object.fromEntries(accounts.map(a=>[a.id,a])) as Record<string,Account>,[accounts]);
-  const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeKey,warehouseMap]);
-  const displayedRows=rows.filter(c=>{
-    if (!onlyLarge) return true;
-    const vals=RESOURCES.map(r=>c.resources?.unsecured?.[r]);
-    return vals.some(v => v===null||v===undefined) || vals.reduce<number>((sum,v)=>sum+(typeof v==="number"?v:0),0)>=220000;
-  });
-  // Stable totals use exact observed numeric fields; an unknown field remains visually unknown.
-  const resourceTotals=Object.fromEntries(RESOURCES.map(k=>[k,{value:rows.reduce((sum,c)=>sum+(c.resources?.unsecured?.[k]??0),0),complete:rows.every(c=>typeof c.resources?.unsecured?.[k]==="number") && Object.keys(warehouseErrors).length===0}])) as Record<(typeof RESOURCES)[number], {value:number;complete:boolean}>;
+  const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeIds,warehouseMap]);
+  const warehouseAccount=useCallback((id:string)=>({name:name(accountById[id]||{id}),world:accountWorld(accountById[id]||{id})}),[accountById]);
+  const islands=useMemo(()=>[...new Set(rows.map(city=>warehouseIsland(city,warehouseAccount(city.account_id).world)))].sort((a,b)=>a.localeCompare(b,locale,{numeric:true})),[rows,warehouseAccount,locale]);
+  const filteredRows=useMemo(()=>filterWarehouseRows(rows,{query:warehouseQuery,island:islandFilter,resource:resourceFilter,minimum:minimumResource,onlyLarge},warehouseAccount),[rows,warehouseQuery,islandFilter,resourceFilter,minimumResource,onlyLarge,warehouseAccount]);
+  const columns=useMemo<ColumnDef<WarehouseCity>[]>(()=>[
+    {id:"island",accessorFn:c=>warehouseIsland(c,warehouseAccount(c.account_id).world)||undefined,header:tr("Island"),cell:({row})=>row.original.island||tr("Island unknown"),sortUndefined:"last"},
+    {id:"city",accessorKey:"city_name",header:tr("City")},
+    {id:"account",accessorFn:c=>warehouseAccount(c.account_id).name,header:tr("Account")},
+    ...RESOURCES.map(k=>({id:k,accessorFn:(c:WarehouseCity)=>c.resources?.unsecured?.[k]??undefined,header:()=> <span className="resource-heading"><ResourceIcon resource={k} small/>{tr(readable(k))}</span>,cell:({getValue}: {getValue:()=>unknown})=>formatNumber(getValue() as number|undefined,locale),sortUndefined:"last" as const,meta:{numeric:true}})),
+    {id:"capacity",accessorFn:c=>c.resources?.capacity??undefined,header:tr("Capacity"),cell:({getValue})=>formatNumber(getValue() as number|undefined,locale),sortUndefined:"last",meta:{numeric:true}}
+  ],[warehouseAccount,tr,locale]);
+  const warehouseTable=useReactTable({data:filteredRows,columns,state:{sorting:warehouseSorting},onSortingChange:setWarehouseSorting,getCoreRowModel:getCoreRowModel(),getSortedRowModel:getSortedRowModel(),getRowId:c=>c.account_id+":"+c.city_id});
+  const displayedRows=warehouseTable.getRowModel().rows.map(row=>row.original);
+  const resourceTotals=Object.fromEntries(RESOURCES.map(k=>[k,{value:filteredRows.reduce((sum,c)=>sum+(c.resources?.unsecured?.[k]??0),0),complete:filteredRows.every(c=>typeof c.resources?.unsecured?.[k]==="number") && Object.keys(warehouseErrors).length===0 && !reportLoading}])) as Record<(typeof RESOURCES)[number], {value:number;complete:boolean}>;
   const countConnected=accounts.filter(isConnected).length;
   const errorCount=Object.keys(warehouseErrors).length;
   const pageInfo=NAV.find(n=>n.id===page)!;
-  const refresh=()=>setReload(v=>v+1);
-  const go=(target:Page)=>{setPage(target);setSearch("");setSidebar(false);setActionMessage("");};
+  const refresh=()=>{warehouseCache.current.clear();setWarehouseMap({});setWarehouseUpdated(null);setReload(v=>v+1);};
+  const go=(target:Page)=>{try{localStorage.setItem("daedalus-page",target);}catch{}setPage(target);setSearch("");setSidebar(false);setActionMessage("");};
   const exportRows=(kind:"csv"|"json"|"txt")=>{
     const cols=displayedRows.map(city=>({
       account:name(accountById[city.account_id]||{id:city.account_id}),world:accountWorld(accountById[city.account_id]||{id:city.account_id}),
@@ -394,11 +429,12 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
           <div className="panel-footer"><LockKeyhole size={16}/><span>{tr("Gameforge authentication, Selenium and CAPTCHA recovery stay exclusively in the Daedalus macOS app. No passwords are accepted here.")}</span></div>
         </section><RecoveryPanel accounts={accounts} role={role}/></div>}
         {page==="warehouses"&&<div className="content-stack">
-          <div className="report-toolbar"><div><strong>{tr("Live warehouse report")}</strong><span>{reportLoading?tr("Fetching selected accounts…"):tr("{cities} city snapshots · {accounts} accounts reported", {cities: rows.length, accounts: Object.keys(warehouseMap).length})}{errorCount>0&&" · "+errorCount+" "+tr("unavailable")}</span></div><div className="report-tools"><label className="check-label"><input type="checkbox" checked={onlyLarge} onChange={e=>setOnlyLarge(e.target.checked)}/> {tr("≥ 220K unsecured")}</label><div className="export-menu"><Download size={16}/><select aria-label={tr("Export report")} defaultValue="" onChange={e=>{if(e.target.value)exportRows(e.target.value as "csv"|"json"|"txt");e.target.value="";}}><option value="" disabled>{tr("Export report")}</option><option value="csv">CSV</option><option value="json">JSON</option><option value="txt">TXT</option></select></div></div></div>
+          <div className="report-toolbar"><div><strong>{tr("Warehouse dashboard")}</strong><span>{reportLoading?tr("Fetching selected accounts…"):tr("{cities} city snapshots · {accounts} accounts reported", {cities: rows.length, accounts: Object.keys(warehouseMap).length})}{errorCount>0&&" · "+errorCount+" "+tr("unavailable")}</span></div><div className="report-tools"><label className="check-label"><input type="checkbox" checked={onlyLarge} onChange={e=>setOnlyLarge(e.target.checked)}/> {tr("≥ 220K unsecured")}</label><div className="export-menu"><Download size={16}/><select aria-label={tr("Export report")} defaultValue="" onChange={e=>{if(e.target.value)exportRows(e.target.value as "csv"|"json"|"txt");e.target.value="";}}><option value="" disabled>{tr("Export report")}</option><option value="csv">CSV</option><option value="json">JSON</option><option value="txt">TXT</option></select></div></div></div>
           {Object.keys(warehouseErrors).length>0&&<div role="alert" className="notice"><CircleAlert size={18}/><span>{tr("Some accounts could not be retrieved:")} {Object.entries(warehouseErrors).map(([id])=>name(accountById[id]||{id})).join(", ")}. {tr("Totals may be incomplete.")}</span></div>}
-          <div className="resource-grid">{RESOURCES.map(k=><div className="resource-card" key={k}><span className={"resource-gem resource-"+k}><ResourceIcon resource={k}/></span><div><span>{tr(readable(k))} · {tr("unsecured")}</span><strong>{rows.length?format(resourceTotals[k].value):"—"}</strong><small>{resourceTotals[k].complete?tr("Observed total"):tr("Partial / unknown")}</small></div></div>)}</div>
-          <section className="panel print-panel"><div className="panel-heading"><div><h3>{tr("City inventory")} <span className="muted-count">{displayedRows.length}</span></h3><p>{tr("Grouped by island · authenticated observations, not estimates")}</p></div><span className="table-info">{reportLoading?tr("Loading…"):tr("Last refreshed on demand")}</span></div>
-          {displayedRows.length?<div className="table-scroll"><table><thead><tr><th>{tr("Island / City")}</th><th>{tr("Account")}</th>{RESOURCES.map(k=><th className="numeric" key={k}><span className="resource-heading"><ResourceIcon resource={k} small/>{tr(readable(k))}</span></th>)}<th className="numeric">{tr("Capacity")}</th></tr></thead><tbody>{displayedRows.slice().sort((a,b)=>(a.island||"").localeCompare(b.island||"")||a.city_name.localeCompare(b.city_name)).map(c=><tr key={c.account_id+":"+c.city_id}><td><div className="city-cell"><strong>{c.city_name}</strong><small>{c.island||tr("Island unknown")}</small></div></td><td>{name(accountById[c.account_id]||{id:c.account_id})}</td>{RESOURCES.map(k=><td className="numeric tabular" key={k}>{format(c.resources?.unsecured?.[k])}</td>)}<td className="numeric tabular">{format(c.resources?.capacity)}</td></tr>)}</tbody></table></div>:<Empty title={reportLoading?tr("Retrieving warehouses…"):tr("No warehouse snapshots")} description={onlyLarge?tr("No observed cities satisfy the current filter. Unknown values are not treated as zero."):tr("Use a connected IkaBot session to fetch real warehouses. Unavailable accounts remain explicit.")} icon={Warehouse}/>}</section>
+          <div className="warehouse-filters"><label className="field"><span>{tr("Search warehouses")}</span><input value={warehouseQuery} onChange={e=>setWarehouseQuery(e.target.value)} placeholder={tr("City, island or account")}/></label><label className="field"><span>{tr("Island")}</span><select value={islandFilter} onChange={e=>setIslandFilter(e.target.value)}><option value="all">{tr("All islands")}</option>{islands.map(island=><option value={island} key={island}>{island||tr("Island unknown")}</option>)}</select></label><label className="field"><span>{tr("Resource")}</span><select value={resourceFilter} onChange={e=>{const value=e.target.value as WarehouseResource|"all";setResourceFilter(value);if(value!=="all")setWarehouseSorting([{id:value,desc:true}]);}}><option value="all">{tr("All resources")}</option>{RESOURCES.map(k=><option key={k} value={k}>{tr(readable(k))}</option>)}</select></label><label className="field"><span>{tr("Minimum unsecured stock")}</span><input type="number" min={0} step={1000} disabled={resourceFilter==="all"} value={minimumResource} onChange={e=>setMinimumResource(Math.max(0,Number(e.target.value)||0))}/></label><button className="secondary-button" onClick={()=>{setWarehouseQuery("");setIslandFilter("all");setResourceFilter("all");setMinimumResource(0);setOnlyLarge(false);setWarehouseSorting([{id:"island",desc:false},{id:"city",desc:false}]);}}>{tr("Reset filters")}</button></div>
+          <div className="resource-grid">{RESOURCES.map(k=><div className="resource-card" key={k}><span className={"resource-gem resource-"+k}><ResourceIcon resource={k}/></span><div><span>{tr(readable(k))} · {tr("unsecured")}</span><strong>{filteredRows.length?format(resourceTotals[k].value):"—"}</strong><small>{resourceTotals[k].complete?tr("Observed total"):tr("Partial / unknown")}</small></div></div>)}</div>
+          <section className="panel print-panel"><div className="panel-heading"><div><h3>{tr("City inventory")} <span className="muted-count">{displayedRows.length}</span></h3><p>{tr("Sortable city inventory · filtered totals")}</p></div><span className="table-info">{reportLoading?tr("Loading…"):warehouseUpdated?tr("Cache checked at {time}",{time:formatDate(new Date(warehouseUpdated).toISOString(),locale)}):tr("No current snapshot")}</span></div>
+          {displayedRows.length?<div className="table-scroll"><table className="warehouse-data-table"><thead>{warehouseTable.getHeaderGroups().map(group=><tr key={group.id}>{group.headers.map(header=><th key={header.id} className={(header.column.columnDef.meta as {numeric?:boolean}|undefined)?.numeric?"numeric":""} aria-sort={header.column.getIsSorted()==="asc"?"ascending":header.column.getIsSorted()==="desc"?"descending":"none"}><button className="warehouse-sort" onClick={header.column.getToggleSortingHandler()}>{flexRender(header.column.columnDef.header,header.getContext())}<span aria-hidden="true">{header.column.getIsSorted()==="asc"?"↑":header.column.getIsSorted()==="desc"?"↓":"↕"}</span></button></th>)}</tr>)}</thead><tbody>{warehouseTable.getRowModel().rows.map(row=><tr key={row.id}>{row.getVisibleCells().map(cell=><td key={cell.id} className={(cell.column.columnDef.meta as {numeric?:boolean}|undefined)?.numeric?"numeric tabular":""}>{flexRender(cell.column.columnDef.cell,cell.getContext())}</td>)}</tr>)}</tbody></table></div>:<Empty title={reportLoading?tr("Retrieving warehouses…"):tr("No warehouse snapshots")} description={rows.length?tr("No observed cities satisfy the current filter. Unknown values are not treated as zero."):tr("Use a connected IkaBot session to fetch real warehouses. Unavailable accounts remain explicit.")} icon={Warehouse}/>}</section>
         </div>}
         {page==="automations"&&<div className="content-stack">
           <div className="notice"><ShieldCheck size={18}/><span>{tr("Automation uses the existing game engine. Inspect authoritative city data and preflight before preparing a change. No task starts without a separate reviewed, account-specific confirmation.")}</span></div>
