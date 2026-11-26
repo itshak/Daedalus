@@ -391,3 +391,124 @@ The authenticated account-scoped military and ship-movements endpoints SHALL ret
 - **WHEN** an authorized operator validates the deployed military feature using an existing authenticated account
 - **THEN** actual owned cities and unit counts are observed through the API, the movements endpoint is checked, and a subsequent read verifies that the worker remains available; no game orders are issued
 - **AND** public CI uses offline synthetic fixtures only
+
+### Requirement: Fill an owned city's warehouse for one resource
+The controller SHALL offer a one-time, account-scoped transfer of one selected resource from all other owned cities into a chosen owned destination. The reviewed allocation SHALL NOT exceed observed free storage less observed inbound cargo. The worker SHALL check fresh stock, destination identity, storage and inbound cargo before each submission, stop on ambiguous cargo or outcome, and MUST NOT automatically replay interrupted work. The clients SHALL show quantities by source and the overall storage budget, and distinguish observations from guaranteed arrival capacity.
+
+#### Scenario: Incoming cargo consumes warehouse space
+- **WHEN** a destination has current free space and already incoming cargo
+- **THEN** the available allocation is reduced by the incoming amount, and all reviewed source quantities together fit within that allocation
+
+#### Scenario: Storage becomes unavailable during execution
+- **WHEN** fresh observations cannot support a reviewed load
+- **THEN** the worker stops or reduces that load within the reviewed limit without exceeding the observed remaining budget
+
+#### Scenario: A warehouse preview cannot be verified
+- **WHEN** the selected warehouse, source stock, incoming cargo or fleet observation is unavailable
+- **THEN** the clients show a bounded nonsecret failure reason and no launch is authorized; a pending preview is visibly distinguished from a completed review
+
+#### Scenario: Native cookie worker already owns the authenticated account
+- **WHEN** an existing controller-local worker holds the exact authenticated lease and protected IPC verifies its identity
+- **THEN** the controller adopts that lease before reserving dispatch instead of attempting a second acquisition; failed pre-dispatch ownership checks SHALL NOT create an unconfirmed engine receipt
+
+#### Scenario: A managed warehouse child cannot be registered
+- **WHEN** process registration fails before execution
+- **THEN** the child SHALL NOT perform a shipment and the controller MUST NOT replay an ambiguous request
+
+#### Scenario: Reviewed cookie-only transport
+- **WHEN** a reviewed warehouse task executes on a cookie-only worker
+- **THEN** the existing IkaBot sender SHALL attest the current player and use bounded same-world nonredirecting requests, and SHALL NOT automatically replay an uncertain transport POST
+
+#### Scenario: Live acceptance through the existing authorized API
+- **WHEN** a trusted host operator prepares a warehouse review
+- **THEN** the operator runner SHALL retain the review privately and require the exact explicit request confirmation before a single launch attempt; it MUST NOT equate a launch receipt with delivery
+
+#### Scenario: A managed transfer fails or waits for ships
+- **WHEN** the warehouse worker is running or exits before its reviewed cargo is confirmed
+- **THEN** the controller SHALL expose a bounded execution stage and separately observed submitted and advisor-verified quantities, and the clients MUST NOT equate worker launch or exit with arrival
+
+#### Scenario: Transport feedback commands are reordered or rejected
+- **WHEN** the game returns a reviewed transport response
+- **THEN** the worker SHALL classify named feedback independently of command ordering, distinguish rejection from unconfirmed response, verify selected source context before submission, and MUST NOT count unknown outcomes as successful or replay them automatically.
+
+#### Scenario: Shared upstream shipment implementation
+- **WHEN** a reviewed warehouse allocation is executed
+- **THEN** the worker SHALL normalize the allocation through the existing IkaBot sendResources preparation, use the shared route executor and sender, and enforce warehouse-specific capacity and incoming-cargo rules through an internal policy rather than a separate transport loop
+
+#### Scenario: Verified cookie worker uses the common sender
+- **WHEN** the shared sender submits a transport on an already verified cookie-only session
+- **THEN** the standard Session.post interface SHALL preserve the upstream transport form, require the exact selected source and a fresh token, and perform one bounded submission without login or replay; contradictory responses MUST remain unconfirmed
+
+#### Scenario: Reviewed shipment exhausts available vessels
+- **WHEN** a verified load occupies all available vessels and reviewed cargo remains
+- **THEN** the shared upstream waitForArrival mechanism SHALL use its original military-advisor AJAX request through the protected cookie session, await the next fleet event, recheck available vessels, and continue the same reviewed allocation only when ships are available
+
+#### Scenario: Resource Transport Manager waits for vessels
+- **WHEN** a recurring consolidation or distribution shipment requires available vessels
+- **THEN** it SHALL use the same shared upstream fleet-wait helper as ordinary shipments and warehouse filling before acquiring its shipping lock; the shared route executor SHALL recheck fleet availability before sending
+
+### Requirement: Authenticated contextual read models
+The controller SHALL expose bounded, typed, sanitized existing-session read endpoints for each UI domain that needs account-specific options. Every returned entity SHALL be bound to an enabled configured account and its verified world/player session, identify source and observation freshness, and exclude cookies, credentials, raw game HTML and arbitrary engine state.
+
+#### Scenario: Wrong account city or building requested
+- **WHEN** a caller requests a city or building absent from the selected verified account
+- **THEN** the controller rejects that request rather than returning data or reusing another account's cache
+
+#### Scenario: Game session unavailable
+- **WHEN** the backing authenticated session is not uniquely present
+- **THEN** the endpoint returns a sanitized unavailable result and the desktop leaves the selector disabled
+
+### Requirement: Nonmutating native plan previews
+The controller SHALL only offer preview/prepare operations explicitly audited as read-only. Plans SHALL include a hash/revision, scope and expiry; dispatch SHALL independently validate eligibility, required current game state and allowed IkaBot arguments before start.
+
+#### Scenario: Construction preview
+- **GIVEN** authoritative city building data and chosen upgrade target
+- **WHEN** the client requests a preview
+- **THEN** the controller delegates resource and duration computation to approved upstream IkaBot logic, returns a bounded nonsecret plan, and performs no game mutation
+
+#### Scenario: Stale preview after changing account
+- **WHEN** the selected account, world, session ownership or building revision changes
+- **THEN** the previous plan cannot be dispatched
+
+### Requirement: User-approved per-account task dispatch
+The API SHALL preserve durable request IDs, config fingerprint, explicit confirmation, managed task ownership, and unconfirmed-no-retry semantics for native operation flows, including batch modes.
+
+#### Scenario: Ambiguous task result
+- **WHEN** the controller cannot establish whether an operation started
+- **THEN** it retains the unconfirmed receipt, blocks further launches on that account, and directs the operator to manual reconciliation
+
+### Requirement: Bound read-only military DTOs
+The controller SHALL expose authenticated existing-session military inventory and movement reads with explicit account/world/player checks, bounded list sizes and sanitized names, counts, and server-observed timestamps. It SHALL reject a city belonging to another account rather than returning guessed or cross-account military data.
+
+#### Scenario: Foreign military city
+- **WHEN** the source engine returns a unit row whose city is not in the selected account's verified city list
+- **THEN** the read fails without displaying any military rows or launching an order
+
+### Requirement: Upstream gameplay waiting compatibility
+Native operations SHALL reuse the existing IkaBot operation-specific wait and queue-read contracts rather than create parallel gameplay waiting implementations. Verified cookie workers SHALL preserve the original bounded read-only AJAX request form for audited queue views, reject mutation fields and avoid implicit relogin. Infrastructure scheduling and explicit verification deadlines remain independent.
+
+#### Scenario: Training, upgrade or miracle queue is occupied
+- **WHEN** an existing upstream wait function reads the corresponding queue or cooldown on a verified cookie-only worker
+- **THEN** the session adapter SHALL perform the exact allowlisted read with current identity and token verification and return the original response shape for the upstream function
+
+#### Scenario: Construction supplies are still in transit
+- **WHEN** a reviewed construction supply was dispatched but the destination does not yet have sufficient stock
+- **THEN** the worker SHALL use the upstream fleet-arrival estimate and wait helper, recheck actual stock before upgrading and stop at the review deadline rather than infer delivery
+
+### Requirement: Minimize divergence from upstream operation implementation
+Daedalus SHALL retain upstream game request construction and shared operation helpers as the source of truth. Native reviews SHALL supply validated arguments to the same operation functions or extracted original request builders. Cookie-session compatibility SHALL be isolated at the existing session boundary and SHALL NOT admit arbitrary mutation parameters through read-only forms. Intentional engine deviations MUST have a documented rationale and regression tests.
+
+#### Scenario: Equivalent CLI and reviewed request
+- **WHEN** the interactive CLI and native reviewed adapter execute the same supported building, layout, deployment or market selection operation
+- **THEN** the underlying request form SHALL match the original upstream payload; the reviewed caller SHALL retain account, stale-plan and no-replay protection
+
+#### Scenario: Upstream preserved helper changes
+- **WHEN** a protected upstream helper differs from the recorded merged upstream baseline
+- **THEN** the regression check SHALL flag the change for explicit review rather than silently accepting a rewritten game algorithm
+
+### Requirement: Exact revision release verification
+A released backend, web client and Mac package SHALL identify their verified compatible source revisions. The project SHALL retain incomplete automated and manual acceptance evidence separately. Manual owner acceptance MAY be deferred but MUST NOT be recorded as passed.
+
+#### Scenario: A required build has not succeeded
+- **WHEN** the matching Mac packaging or required CI has not succeeded
+- **THEN** the release is not represented as verified and an older artifact is not substituted

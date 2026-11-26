@@ -1,5 +1,7 @@
 # Owner-supervised real-account acceptance — Mac-first
 
+**Current consolidated owner checklist:** [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md). Manual checks are deferred from engineering OpenSpec archival, not passed or waived. The dated procedure below preserves earlier acceptance context.
+
 **Status (2026-11-19): release implementation merged, final live acceptance blocked.** Native macOS Gameforge login and one-use encrypted session transfer are merged in [PR #57](https://github.com/itshak/Daedalus/pull/57). Synthetic tests, a separate Linux daemon with native-login enabled, and authenticated real Monjo read-only warehouse requests passed. A real Mac Gameforge/MFA/CAPTCHA browser login, live dedicated rebind, game-changing task trial and reboot durability were **not** completed. Never label the app production-ready on synthetic evidence alone. The completed `validate-live-authentication` **implementation** OpenSpec record
 is archived. Owner-only acceptance remains open in
 [issue #60](https://github.com/itshak/Daedalus/issues/60), and production

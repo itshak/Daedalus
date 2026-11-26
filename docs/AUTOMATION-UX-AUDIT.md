@@ -1,8 +1,8 @@
 # Daedalus Automation UX — Complete IkaBot feature audit
 
-**Status: native background-task implementation available on the feature branch; release blocked pending CI, merge and owner-operated live testing. Interactive CLI-only operations remain explicitly out of scope of automatic dispatch.**
+**Historical UX design audit, not current coverage.** Later merged work implemented many formerly pending rows below. Current implementation classification is in [operation-coverage.json](operation-coverage.json), remaining engineering in [the successor](../openspec/changes/finish-v010-engineering/tasks.md), and unperformed manual acceptance in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md).
 
-This is the accessible index to the full [operation-specific design](../openspec/changes/native-automation-workflows/design.md), [OpenSpec proposal](../openspec/changes/native-automation-workflows/proposal.md) and [task-by-task implementation checklist](../openspec/changes/native-automation-workflows/tasks.md). It was built against Daedalus's vendored `engine/ikabot/ikabot/command_line.py`, the `@task` decorators and `prepare_*` functions, and the actual Daedalus account-scoped API. The IkaBot task registry is authoritative for which operations are executable; the menu catalog can include interactive-only actions that cannot be launched as background tasks.
+This is the accessible index to the full [operation-specific design](../openspec/changes/archive/2026-11-26-native-automation-workflows/design.md), [OpenSpec proposal](../openspec/changes/archive/2026-11-26-native-automation-workflows/proposal.md) and [task-by-task implementation checklist](../openspec/changes/archive/2026-11-26-native-automation-workflows/tasks.md). It was built against Daedalus's vendored `engine/ikabot/ikabot/command_line.py`, the `@task` decorators and `prepare_*` functions, and the actual Daedalus account-scoped API. The IkaBot task registry is authoritative for which operations are executable; the menu catalog can include interactive-only actions that cannot be launched as background tasks.
 
 ## Immediate UX decisions
 
@@ -79,7 +79,7 @@ Some features appear only in the old IkaBot CLI menu; others appear as `@task` e
 
 Use a synthetic/demo backend to verify grouping, empty states, account switching, city picker, disabled construction start, native resource policy and read-only building failure. Use an explicitly authorized real session only for operator-owned testing of actual city/building values; normal automated tests must not log in, create child game tasks or guess game resources. Run the repository's source lint, offscreen Qt tests, IPC contract tests, OpenSpec strict validation and GitHub Actions before merge. Real-world behavior remains subject to the user’s later acceptance tests.
 
-## Remaining functional gaps / safe boundaries
+## Historical functional gaps / safe boundaries (superseded by current operation matrix)
 
 - Combat planners (`attackBarbarians`, `autoBarbarians`) still require an independently prepared, correctly scoped game plan. The ordinary form does **not** request JSON or suggest that an unverified army can attack; these operations are unavailable in the desktop until read-only troop/risk/ship previews and revalidation are implemented.
 - The `webServer` automation is administrative and requires a secure native listener setup before launch.
