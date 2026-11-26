@@ -36,3 +36,7 @@ transport and identity attestation instead. Add a managed child registration
 gate and preserve nonzero status when cargo confirmation is unavailable.
 Public tests use only synthetic identities and HTTP/IPC doubles. The live
 review is not a shipment; repaired live dispatch and delivery remain open.
+
+### Execution diagnostics follow-up
+
+A live launch reached the child process but exited without observed incoming cargo. The managed process now exposes a bounded stage and cumulative submitted/verified cargo counts. Default game views are not assumed to contain full city data. Real dispatch and arrival acceptance remain open; a process start is not shipment success.

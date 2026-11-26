@@ -75,7 +75,7 @@ def project_tasks(data):
     return {"requests": [{k: r.get(k) for k in ("request_id", "task", "status", "task_id", "pid")}
                          for r in data["requests"] if r.get("task") == TASK
                          or r.get("status") in ("dispatching", "unconfirmed")],
-            "engine_tasks": [{k: r.get(k) for k in ("task_id", "task", "status", "pid", "started_at", "outcome")}
+            "engine_tasks": [{k: r.get(k) for k in ("task_id", "task", "status", "pid", "started_at", "outcome", "progress")}
                              for r in data["engine_tasks"]]}
 
 

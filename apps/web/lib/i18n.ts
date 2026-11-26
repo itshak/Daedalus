@@ -2,6 +2,22 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Execution stage": "Этап выполнения",
+  "Submitted cargo": "Отправлено груза",
+  "Verified incoming cargo": "Подтверждено входящего груза",
+  "Initializing": "Инициализация",
+  "Preparing": "Подготовка",
+  "Checking Destination": "Проверка города назначения",
+  "Waiting Ships": "Ожидание кораблей",
+  "Checking Source": "Проверка города-источника",
+  "Checking Current City": "Проверка текущего города",
+  "Switching City": "Переключение города",
+  "Checking Guard": "Проверка условий отправки",
+  "Verifying Token": "Проверка запроса",
+  "Submitting": "Отправка груза",
+  "Verifying Cargo": "Проверка входящего груза",
+  "Capacity Reached": "Достигнута вместимость склада",
+  "Checking Transport Response": "Проверка ответа на отправку",
   "Warehouse preview endpoint unavailable. Check backend and website versions.": "Служба предпросмотра недоступна. Проверьте версии сервера и сайта.",
   "Warehouse preview backend failed. No transfer was started.": "Ошибка серверной части предпросмотра. Перевозка не запущена.",
   "Warehouse preview access denied. Sign in again or check account permissions.": "Доступ к предпросмотру запрещён. Войдите заново или проверьте права доступа.",

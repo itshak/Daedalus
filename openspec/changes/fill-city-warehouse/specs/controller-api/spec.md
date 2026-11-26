@@ -30,3 +30,7 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: Live acceptance through the existing authorized API
 - **WHEN** a trusted host operator prepares a warehouse review
 - **THEN** the operator runner SHALL retain the review privately and require the exact explicit request confirmation before a single launch attempt; it MUST NOT equate a launch receipt with delivery
+
+#### Scenario: A managed transfer fails or waits for ships
+- **WHEN** the warehouse worker is running or exits before its reviewed cargo is confirmed
+- **THEN** the controller SHALL expose a bounded execution stage and separately observed submitted and advisor-verified quantities, and the clients MUST NOT equate worker launch or exit with arrival

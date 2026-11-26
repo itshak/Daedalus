@@ -447,7 +447,7 @@ def _validate_task_config(task_name, task_func, config_dict):
     return clean
 
 
-def _run_ipc_task(task_name, session, task_config, started=None, registered=None):
+def _run_ipc_task(task_name, session, task_config, started=None, registered=None, progress=None):
     """Child-process entry point for tasks launched via CLI/IPC."""
     if started is not None:
         # arguments are unpickled by now: the launching process may exit
@@ -464,6 +464,7 @@ def _run_ipc_task(task_name, session, task_config, started=None, registered=None
         if not registered.wait(timeout=_TASK_STARTUP_TIMEOUT):
             raise RuntimeError("Warehouse child registration unavailable")
         session._daedalus_managed_fill = True
+        session._daedalus_fill_progress = progress
     setLoggedInPlayer(getattr(session, "username", ""))
     set_child_mode(session)
     _, task_func = _resolve_task(task_name)
@@ -1779,6 +1780,8 @@ class IPCServer:
 
     def _list_existing_tasks(self, request):
         world, player = self._task_entry(request)
+        from ikabot.helpers.fillProgress import snapshot
+
         rows = []
         for task_id, entry in self._daedalus_tasks.items():
             if (entry["world"].casefold(), entry["player"].casefold()) != (world, player):
@@ -1789,6 +1792,7 @@ class IPCServer:
             rows.append({
                 "task_id": task_id, "task": entry["task"], "pid": entry["pid"],
                 "status": entry["status"], "started_at": entry["started_at"],
+                **({"progress": snapshot(entry["progress"])} if entry.get("progress") is not None else {}),
                 **({"outcome": "accepted" if proc.exitcode == 0 else "failed_or_uncertain"}
                    if entry["task"] in {"testTelegramBot", "testDiscordBot"}
                    and entry["status"] == "finished" and proc.exitcode is not None else {}),
@@ -2013,9 +2017,10 @@ class IPCServer:
         started = multiprocessing.Event()
         registered = (multiprocessing.Event()
                       if existing_only and canonical_name == "fillCityWarehouse" else None)
+        progress = multiprocessing.Array("q", 3, lock=False) if registered is not None else None
         proc = multiprocessing.Process(
             target=_run_ipc_task,
-            args=(canonical_name, session, clean_config, started, registered),
+            args=(canonical_name, session, clean_config, started, registered, progress),
             name=canonical_name,
         )
         proc.start()
@@ -2055,7 +2060,7 @@ class IPCServer:
             self._daedalus_tasks[task_id] = {
                 "process": proc, "pid": proc.pid, "task": canonical_name,
                 "world": response["world"], "player": session.username,
-                "status": "running", "started_at": time.time(),
+                "status": "running", "started_at": time.time(), "progress": progress,
             }
             response["task_id"] = task_id
             self._daedalus_requests[request_id] = (fingerprint, dict(response))
