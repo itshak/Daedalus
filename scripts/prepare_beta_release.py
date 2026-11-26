@@ -41,10 +41,18 @@ def verify_checksum(path, checksum):
     return actual
 
 
+def require_refreshable_draft(release, tag, existing_tag):
+    if (existing_tag or release.get("tagName") != tag or release.get("isDraft") is not True
+            or release.get("isPrerelease") is not True):
+        raise ValueError("Refusing to replace a published release, non-beta draft, or existing tag")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revision", required=True, help="Exact approved main commit SHA")
-    parser.add_argument("--create-draft", action="store_true", help="Create an unpublished prerelease draft after verification")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--create-draft", action="store_true", help="Create an unpublished prerelease draft after verification")
+    mode.add_argument("--refresh-draft", action="store_true", help="Refresh only an existing unpublished beta draft after verification")
     args = parser.parse_args()
     sha = args.revision
     if not re.fullmatch(r"[a-f0-9]{40}", sha):
@@ -69,18 +77,45 @@ def main():
         command("gh", "release", "download", preview, "--repo", REPO, "--pattern", DMG, "--pattern", DMG + ".sha256", "--dir", directory)
         digest = verify_checksum(folder / DMG, folder / (DMG + ".sha256"))
         print(f"Verified {tag} source {sha}; DMG SHA-256 {digest}")
-        if not args.create_draft:
+        if not (args.create_draft or args.refresh_draft):
             return
-        # Refuse to alter existing releases or move tags. GitHub will also
-        # reject a duplicate release; publication remains a separate action.
-        existing = subprocess.run(["gh", "release", "view", tag, "--repo", REPO], capture_output=True, timeout=30, check=False)
-        if existing.returncode == 0:
-            raise SystemExit("Versioned release already exists; inspect it manually")
+        # No published release or existing tag may be moved. The explicit
+        # refresh path only replaces an unpublished candidate for this version.
+        existing = subprocess.run(["gh", "release", "view", tag, "--repo", REPO,
+                                   "--json", "tagName,isDraft,isPrerelease,targetCommitish"],
+                                  capture_output=True, text=True, timeout=30, check=False)
+        existing_tag = command("git", "ls-remote", "--tags", "origin", "refs/tags/" + tag, cwd=root)
+        if args.refresh_draft:
+            if existing.returncode != 0:
+                raise SystemExit("Existing draft unavailable; cannot refresh")
+            require_refreshable_draft(json.loads(existing.stdout), tag, existing_tag)
+        elif existing.returncode == 0 or existing_tag:
+            raise SystemExit("Versioned release or tag already exists; inspect it manually")
         notes = folder / "notes.md"
         notes.write_text((root / "CHANGELOG.md").read_text(encoding="utf-8") +
                          f"\nSource revision: `{sha}`\n\nDMG SHA-256: `{digest}`\n\n"
                          "Unnotarized beta candidate. Owner acceptance and coordinated deployment are pending.\n"
                          "See https://github.com/itshak/Daedalus/issues/60 and docs/BETA-OPERATION-SCOPE.md.\n", encoding="utf-8")
+        if args.refresh_draft:
+            # Keep the release unpublished. If asset upload fails, the draft
+            # must be checked again; never publish from this script.
+            command("gh", "release", "upload", tag, str(folder / DMG), str(folder / (DMG + ".sha256")),
+                    "--repo", REPO, "--clobber")
+            print(command("gh", "release", "edit", tag, "--repo", REPO, "--target", sha,
+                          "--draft=true", "--prerelease", "--notes-file", str(notes)))
+            observed = json.loads(command("gh", "release", "view", tag, "--repo", REPO,
+                                          "--json", "tagName,isDraft,isPrerelease,targetCommitish,assets"))
+            require_refreshable_draft(observed, tag, "")
+            if observed.get("targetCommitish") != sha or {a["name"] for a in observed["assets"]} != {DMG, DMG+".sha256"}:
+                raise SystemExit("Refreshed draft metadata does not match the candidate")
+            # Verify the actual uploaded draft bytes, not just the local copy.
+            fetched = folder / "draft-verification"
+            fetched.mkdir()
+            command("gh", "release", "download", tag, "--repo", REPO, "--pattern", DMG,
+                    "--pattern", DMG+".sha256", "--dir", str(fetched))
+            if verify_checksum(fetched/DMG, fetched/(DMG+".sha256")) != digest:
+                raise SystemExit("Refreshed draft checksum differs from approved preview")
+            return
         print(command("gh", "release", "create", tag, str(folder / DMG), str(folder / (DMG + ".sha256")),
                       "--repo", REPO, "--target", sha, "--draft", "--prerelease", "--title", "Daedalus " + version,
                       "--notes-file", str(notes)))

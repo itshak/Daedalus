@@ -28,7 +28,7 @@ python scripts/prepare_beta_release.py --revision "$(git rev-parse HEAD)"
 python scripts/prepare_beta_release.py --revision "$(git rev-parse HEAD)" --create-draft
 ```
 
-The first command verifies the main SHA, current CI, matching preview tag and downloaded DMG checksum. The second creates an unpublished GitHub prerelease draft using those exact bytes. It refuses to replace a versioned release. Publication and production rollout remain separate approval actions.
+The first command verifies the main SHA, current CI, matching preview tag and downloaded DMG checksum. The second creates an unpublished GitHub prerelease draft using those exact bytes. To refresh an existing unpublished beta draft after a newer reviewed main revision passes all checks, use `--refresh-draft` instead of `--create-draft`. It refuses to replace a published release or move an existing tag and re-downloads the refreshed assets to verify their checksum. Publication and production rollout remain separate approval actions.
 
 For owner testing before final publication, use the matching verified [merged Mac preview 26663b8](https://github.com/itshak/Daedalus/releases/tag/desktop-preview-26663b8e7b01), and check the [beta operation scope](BETA-OPERATION-SCOPE.md). This is a beta test candidate, not evidence that all game operations or the live deployment are accepted.
 
