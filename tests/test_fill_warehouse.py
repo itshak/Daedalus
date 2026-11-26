@@ -248,3 +248,13 @@ def test_legacy_session_exit_is_stage_specific_and_fails_closed(offline, monkeyp
     monkeypatch.setattr(worker, "incoming_amount", rotated)
     with pytest.raises(worker.FillPreviewError, match="^fill_incoming_unavailable$"):
         worker.preview_fill(offline, DRAFT)
+
+
+def test_managed_fill_reports_ambiguous_observation_as_failure(offline, monkeypatch):
+    offline._daedalus_managed_fill = True
+    sender = Mock(side_effect=lambda *args, **kwargs: kwargs["before_send"]())
+    monkeypatch.setattr(worker, "sendGoods", sender)
+    with pytest.raises(RuntimeError, match="cargo unconfirmed"):
+        worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
+            {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 30}])
+    assert sender.call_count == 1

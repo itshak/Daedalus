@@ -14,3 +14,19 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: A warehouse preview cannot be verified
 - **WHEN** the selected warehouse, source stock, incoming cargo or fleet observation is unavailable
 - **THEN** the clients show a bounded nonsecret failure reason and no launch is authorized; a pending preview is visibly distinguished from a completed review
+
+#### Scenario: Native cookie worker already owns the authenticated account
+- **WHEN** an existing controller-local worker holds the exact authenticated lease and protected IPC verifies its identity
+- **THEN** the controller adopts that lease before reserving dispatch instead of attempting a second acquisition; failed pre-dispatch ownership checks SHALL NOT create an unconfirmed engine receipt
+
+#### Scenario: A managed warehouse child cannot be registered
+- **WHEN** process registration fails before execution
+- **THEN** the child SHALL NOT perform a shipment and the controller MUST NOT replay an ambiguous request
+
+#### Scenario: Reviewed cookie-only transport
+- **WHEN** a reviewed warehouse task executes on a cookie-only worker
+- **THEN** the existing IkaBot sender SHALL attest the current player and use bounded same-world nonredirecting requests, and SHALL NOT automatically replay an uncertain transport POST
+
+#### Scenario: Live acceptance through the existing authorized API
+- **WHEN** a trusted host operator prepares a warehouse review
+- **THEN** the operator runner SHALL retain the review privately and require the exact explicit request confirmation before a single launch attempt; it MUST NOT equate a launch receipt with delivery

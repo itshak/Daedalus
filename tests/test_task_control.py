@@ -233,3 +233,44 @@ def test_engine_pre_spawn_rejection_is_definite_and_does_not_block_future_reques
         "task_id": "f" * 24, "pid": 4242, "task": t, "status": "running"}
     assert controller.start("alpha", "alertAttacks", {"minutes": 20},
                             str(uuid.uuid4()), confirmed=True)["status"] == "started"
+
+
+def test_browser_cookie_worker_lease_is_adopted_before_dispatch(fixtures):
+    """The production native-cookie path already owns this exact account lease."""
+    controller, ipc, owner, _ = fixtures
+    lease = owner.acquire("alpha")
+    lease.transition(SessionPhase.AUTHENTICATED)
+    request_id = str(uuid.uuid4())
+    result = controller.start("alpha", "fillCityWarehouse", {
+        "destination_city": 123, "resource": "wood", "useFreighters": False,
+        "reviewed_sources": [{"city_id": 456, "amount": 50}],
+    }, request_id, confirmed=True)
+    assert result["status"] == "started"
+    assert controller.owned_sessions() == (lease,)
+    assert len(ipc.sent) == 1
+    assert controller.preflight("alpha", "fillCityWarehouse")["unresolved_request"] is False
+
+
+def test_unverified_local_lease_does_not_reserve_dispatch(fixtures):
+    controller, ipc, owner, temp = fixtures
+    lease = owner.acquire("alpha")
+    try:
+        with pytest.raises(TaskUnavailable, match="verified local account owner"):
+            controller.start("alpha", "alertAttacks", {}, str(uuid.uuid4()), confirmed=True)
+        assert not ipc.sent
+        assert TaskLedger(temp / "ledger.sqlite3").entries("alpha") == []
+    finally:
+        lease.close()
+
+
+def test_closed_adopted_lease_can_be_replaced(fixtures):
+    controller, ipc, owner, _ = fixtures
+    first = owner.acquire("alpha")
+    first.transition(SessionPhase.AUTHENTICATED)
+    controller.start("alpha", "alertAttacks", {}, str(uuid.uuid4()), confirmed=True)
+    first.close()
+    replacement = owner.acquire("alpha")
+    replacement.transition(SessionPhase.AUTHENTICATED)
+    controller.start("alpha", "alertAttacks", {}, str(uuid.uuid4()), confirmed=True)
+    assert controller.owned_sessions() == (replacement,)
+    assert len(ipc.sent) == 2

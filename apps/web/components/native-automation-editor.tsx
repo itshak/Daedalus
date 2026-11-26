@@ -1,4 +1,5 @@
 "use client";
+import {confirmedLaunch,activityReceipt} from "../lib/launch-receipt";
 import {fillPreviewMessage,fillPreviewHttpMessage} from "../lib/preview-request";
 import {parseRewardDistributionReview,policyTask,reviewRoute} from "../lib/reward-distribution-review";
 import {QueueReviewButton} from "./reviewed-batch-queue";
@@ -70,6 +71,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [busy,setBusy]=useState(false);
   const [locked,setLocked]=useState(false);
   const [message,setMessage]=useState("");
+  const [launchOutcome,setLaunchOutcome]=useState<"started"|"rejected"|"uncertain"|null>(null);
+  const [launchRequestId,setLaunchRequestId]=useState<string|null>(null);
   const [batchReceipts,setBatchReceipts]=useState<BatchReceipt[]>([]);
   const inFlight=useRef(false);
   const mounted=useRef(false);
@@ -143,10 +146,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const edit=()=>{setReview(null);setApproved(false);setShipment(null);};
   useEffect(()=>{
     const ttl=shipment?.expires_in??review?.ttl;
-    if(!ttl)return;
-    const timer=window.setTimeout(()=>{setReview(null);setApproved(false);setShipment(null);setMessage("Review expired; prepare a new preview.");},ttl*1000);
+    if(!ttl||locked)return;
+    const timer=window.setTimeout(()=>{if(inFlight.current)return;setReview(null);setApproved(false);setShipment(null);setMessage("Review expired; prepare a new preview.");},ttl*1000);
     return ()=>window.clearTimeout(timer);
-  },[shipment,review]);
+  },[shipment,review,locked]);
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     edit();setMessage("");
@@ -233,11 +236,27 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       const current=await api(prefix+"/tasks/preflight?task="+encodeURIComponent(task));
       if(!mounted.current)return;
       if(!readyPreflight(current,account,task)){setMessage("Readiness changed; refresh and review again.");return;}
-      const result=review.previewId?await api(prefix+"/tasks/"+reviewRoute(task),{preview_id:review.previewId,confirmed:true,request_id:crypto.randomUUID()}):needsShipmentReview&&shipment?.preview_id?await api(prefix+"/tasks/"+(task==="distributeResources"?"distribution-start":"shipment-start"),{preview_id:shipment.preview_id,confirmed:true,request_id:crypto.randomUUID()}):await api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:crypto.randomUUID()});
-      const receipt=result as {status?:unknown};
-      if(mounted.current)setMessage(receipt.status==="started"?"Task started. See Activity for status.":"Request recorded. Check Activity before another attempt.");
-    } catch {if(mounted.current)setMessage("Request outcome uncertain or rejected. Check Activity before retrying.");}
+      const rid=crypto.randomUUID();
+      setLaunchRequestId(rid);
+      const outcome=await confirmedLaunch(
+        ()=>review.previewId?api(prefix+"/tasks/"+reviewRoute(task),{preview_id:review.previewId,confirmed:true,request_id:rid}):needsShipmentReview&&shipment?.preview_id?api(prefix+"/tasks/"+(task==="distributeResources"?"distribution-start":"shipment-start"),{preview_id:shipment.preview_id,confirmed:true,request_id:rid}):api(prefix+"/tasks",{task,config:review.config,confirmed:true,request_id:rid}),
+        ()=>api(prefix+"/activity?limit=50"),account,task,rid);
+      if(mounted.current)showLaunchOutcome(outcome);
+    } catch {if(mounted.current)showLaunchOutcome("uncertain");}
     finally {if(mounted.current)setBusy(false);inFlight.current=false;}
+  };
+  const showLaunchOutcome=(outcome:"started"|"rejected"|"uncertain")=>{
+    setLaunchOutcome(outcome);
+    setMessage(outcome==="started"?"Task launch confirmed. See Activity for execution status.":outcome==="rejected"?"Task was rejected. No launch confirmed. Review Activity.":"Launch not confirmed. Check Activity and existing tasks before retrying.");
+  };
+  const checkReceipt=async()=>{
+    if(!launchRequestId||inFlight.current)return;
+    inFlight.current=true;setBusy(true);
+    try{
+      const outcome=activityReceipt(await api(prefix+"/activity?limit=50"),account,task,launchRequestId);
+      if(mounted.current)showLaunchOutcome(outcome);
+    }catch{if(mounted.current)showLaunchOutcome("uncertain");}
+    finally{if(mounted.current)setBusy(false);inFlight.current=false;}
   };
   return <section className="native-automation-editor">
     {batchTargets?<p>{batchValid?t("Each selected account is checked before any launch."):t("Select 1–32 enabled accounts.")}</p>:loading?<p role="status">{t("Retrieving authenticated controller data…")}</p>:loadError||!ready?<p role="alert">{t("Task prerequisites are not ready. Check the account and notifications.")}</p>:<p>{t("Ready to review")}</p>}
@@ -308,6 +327,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       <label className="check-label"><input type="checkbox" checked={approved} disabled={locked||busy||(needsShipmentReview&&!shipment?.ready)} onChange={e=>setApproved(e.target.checked)}/>{t("I approve starting this automation")}</label>
       <button type="button" className="primary-button" disabled={!canLaunch} onClick={()=>void launch()}>{t("Start automation")}</button>{review.previewId&&<QueueReviewButton key={review.previewId} account={account} accountName={accountName} task={task} previewId={review.previewId} ttl={review.ttl??null} summary={review.summary} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}{needsShipmentReview&&shipment?.ready&&<QueueReviewButton key={shipment.preview_id} account={account} accountName={accountName} task={task} previewId={shipment.preview_id} ttl={shipment.expires_in} summary={review.summary+"\n"+shipment.routes.map(r=>r.origin_name+" → "+r.destination_name+": "+r.resources.reduce((a,b)=>a+b,0)).join("\n")} disabled={!canLaunch} onQueued={()=>{setLocked(true);setApproved(false);}}/>}</section>}
     {batchReceipts.length>0&&<section className="preview-panel"><h4>{t("Batch receipts")}</h4><ul>{batchReceipts.map(r=><li key={r.account}>{batchTargets?.find(a=>a.id===r.account)?.name??r.account} · {t(r.status)}</li>)}</ul><p>{t("Check Activity before starting any further task.")}</p></section>}
-    {message&&<p role="status">{t(message)}</p>}
+    {busy&&locked&&<p role="status">{t("Waiting for a task receipt. Do not start another request.")}</p>}
+    {message&&<div role="status" className={launchOutcome==="started"?"launch-success":launchOutcome?"notice":undefined}>{launchOutcome==="started"&&<span aria-hidden="true">✓ </span>}{t(message)}</div>}
+    {launchOutcome==="uncertain"&&launchRequestId&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>void checkReceipt()}>{t("Check launch receipt")}</button>}
   </section>;
 }

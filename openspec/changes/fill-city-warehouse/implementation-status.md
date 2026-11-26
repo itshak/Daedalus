@@ -19,3 +19,20 @@ Owner reported a generic preview failure on deployed 687436c. Backend health was
 ## Cookie-only advisor read compatibility
 
 The deployed worker-unavailable diagnostic is consistent with multiple IPC failures. Source review found that the legacy military advisor POST can enter cookie checking/recovery and SystemExit, while the existing cookie-only GET helper retains bounded same-origin checks. Use the fixed read-only military advisor view through the existing GET helper for cookie-only sessions, parse its expected embedded AJAX response, and fail closed if unavailable. Legacy previews classify SystemExit by the observation stage rather than returning an opaque IPC error. Synthetic tests verify no POST is attempted on the cookie-only read and no incomplete observation authorizes a transfer. Live advisor response format and execution remain unverified. No changes to authentication or mutation transport.
+
+## Launch receipt feedback
+
+Live owner report after 611639a: preview appears to succeed, confirm returned uncertain. Read-only ledger status check found one fill request unconfirmed, with no recorded engine receipt/PID. Do not replay or restart the service while unresolved. Extend only the warehouse launch gateway deadline; keep a single request UUID, look up exact scoped durable receipt on a lost response, display a positive localized confirmation only for a verified started receipt, and prevent review expiry overwriting launch results. A started receipt is not proof of cargo delivery. Actual dispatch cause and live task remain unverified.
+
+## Host-local E2E and launch repair
+
+The authorized host-local runner successfully obtained a live warehouse review.
+A synthetic regression reproduced the duplicate lease failure: the native
+cookie worker held the authenticated lease and dispatch reserved its ledger
+entry before failing to acquire another lease. Fix adoption and move validation
+before reservation. Separate source inspection identified legacy POST paths in
+movement inspection, fleet waiting and reviewed transport; use bounded cookie
+transport and identity attestation instead. Add a managed child registration
+gate and preserve nonzero status when cargo confirmation is unavailable.
+Public tests use only synthetic identities and HTTP/IPC doubles. The live
+review is not a shipment; repaired live dispatch and delivery remain open.

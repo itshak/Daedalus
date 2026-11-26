@@ -78,3 +78,40 @@ def test_cookie_only_request_rejects_cross_origin_override():
     with pytest.raises(ValueError, match="Unsupported"):
         session.get("https://other-site.example/?view=city")
     assert http.calls == []
+
+
+def test_reviewed_cookie_transport_attests_identity_and_posts_once():
+    from ikabot.config import actionRequest
+    from unittest.mock import Mock
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(return_value=SimpleNamespace(
+        url=session.urlBase, status_code=200, text="[]", content=b"[]", history=[]))
+    params = {"action": "transportOperations", "function": "loadTransportersWithFreight",
+              "actionRequest": actionRequest, "cargo_resource": 50}
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
+        assert session._daedalus_reviewed_transport_post(params) == "[]"
+    http.post.assert_called_once_with(session.urlBase, params=dict(params, actionRequest="abcdefgh1234"),
+                                     allow_redirects=False, verify=True, timeout=12)
+    assert params["actionRequest"] == actionRequest
+
+
+def test_reviewed_cookie_transport_never_retries_timeout_or_wrong_identity():
+    import requests
+    from ikabot.config import actionRequest
+    from unittest.mock import Mock
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(side_effect=requests.Timeout("private details"))
+    params = {"action": "header", "function": "changeCurrentCity", "actionRequest": actionRequest}
+    with pytest.raises(RuntimeError, match="uncertain"):
+        session._daedalus_reviewed_transport_post(params)
+    assert http.post.call_count == 1
+    session.username = "DifferentPlayer"
+    with pytest.raises(RuntimeError, match="verification failed"):
+        session._daedalus_reviewed_transport_post(params)
+    assert http.post.call_count == 1

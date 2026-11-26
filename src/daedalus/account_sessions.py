@@ -215,6 +215,11 @@ class AccountSessionCoordinator:
                 file_lock.release()
                 raise
 
+    def active_lease(self, account_id: str) -> OwnedAccountSession | None:
+        """Return only the lease already held by this in-process coordinator."""
+        with self._mutex:
+            return self._active.get(account_id)
+
     def status(self, account_id: str) -> str:
         """Read-only, nonsecret state for an account status dashboard."""
         with self._mutex:

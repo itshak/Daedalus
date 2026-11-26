@@ -1611,8 +1611,10 @@ class ControlledIPCClient(ExistingIPCClient):
             ):
                 raise EngineIPCUnavailable("Invalid engine task state")
             outcome = item.get("outcome")
-            if outcome is not None and (task not in {"testTelegramBot", "testDiscordBot"}
-                    or status != "finished" or outcome not in {"accepted", "failed_or_uncertain"}):
+            if outcome is not None and (status != "finished" or not (
+                    (task in {"testTelegramBot", "testDiscordBot"}
+                     and outcome in {"accepted", "failed_or_uncertain"})
+                    or (task == "fillCityWarehouse" and outcome == "failed_or_uncertain"))):
                 raise EngineIPCUnavailable("Invalid notification result")
             cleaned.append({"task_id": task_id, "task": task, "status": status,
                             "pid": item.get("pid"), "started_at": item.get("started_at"),

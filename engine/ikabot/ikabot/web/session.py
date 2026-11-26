@@ -1512,6 +1512,46 @@ class Session:
         except requests.exceptions.RequestException:
             raise RuntimeError("Cookie-only world request could not be verified") from None
 
+    def _daedalus_reviewed_transport_post(self, params):
+        """Single-attempt world POST for the reviewed owned-city sender only."""
+        from ikabot.helpers.serverIdentity import attest_player_from_world_html
+
+        if getattr(self, "_daedalus_cookies_only", False) is not True:
+            raise ValueError("Reviewed cookie transport requires a verified cookie worker")
+        actions = {("header", "changeCurrentCity"),
+                   ("transportOperations", "loadTransportersWithFreight")}
+        if (not isinstance(params, dict)
+                or (params.get("action"), params.get("function")) not in actions
+                or params.get("actionRequest") != actionRequest):
+            raise ValueError("Unsupported reviewed transport action")
+        target = urllib.parse.urlsplit(self.urlBase)
+        if (target.scheme != "https" or target.hostname != self.host
+                or target.port not in (None, 443) or target.path != "/index.php"
+                or target.username or target.password or target.fragment or target.query):
+            raise ValueError("Reviewed transport origin unavailable")
+        html = self.get()
+        if not attest_player_from_world_html(html, self.username):
+            raise RuntimeError("Reviewed transport account verification failed")
+        match = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
+        if match is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", match.group(1)):
+            raise RuntimeError("Reviewed transport request token unavailable")
+        query = dict(params, actionRequest=match.group(1))
+        try:
+            response = self.s.post(self.urlBase, params=query,
+                                   allow_redirects=False, verify=True, timeout=12)
+            arrived = urllib.parse.urlsplit(str(response.url))
+            if (response.status_code != 200 or arrived.scheme != "https"
+                    or arrived.hostname != self.host or arrived.port not in (None, 443)
+                    or arrived.path != "/index.php" or response.history
+                    or len(response.content) > 2_000_000
+                    or self.__isExpired(response.text)
+                    or self.__isSessionRotated(response.text, response=response)
+                    or "TXT_ERROR_WRONG_REQUEST_ID" in response.text):
+                raise RuntimeError("Reviewed transport response uncertain; reconcile before retry")
+            return response.text
+        except requests.exceptions.RequestException:
+            raise RuntimeError("Reviewed transport response uncertain; reconcile before retry") from None
+
     def get(
         self, url='', params={}, ignoreExpire=False, noIndex=False, fullResponse=False, noQuery=False, **kwargs
     ):
@@ -1839,7 +1879,7 @@ class Session:
     def logout(self):
         """This function kills the current (chlid) process"""
         self.logger.info("logout()")
-        if self.padre is False:
+        if self.padre is False and not getattr(self, "_daedalus_managed_fill", False):
             os._exit(0)
 
     def setSessionData(self, sessionData, shared=False, keep_process_list=True):
