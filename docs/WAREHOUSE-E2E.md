@@ -71,3 +71,5 @@ Production rollout: ensure no active or unresolved jobs across all configured
 accounts, verify required CI on the exact release commit, use the documented
 deployment mechanism, recheck worker health, and obtain a fresh review after
 deployment. Do not restart while any worker or dispatch cannot be reconciled.
+
+Managed warehouse tasks expose bounded execution stages, submitted cargo and cargo verified by the advisor. A failed task retains its last stage. No raw exceptions, tokens, or game pages are returned. A finished process is not proof of delivery.

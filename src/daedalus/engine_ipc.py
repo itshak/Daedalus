@@ -1616,7 +1616,17 @@ class ControlledIPCClient(ExistingIPCClient):
                      and outcome in {"accepted", "failed_or_uncertain"})
                     or (task == "fillCityWarehouse" and outcome == "failed_or_uncertain"))):
                 raise EngineIPCUnavailable("Invalid notification result")
+            progress = item.get("progress")
+            if progress is not None:
+                from ikabot.helpers.fillProgress import STAGES
+                if (task != "fillCityWarehouse" or not isinstance(progress, dict)
+                        or set(progress) != {"stage", "submitted", "verified"}
+                        or progress["stage"] not in STAGES
+                        or any(type(progress[k]) is not int for k in ("submitted", "verified"))
+                        or not 0 <= progress["verified"] <= progress["submitted"] <= 10**14):
+                    raise EngineIPCUnavailable("Invalid warehouse progress")
             cleaned.append({"task_id": task_id, "task": task, "status": status,
+                            **({"progress": progress} if progress is not None else {}),
                             "pid": item.get("pid"), "started_at": item.get("started_at"),
                             **({"outcome": outcome} if outcome is not None else {})})
         return cleaned

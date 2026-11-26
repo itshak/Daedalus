@@ -147,6 +147,23 @@ class TestShipmentOutcome(unittest.TestCase):
             self.run_shipment()
         self.assert_single_cargo()
 
+    def test_reviewed_cookie_sender_does_not_parse_default_view_as_city(self):
+        self.session._daedalus_cookies_only = True
+        self.session.get.return_value = "currentCityId: 7, not a city view"
+        self.session._daedalus_reviewed_transport_post.side_effect = [
+            "ok", '[null,null,null,[null,[{"type":10}]]]']
+        guard = Mock()
+        with patch("ikabot.helpers.planRoutes.getCity", return_value={
+            "id": "1", "availableResources": [100] * 5
+        }) as parser:
+            sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0], before_send=guard)
+        self.assertEqual(parser.call_count, 2)
+        calls = self.session._daedalus_reviewed_transport_post.call_args_list
+        self.assertEqual(calls[0].args[0]["currentCityId"], "7")
+        self.assertEqual(calls[1].args[0]["cargo_resource"], 10)
+        guard.assert_called_once()
+        self.session.post.assert_not_called()
+
     def test_confirmed_shipment_records_exact_cargo(self):
         self.session.post.side_effect = ["ok", '[null,null,null,[null,[{"type":10}]]]']
         self.run_shipment(self.checkpoint)

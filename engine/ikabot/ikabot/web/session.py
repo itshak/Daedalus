@@ -1515,6 +1515,7 @@ class Session:
     def _daedalus_reviewed_transport_post(self, params):
         """Single-attempt world POST for the reviewed owned-city sender only."""
         from ikabot.helpers.serverIdentity import attest_player_from_world_html
+        from ikabot.helpers.fillProgress import mark
 
         if getattr(self, "_daedalus_cookies_only", False) is not True:
             raise ValueError("Reviewed cookie transport requires a verified cookie worker")
@@ -1529,6 +1530,8 @@ class Session:
                 or target.port not in (None, 443) or target.path != "/index.php"
                 or target.username or target.password or target.fragment or target.query):
             raise ValueError("Reviewed transport origin unavailable")
+        if params["action"] == "transportOperations":
+            mark(self, "verifying_token")
         html = self.get()
         if not attest_player_from_world_html(html, self.username):
             raise RuntimeError("Reviewed transport account verification failed")
@@ -1536,6 +1539,8 @@ class Session:
         if match is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", match.group(1)):
             raise RuntimeError("Reviewed transport request token unavailable")
         query = dict(params, actionRequest=match.group(1))
+        if params["action"] == "transportOperations":
+            mark(self, "submitting")
         try:
             response = self.s.post(self.urlBase, params=query,
                                    allow_redirects=False, verify=True, timeout=12)

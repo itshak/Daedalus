@@ -252,9 +252,36 @@ def test_legacy_session_exit_is_stage_specific_and_fails_closed(offline, monkeyp
 
 def test_managed_fill_reports_ambiguous_observation_as_failure(offline, monkeypatch):
     offline._daedalus_managed_fill = True
+    offline._daedalus_fill_progress = [0, 0, 0]
     sender = Mock(side_effect=lambda *args, **kwargs: kwargs["before_send"]())
     monkeypatch.setattr(worker, "sendGoods", sender)
     with pytest.raises(RuntimeError, match="cargo unconfirmed"):
         worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
             {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 30}])
     assert sender.call_count == 1
+
+
+def test_progress_records_confirmed_cargo_and_last_stage(offline, monkeypatch):
+    from ikabot.helpers.fillProgress import snapshot
+    offline._daedalus_managed_fill = True
+    offline._daedalus_fill_progress = [0, 0, 0]
+    pending = [20]
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: pending[0])
+    def sender(*args, **kwargs):
+        kwargs["before_send"]()
+        pending[0] += args[5][2]
+    monkeypatch.setattr(worker, "sendGoods", sender)
+    worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
+    assert snapshot(offline._daedalus_fill_progress) == {
+        "stage": "finished", "submitted": 100, "verified": 100}
+
+
+def test_progress_retains_failure_stage(offline, monkeypatch):
+    from ikabot.helpers.fillProgress import snapshot
+    offline._daedalus_managed_fill = True
+    offline._daedalus_fill_progress = [0, 0, 0]
+    monkeypatch.setattr(worker, "sendGoods", Mock(side_effect=RuntimeError("private")))
+    with pytest.raises(RuntimeError):
+        worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
+    assert snapshot(offline._daedalus_fill_progress) == {
+        "stage": "checking_source", "submitted": 0, "verified": 0}

@@ -13,3 +13,7 @@
 - [x] Add host-local authenticated acceptance runner and operator instructions.
 - [ ] Verify a live reviewed shipment and its observed incoming cargo and delivery on the repaired release.
 - [ ] Verify final CI, deploy the exact approved revision without interrupting unresolved work, and confirm production health.
+
+- [x] Instrument bounded execution stages and submitted versus verified cargo; show progress in both clients.
+- [x] Avoid parsing the default view as a complete city for reviewed cookie transport.
+- [ ] Prove the precise live execution failure is resolved, including observed shipments and final stock.

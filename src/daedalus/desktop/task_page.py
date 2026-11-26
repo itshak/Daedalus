@@ -2843,7 +2843,10 @@ class TasksPage(QWidget):
             [_friendly_task(str(task.get("task", ""))),
              str(task.get("status", "unknown")).replace("_", " ").capitalize() + (
                  " · " + str(task["outcome"]).replace("_", " ") if task.get("outcome") in
-                 {"accepted", "failed_or_uncertain"} else ""),
+                 {"accepted", "failed_or_uncertain"} else "") + (
+                 " · " + str(task["progress"]["stage"]).replace("_", " ")
+                 + f' · submitted {task["progress"]["submitted"]:,}; verified {task["progress"]["verified"]:,}'
+                 if isinstance(task.get("progress"), dict) else ""),
              task.get("started_at") or "Not provided", "Selected account"]
             for task in tasks
         ])

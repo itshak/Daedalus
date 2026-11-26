@@ -7,6 +7,7 @@ import time
 from ikabot.config import actionRequest, materials_names_tec
 from ikabot.helpers import pedirInfo
 from ikabot.helpers.decorators import task
+from ikabot.helpers.fillProgress import mark
 from ikabot.helpers.naval import getAvailableFreighters, getAvailableShips, getTotalFreighters, getTotalShips
 from ikabot.helpers.planRoutes import sendGoods, waitForArrival
 from ikabot.helpers.signals import setInfoSignal
@@ -187,6 +188,7 @@ def prepare_fill(session, destination_city, resource, useFreighters=False, revie
 @task("fillCityWarehouse", prepare=prepare_fill, report_error=False)
 def fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None):
     """Send at most the reviewed quantities, never refill automatically."""
+    mark(session, "preparing")
     config = prepare_fill(session, destination_city, resource, useFreighters, reviewed_sources)
     index = RESOURCES.index(resource)
     setInfoSignal(session, f"Fill warehouse: {resource} (one time)")
@@ -194,15 +196,18 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
     for row in config["reviewed_sources"]:
         source, remaining = row["city_id"], row["amount"]
         while remaining:
+            mark(session, "checking_destination")
             names, target, free, incoming = _target(session, destination_city, index)
             if source not in names:
                 raise ValueError("Source no longer owned")
             if free <= incoming:
+                mark(session, "capacity_reached")
                 session.setStatus(f"Storage budget exhausted; submitted {sent:,}")
                 return
             total = (getTotalFreighters if useFreighters else getTotalShips)(session)
             if type(total) is not int or total <= 0:
                 raise ValueError("Selected fleet unavailable")
+            mark(session, "waiting_ships")
             ships = waitForArrival(session, useFreighters)
             capacity = pedirInfo.getShipCapacity(session)[int(useFreighters)]
             if type(capacity) is not int or capacity <= 0 or type(ships) is not int or ships <= 0:
@@ -210,6 +215,7 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
             names, target, free, incoming = _target(session, destination_city, index)
             if source not in names:
                 raise ValueError("Source no longer owned")
+            mark(session, "checking_source")
             stock = _amount(_city(session, source)["availableResources"][index])
             qty = min(remaining, stock, max(0, free-incoming), ships*capacity)
             if qty <= 0:
@@ -220,6 +226,7 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
 
             def guard():
                 nonlocal before_incoming
+                mark(session, "checking_guard")
                 current_names, current, current_free, current_incoming = _target(session, destination_city, index)
                 if (source not in current_names or str(current["islandId"]) != str(target["islandId"])
                         or qty > max(0, current_free-current_incoming)):
@@ -229,6 +236,7 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
             sendGoods(session, str(source), str(destination_city), target["islandId"],
                       math.ceil(qty/capacity), cargo, useFreighters, before_send=guard)
             sent += qty
+            mark(session, "verifying_cargo", submitted=sent)
             remaining -= qty
             session.setStatus(f"Submitted {sent:,} {resource}; checking incoming cargo")
             # Don't send another load against a potentially stale advisor. The
@@ -236,6 +244,7 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
             for attempt in range(3):
                 _, _, _, observed = _target(session, destination_city, index)
                 if observed >= before_incoming + qty:
+                    mark(session, "verifying_cargo", verified=sent)
                     break
                 if attempt < 2:
                     time.sleep(2)
@@ -244,4 +253,5 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
                 if getattr(session, "_daedalus_managed_fill", False) is True:
                     raise RuntimeError("Warehouse cargo unconfirmed; reconcile before retrying")
                 return
+    mark(session, "finished")
     session.setStatus(f"Warehouse fill finished; submitted {sent:,} {resource}")

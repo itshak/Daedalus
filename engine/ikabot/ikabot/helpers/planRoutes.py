@@ -11,7 +11,8 @@ from decimal import *
 from ikabot.config import *
 from ikabot.helpers.getJson import getCity
 from ikabot.helpers.naval import *
-from ikabot.helpers.varios import wait
+from ikabot.helpers.varios import wait, getCurrentCityId
+from ikabot.helpers.fillProgress import mark
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
@@ -36,10 +37,14 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                      and getattr(session, "_daedalus_cookies_only", False) is True)
     # this can fail if a random request is made in between this two posts
     while True:
-        html = session.get()
-        current_city = getCity(html)  # the city the bot is right now
-        city = getCity(session.get(city_url + originCityId))  # the origin city
-        currId = current_city["id"]
+        if cookie_review:
+            # The default view may be the advisor or island, not a city.
+            mark(session, "checking_current_city")
+            currId = getCurrentCityId(session)
+        else:
+            html = session.get()
+            currId = getCity(html)["id"]
+        city = getCity(session.get(city_url + originCityId))
 
         # Change from the city the bot is sitting right now to the city we want to load resources from
         data = {
@@ -54,6 +59,7 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         }
 
         if cookie_review:
+            mark(session, "switching_city")
             session._daedalus_reviewed_transport_post(data)
         else:
             session.post(params=data)
@@ -116,8 +122,10 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.
         # Never replay this non-idempotent POST at the transport layer.
+        mark(session, "submitting")
         resp = (session._daedalus_reviewed_transport_post(data) if cookie_review
                 else session.post(params=data, retry_on_failure=False))
+        mark(session, "checking_transport_response")
         try:
             outcome = json.loads(resp, strict=False)[3][1][0]["type"]
         except (ValueError, TypeError, KeyError, IndexError):
