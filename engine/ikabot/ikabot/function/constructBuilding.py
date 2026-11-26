@@ -48,6 +48,15 @@ def splitBuildingBlocks(html):
     return blocks
 
 
+def _building_ground(session, city_id, position):
+    """Original upstream read of building options for a slot."""
+    return json.loads(session.post(params={
+        "view": "buildingGround", "cityId": city_id, "position": position,
+        "backgroundView": "city", "currentCityId": city_id,
+        "actionRequest": actionRequest, "ajax": "1",
+    }, noIndex=True), strict=False)
+
+
 def _native_build_options(session, city_id, only_position=None):
     """Read the actual building-ground view for each eligible empty slot."""
     if type(city_id) is not int or not 0 < city_id < 10**12:
@@ -74,11 +83,7 @@ def _native_build_options(session, city_id, only_position=None):
                 or not 0 <= position <= 80 or surface not in ("sea", "land", "shore", "wall", "dockyard")
                 or (only_position is not None and position != only_position)):
             continue
-        response = json.loads(session.post(params={
-            "view": "buildingGround", "cityId": own, "position": position,
-            "backgroundView": "city", "currentCityId": own,
-            "actionRequest": actionRequest, "ajax": "1",
-        }, noIndex=True), strict=False)
+        response = _building_ground(session, own, position)
         for item in response:
             if item[0] == "updateGlobalData":
                 action_token = item[1].get("actionRequest", actionRequest)
@@ -144,6 +149,24 @@ def prepare_native_build(session, city_id, position, building_id, expected):
     return plan["config"]
 
 
+def _submit_building(session, city_id, position, building_id, action_token, *, reviewed=False):
+    """Single upstream building request shared by CLI and reviewed plans."""
+    params = {
+        "action": "BuildNewBuilding",
+        "cityId": city_id,
+        "position": position,
+        "building": building_id,
+        "backgroundView": "city",
+        "currentCityId": city_id,
+        "templateView": "buildingGround",
+        "actionRequest": action_token,
+        "ajax": "1",
+    }
+    if reviewed:
+        return session.post(params=params, noIndex=True, retry_on_failure=False)
+    return session.post(params=params, noIndex=True)
+
+
 @task("constructBuilding", prepare=prepare_native_build)
 def native_build(session, city_id: int, position: int, building_id: int, expected: str):
     plan, action_token = _native_build_plan(session, city_id, position, building_id)
@@ -151,11 +174,7 @@ def native_build(session, city_id: int, position: int, building_id: int, expecte
         raise ValueError("Building review is stale or unaffordable")
     city = str(city_id)
     session.setStatus("Submitting reviewed building construction")
-    session.post(params={
-        "action": "BuildNewBuilding", "cityId": city, "position": position,
-        "building": str(building_id), "backgroundView": "city", "currentCityId": city,
-        "templateView": "buildingGround", "actionRequest": action_token, "ajax": "1",
-    }, noIndex=True, retry_on_failure=False)
+    _submit_building(session, city, position, str(building_id), action_token, reviewed=True)
     session.setStatus("Construction submitted; verify the city")
 
 
@@ -198,18 +217,8 @@ def constructBuilding(session, event, stdin_fd, predetermined_input):
             # Iterate through available slots for this surface type until an active/unlocked slot is found.
             # Slots like position 13 require specific research (e.g., Bureaucracy) and will return empty HTML if locked.
             for free_space_of_type in free_spaces_of_type:
-                params = {
-                    "view": "buildingGround",
-                    "cityId": city["id"],
-                    "position": free_space_of_type["position"],
-                    "backgroundView": "city",
-                    "currentCityId": city["id"],
-                    "actionRequest": actionRequest,
-                    "ajax": "1",
-                }
-                buildings_response = session.post(params=params, noIndex=True)
-                parsed_response = json.loads(buildings_response, strict=False)
-                
+                parsed_response = _building_ground(session, city["id"], free_space_of_type["position"])
+
                 # Extract fresh actionRequest from the response
                 try:
                     update_global = [item for item in parsed_response if item[0] == 'updateGlobalData']
@@ -349,18 +358,8 @@ def constructBuilding(session, event, stdin_fd, predetermined_input):
             banner()
 
         # build it
-        params = {
-            "action": "BuildNewBuilding",
-            "cityId": city["id"],
-            "position": option["position"],
-            "building": building["buildingId"],
-            "backgroundView": "city",
-            "currentCityId": city["id"],
-            "templateView": "buildingGround",
-            "actionRequest": current_action_request,
-            "ajax": "1",
-        }
-        buildings_response = session.post(params=params, noIndex=True)
+        buildings_response = _submit_building(
+            session, city["id"], option["position"], building["buildingId"], current_action_request)
         response_data = json.loads(buildings_response, strict=False)
         msg = None
         for item in response_data:

@@ -49,3 +49,14 @@ Native operations SHALL reuse the existing IkaBot operation-specific wait and qu
 #### Scenario: Construction supplies are still in transit
 - **WHEN** a reviewed construction supply was dispatched but the destination does not yet have sufficient stock
 - **THEN** the worker SHALL use the upstream fleet-arrival estimate and wait helper, recheck actual stock before upgrading and stop at the review deadline rather than infer delivery
+
+### Requirement: Minimize divergence from upstream operation implementation
+Daedalus SHALL retain upstream game request construction and shared operation helpers as the source of truth. Native reviews SHALL supply validated arguments to the same operation functions or extracted original request builders. Cookie-session compatibility SHALL be isolated at the existing session boundary and SHALL NOT admit arbitrary mutation parameters through read-only forms. Intentional engine deviations MUST have a documented rationale and regression tests.
+
+#### Scenario: Equivalent CLI and reviewed request
+- **WHEN** the interactive CLI and native reviewed adapter execute the same supported building, layout, deployment or market selection operation
+- **THEN** the underlying request form SHALL match the original upstream payload; the reviewed caller SHALL retain account, stale-plan and no-replay protection
+
+#### Scenario: Upstream preserved helper changes
+- **WHEN** a protected upstream helper differs from the recorded merged upstream baseline
+- **THEN** the regression check SHALL flag the change for explicit review rather than silently accepting a rewritten game algorithm

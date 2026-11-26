@@ -72,3 +72,9 @@ while any checked product scope remains unresolved.
 - [x] Consolidate duplicate fleet waits and reviewed supply arrival timing into upstream helpers.
 - [x] Preserve audited read-only queue AJAX request forms on verified cookie sessions; test original training, workshop and miracle waiting implementations.
 - [ ] Verify real successive fleet loads, recruitment rounds, workshop and construction queue progression on the deployed revision.
+
+## Engine parity review
+- [x] Compare the vendored engine definitions with the merged upstream CLI/IPC baseline and record the complete changed-module inventory.
+- [x] Restore the upstream fleet timing helper and consolidate duplicated original request construction for building, layout, deployment and market resource selection.
+- [x] Isolate bounded read-only form validation from gameplay logic and test original request shapes and preserved helper source guards.
+- [ ] Finish individual verified-cookie integration and live acceptance for other state-changing operation POSTs; do not imply live coverage from read-only/parity tests.

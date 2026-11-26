@@ -65,7 +65,8 @@ def calculateTotals(tooltips, values):
     return desc_value_dict, total_units, total_ships
 
 
-def getArmyAvailable(session, type_army, destination_city_id, origin_city_id, event):
+def _deployment_view(session, type_army, destination_city_id, origin_city_id):
+    """The upstream deployment view shared by interactive and reviewed paths."""
     params = {
         "view": "deployment",
         "deploymentType": "army" if type_army else "fleet",
@@ -75,9 +76,12 @@ def getArmyAvailable(session, type_army, destination_city_id, origin_city_id, ev
         "actionRequest": actionRequest,
         "ajax": 1,
     }
-    ship_capacity, freighter_capacity = getShipCapacity(session)
+    return session.post(params=params)
 
-    data = session.post(params=params)
+
+def getArmyAvailable(session, type_army, destination_city_id, origin_city_id, event):
+    ship_capacity, freighter_capacity = getShipCapacity(session)
+    data = _deployment_view(session, type_army, destination_city_id, origin_city_id)
     amount_results = re.findall(r'<div class=\\"amount\\">(.*?)<\\/div>', data)
 
     if type_army:
@@ -119,7 +123,7 @@ def getArmyAvailable(session, type_army, destination_city_id, origin_city_id, ev
     return None
 
 
-def sendArmy(session, origin_city, destination_city, type_army, army_available):
+def sendArmy(session, origin_city, destination_city, type_army, army_available, *, reviewed=False):
     params = {
         "action": "transportOperations",
         "function": "deployArmy" if type_army else "deployFleet",
@@ -136,7 +140,9 @@ def sendArmy(session, origin_city, destination_city, type_army, army_available):
     for army in army_available:
         params[army] = army_available[army]
 
-    session.post(params=params)
+    if reviewed:
+        return session.post(params=params, retry_on_failure=False)
+    return session.post(params=params)
 
 
 def _station_plan(session, city_id, destination_city_id, ground):
@@ -156,11 +162,7 @@ def _station_plan(session, city_id, destination_city_id, ground):
         raise ValueError("Invalid destination island")
     # The original CLI deployment view, but no interactive prompts or mutation.
     mode = "army" if ground else "fleet"
-    data = session.post(params={
-        "view": "deployment", "deploymentType": mode,
-        "destinationCityId": destination, "backgroundView": "city",
-        "currentCityId": origin, "actionRequest": actionRequest, "ajax": 1,
-    })
+    data = _deployment_view(session, ground, destination, origin)
     amounts = re.findall(r'<div class=\\"amount\\">(.*?)<\\/div>', data)
     codes = re.findall(r'name=\\"cargo_' + mode + r'_([^\\]+)_upkeep\\"\\n\s+value=\\"([^\\"]+)\\"', data)
     weights = re.findall(r'<div class=\\"weight\\">(.*?)<\\/div>', data) if ground else []
@@ -280,15 +282,10 @@ def native_station(session, city_id: int, destination_city_id: int, ground: bool
             fresh, cargo, island = _station_plan(session, route["city_id"], destination_city_id, route["ground"])
             if not fresh["ready"] or fresh["config"]["expected"] != route["config"]["expected"]:
                 raise ValueError("Deployment changed; stop remaining routes")
-        mode = "army" if route["ground"] else "fleet"
         session.setStatus("Submitting reviewed owned-city deployment")
-        session.post(params={
-            "action": "transportOperations", "function": "deployArmy" if route["ground"] else "deployFleet",
-            "actionRequest": actionRequest, "islandId": str(island),
-            "destinationCityId": str(destination_city_id), "deploymentType": mode,
-            "backgroundView": "city", "currentCityId": str(route["city_id"]), "templateView": "deployment",
-            "ajax": 1, **cargo,
-        }, retry_on_failure=False)
+        sendArmy(session, {"id": str(route["city_id"])},
+                 {"id": str(destination_city_id), "islandId": str(island)},
+                 route["ground"], cargo, reviewed=True)
     session.setStatus("Deployment submitted; verify military movements")
 
 

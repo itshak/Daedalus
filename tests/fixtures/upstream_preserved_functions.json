@@ -1,0 +1,50 @@
+{
+  "baseline": "ba6aaba",
+  "functions": {
+    "function/activateMiracle.py": {
+      "get_temple_info": "5cca1b688cd435433ec8e232ef0837d5fc7ffe811f2d34b3c395c3ed1bf63a29",
+      "wait_for_miracle": "533f08bb1721f70fc48ea017fb4ca9d40ec15d8d1c79552a29b111cf9c47ff6c"
+    },
+    "function/constructBuilding.py": {
+      "parseBuildingCosts": "477a32a2d8c407d494662a314ea0c566f51d52778a18e6d571aa79db6db59f70",
+      "splitBuildingBlocks": "89130c63e8ccb5158c81431ab4ccb80903c7573ebbea2f441f99c742f6f1c429"
+    },
+    "function/constructionList.py": {
+      "tryFreeBuildingSpeedup": "9d1b9f853f8b42f86e14b02caeed26e02756515fe3c902f44664e23715215ca9",
+      "waitForConstruction": "f4f190e8d8606429f9d2f0c93bffd03e3f126ac2840c4b2cda0b94e414cfd49c"
+    },
+    "function/reorganizeCityBuildings.py": {
+      "_compute_moves": "364f418ac4837cf9e734dd0e7eaa680afb9a1b40783cf412e8560c0947d0a0b3"
+    },
+    "function/research.py": {
+      "experiment": "ee387ee388db43cf2fb6db7506156843fcbe9cd0b2049786a5998cc73d3ab5bc",
+      "experiment_multi": "4fefa47ff9e541e86f7551e89e215ac1f86b44e5da30ab90407fce84ec699306"
+    },
+    "function/trainArmy.py": {
+      "generateArmyData": "cc2dcc5d9d207cb1d252877388e4ed879f4547af40b8ca67b2091ac39024a8cd",
+      "getBuildingInfo": "1eb26af3fe2290b6d6d09c8642b6cd3b8005b2e9d44f02f88f712ca3264ee34e",
+      "planTrainings": "05d060eaca9e0ebd405a17d694691291561317bd6ab1fe54f5f67481664788d5",
+      "waitForTraining": "8866d9d2020cd194f268fe0b8b9ea6c4fd2c3d6f09a8236b0b4cc38d2911a20b"
+    },
+    "helpers/market.py": {
+      "getCommercialCities": "6a5e54c4186c470669477faf0491cb93deaf4cac62e192add1b2a52570bd7fe1",
+      "getGold": "966fb653ff581fa855ee2ec055f8f93111587bc26c20f30ff409bf2f577db3cb",
+      "getMarketHtml": "487fda802ae508e37642584b288e21ac958fd61e699cd625c63dd48481c0821a",
+      "storageCapacityOfMarket": "0701ccc9de5d79107988f2a09e2af5cb399cb8f6887a91669bd9da80b131bfc1"
+    },
+    "helpers/naval.py": {
+      "getAvailableFreighters": "f8da34b84a4e5af938b1b448255d66d5fb98db1994cda93a19e602806e987427",
+      "getAvailableShips": "a00e13cb97db16a54b06f6d09ec23740027dbd1cac825f1987b1c1da5986c7c9",
+      "getTotalFreighters": "0fac2f5cfa72ed24c8efe3cde144bdb72ff1719b16315a84aa5ae4ce4c0f2240",
+      "getTotalShips": "f506328019e24704c48e24ef2616b4c3ec920c83e1fffab9a0c3ca68feccb266"
+    },
+    "helpers/planRoutes.py": {
+      "getMinimumWaitingTime": "9e64687c0b2e8afc79fc79c2293ce0a7ed43ff14f670b48fb3b89281c78650ec",
+      "splitCargoBetweenFleets": "a948ab87ab35755417ed0b7cc7c88904132fb3c25e3a79ca80461990d579239e"
+    },
+    "helpers/varios.py": {
+      "getCurrentCityId": "07a98bd4322ff3895cbca543b0432035ade8b15836c286b3677fe7276b0585f6",
+      "wait": "49c7f0c7a79a792c83eb3e779e0d8ef5d73514db4b13355393080317c8ae145d"
+    }
+  }
+}

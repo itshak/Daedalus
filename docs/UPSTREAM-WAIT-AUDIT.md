@@ -3,8 +3,9 @@
 ## Evidence and scope
 
 Compared the AST of every Python function in the vendored game operation
-directory against import commit `ab070fb` (the merged public IkaBot stable
-`3ea1e0e` and experimental CLI PR #499 `062feec`). Audited 61 top-level
+directory against stable import commit `ab070fb` (public IkaBot stable
+`3ea1e0e`). The later merged CLI/IPC baseline is `ba6aaba`; see
+[the broader parity audit](UPSTREAM-ENGINE-PARITY.md). Audited 61 top-level
 functions containing explicit wait/sleep calls; also inspected the warehouse
 policy's class methods, shared transport helpers, session adapter and
 controller waits. Spot-checked the public PR #499 revision `55d8877` for
