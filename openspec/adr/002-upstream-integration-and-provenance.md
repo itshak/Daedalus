@@ -10,3 +10,5 @@ Import a pristine upstream revision through a reviewable tracked source mechanis
 
 ## Consequences
 Upstream merges remain possible. Unreleased IPC changes are treated as external candidate code, not guaranteed stable APIs. Product-specific scheduling and read-only reporting remain in the backend/adapter.
+
+[ADR-006](006-upstream-first-engine-reuse.md) elaborates the mandatory upstream-first reuse policy and exception criteria for gameplay changes.

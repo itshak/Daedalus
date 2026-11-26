@@ -39,8 +39,12 @@ def chooseResource(session, city):
         print("({:d}) {}".format(index + 1, material_name))
     choise = read(min=1, max=5)
     resource = choise - 1
-    if resource == 0:
-        resource = "resource"
+    select_market_resource(session, city, resource)
+    return resource
+
+
+def select_market_resource(session, city, resource_type):
+    resource = "resource" if resource_type == 0 else resource_type
     data = {
         "cityId": city["id"],
         "position": city["pos"],
@@ -58,9 +62,6 @@ def chooseResource(session, city):
     }
     # this will set the chosen resource in the store
     session.post(params=data)
-    resource = choise - 1
-    # return the chosen resource
-    return resource
 
 
 def getOffers(session, city):

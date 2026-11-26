@@ -153,25 +153,35 @@ def prepare_native_layout(session, city_id, template_city_id, expected):
     return plan["config"]
 
 
+def _open_layout_dialog(session, city_id):
+    return session.post(
+        f"view=saveCityBuildingsPositions&cityId={city_id}&backgroundView=city"
+        f"&currentCityId={city_id}&actionRequest={actionRequest}&ajax=1", noIndex=True)
+
+
+def _submit_layout(session, city_id, moves, *, reviewed=False):
+    """The original upstream move form, used by both entry points."""
+    params = {"action": "SaveBuildingPositions", "backgroundView": "city",
+              "currentCityId": city_id, "templateView": "saveCityBuildingsPositions",
+              "actionRequest": actionRequest, "ajax": "1", "cityId": city_id}
+    for index, (source, target) in enumerate(moves):
+        params[f"moves[{index}][from]"] = source
+        params[f"moves[{index}][to]"] = target
+    if reviewed:
+        return session.post(params=params, noIndex=True, retry_on_failure=False)
+    return session.post(params=params, noIndex=True)
+
+
 @task("reorganizeCityBuildings", prepare=prepare_native_layout)
 def native_layout(session, city_id: int, template_city_id: int, expected: str):
     plan = preview_native_layout(session, city_id, template_city_id)
     if not plan["ready"] or expected != plan["config"]["expected"]:
         raise ValueError("Layout review is stale or no moves are needed")
     city = str(city_id)
-    session.post(
-        f"view=saveCityBuildingsPositions&cityId={city}&backgroundView=city"
-        f"&currentCityId={city}&actionRequest={actionRequest}&ajax=1",
-        noIndex=True,
-    )
-    params = {"action": "SaveBuildingPositions", "backgroundView": "city",
-              "currentCityId": city, "templateView": "saveCityBuildingsPositions",
-              "actionRequest": actionRequest, "ajax": "1", "cityId": city}
-    for index, move in enumerate(plan["moves"]):
-        params[f"moves[{index}][from]"] = move["from"]
-        params[f"moves[{index}][to]"] = move["to"]
+    _open_layout_dialog(session, city)
     session.setStatus("Submitting reviewed building layout")
-    session.post(params=params, noIndex=True, retry_on_failure=False)
+    _submit_layout(session, city, [(move["from"], move["to"]) for move in plan["moves"]],
+                   reviewed=True)
     session.setStatus("Layout submitted; verify the city")
 
 
@@ -209,15 +219,7 @@ def reorganizeCityBuildings(session, event, stdin_fd, predetermined_input):
                 continue
 
             # Open the reorganization dialog (mimics clicking the button in-game)
-            dialog_params = (
-                'view=saveCityBuildingsPositions'
-                '&cityId={city_id}'
-                '&backgroundView=city'
-                '&currentCityId={city_id}'
-                '&actionRequest={actionRequest}'
-                '&ajax=1'
-            ).format(city_id=city_id, actionRequest=actionRequest)
-            session.post(dialog_params, noIndex=True)
+            _open_layout_dialog(session, city_id)
 
             # Simulate time spent looking at the layout before dragging
             time.sleep(random.uniform(2.0, 5.0))
@@ -225,20 +227,7 @@ def reorganizeCityBuildings(session, event, stdin_fd, predetermined_input):
             # Simulate drag-and-drop: ~1–3 s per move
             time.sleep(random.uniform(1.0, 3.0) * len(moves))
 
-            params = {
-                'action': 'SaveBuildingPositions',
-                'backgroundView': 'city',
-                'currentCityId': city_id,
-                'templateView': 'saveCityBuildingsPositions',
-                'actionRequest': actionRequest,
-                'ajax': '1',
-                'cityId': city_id,
-            }
-            for i, (from_pos, to_pos) in enumerate(moves):
-                params['moves[{}][from]'.format(i)] = from_pos
-                params['moves[{}][to]'.format(i)] = to_pos
-
-            session.post(params=params, noIndex=True)
+            _submit_layout(session, city_id, moves)
             print('{}: reorganized with {} move(s).'.format(
                 target_city['cityName'], len(moves)))
 

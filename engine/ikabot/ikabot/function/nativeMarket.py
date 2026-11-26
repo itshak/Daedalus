@@ -56,7 +56,6 @@ def _market_city(session, city_id):
 
 def market_snapshot(session, city_id, resource_type, side):
     """Return the actual selected city's public market quotes and allowed prices."""
-    from ikabot.config import actionRequest
     from ikabot.function import buyResources, sellResources
     from ikabot.helpers.market import storageCapacityOfMarket
 
@@ -71,15 +70,7 @@ def market_snapshot(session, city_id, resource_type, side):
     currently_on_sale = None
 
     if side == "buy":
-        resource = "resource" if resource_type == 0 else resource_type
-        session.post(params={
-            "cityId": city["id"], "position": city["pos"],
-            "view": "branchOffice", "activeTab": "bargain",
-            "type": 444, "searchResource": resource,
-            "range": city["rango"], "backgroundView": "city",
-            "currentCityId": city["id"], "templateView": "branchOffice",
-            "currentTab": "bargain", "actionRequest": actionRequest, "ajax": 1,
-        })
+        buyResources.select_market_resource(session, city, resource_type)
         expected_resource = "resource" if resource_type == 0 else str(resource_type)
         raw = buyResources.getOffers(session, city)
         if not isinstance(raw, list) or len(raw) > 400:

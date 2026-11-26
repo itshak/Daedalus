@@ -136,3 +136,9 @@ The warehouse task is a Daedalus planner/policy, not an independent game transpo
 ## Operation-specific waiting compatibility
 
 See [upstream wait audit](../docs/UPSTREAM-WAIT-AUDIT.md) for the source comparison, operation inventory, preserved queue algorithms and offline evidence. The Daedalus cookie-only adapter now admits the exact existing read-only queue forms for the fleet advisor, barracks, shipyard, workshop, temple and construction-speedup popup. These are local transport compatibility changes; the upstream wait helper and queue algorithms remain the source of truth. Live multi-iteration acceptance remains open.
+
+## Engine parity audit
+
+The correct merged stable + CLI/IPC comparison point is Daedalus commit ba6aaba (not the stable-only import ab070fb). [Full definition inventory and rationale](../docs/UPSTREAM-ENGINE-PARITY.md) records every changed module relative to this baseline, remaining integration risks and the shared original request builders. Twenty-five preserved upstream helpers are source-guarded in offline CI. New local read-form validation is isolated in nativeReadForms; no blanket mutation proxy or live-game acceptance is implied.
+
+The governing architecture decision is [ADR-006: upstream-first engine reuse](../openspec/adr/006-upstream-first-engine-reuse.md). Consult it before changing any game operation or shared helper.

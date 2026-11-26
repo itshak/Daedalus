@@ -20,6 +20,7 @@ Build one maintainable Daedalus application: existing public IkaBot operations a
    Acquire a host-local world/player lease before any game-worker authentication and hold it through challenge waits; release it only after its game process stops. Never assume host-local locks coordinate two remote servers.
 5. Server-side policies SHALL be restart-safe, with state reconciliation and no duplicate state-changing actions.
 6. Packaging uses unique distribution and import namespaces. Never shadow the upstream `ikabot` package with the legacy GUI's package of the same name.
+7. Follow [ADR-006](openspec/adr/006-upstream-first-engine-reuse.md): upstream-first reuse is mandatory. Inspect and reuse existing upstream operations, JSON contracts, helpers, request builders, parsers and waiting mechanisms before adding code. Keep product policy in the harness; prefer shared extraction or narrow adapters to gameplay edits. Document and test the smallest necessary deviation, including why reuse is insufficient. Never remove safety or reconciliation gates to obtain parity.
 
 ## Security and provenance
 - **Never read, print, upload, or commit** real secrets, passwords, saved sessions, cookies, GF tokens, browser profiles, personal account configuration, server credentials, or runtime logs.
