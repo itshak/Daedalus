@@ -65,9 +65,9 @@ def test_preserved_upstream_source_guards():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    guard = json.loads((root / "tests/fixtures/upstream_preserved_functions.json").read_text())
+    guard = json.loads((root / "tests/fixtures/upstream_preserved_functions.json").read_text(encoding="utf-8"))
     for file, functions in guard["functions"].items():
-        source = (root / "engine/ikabot/ikabot" / file).read_text()
+        source = (root / "engine/ikabot/ikabot" / file).read_text(encoding="utf-8")
         definitions = {node.name: node for node in ast.parse(source).body
                        if isinstance(node, ast.FunctionDef)}
         for name, expected in functions.items():
