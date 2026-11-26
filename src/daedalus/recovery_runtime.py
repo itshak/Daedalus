@@ -32,7 +32,7 @@ from daedalus.recovery_reconcile import (
     convergent_transport_plan,
     fixed_transfer_plan,
 )
-from daedalus.recovery_state import RecoveryStore, identity
+from daedalus.recovery_state import RecoveryConflict, RecoveryStore, identity
 from daedalus.task_control import TaskController, TaskUnavailable
 
 logger = logging.getLogger("daedalus.recovery_runtime")
@@ -370,16 +370,15 @@ class RecoverySupervisor:
             self.store.record_loss(account)
             # Block the old game's child tasks as soon as loss is confirmed.
             # The owner lease is intentionally held through grace/recovery.
-            if worker is not None:
-                worker.stop()
             if existing.phase is SessionPhase.AUTHENTICATED:
                 existing.transition(SessionPhase.NEEDS_ASSISTANCE)
+            if worker is not None:
+                worker.stop()
             self._suspected.pop(account.id,None)
 
     def _resume_jobs(self, account: Account, epoch: str) -> dict[str,int]:
         totals={"restored":0,"completed":0,"skipped":0,"unconfirmed":0}
-        policy=self.store.policy(account)
-        if not policy["auto_resume"]:
+        if not self.store.resume_permitted(account, epoch):
             return totals
         if self.controller._ledger.has_unresolved(account.id):
             totals["skipped"]=len(self.store.desired(account))
@@ -447,7 +446,8 @@ class RecoverySupervisor:
             # receipt; a recovery racing a policy change cannot revive a job.
             latest=next((row for row in self.store.desired(account)
                         if row["id"]==job["id"]),None)
-            if (latest is None or latest["desired_state"]!="running"
+            if (not self.store.resume_permitted(account, epoch)
+                    or latest is None or latest["desired_state"]!="running"
                     or latest["revision"]!=prepared["revision"]):
                 self.store.finish_resume(
                     account,job["id"],epoch,status="skipped",
@@ -467,7 +467,8 @@ class RecoverySupervisor:
                     raise TaskUnavailable("New task is not verified as running")
                 latest=next((row for row in self.store.desired(account)
                             if row["id"]==job["id"]),None)
-                if (latest is None or latest["desired_state"]!="running"
+                if (not self.store.resume_permitted(account, epoch)
+                        or latest is None or latest["desired_state"]!="running"
                         or latest["revision"]!=prepared["revision"]):
                     # User requested stop while IPC was in flight. Stop the
                     # newly started task; never label it as desired-running.
@@ -496,7 +497,11 @@ class RecoverySupervisor:
         for account in self.accounts.values():
             if not self.store.policy(account)["enabled"]:
                 continue
-            self._observe(account)
+            try:
+                self._observe(account)
+            except (RecoveryWorkerError, OSError):
+                # A failed cleanup must not block independent accounts.
+                logger.warning("Account worker cleanup requires reconciliation")
         for account in self.accounts.values():
             if self._stop.is_set():
                 break
@@ -512,11 +517,21 @@ class RecoverySupervisor:
                 continue
             try:
                 self.workers.start(account)
-                self.store.outcome(account,attempt["epoch"],success=True)
-                self._resume_jobs(account,attempt["epoch"])
             except RecoveryWorkerError:
-                self.store.outcome(account,attempt["epoch"],
-                                   success=False,reason="needs_assistance")
+                try:
+                    self.store.outcome(account,attempt["epoch"],
+                                       success=False,reason="needs_assistance")
+                except RecoveryConflict:
+                    logger.info("Recovery approval changed during worker startup")
+                continue
+            try:
+                self.store.outcome(account,attempt["epoch"],success=True)
+            except RecoveryConflict:
+                # The user revoked recovery while the login was in flight.
+                # Never restore jobs against a deleted or superseded epoch.
+                logger.info("Recovery approval changed during worker startup")
+                continue
+            self._resume_jobs(account,attempt["epoch"])
         # Building work may already be queued in-game, or resources may be
         # missing during the first fresh read. Re-check only after a verified
         # worker is live. No dispatch receipt exists until a plan is ready.

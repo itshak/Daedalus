@@ -126,15 +126,16 @@ def test_lost_session_triggers_lease_bound_ticket_no_automatic_replay(context):
 
 
 def test_transient_validation_exception_is_sanitized_and_never_resumes(context):
-    account, owner, ipc, controller, _broker, monitor, _tmp = context
+    account, owner, ipc, _controller, _broker, monitor, _tmp = context
     monitor.observe(account.id, confirmed=True)
     ipc.network_failure = True
     monitor.poll_once()
-    assert owner.status(account.id) == "needs_assistance"
-    assert monitor.pending()["tickets"][0]["reason"] == "session_expired"
+    assert owner.status(account.id) == "authenticated"
+    assert monitor.pending()["tickets"] == []
     assert "private sensitive cookie" not in str(monitor.pending())
-    with pytest.raises(TaskUnavailable):
-        controller.observe_existing(account.id, confirmed=True)
+    with pytest.raises(MonitoringUnavailable, match="verified"):
+        monitor.observe(account.id, confirmed=True)
+    assert owner.status(account.id) == "authenticated"
 
 
 def test_monitor_start_stop_is_explicit_and_idempotent(context):

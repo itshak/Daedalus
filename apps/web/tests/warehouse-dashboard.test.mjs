@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {WarehouseCache, WAREHOUSE_TTL_MS, savedPage, filterWarehouseRows} from "../lib/warehouse-dashboard.ts";
+import {WarehouseCache, WAREHOUSE_TTL_MS, savedPage, filterWarehouseRows, parseWarehouseResult} from "../lib/warehouse-dashboard.ts";
 const city=(id,account,wood,island="[1:2]")=>({account_id:account,city_id:id,city_name:id===1?"Athens":"Sparta",island,resources:{unsecured:{wood,wine:0,marble:0,glass:0,sulfur:0},capacity:300000}});
 const response={account_id:"alpha",cities:[city(1,"alpha",250000)]};
 const identity=id=>({name:id,world:id==="alpha"?"s1":"s2"});
@@ -27,7 +27,7 @@ test("wrong accounts, failed fetches, and late responses after clear never popul
   const cache=new WarehouseCache();
   await assert.rejects(cache.read("beta","beta",async()=>response));assert.equal(cache.fresh("beta"),undefined);
   await assert.rejects(cache.read("alpha","alpha",async()=>{throw Error("offline")}));assert.equal(cache.fresh("alpha"),undefined);
-  let resolve;const pending=cache.read("alpha","alpha",()=>new Promise(r=>{resolve=r;}));await Promise.resolve();cache.clear();resolve(response);await pending;assert.equal(cache.fresh("alpha"),undefined);
+  let resolve;const pending=cache.read("alpha","alpha",()=>new Promise(r=>{resolve=r;}));await Promise.resolve();cache.clear();resolve(response);await assert.rejects(pending);assert.equal(cache.fresh("alpha"),undefined);
 });
 test("dashboard renders TanStack sorted rows and persists navigation, not warehouse payloads",()=>{
   const source=readFileSync(new URL("../components/control-center.tsx",import.meta.url),"utf8");
@@ -40,4 +40,12 @@ test("TanStack numeric sorting is numeric and unknown values sort last", async()
   const rows=[city(1,"alpha",2),city(2,"alpha",100),city(3,"alpha",null),city(4,"alpha",10)];
   const table=createTable({data:rows,columns:[{id:"wood",accessorFn:r=>r.resources.unsecured.wood??undefined,sortUndefined:"last"}],state:{sorting:[{id:"wood",desc:true}]},onStateChange:()=>{},renderFallbackValue:null,getCoreRowModel:getCoreRowModel(),getSortedRowModel:getSortedRowModel()});
   assert.deepEqual(table.getRowModel().rows.map(r=>r.original.city_id),[2,4,1,3]);
+});
+
+
+test("warehouse projection rejects malformed resource values, duplicate cities and cross-account rows",()=>{
+  assert.equal(parseWarehouseResult(response,"alpha").cities[0].resources.unsecured.wood,250000);
+  for(const bad of [{...response,cities:[city(1,"beta",12)]},{...response,cities:[city(1,"alpha",1),city(1,"alpha",2)]},{...response,cities:[city(1,"alpha",-1)]},{...response,cities:[city(1,"alpha","100")]}])assert.throws(()=>parseWarehouseResult(bad,"alpha"));
+  const projected=parseWarehouseResult({...response,unwanted:"synthetic extra",cities:[{...city(1,"alpha",null),unwanted:"synthetic extra"}]},"alpha");
+  assert.equal(projected.cities[0].resources.unsecured.wood,null);assert.equal(projected.unwanted,undefined);assert.equal(projected.cities[0].unwanted,undefined);
 });

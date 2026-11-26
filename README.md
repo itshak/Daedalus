@@ -18,7 +18,7 @@
 
 > **Beta — v0.1.0b1 target.** The core system is implemented and in use, but this is prerelease software. Live game-changing workflows, recovery and physical Mac acceptance are still being validated. No stable-release certification or guarantee of game outcomes is implied. See [current status](docs/PROJECT-STATUS.md) and [known limitations](#beta-limitations).
 
-[Download macOS](https://github.com/itshak/Daedalus/releases) · [Web control center](https://daedalus-web-chi.vercel.app) · [Installation and configuration](#getting-started) · [Report a bug](https://github.com/itshak/Daedalus/issues/new/choose)
+[Download macOS](https://github.com/itshak/Daedalus/releases) · [Web control center](https://daedalus.tongrix.com) · [Installation and configuration](#getting-started) · [Report a bug](https://github.com/itshak/Daedalus/issues/new/choose)
 
 ## Features
 
@@ -39,7 +39,7 @@ A Fluent/PySide6 desktop app with direct HTTPS connection, macOS Keychain, nativ
 
 ### Web control center
 
-A responsive Next.js/React dashboard with English/Russian localization, saved navigation, resource filters, military inventory and reviewed automation workflows. The hosted [web control center](https://daedalus-web-chi.vercel.app) is private, invite-only and tied to the operator's backend. Self-hosters can deploy their own instance with Supabase Auth and the server-only controller gateway. Gameforge login and game credentials stay outside the web UI. See [web deployment and configuration](apps/web/README.md).
+A responsive Next.js/React dashboard with English/Russian localization, saved navigation, resource filters, military inventory and reviewed automation workflows. The hosted [web control center](https://daedalus.tongrix.com) is private, invite-only and tied to the operator's backend. Self-hosters can deploy their own instance with Supabase Auth and the server-only controller gateway. Gameforge login and game credentials stay outside the web UI. See [web deployment and configuration](apps/web/README.md).
 
 ### Linux backend
 

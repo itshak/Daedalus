@@ -166,6 +166,7 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
   const [reload, setReload] = useState(0);
   const [scope, setScope] = useState<"all" | "selected" | "one">("all");
   const [selected, setSelected] = useState<string[]>([]);
+  const [warehouseViewScope,setWarehouseViewScope]=useState("");
   const [warehouseMap, setWarehouseMap] = useState<Record<string, WarehouseResult>>({});
   const [warehouseErrors, setWarehouseErrors] = useState<Record<string,string>>({});
   const [reportLoading, setReportLoading] = useState(false);
@@ -185,6 +186,7 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
   const [taskErrors, setTaskErrors] = useState<Record<string,string>>({});
   const [pendingAction, setPendingAction] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [logoutError,setLogoutError]=useState(false);
   const [automationGroup, setAutomationGroup] = useState("All");
   const [automationQuery, setAutomationQuery] = useState("");
   const operationGroups = useMemo(() => {
@@ -272,15 +274,20 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
     const cache=warehouseCache.current;
     const identities=JSON.parse(warehouseScope) as [string,string|undefined,string|undefined,string|undefined,boolean|undefined][];
     const key=(identity: typeof identities[number])=>JSON.stringify([email,role,...identity]);
-    const unavailable=()=>{if(live){setWarehouseMap({});setWarehouseErrors(Object.fromEntries(identities.map(([id])=>[id,"Warehouse response unavailable"])));setWarehouseUpdated(null);setReportLoading(false);}};
+    let generation=0;
+    const unavailable=()=>{if(live){setWarehouseViewScope(warehouseScope);setWarehouseMap({});setWarehouseErrors(Object.fromEntries(identities.map(([id])=>[id,"Warehouse response unavailable"])));setWarehouseUpdated(null);setReportLoading(false);}};
     const load=async()=>{
+      const current=++generation;
       if(timer!==undefined)clearTimeout(timer);
       if(!navigator.onLine){cache.clear();unavailable();return;}
       const misses=identities.some(identity=>!cache.fresh(key(identity)));
       setReportLoading(misses);
-      if(misses){setWarehouseMap(Object.fromEntries(identities.flatMap(identity=>{const entry=cache.fresh(key(identity));return entry?[[identity[0],entry.value]]:[];})));setWarehouseUpdated(null);}
+      setWarehouseViewScope(warehouseScope);
+      setWarehouseMap(Object.fromEntries(identities.flatMap(identity=>{const entry=cache.fresh(key(identity));return entry?[[identity[0],entry.value]]:[];})));
+      setWarehouseErrors({});
+      if(misses)setWarehouseUpdated(null);
       const results=await Promise.allSettled(identities.map(identity=>cache.read(key(identity),identity[0],()=>controller<WarehouseResult>("warehouses/"+encodeURIComponent(identity[0])))));
-      if(!live||!navigator.onLine)return;
+      if(!live||current!==generation||!navigator.onLine)return;
       const data:Record<string,WarehouseResult>={}, errors:Record<string,string>={};
       results.forEach((r,i)=>{const id=identities[i][0];if(r.status==="fulfilled")data[id]=r.value;else errors[id]=r.reason instanceof Error?r.reason.message:"Unavailable";});
       setWarehouseMap(data);setWarehouseErrors(errors);setReportLoading(false);
@@ -288,7 +295,7 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
       setWarehouseUpdated(times.length?Math.min(...times):null);
       timer=setTimeout(load, times.length?Math.max(1000,Math.min(...times)+WAREHOUSE_TTL_MS-Date.now()):WAREHOUSE_TTL_MS);
     };
-    const offline=()=>{if(timer!==undefined)clearTimeout(timer);cache.clear();unavailable();};
+    const offline=()=>{generation++;if(timer!==undefined)clearTimeout(timer);cache.clear();unavailable();};
     window.addEventListener("offline",offline);window.addEventListener("online",load);
     void load();
     return ()=>{live=false;if(timer!==undefined)clearTimeout(timer);window.removeEventListener("offline",offline);window.removeEventListener("online",load);};
@@ -303,14 +310,14 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
     const load=()=>Promise.allSettled(scopeIds.map(id=>controller<Result>("accounts/"+encodeURIComponent(id)+"/"+resource))).then(results=>{
       if(!live)return;
       const data:Record<string,Result>={}, errors:Record<string,string>={};
-      results.forEach((r,i)=>{if(r.status==="fulfilled"){if(page==="military"&&resource==="military"&&!militaryInventory(r.value,scopeIds[i]))errors[scopeIds[i]]="Military inventory unavailable. Check account connection and refresh.";else data[scopeIds[i]]=r.value;}else errors[scopeIds[i]]=r.reason instanceof Error?r.reason.message:"Unavailable";});
+      results.forEach((r,i)=>{if(r.status==="fulfilled"){if(r.value?.account_id!==scopeIds[i]||(page==="military"&&resource==="military"&&!militaryInventory(r.value,scopeIds[i])))errors[scopeIds[i]]="Military inventory unavailable. Check account connection and refresh.";else data[scopeIds[i]]=r.value;}else errors[scopeIds[i]]=r.reason instanceof Error?r.reason.message:"Unavailable";});
       if(page==="activity"){setTaskData(data);setTaskErrors(errors);timer=setTimeout(load,5000);}
       else {setMilitaryData(data);setMilitaryErrors(errors);}
     });
     void load();
     return ()=>{live=false;if(timer!==undefined)clearTimeout(timer);};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[page,scopeKey,militaryTab,reload]);
+  },[page,scopeKey,warehouseScope,militaryTab,reload]);
 
   useEffect(()=>{
     if(page!=="automations")return;
@@ -351,7 +358,7 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
 
   const automationNames=useMemo(()=>playerNames(accounts),[accounts]);
   const accountById=useMemo(()=>Object.fromEntries(accounts.map(a=>[a.id,a])) as Record<string,Account>,[accounts]);
-  const rows=useMemo(()=>scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])),[scopeIds,warehouseMap]);
+  const rows=useMemo(()=>warehouseViewScope===warehouseScope&&!busy?scopeIds.flatMap(id=>(warehouseMap[id]?.cities??[])):[],[scopeIds,warehouseMap,warehouseViewScope,warehouseScope,busy]);
   const warehouseAccount=useCallback((id:string)=>({name:name(accountById[id]||{id}),world:accountWorld(accountById[id]||{id})}),[accountById]);
   const islands=useMemo(()=>[...new Set(rows.map(city=>warehouseIsland(city,warehouseAccount(city.account_id).world)))].sort((a,b)=>a.localeCompare(b,locale,{numeric:true})),[rows,warehouseAccount,locale]);
   const filteredRows=useMemo(()=>filterWarehouseRows(rows,{query:warehouseQuery,island:islandFilter,resource:resourceFilter,minimum:minimumResource,onlyLarge},warehouseAccount),[rows,warehouseQuery,islandFilter,resourceFilter,minimumResource,onlyLarge,warehouseAccount]);
@@ -462,7 +469,7 @@ export function ControlCenter({ email, role, webVersion, webRevision }: { email:
             <div className="form-section-title">{tr("Request receipts")}</div>{(Array.isArray(taskData[id].requests)?taskData[id].requests as Result[]:[]).length?<div className="activity-items">{(taskData[id].requests as Result[]).map((r,i)=><div className="activity-item" key={i}><div><strong>{String(r.task??tr("Request"))} <span className="status-neutral-label">{String(r.status??tr("unknown"))}</span></strong><small>{String(r.request_id??tr("ID unavailable"))}</small></div>{role!=="viewer"&&r.status==="unconfirmed"&&<button className="danger-outline" onClick={()=>{if(window.confirm(tr("Only acknowledge after independently checking that this request will not execute again. Have you inspected its actual state?")))safeAction("accounts/"+encodeURIComponent(id)+"/tasks/requests/"+encodeURIComponent(String(r.request_id))+"/acknowledge",{confirmed:true},"ack:"+i);}}>{tr("Reconcile")}</button>}</div>)}</div>:<p className="subtle-message">{tr("No durable request receipts returned.")}</p>}</>:<p className="soft-loading">{tr("Checking controller activity…")}</p>}</div>)}</section>
         </div>}
         {page==="settings"&&<div className="settings-grid"><ReleasePanel key={reload+":"+role} webVersion={webVersion} webRevision={webRevision}/><AdminStatusPanel key={reload+":"+role} role={role} accounts={accounts.filter(a=>a.enabled===true).map(a=>({id:a.id,name:automationNames[a.id]??a.id}))}/><section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Appearance")}</h3><p>{tr("Choose a comfortable workspace")}</p></div><Sun size={19}/></div><div className="settings-row"><div><strong>{tr("Color theme")}</strong><small>{tr("System typography, refined for clarity")}</small></div><div className="segmented"><button className={theme==="light"?"segment-on":""} onClick={()=>setTheme("light")}><Sun size={15}/> {tr("Light")}</button><button className={theme==="dark"?"segment-on":""} onClick={()=>setTheme("dark")}><Moon size={15}/> {tr("Dark")}</button></div></div><div className="settings-row"><div><strong>{tr("Reduced motion")}</strong><small>{tr("Respects your device accessibility setting")}</small></div><span className="settings-value">{tr("Automatic")}</span></div><div className="settings-row"><div><strong>{tr("Language preference")}</strong><small>{tr("Choose the language used across Daedalus")}</small></div><LanguageSelector /></div></section>
-          <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Authentication")}</h3><p>{tr("Your private administrator session")}</p></div><LockKeyhole size={19}/></div><div className="settings-row"><div><strong>{tr("Signed in as")}</strong><small>{email}</small></div><Status ok={true} label={tr(readable(role))}/></div><div className="settings-row"><div><strong>{tr("Web sessions")}</strong><small>{tr("Validated against Supabase on privileged requests")}</small></div><span className="settings-value">{tr("Secure cookies")}</span></div><button className="secondary-button" onClick={async()=>{await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});window.location.assign("/login");}}><LogOut size={15}/> {tr("Sign out")}</button></section>
+          <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Authentication")}</h3><p>{tr("Your private administrator session")}</p></div><LockKeyhole size={19}/></div><div className="settings-row"><div><strong>{tr("Signed in as")}</strong><small>{email}</small></div><Status ok={true} label={tr(readable(role))}/></div><div className="settings-row"><div><strong>{tr("Web sessions")}</strong><small>{tr("Validated against Supabase on privileged requests")}</small></div><span className="settings-value">{tr("Secure cookies")}</span></div><button className="secondary-button" onClick={async()=>{setLogoutError(false);try{const response=await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(!response.ok)throw new Error();warehouseCache.current.clear();setWarehouseMap({});window.location.replace("/login");}catch{setLogoutError(true);}}}><LogOut size={15}/> {tr("Sign out")}</button>{logoutError&&<p role="alert">{tr("Sign out could not be verified. Try again.")}</p>}</section>
           <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Backend connection")}</h3><p>{tr("Safe operational status, no credentials disclosed")}</p></div><Activity size={19}/></div>{[[tr("Availability"),health?tr("Connected"):tr("Unavailable")],[tr("Mode"),health?.mode??tr("Unknown")],[tr("Version"),health?.version??tr("Unknown")],[tr("Synthetic data"),health?.synthetic_demo?tr("Yes"):tr("No or unknown")],[tr("Engine dispatch"),capabilities?.structured_engine_dispatch?tr("Available"):tr("Not reported")]].map(([k,v])=><div className="settings-row" key={String(k)}><strong>{String(k)}</strong><span className="settings-value">{String(v)}</span></div>)}<button className="secondary-button" onClick={refresh}><RefreshCw size={16}/> {tr("Recheck backend")}</button></section>
           <section className="panel settings-panel"><div className="panel-heading"><div><h3>{tr("Security boundaries")}</h3><p>{tr("Safer by design")}</p></div><ShieldCheck size={19}/></div><div className="security-list"><p><CheckCircle2 size={17}/> {tr("No backend bearer token or vault material in the browser")}</p><p><CheckCircle2 size={17}/> {tr("No browser-based Gameforge or Selenium login")}</p><p><CheckCircle2 size={17}/> {tr("Operations require authenticated controllers")}</p><p><CheckCircle2 size={17}/> {tr("Read-only previews before any proposed mutation")}</p><p><CheckCircle2 size={17}/> {tr("No private offline data cache")}</p></div></section>
         </div>}

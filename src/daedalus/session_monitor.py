@@ -214,7 +214,9 @@ class ExistingSessionRecoveryMonitor:
                     if phase is SessionPhase.AUTHENTICATED:
                         # A genuine negative validation may indicate rotation
                         # or expiration. Prompt for a human, holding the lease.
-                        if not self._session_valid(account):
+                        # Inconclusive IPC/transport failures are caught below.
+                        # They block new validated task requests but are not proof of rotation.
+                        if not self.controller._ipc.validate_account(account):
                             self.broker.request(owned, AssistanceReason.SESSION_EXPIRED)
                     elif phase is SessionPhase.ASSISTED_LOGIN:
                         ticket = self.broker.snapshot(account.id)["ticket"]
@@ -243,7 +245,7 @@ class ExistingSessionRecoveryMonitor:
                     # explicit verification or recovery, never automatic login.
                 except AssistanceConflict:
                     logger.warning("Assistance state changed during monitored session")
-                except (TaskUnavailable, EngineIPCUnavailable, ValueError):
+                except (TaskUnavailable, EngineIPCUnavailable, ValueError, OSError):
                     logger.warning("Monitored engine session is unavailable")
                 statuses.append(MonitorStatus(account.id, owned.phase.value))
         return statuses

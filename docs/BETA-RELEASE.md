@@ -15,4 +15,4 @@ Keep the prior verified backend revision, DMG and Vercel deployment available. B
 
 The remaining engineering work is tracked in `finish-v010-engineering`; real game effects and physical Mac acceptance remain separately in [owner acceptance](V010-OWNER-ACCEPTANCE.md). No versioned beta release has been published by this preparation alone.
 
-CI workflow updates for the browser E2E and bundle provenance assertions are prepared locally but cannot be pushed with the current workflow-restricted credential. Until authorized, run the E2E and bundle metadata tests explicitly.
+CI workflow updates for browser E2E and bundle provenance assertions are committed on the engineering branch through the authorized GitHub integration. The server CLI retains its limited OAuth scope; GitHub branch protection remains in force. Require actual successful CI on the final revision.
