@@ -1,5 +1,5 @@
 "use client";
-import {fillPreviewMessage} from "../lib/preview-request";
+import {fillPreviewMessage,fillPreviewHttpMessage} from "../lib/preview-request";
 import {parseRewardDistributionReview,policyTask,reviewRoute} from "../lib/reward-distribution-review";
 import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
@@ -23,6 +23,8 @@ async function api(path:string, body?:unknown):Promise<unknown> {
       if(message)throw new Error(message);
       if(data?.error==="Preview timed out. No automation was started.")throw new Error(data.error);
       if(response.status===422)throw new Error("Preview settings were rejected. Refresh and review the selected account.");
+      if(typeof body==="object"&&body!==null&&"task" in body&&body.task==="fillCityWarehouse")
+        throw new Error(fillPreviewHttpMessage(response.status));
     }
     throw new Error("Request unavailable");
   }
@@ -152,7 +154,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     inFlight.current=true;setBusy(true);setPreparing(true);
     try{
       if(needsPolicyReview){
-        const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
+        const raw=await api(prefix+"/reward-distribution-plan",{task,draft:config});
+        let data:ReturnType<typeof parseRewardDistributionReview>;
+        try{data=parseRewardDistributionReview(raw,account,task,config);}
+        catch{throw new Error(task==="fillCityWarehouse"?"Warehouse preview response failed validation. No transfer was started.":"Invalid review");}
         if(mounted.current)setReview({config,summary:summary+"\n"+data.policySummary+"\n"+t("Observed current state; future eligibility and costs may change."),fingerprint,previewId:data.preview_id,ttl:data.expires_in});
         return;
       }

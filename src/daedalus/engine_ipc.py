@@ -408,20 +408,28 @@ class ExistingIPCClient:
         from daedalus.fill_warehouse_review import draft_fill, validate_fill
 
         clean = draft_fill(draft)
-        owned = {r["id"] for r in self.cities(account)}
+        try:
+            owned = {r["id"] for r in self.cities(account)}
+        except EngineIPCUnavailable:
+            raise FillPreviewUnavailable("fill_inventory_unavailable") from None
         if clean["destination_city"] not in owned or not account.enabled:
-            raise ValueError("Choose an owned destination")
-        response = self._exchange({"action": "preview_fill_existing", "world": account.world,
-                                   "player": account.player, "draft": clean}, read_timeout=90)
+            raise FillPreviewUnavailable("fill_scope_changed")
+        try:
+            response = self._exchange({"action": "preview_fill_existing", "world": account.world,
+                                       "player": account.player, "draft": clean}, read_timeout=90)
+        except FillPreviewUnavailable:
+            raise
+        except EngineIPCUnavailable:
+            raise FillPreviewUnavailable("fill_worker_unavailable") from None
         if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
-            raise EngineIPCUnavailable("Invalid fill scope")
+            raise FillPreviewUnavailable("fill_scope_changed")
         try:
             result = validate_fill(clean, response.get("result"))
             if {r["city_id"] for r in result["sources"]} != owned - {clean["destination_city"]}:
                 raise ValueError("Owned city scope changed")
             return result
-        except (ValueError, KeyError, TypeError) as exc:
-            raise EngineIPCUnavailable("Invalid fill observation") from exc
+        except (ValueError, KeyError, TypeError):
+            raise FillPreviewUnavailable("fill_scope_changed") from None
 
     def recurring_preview(self, account: Account, task, draft):
         from daedalus.recurring_review import (

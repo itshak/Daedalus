@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {controllerTimeout,isReviewPreview,fillPreviewMessage} from "../lib/preview-request.ts";
+import {controllerTimeout,isReviewPreview,fillPreviewMessage,fillPreviewHttpMessage} from "../lib/preview-request.ts";
 
 test("only reviewed read-only previews get an extended timeout",()=>{
  const preview=["accounts","alpha","reward-distribution-plan"];
@@ -14,4 +14,12 @@ test("only allowlisted nonsecret warehouse reasons can cross the gateway",()=>{
  assert.equal(fillPreviewMessage(message),message);
  assert.equal(fillPreviewMessage("synthetic private payload"),null);
  assert.equal(fillPreviewMessage({detail:message}),null);
+});
+
+test("warehouse failure identifies gateway, access and endpoint errors without raw details",()=>{
+  assert.match(fillPreviewHttpMessage(524),/connection failed/);
+  assert.match(fillPreviewHttpMessage(403),/access denied/);
+  assert.match(fillPreviewHttpMessage(404),/endpoint unavailable/);
+  assert.match(fillPreviewHttpMessage(503),/backend failed/);
+  assert.equal(fillPreviewMessage(fillPreviewHttpMessage(524)),fillPreviewHttpMessage(524));
 });

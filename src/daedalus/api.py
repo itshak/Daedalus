@@ -666,8 +666,15 @@ def create_app(
             draft = (daily_draft(payload["draft"]) if task == "loginDaily" else distribution_draft(payload["draft"])
                      if task == "distributeResources" else policy_draft(task, payload["draft"]) if task in POLICY_TASKS
                      else market_draft(task, payload["draft"]))
-            preflight = controller.preflight(account_id, task)
+            try:
+                preflight = controller.preflight(account_id, task)
+            except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError):
+                if task == "fillCityWarehouse":
+                    raise FillPreviewUnavailable("fill_session_unavailable") from None
+                raise
             if preflight.get("ready") is not True or preflight.get("unresolved_request") is not False:
+                if task == "fillCityWarehouse":
+                    raise FillPreviewUnavailable("fill_preflight_unavailable")
                 raise ValueError("Prerequisites unavailable")
             account = account_by_id[account_id]
             observed = (observe_policy(ipc_client, account, task, draft) if task in POLICY_TASKS
