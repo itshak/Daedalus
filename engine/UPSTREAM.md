@@ -132,3 +132,7 @@ remaining live recovery, explicit task dispatch and production gates in
 ## Warehouse consolidation overlay
 
 The warehouse task is a Daedalus planner/policy, not an independent game transport engine. It translates the reviewed allocation into the upstream PR #499 sendResources route contract, reuses prepare_sendResources and shared route resolution, and applies its storage/incoming guards inside executeRoutes. The common sendGoods builds the upstream form (including explicit zero-valued available resource inputs). Cookie-only transport is a bounded adapter behind Session.post, not a second sender; ordinary CLI sessions retain existing behavior. The upstream baseline and PR head were source-compared; upstream stable and both reviewed PR #499 revisions use the same sendGoods form. Live compatibility is not inferred from synthetic tests.
+
+## Operation-specific waiting compatibility
+
+See [upstream wait audit](../docs/UPSTREAM-WAIT-AUDIT.md) for the source comparison, operation inventory, preserved queue algorithms and offline evidence. The Daedalus cookie-only adapter now admits the exact existing read-only queue forms for the fleet advisor, barracks, shipyard, workshop, temple and construction-speedup popup. These are local transport compatibility changes; the upstream wait helper and queue algorithms remain the source of truth. Live multi-iteration acceptance remains open.

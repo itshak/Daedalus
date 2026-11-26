@@ -353,15 +353,10 @@ def getMinimumWaitingTime(session):
     """
     html = session.get()
     idCiudad = re.search(r"currentCityId:\s(\d+),", html).group(1)
-    url = "view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city&currentCityId={}&actionRequest={}&ajax=1".format(
-        idCiudad, actionRequest
-    )
-    if getattr(session, "_daedalus_cookies_only", False) is True:
-        from ikabot.helpers.fleetAdvisor import advisor_data
-        postdata = advisor_data(session, idCiudad)
-    else:
-        posted = session.post(url)
-        postdata = json.loads(posted, strict=False)
+    # Upstream uses an AJAX advisor POST, not the full-page advisor GET.
+    # The AJAX response supplies the game clock and fleet event metadata.
+    from ikabot.helpers.fleetAdvisor import advisor_data
+    postdata = advisor_data(session, idCiudad, ajax=True)
     militaryMovements = postdata[1][1][2]["viewScriptParams"][
         "militaryAndFleetMovements"
     ]

@@ -161,3 +161,25 @@ def test_controller_supply_ticket_and_owned_source_validation(game, monkeypatch,
         starts.assert_called_once()
     finally:
         controller.close()
+
+
+def test_supply_uses_upstream_arrival_wait_before_stock_recheck(game, monkeypatch):
+    session, cities = game
+    plan = engine.preview_native_construction(session, 1, UPGRADES, OPTIONS)
+    monkeypatch.setattr(engine, "executeRoutes", Mock())
+    estimate = Mock(return_value=120)
+    monkeypatch.setattr(engine, "getMinimumWaitingTime", estimate)
+
+    def arrive(seconds):
+        assert seconds == 125
+        cities["1"]["availableResources"] = [1050, 0, 230, 0, 0]
+
+    def build(_s, city, building, wait_for_resources, queue, *, reviewed):
+        assert reviewed and city == "1"
+        cities["1"]["position"][0]["level"] = building["upgradeTo"]
+
+    monkeypatch.setattr(engine, "wait", arrive)
+    monkeypatch.setattr(engine, "expandBuilding", build)
+    engine._run_supplied_construction(session, plan["config"])
+    estimate.assert_called_once_with(session)
+    assert cities["1"]["position"][0]["level"] == 6

@@ -187,7 +187,7 @@ def test_recurring_external_route_checks_recipient_before_every_cargo(monkeypatc
     monkeypatch.setattr(manager, "getCity", lambda *_a: origin)
     monkeypatch.setattr(manager, "getIsland", lambda *_a: island)
     monkeypatch.setattr(manager, "setInfoSignal", lambda *_a: None)
-    monkeypatch.setattr(manager, "getAvailableShips", lambda *_a: 1)
+    monkeypatch.setattr(manager, "waitForArrival", lambda *_a: 1)
     monkeypatch.setattr(manager, "acquire_shipping_lock", lambda *_a, **_kw: True)
     release = Mock()
     monkeypatch.setattr(manager, "release_shipping_lock", release)

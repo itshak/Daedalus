@@ -143,3 +143,98 @@ def test_cookie_transport_standard_post_refuses_implicit_retry():
                              "function": "loadTransportersWithFreight",
                              "actionRequest": actionRequest})
     http.post.assert_not_called()
+
+
+def test_upstream_advisor_ajax_post_is_read_only_and_never_reauthenticates():
+    from unittest.mock import Mock
+    from ikabot.config import actionRequest
+    from ikabot.helpers.fleetAdvisor import advisor_data
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(return_value=SimpleNamespace(
+        url=session.urlBase, status_code=200, text="[]", content=b"[]", history=[]))
+    url = ("view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city"
+           f"&currentCityId=123&actionRequest={actionRequest}&ajax=1")
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
+        assert advisor_data(session, 123, ajax=True) == []
+        http.post.assert_called_once_with(
+            session.urlBase + url.replace(actionRequest, "abcdefgh1234"),
+            data={}, params={}, verify=True, timeout=12, allow_redirects=False)
+        with pytest.raises(ValueError, match="Unsupported cookie-only advisor request"):
+            session.post(url + "&action=transportOperations")
+        with pytest.raises(ValueError, match="Unsupported cookie-only advisor options"):
+            session.post(url, params={"action": "transportOperations"})
+    assert http.post.call_count == 1
+
+
+@pytest.mark.parametrize("troops,view", [(True, "barracks"), (False, "shipyard")])
+def test_actual_upstream_training_wait_through_cookie_session(troops, view):
+    import json
+    from unittest.mock import Mock
+    from ikabot.function import trainArmy
+    from ikabot.config import actionRequest
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    reply = json.dumps([["updateGlobalData", {"time": 1000}],
+                        ["changeView", [None, "'buildProgress', 1120,"]]])
+    http.post = Mock(return_value=SimpleNamespace(
+        url=session.urlBase, status_code=200, text=reply, content=reply.encode(), history=[]))
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")), \
+         patch.object(trainArmy, "wait") as wait:
+        trainArmy.waitForTraining(session, {"id": "123", "pos": "4"}, troops)
+    wait.assert_called_once_with(125)
+    expected = {"view": view, "cityId": "123", "position": "4", "backgroundView": "city",
+                "currentCityId": "123", "actionRequest": "abcdefgh1234", "ajax": "1"}
+    http.post.assert_called_once_with(session.urlBase, data={}, params=expected,
+                                     verify=True, timeout=12, allow_redirects=False)
+    with pytest.raises(ValueError, match="Unsupported cookie-only queue view"):
+        session.post(params={**expected, "action": "CityScreen", "actionRequest": actionRequest})
+    assert http.post.call_count == 1
+
+
+def test_actual_upstream_workshop_wait_through_cookie_session():
+    import json
+    from unittest.mock import Mock
+    from ikabot.function import UpgradeUnits
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    session.setStatus = Mock()
+    busy = json.dumps([["updateTemplateData", {"inProgress": {"endTime": 1120}, "currentdate": 1000}]])
+    ready = json.dumps([["updateTemplateData", {"currentdate": 1120}]])
+    http.post = Mock(side_effect=[SimpleNamespace(url=session.urlBase, status_code=200,
+        text=x, content=x.encode(), history=[]) for x in (busy, ready)])
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")), \
+         patch.object(UpgradeUnits.time, "sleep") as wait:
+        UpgradeUnits.wait_for_upgrade_completion(session, "123", "4", "tabUnits")
+    wait.assert_called_once_with(120)
+    assert http.post.call_count == 2
+    assert all(c.kwargs["params"]["view"] == "workshop" for c in http.post.call_args_list)
+
+
+def test_actual_upstream_miracle_wait_through_cookie_session():
+    import json
+    from unittest.mock import Mock
+    from ikabot.function import activateMiracle
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    session.setStatus = Mock()
+    cooldown = json.dumps([[], [], ["updateTemplateData", {"timer": {
+        "countdown": {"enddate": 1120, "currentdate": 1000}}}]])
+    ready = json.dumps([[], [], ["updateTemplateData", {"js_WonderViewButton": {"buttonState": "enabled"}}]])
+    http.post = Mock(side_effect=[SimpleNamespace(url=session.urlBase, status_code=200,
+        text=x, content=x.encode(), history=[]) for x in (cooldown, ready)])
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")), \
+         patch.object(activateMiracle, "wait") as wait, \
+         patch.object(activateMiracle, "sendToBotDebug"):
+        activateMiracle.wait_for_miracle(session, {"ciudad": {"id": "123", "pos": "4"}, "wonderName": "Example"})
+    wait.assert_called_once_with(125)
+    assert http.post.call_count == 2
+    assert all(c.kwargs["params"]["view"] == "temple" for c in http.post.call_args_list)

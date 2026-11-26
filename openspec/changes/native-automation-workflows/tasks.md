@@ -66,3 +66,9 @@ while any checked product scope remains unresolved.
 - [ ] Run pytest, Ruff, strict OpenSpec validate and CI on the complete implementation; repair all failures.
 - [ ] Update canonical specs, GUI quick start and task-control docs after verification and archive only when verified.
 - [ ] Keep real-account, CAPTCHA, game outcome, live SSH/server migration and production approval assigned to the owner; no live credentials in tests.
+
+## Upstream waiting compatibility audit
+- [x] Compare vendored gameplay waits with the original upstream import and inspect the current experimental CLI PR for principal queue helpers.
+- [x] Consolidate duplicate fleet waits and reviewed supply arrival timing into upstream helpers.
+- [x] Preserve audited read-only queue AJAX request forms on verified cookie sessions; test original training, workshop and miracle waiting implementations.
+- [ ] Verify real successive fleet loads, recruitment rounds, workshop and construction queue progression on the deployed revision.

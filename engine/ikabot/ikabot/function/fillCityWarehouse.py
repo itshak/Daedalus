@@ -1,6 +1,5 @@
 """Daedalus one-time owned-city fill, using IkaBot's existing transport sender."""
 import re
-import time
 
 from ikabot.config import materials_names_tec
 from ikabot.helpers import pedirInfo
@@ -11,7 +10,7 @@ from ikabot.helpers.naval import getAvailableFreighters, getAvailableShips, getT
 from ikabot.function import sendResources
 from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.taskConfig import getCityById, requireOwnCity
-from ikabot.helpers.varios import decodeUnicodeEscape
+from ikabot.helpers.varios import decodeUnicodeEscape, wait
 
 RESOURCES = ("wood", "wine", "marble", "crystal", "sulfur")
 MAX_AMOUNT = 10**12
@@ -235,7 +234,7 @@ class _WarehousePolicy:
                 mark(self.session, "verifying_cargo", verified=self.sent)
                 return
             if attempt < 2:
-                time.sleep(2)
+                wait(2)
         self.session.setStatus(f"Submitted {self.sent:,}; incoming cargo unconfirmed. Review before retrying.")
         raise RuntimeError("Warehouse cargo unconfirmed; reconcile before retrying")
 

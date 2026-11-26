@@ -38,3 +38,14 @@ The controller SHALL expose authenticated existing-session military inventory an
 #### Scenario: Foreign military city
 - **WHEN** the source engine returns a unit row whose city is not in the selected account's verified city list
 - **THEN** the read fails without displaying any military rows or launching an order
+
+### Requirement: Upstream gameplay waiting compatibility
+Native operations SHALL reuse the existing IkaBot operation-specific wait and queue-read contracts rather than create parallel gameplay waiting implementations. Verified cookie workers SHALL preserve the original bounded read-only AJAX request form for audited queue views, reject mutation fields and avoid implicit relogin. Infrastructure scheduling and explicit verification deadlines remain independent.
+
+#### Scenario: Training, upgrade or miracle queue is occupied
+- **WHEN** an existing upstream wait function reads the corresponding queue or cooldown on a verified cookie-only worker
+- **THEN** the session adapter SHALL perform the exact allowlisted read with current identity and token verification and return the original response shape for the upstream function
+
+#### Scenario: Construction supplies are still in transit
+- **WHEN** a reviewed construction supply was dispatched but the destination does not yet have sufficient stock
+- **THEN** the worker SHALL use the upstream fleet-arrival estimate and wait helper, recheck actual stock before upgrading and stop at the review deadline rather than infer delivery

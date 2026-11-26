@@ -1512,6 +1512,82 @@ class Session:
         except requests.exceptions.RequestException:
             raise RuntimeError("Cookie-only world request could not be verified") from None
 
+    def _daedalus_cookie_read_ajax(self, *, url="", params=None):
+        """Preserve specific upstream queue-view POSTs on a verified cookie worker.
+
+        This is an adapter for existing read-only requests, not a general
+        game POST proxy. The allowlist is checked by the caller.
+        """
+        from ikabot.helpers.serverIdentity import attest_player_from_world_html
+
+        base = urllib.parse.urlsplit(self.urlBase)
+        if (base.scheme != "https" or base.hostname != self.host
+                or base.port not in (None, 443) or base.path != "/index.php"
+                or base.username or base.password or base.fragment or base.query):
+            raise ValueError("Cookie-only queue view origin unavailable")
+        html = self.get()
+        if not attest_player_from_world_html(html, self.username):
+            raise RuntimeError("Queue view account verification failed")
+        token = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
+        if token is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", token.group(1)):
+            raise RuntimeError("Queue view request token unavailable")
+        query = {} if params is None else dict(params, actionRequest=token.group(1))
+        try:
+            response = self.s.post(
+                self.urlBase + url.replace(actionRequest, token.group(1)),
+                data={}, params=query, verify=True, timeout=12, allow_redirects=False,
+            )
+            arrived = urllib.parse.urlsplit(str(response.url))
+            if (response.status_code != 200 or arrived.scheme != "https"
+                    or arrived.hostname != self.host or arrived.port not in (None, 443)
+                    or arrived.path != "/index.php" or response.history
+                    or len(response.content) > 2_000_000
+                    or self.__isExpired(response.text)
+                    or self.__isSessionRotated(response.text, response=response)
+                    or "TXT_ERROR_WRONG_REQUEST_ID" in response.text):
+                raise RuntimeError("Queue view response could not be verified")
+            return response.text
+        except requests.exceptions.RequestException:
+            raise RuntimeError("Queue view response could not be verified") from None
+
+    def _daedalus_cookie_advisor_post(self, url):
+        """Read the exact upstream military-advisor AJAX view without relogin."""
+        pattern = (r"view=militaryAdvisor&oldView=city&oldBackgroundView=city"
+                   r"&backgroundView=city&currentCityId=[1-9][0-9]{0,11}"
+                   r"&actionRequest=" + re.escape(actionRequest) + r"&ajax=1")
+        if not isinstance(url, str) or not re.fullmatch(pattern, url):
+            raise ValueError("Unsupported cookie-only advisor request")
+        return self._daedalus_cookie_read_ajax(url=url)
+
+    def _daedalus_cookie_queue_post(self, params):
+        """Exact upstream barracks, shipyard, temple, workshop and advisor reads."""
+        common = {"view", "cityId", "currentCityId", "backgroundView", "actionRequest", "ajax"}
+        view = params.get("view")
+        extra = {
+            "barracks": {"position"},
+            "shipyard": {"position"},
+            "temple": {"position"},
+            "buildingSpeedup": {"position"},
+            "workshop": {"position", "activeTab", "templateView"},
+            "militaryAdvisor": {"oldView", "templateView"},
+        }
+        if (view not in extra or set(params) != common | extra[view]
+                or not re.fullmatch(r"[1-9][0-9]{0,11}", str(params["cityId"]))
+                or str(params["currentCityId"]) != str(params["cityId"])
+                or params["backgroundView"] != "city" or str(params["ajax"]) != "1"):
+            raise ValueError("Unsupported cookie-only queue view")
+        if "position" in params and not re.fullmatch(r"[0-9]{1,3}", str(params["position"])):
+            raise ValueError("Invalid queue building position")
+        if view == "workshop" and (params["activeTab"] not in ("tabUnits", "tabShips")
+                                   or params["templateView"] != "workshop"):
+            raise ValueError("Unsupported workshop queue tab")
+        if view == "militaryAdvisor" and (params["oldView"] != "updateGlobalData"
+                                          or params["templateView"] != view):
+            raise ValueError("Unsupported advisor queue view")
+        if view != "workshop" and params["actionRequest"] != actionRequest:
+            raise ValueError("Unsupported queue view request token")
+        return self._daedalus_cookie_read_ajax(params=params)
+
     def _daedalus_reviewed_transport_post(self, params):
         """Single-attempt world POST for the reviewed owned-city sender only."""
         from ikabot.helpers.serverIdentity import attest_player_from_world_html
@@ -1722,6 +1798,18 @@ class Session:
         html : str
             response from the server
         """
+        if (getattr(self, "_daedalus_cookies_only", False) is True
+                and isinstance(url, str) and url.startswith("view=militaryAdvisor&")):
+            if payloadPost or params or ignoreExpire or noIndex or fullResponse or noQuery or kwargs:
+                raise ValueError("Unsupported cookie-only advisor options")
+            return self._daedalus_cookie_advisor_post(url)
+        if (getattr(self, "_daedalus_cookies_only", False) is True
+                and isinstance(params, dict)
+                and params.get("view") in ("barracks", "shipyard", "temple", "buildingSpeedup",
+                                           "workshop", "militaryAdvisor")):
+            if url or payloadPost or ignoreExpire or noIndex or fullResponse or noQuery or kwargs:
+                raise ValueError("Unsupported cookie-only queue options")
+            return self._daedalus_cookie_queue_post(params)
         if getattr(self, "_daedalus_cookies_only", False) is True and (
                 isinstance(params, dict) and
                 (params.get("action"), params.get("function")) in {

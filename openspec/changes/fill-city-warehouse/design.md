@@ -44,3 +44,9 @@ before submission, and refuses redirects, implicit login and automatic replay.
 Ambiguous or contradictory game feedback is not a definitive rejection;
 checkpoint and warehouse progress may only advance after their corresponding
 positive evidence. Normal upstream CLI sessions retain their existing path.
+
+## Fleet-waiting compatibility
+
+Preserve upstream getMinimumWaitingTime and waitForArrival: when the fleet is occupied, the shared executor reads the military advisor via the original AJAX POST and computes the next own-fleet event. The verified cookie session SHALL admit only the exact read-only advisor URL shape through the existing Session.post interface with fresh account attestation, a request token, a bounded same-world request, and no implicit reauthentication. The working warehouse incoming-cargo preview keeps its protected full-page GET. No new shipment is submitted until the upstream fleet check reports available vessels.
+
+All transport fleet availability waits SHALL use the existing shared waitForArrival/getMinimumWaitingTime implementation. Resource Transport Manager consolidation and distribution modes SHALL not maintain independent two-minute ship-polling loops. Keep recurring operation schedules, shipping-lock acquisition and construction/arrival-specific checks distinct; previews remain nonblocking reads.
