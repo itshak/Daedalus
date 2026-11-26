@@ -661,3 +661,10 @@ The desktop SHALL use player-first names, native Fluent controls and reviewed co
 #### Scenario: Account changes after selecting a city
 - **WHEN** the operator changes account
 - **THEN** old options, draft and approval are invalidated and only the new account's data is selectable
+
+### Requirement: Military inspection diagnostics
+The desktop SHALL expose verified Troops, Fleet and Movements observations through the shared controller API and SHALL distinguish unavailable account reads from successful empty observations. Its Activity timeline SHALL show military-specific success and failure events with reviewed, nonsecret guidance instead of generic desktop warnings; viewing or refreshing SHALL NOT launch a game order.
+
+#### Scenario: Military refresh fails or succeeds
+- **WHEN** the selected account's military inventory or movements request completes
+- **THEN** the desktop shows the verified data or an unavailable state and records the corresponding military-specific Activity event without exposing arbitrary server or browser errors

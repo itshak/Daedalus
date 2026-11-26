@@ -245,3 +245,19 @@ Native external shipments and recurring external consolidation SHALL bind the ob
 #### Scenario: A reviewed recipient changes
 - **WHEN** recipient ownership or eligibility changes before a shipment
 - **THEN** the engine stops rather than sends to a changed recipient
+
+### Requirement: Protected upstream military read compatibility
+The engine SHALL reuse the upstream `viewArmy.getCityMilitaryData` and `parseUnits` helpers and the shared military advisor reader for existing-session military inspection. The verified-cookie session adapter SHALL accept only the audited upstream `cityMilitary` read form: matching positive city identifiers, `activeTab` and `currentTab` equal to `tabUnits`, `templateView=cityMilitary`, the upstream action-request placeholder and `ajax=1`, with no extra fields. It SHALL verify the current player and request token and use the existing protected same-world read transport without implicit relogin or game orders. The original upstream inventory reader and parser SHALL remain unchanged.
+
+#### Scenario: Military inventory on a verified cookie worker
+- **GIVEN** a uniquely authenticated worker and verified owned cities
+- **WHEN** the upstream military inventory helper reads a city
+- **THEN** the exact upstream request uses the protected read transport, returns the original response shape to the upstream parser and leaves the worker available for subsequent reads
+
+#### Scenario: Invalid military read form
+- **WHEN** a military inventory form includes mismatched city identifiers, a changed tab or extra mutation fields
+- **THEN** the adapter rejects the form before any game POST and does not fall through to legacy login
+
+#### Scenario: Regression coverage for actual upstream reads
+- **WHEN** the military session adapter changes
+- **THEN** offline tests SHALL invoke the actual upstream helper through the real cookie-session transport with a synthetic HTTP response and verify exact request parameters, rejection of unsafe forms and absence of implicit login; mocked IPC DTO tests alone SHALL NOT establish transport compatibility

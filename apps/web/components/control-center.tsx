@@ -4,7 +4,8 @@ import {AdminStatusPanel} from "./admin-status-panel";
 import {ReviewedBatchProvider,ReviewedBatchPanel} from "./reviewed-batch-queue";
 import Image from "next/image";
 import { LanguageSelector, useLanguage } from "@/components/language-provider";
-import { formatNumber } from "@/lib/i18n";
+import { formatNumber, formatDate } from "@/lib/i18n";
+import { militaryInventory, type MilitaryRow } from "@/lib/military-inventory";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {WorldReportsPanel} from "./world-reports-panel";
@@ -124,6 +125,21 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
   return <div className="table-scroll"><table><thead><tr>{keys.map(k=><th key={k}>{tr(readable(k))}</th>)}</tr></thead><tbody>
     {rows.map((row,i)=><tr key={i}>{keys.map(k=><td key={k}>{typeof row[k]==="object" && row[k]!==null ? tr("Details available in controller") : String(row[k] ?? "—")}</td>)}</tr>)}
   </tbody></table></div>;
+}
+
+function MilitaryInventoryDetails({ data, accountId }: {data: Result; accountId: string}) {
+  const { t: tr, locale } = useLanguage();
+  const inventory = militaryInventory(data, accountId);
+  if (!inventory) return <div role="alert" className="inline-error">{tr("Military inventory unavailable. Check account connection and refresh.")}</div>;
+  function unitsTable(rows: MilitaryRow[], group: "troops" | "fleet") {
+    return <div className="military-group"><h4>{tr(group === "troops" ? "Troops by city" : "Fleet by city")}</h4>
+      <div className="table-scroll"><table><thead><tr><th>{tr("City")}</th><th>{tr(group === "troops" ? "Unit" : "Ship")}</th><th>{tr("Count")}</th></tr></thead>
+      <tbody>{rows.map((row, index) => <tr key={`${row.cityId}:${index}`}><td>{row.city}</td><td>{row.unit ?? tr(group === "troops" ? "No troops" : "No ships")}</td><td>{formatNumber(row.amount, locale)}</td></tr>)}</tbody></table></div>
+      {!rows.length && <p>{tr("No observed records")}</p>}
+      <div className="key-value"><span>{tr("Total")}</span><strong>{formatNumber(rows.reduce((total, row) => total + row.amount, 0), locale)}</strong></div>
+    </div>;
+  }
+  return <div>{unitsTable(inventory.troops, "troops")}{unitsTable(inventory.fleet, "fleet")}<div className="key-value"><span>{tr("Observed at")}</span><strong>{formatDate(new Date(inventory.observedAt * 1000).toISOString(), locale)}</strong></div></div>;
 }
 
 function InventoryDetails({ data }: { data: Result }) {
@@ -254,10 +270,11 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
     let live=true;
     const resource=page==="military"?(militaryTab==="troops"?"military":"ship-movements"):"tasks";
     let timer: ReturnType<typeof setTimeout>|undefined;
+    if(page==="military"){setMilitaryData({});setMilitaryErrors({});}
     const load=()=>Promise.allSettled(scopeIds.map(id=>controller<Result>("accounts/"+encodeURIComponent(id)+"/"+resource))).then(results=>{
       if(!live)return;
       const data:Record<string,Result>={}, errors:Record<string,string>={};
-      results.forEach((r,i)=>{if(r.status==="fulfilled")data[scopeIds[i]]=r.value;else errors[scopeIds[i]]=r.reason instanceof Error?r.reason.message:"Unavailable";});
+      results.forEach((r,i)=>{if(r.status==="fulfilled"){if(page==="military"&&resource==="military"&&!militaryInventory(r.value,scopeIds[i]))errors[scopeIds[i]]="Military inventory unavailable. Check account connection and refresh.";else data[scopeIds[i]]=r.value;}else errors[scopeIds[i]]=r.reason instanceof Error?r.reason.message:"Unavailable";});
       if(page==="activity"){setTaskData(data);setTaskErrors(errors);timer=setTimeout(load,5000);}
       else {setMilitaryData(data);setMilitaryErrors(errors);}
     });
@@ -393,14 +410,14 @@ export function ControlCenter({ email, role }: { email: string; role: string }) 
                   {INVENTORIES[chosenTask].scope === "city" && <label className="field"><span>{tr("Choose your city")}</span><select value={selectedCity} onChange={e=>setSelectedCity(e.target.value)}><option value="">{tr("Select an authenticated city")}</option>{cities.map((c,i)=><option key={i} value={String(c.city_id??c.id??"")}>{String(c.name??c.city_name??c.id??tr("City"))}</option>)}</select></label>}
                   {INVENTORIES[chosenTask].resource === "market-quotes" && <div className="market-fields"><label className="field"><span>{tr("Resource")}</span><select value={marketResource} onChange={e=>setMarketResource(Number(e.target.value))}>{RESOURCES.map((resource,index)=><option key={resource} value={index}>{tr(readable(resource))}</option>)}</select></label><label className="field"><span>{tr("Market action")}</span><select value={marketSide} onChange={e=>setMarketSide(e.target.value)}><option value="buy">{tr("Buy available offers")}</option><option value="sell_to_offers">{tr("Sell to available offers")}</option><option value="create_offer">{tr("Create offer (preview)")}</option></select></label></div>}
                   <div className="form-section-title">{tr(INVENTORIES[chosenTask].title)}</div>
-                  {inventoryBusy ? <p className="soft-loading">{tr("Retrieving authenticated controller data…")}</p> : inventoryError ? <div role="alert" className="inline-error">{tr(inventoryError)}</div> : inventory ? <InventoryDetails data={inventory}/> : <p className="subtle-message">{tr("Select an authenticated city to inspect the available data.")}</p>}
+                  {inventoryBusy ? <p className="soft-loading">{tr("Retrieving authenticated controller data…")}</p> : inventoryError ? <div role="alert" className="inline-error">{tr(inventoryError)}</div> : inventory ? (chosenTask==="viewArmy"?<MilitaryInventoryDetails data={inventory} accountId={automationAccount}/>:<InventoryDetails data={inventory}/>) : <p className="subtle-message">{tr("Select an authenticated city to inspect the available data.")}</p>}
                   <div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Inventory is read-only. Starting this task requires a separately audited, account-scoped configuration and confirmation flow.")}</span></div>
                 </div> :<div className="empty-adapter"><Landmark size={24}/><strong>{tr("Domain editor pending audit")}</strong><p>{tr("This upstream operation is catalogued, but a web-safe, independently reviewed adapter is required before this browser can execute it. The preflight shown above is informational.")}</p></div>}
                 {automationError&&<p role="alert" className="form-error">{tr(automationError)}</p>}
                 {!isNativeTask(chosenTask)&&chosenTask!=="constructionList"&&chosenTask!=="donate"&&chosenTask!=="reorganizeCityBuildings"&&chosenTask!=="constructBuilding"&&chosenTask!=="stationArmy"&&chosenTask!=="trainArmy"&&chosenTask!=="autoBarbarians"&&chosenTask!=="attackBarbarians"&&chosenTask!=="vacationMode"&&!isWorkerTask(chosenTask)&&<div className="read-only-foot"><LockKeyhole size={16}/><span>{tr("Dispatch unavailable from this panel until configuration parity and per-account approval are verified. No JSON executor is exposed.")}</span></div>}
               </div></section></div>
         </div>}
-        {page==="military"&&<div className="content-stack"><div className="under-tabs"><button className={militaryTab==="troops"?"tab-selected":""} onClick={()=>setMilitaryTab("troops")}>{tr("Troops & fleet")}</button><button className={militaryTab==="movements"?"tab-selected":""} onClick={()=>setMilitaryTab("movements")}>{tr("Movements")}</button></div><section className="panel"><div className="panel-heading"><div><h3>{militaryTab==="troops"?tr("Military strength"):tr("Ship movements")}</h3><p>{tr("Read-only observations for the selected accounts")}</p></div><Status ok={Object.keys(militaryErrors).length===0&&Object.keys(militaryData).length>0} label={tr("Controller data")}/></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{militaryErrors[id]?<div className="inline-error">{tr(militaryErrors[id])}</div>:militaryData[id]?<div>{Object.entries(militaryData[id]).filter(([k])=>!["account_id","synthetic_demo"].includes(k)).map(([key,value])=><div key={key} className="military-group"><strong className="table-label">{tr(readable(key))}</strong>{Array.isArray(value)?<DataTable rows={value.filter(x=>x && typeof x==="object") as Record<string,unknown>[]} />:typeof value==="object"&&value!==null?<DataTable rows={Object.entries(value).map(([key,v])=>({type:key,value:typeof v==="object"?tr("See controller details"):v}))}/>:<div className="key-value"><span>{tr(readable(key))}</span><strong>{String(value??tr("Unknown"))}</strong></div>}</div>)}</div>:<div className="soft-loading">{tr("Retrieving current observations…")}</div>}</div>)}</section></div>}
+        {page==="military"&&<div className="content-stack"><div className="under-tabs"><button className={militaryTab==="troops"?"tab-selected":""} onClick={()=>setMilitaryTab("troops")}>{tr("Troops & fleet")}</button><button className={militaryTab==="movements"?"tab-selected":""} onClick={()=>setMilitaryTab("movements")}>{tr("Movements")}</button></div><section className="panel"><div className="panel-heading"><div><h3>{militaryTab==="troops"?tr("Military strength"):tr("Ship movements")}</h3><p>{tr("Read-only observations for the selected accounts")}</p></div><Status ok={Object.keys(militaryErrors).length===0&&Object.keys(militaryData).length>0} label={tr("Controller data")}/></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{militaryErrors[id]?<div className="inline-error">{tr(militaryErrors[id])}</div>:militaryData[id]?(militaryTab==="troops"?<MilitaryInventoryDetails data={militaryData[id]} accountId={id}/>:<div>{Object.entries(militaryData[id]).filter(([k])=>!["account_id","synthetic_demo"].includes(k)).map(([key,value])=><div key={key} className="military-group"><strong className="table-label">{tr(readable(key))}</strong>{Array.isArray(value)?<DataTable rows={value.filter(x=>x && typeof x==="object") as Record<string,unknown>[]} />:typeof value==="object"&&value!==null?<DataTable rows={Object.entries(value).map(([key,v])=>({type:key,value:typeof v==="object"?tr("See controller details"):v}))}/>:<div className="key-value"><span>{tr(readable(key))}</span><strong>{String(value??tr("Unknown"))}</strong></div>}</div>)}</div>):<div className="soft-loading">{tr("Retrieving current observations…")}</div>}</div>)}</section></div>}
         {page==="activity"&&<div className="content-stack"><WorldReportsPanel key={"world-reports:"+reload} accounts={scopeIds.map(id=>({id,name:automationNames[id]??id}))}/><ActivityHistory accounts={scopeIds.map(id=>({id,name:automationNames[id]??id}))} revision={reload}/>
           {actionMessage&&<div role="status" className="notice"><CircleAlert size={18}/>{tr(actionMessage)}</div>}
           <section className="panel"><div className="panel-heading"><div><h3>{tr("Managed task activity")}</h3><p>{tr("Observed engine tasks and durable controller request receipts")}</p></div><span className="table-info">{tr("No automatic replay on uncertain outcomes")}</span></div>{scopeIds.map(id=><div className="account-data-block" key={id}><div className="account-data-title"><div className="row-avatar">{name(accountById[id]||{id}).charAt(0).toUpperCase()}</div><strong>{name(accountById[id]||{id})}</strong><span>{tr(accountWorld(accountById[id]||{id}))}</span></div>{taskErrors[id]?<div className="inline-error">{tr(taskErrors[id])}</div>:taskData[id]?<>
