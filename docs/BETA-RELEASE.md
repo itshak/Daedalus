@@ -18,3 +18,16 @@ The remaining engineering work is tracked in `finish-v010-engineering`; real gam
 CI workflow updates for browser E2E and bundle provenance assertions are committed on the engineering branch through the authorized GitHub integration. The server CLI retains its limited OAuth scope; GitHub branch protection remains in force. Require actual successful CI on the final revision.
 
 Native visual QA: `QT_QPA_PLATFORM=offscreen python scripts/capture_native_ui.py --output-dir ./qa-screenshots` renders the actual Qt client with synthetic fixtures. The matrix includes 19 primary/secondary views at 900×650 and 1200×800 in light/dark, and all 33 native operation editors at 900×650 in both themes (142 images). The Linux CI screenshot artifact must be generated successfully; physical macOS visual acceptance is separate.
+
+## Stage the immutable beta draft
+
+After the final preparation PR is merged and all seven workflows for that **exact main revision** succeed, run from its clean checkout:
+
+```bash
+python scripts/prepare_beta_release.py --revision "$(git rev-parse HEAD)"
+python scripts/prepare_beta_release.py --revision "$(git rev-parse HEAD)" --create-draft
+```
+
+The first command verifies the main SHA, current CI, matching preview tag and downloaded DMG checksum. The second creates an unpublished GitHub prerelease draft using those exact bytes. It refuses to replace a versioned release. Publication and production rollout remain separate approval actions.
+
+For owner testing before final publication, use the direct [merged Mac preview f22f098](https://github.com/itshak/Daedalus/releases/tag/desktop-preview-f22f098ce0a4), and check the [beta operation scope](BETA-OPERATION-SCOPE.md). This is a beta test candidate, not evidence that all game operations or the live deployment are accepted.
