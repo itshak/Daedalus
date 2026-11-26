@@ -28,6 +28,14 @@ jobs:
           python -m pip install dist/*.whl
           daedalus --version
           daedalus doctor
+      - name: Verify clean installed server extra and offline smoke
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/engine/ikabot
+        run: |
+          wheel=(dist/*.whl)
+          python -m pip install "${wheel[0]}[server]"
+          python -m daedalus doctor --smoke
       - name: Upload distribution candidate (not PyPI)
         uses: actions/upload-artifact@v4
         with:

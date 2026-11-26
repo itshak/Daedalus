@@ -135,3 +135,14 @@ The PWA MAY cache public static shell files but MUST NOT store or replay privile
 #### Scenario: PWA offline
 - **WHEN** the device is disconnected
 - **THEN** privileged data is marked unavailable, not represented as a current cached snapshot
+
+### Requirement: Version-gated web deployment
+Hosted automatic production builds SHALL occur only on an increasing aligned web version on the production branch. Ordinary pushes, previews, invalid metadata and unavailable history SHALL skip. Explicit authorized manual redeployment SHALL remain possible without removing the persistent policy. Offline CI SHALL continue independently of deployment.
+
+#### Scenario: Ordinary development push
+- **WHEN** a main commit does not increase the package version, or a preview branch is pushed
+- **THEN** Vercel SHALL skip building it and GitHub CI SHALL still verify the source
+
+#### Scenario: Reviewed version increase
+- **WHEN** a main merge increases the version and the package lock agrees
+- **THEN** the hosted build MAY proceed under existing project security settings

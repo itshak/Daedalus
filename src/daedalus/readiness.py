@@ -82,7 +82,7 @@ def synthetic_smoke() -> dict[str, object]:
         from fastapi.testclient import TestClient
 
         from daedalus.api import create_app
-    except ImportError as exc:
+    except (ImportError, RuntimeError) as exc:
         raise OfflineSmokeError(
             "Install optional server/client test dependencies to run the synthetic smoke"
         ) from exc
