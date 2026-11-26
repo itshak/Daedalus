@@ -1,10 +1,11 @@
-/** Only read-only reviewed previews may use the extended request budget. */
+/** Extend only reviewed previews and the warehouse launch's one dispatch. */
 export function isReviewPreview(parts:string[], method:string):boolean {
   return method==="POST"&&parts.length===3&&parts[0]==="accounts"&&
     ["reward-distribution-plan","shipment-plan"].includes(parts[2]);
 }
 export function controllerTimeout(parts:string[],method:string):number {
-  return isReviewPreview(parts,method)?115000:method==="GET"?12000:25000;
+  const warehouseStart=method==="POST"&&parts.length===4&&parts[0]==="accounts"&&parts[2]==="tasks"&&parts[3]==="fill-warehouse-start";
+  return isReviewPreview(parts,method)||warehouseStart?115000:method==="GET"?12000:25000;
 }
 const fillMessages=[
   "The selected account worker is disconnected or busy. Refresh account status and retry.",

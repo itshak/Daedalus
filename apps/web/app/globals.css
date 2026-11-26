@@ -341,3 +341,6 @@ tbody tr:hover {background:var(--surface-alt)}
 .native-automation-editor .native-resource-row { display:grid; grid-template-columns:25px minmax(0,1fr); align-items:end; gap:10px; }
 .native-automation-editor .native-resource-row img { margin-bottom:12px; object-fit:contain; }
 .native-automation-editor .preview-panel { display:grid; gap:10px; overflow-wrap:anywhere; }
+
+.launch-success {border:1px solid #9cc9aa;border-radius:11px;background:#edf8f0;color:#235c36;padding:13px 16px;font-weight:600}
+.theme-dark .launch-success {background:#203e2c;color:#b9e5c5;border-color:#477454}
