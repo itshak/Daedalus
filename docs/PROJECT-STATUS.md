@@ -1,59 +1,20 @@
 # Implementation status and OpenSpec reconciliation
 
-Last reviewed: **2026-11-25** (offline implementation review; live acceptance still open). The public repository's default branch is `main`.
+Last reviewed: **2026-11-26**, against main `69d7552` (PR #110). The repository is in development preview (`0.1.0a0`); stable release is **NOT TESTED / NOT APPROVED**.
 
-## Cross-platform native automation parity (active)
+## Current engineering backlog
 
-The `complete-cross-platform-automation-parity` implemented baseline is **ARCHIVED in PR #97**, with [implementation evidence](../openspec/changes/archive/2026-11-25-complete-cross-platform-automation-parity/implementation-status.md) and updated canonical specifications. The expanded `finish-cross-platform-operation-parity` implementation is **ARCHIVED in PR #97** ([evidence](../openspec/changes/archive/2026-11-25-finish-cross-platform-operation-parity/implementation-status.md)); the active [`verify-and-release-cross-platform-parity`](../openspec/changes/verify-and-release-cross-platform-parity/proposal.md) change retains all outstanding option parity, protected administrative boundaries, verification and rollout requirements. All eligible native background operations now have independent account reviews or account-independent alert batch controls; fixed provider test messages remain single-account. This is not full parity, live acceptance, or production approval; required CI and merge remain release gates.
+**Exactly one active OpenSpec implementation change:** [`finish-v010-engineering`](../openspec/changes/finish-v010-engineering/tasks.md). Six prior proposals were archived as superseded, not certified complete; all 122 previously unchecked tasks have a disposition. See [reconciliation and evidence](V010-RECONCILIATION.md), [permanent operation coverage](operation-coverage.json) and [owner-only acceptance](V010-OWNER-ACCEPTANCE.md) ([issue #60](https://github.com/itshak/Daedalus/issues/60)). Engineering closure does not waive stable release acceptance.
 
-## Fill city warehouse (active)
+The latest main had seven successful CI workflows, a published matching Mac preview DMG/checksum and a READY Vercel production deployment. The live backend was healthy in a read-only check; its checkout had identical backend/engine source to main. Actual game-changing task effects, full reboot, live restoration and final authenticated UI acceptance remain unverified. No new production changes were performed for the consolidation.
 
-The `fill-city-warehouse` change implements a one-time, capacity-capped transfer of a selected resource from all other owned cities. Current inbound cargo is accounted for, and the worker revalidates each shipment. Focused offline tests passed; final CI and owner-operated live acceptance remain outstanding.
+### Implemented baseline
 
-## Automatic recovery implementation (active OpenSpec; approval pending)
-
-The `delayed-session-reconnect-and-task-restoration` change is **ACTIVE and PARTIALLY IMPLEMENTED**. It now includes a default-enabled per-account 300-second grace timer, a private versioned SQLite desired-job and idempotent resume journal, exact-account encrypted server-side Gameforge lobby-token import, an isolated IkaBot engine recovery supervisor automatically active when monitored task control is configured (explicit host opt-out available), a narrow verified safe-task allowlist, Mac and Next.js recovery controls and synthetic API/UI/session tests. Enabled accounts now default to recovery and safe-job resume ON unless an explicit disabled policy already exists; existing pauses, identity mismatch, protected-credential prerequisites and fresh world/player verification still gate any restart. The backend deployment and live Gameforge acceptance are independently checked.
-
-**Not complete:** There is no verified unattended Gameforge live recovery yet; `alertAttacks`, self-funded native `constructionList` target plans, and recurring source-retained-stock `consolidateResources` / `resourceTransportManager` policies can reconcile after recovery. New Daedalus-managed own-city `sendResources` jobs now have engine write-ahead per-batch shipment receipts: confirmed dispatches count against the original fixed resource target, while unknown transport outcomes remain blocked for review. Other one-shot/external transports still require task-specific receipt work; older manual-class jobs must be reviewed once. Existing legacy task names/PIDs do not contain sufficient configuration for blind restoration. The source-code work is not a claim of production approval; the future owner-supervised browser takeover and task replay-prevention trial remain outstanding. The implementation change MUST stay active until its unchecked checklist and acceptance gates are resolved. See the [implementation guide](AUTOMATIC-RECOVERY.md), [OpenSpec tasks](../openspec/changes/delayed-session-reconnect-and-task-restoration/tasks.md) and [design](../openspec/changes/delayed-session-reconnect-and-task-restoration/design.md).
-
-## Planned Apple-inspired Next.js web control center — PR #72
-
-The `apple-style-nextjs-web-control-center` OpenSpec change is **ACTIVE, PLANNING ONLY, NOT IMPLEMENTED**. It proposes a responsive Apple-inspired Next.js/Refine/shadcn web application at `daedalus.tongrix.com`, with closed Supabase web authentication and a secure Vercel server-only gateway to the existing FastAPI/IkaBot controller. It includes an Apple design skill–based interaction and accessibility blueprint, web-safe feature-parity inventory, multi-account warehouse and automation controls, desktop-only Selenium login boundary and an entirely unchecked implementation checklist. No web build, provisioning, backend change, DNS, deployment, live task, visual acceptance or production cutover has been performed. Keep active until the implementation and owner-operated acceptance gates pass; see [proposal](../openspec/changes/apple-style-nextjs-web-control-center/proposal.md).
-
-## Active native Mac redesign
-
-The `redesign-macos-desktop-experience` OpenSpec change remains active while implementation work is completed incrementally. PR #63 merged the Fluent shell, first-class all-account warehouse reporting, selected-account task workflows and a macOS preview. The follow-up implementation consolidates three automation editors into one, adds Accounts master/detail, safe keyboard shortcuts, a filtered local Activity timeline, backend-grounded enum pickers, draft consent invalidation and duplicate-launch protection. Human macOS visual/VoiceOver walkthroughs and real-account acceptance are deferred to the owner and are **not** recorded as passing. Do not archive the redesign change until its remaining implementation tasks are reconciled.
-
-The latest implementation work also adds capability-derived automation
-discovery cards; account-selectable Running/History with opt-in expert IDs;
-an Overview whose read-only summaries distinguish unobserved, successful and
-unavailable snapshots; Settings controls for per-backend **all/selected**
-warehouse reporting; contextual HTTPS/Keychain failures; and explicit
-per-backend task/draft invalidation on origin change. Source-level Python
-compilation and patch whitespace checks passed on the development server;
-the PySide6-Fluent runtime, physical Mac layout/VoiceOver and live Gameforge
-workflow have **not** been exercised in this branch. The redesign OpenSpec
-remains active until reviewed build and UX gates are satisfied.
-
-## Active native automation workspace — PR #68 (draft, unfinished)
-
-The `native-automation-workflows` OpenSpec change is **ACTIVE and UNFINISHED**.
-It implements category tabs, actual authenticated city pickers, a bounded read-only
-IkaBot IPC/API for real owned-city building levels, a construction building table
-with draft upgrade targets, and safe rejection of cross-account city/plan reuse.
-Raw construction planner JSON and expert import are removed from the automation UI in the cross-platform implementation. Resource distribution has native
-resource/mode choices and source-backed participating-city multi-selection;
-research and tavern management have account-bound city subsets. Daily reward collection has native wine/wood/luxury city destinations and verified favour-task choices.
-
-The remaining implementation is substantial: IkaBot's authoritative, read-only
-construction cost/shipment/ETA planner; native executable construction queue;
-dedicated domain UI and verified game DTOs for the full IkaBot catalog;
-per-account review previews and final Mac accessibility/visual acceptance.
-**The current draft is NOT production-ready and MUST NOT be archived or merged
-until the required engine planner, UI, contract tests and acceptance gates are
-completed.** See [full UX feature audit](AUTOMATION-UX-AUDIT.md),
-[design](../openspec/changes/native-automation-workflows/design.md) and
-[remaining checklist](../openspec/changes/native-automation-workflows/tasks.md).
+- 49 registered/catalogued operations: 33 native, 15 existing views, one protected-local cookie operation. Coverage is still partial; no full option-level or live acceptance claim.
+- Native Mac and Next.js web interfaces, actual account/city selectors, independent typed reviews, receipt history, reviewed dispatch, multi-account read-only reports, protected administration and upstream-first integration.
+- Warehouse filling uses shared upstream sendResources / fleet waits, bounded capacity and incoming cargo policy, protected cookie transport, reviewed receipts and offline multi-load regression tests. Real delivery remains an owner test.
+- Recovery defaults on for enabled accounts on a properly configured monitored daemon, with persisted pause/disable, protected server credentials, verified rebind, 300-second grace and fenced safe-job restoration. New owned-city fixed cargo uses per-batch write-ahead receipts; unknown and unsupported work stays manual.
+- PR #109 fixed protected military reads; owner confirmed Mac inventory. PR #110 added actual web troop/fleet tables, persistent navigation and a sortable/filterable warehouse dashboard with private 120-second online cache.
 
 ## Desktop sign-in observability and connection feedback (2026-11-22)
 
@@ -69,14 +30,20 @@ NOT TESTED / NOT APPROVED**, and remain in
 [owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60).
 This release does not certify any live automation or backend deployment.
 
-## Complete and archived
+## Archived implementation and superseded proposals
 
 The following changes have implemented and archived OpenSpec requirements. The historical PR checks and local test evidence vary by change; do not interpret this table as live-game certification. Their task checklists are complete, their capability deltas are incorporated into `openspec/specs/`, and their proposals/designs/tasks remain available under `openspec/changes/archive/`:
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
-| `complete-cross-platform-automation-parity` | Reviewed native workflow baseline; unfinished original requirements retained in the active successor; no live acceptance | [#97](https://github.com/itshak/Daedalus/pull/97) |
-| `finish-cross-platform-operation-parity` | Delivered expanded reviewed operation workflows; detailed parity and release gates remain active | [#97](https://github.com/itshak/Daedalus/pull/97) |
+| `apple-style-nextjs-web-control-center` | Web client and BFF baseline; outstanding engineering/owner items transferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-apple-style-nextjs-web-control-center/consolidation-record.md) |
+| `delayed-session-reconnect-and-task-restoration` | Recovery and fixed-cargo baseline; outstanding safety verification transferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-delayed-session-reconnect-and-task-restoration/consolidation-record.md) |
+| `fill-city-warehouse` | Shared upstream warehouse filling; owner delivery acceptance deferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-fill-city-warehouse/consolidation-record.md) |
+| `native-automation-workflows` | Native editors, upstream integration and military read fixes; remaining options transferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-native-automation-workflows/consolidation-record.md) |
+| `redesign-macos-desktop-experience` | Native Fluent redesign and Selenium baseline; automated QA and owner review separated; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-redesign-macos-desktop-experience/consolidation-record.md) |
+| `verify-and-release-cross-platform-parity` | Release verification and operation coverage consolidated into successor; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-verify-and-release-cross-platform-parity/consolidation-record.md) |
+| `complete-cross-platform-automation-parity` | Reviewed native workflow baseline; unfinished original requirements retained in the consolidated successor; no live acceptance | [#97](https://github.com/itshak/Daedalus/pull/97) |
+| `finish-cross-platform-operation-parity` | Delivered expanded reviewed operation workflows; detailed parity and release gates transferred to the consolidated successor | [#97](https://github.com/itshak/Daedalus/pull/97) |
 | `observable-selenium-login-and-connection` | Visible Chrome recovery after headless failure, sanitized live Activity stages and Fluent backend-success/masked-token feedback | [#85](https://github.com/itshak/Daedalus/pull/85) |
 | `persistent-login-identity-status` | Encrypted Mac-bound server login backups, protected email identities, Russian world flags and accessible account/session/worker status indicators | Pending PR for this change |
 | `bootstrap-public-monorepo` | Clean open-source package, CI, OpenSpec, license and security boundaries | [Initial foundation](https://github.com/itshak/Daedalus/commits/main/) |
@@ -109,9 +76,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 | `persist-headless-credentials` | Host-encrypted persistent credential collection, receipt reconciliation and service restart/startup-order regression | [#59](https://github.com/itshak/Daedalus/pull/59) |
 | `validate-live-authentication` | Offline/field-preflight implementation archived; **unperformed owner-only acceptance is still open in [issue #60](https://github.com/itshak/Daedalus/issues/60)** | [archive record](https://github.com/itshak/Daedalus/tree/main/openspec/changes/archive/2026-11-19-validate-live-authentication) |
 
-The archive folders are dated `2026-11-18` through `2026-11-25`. Archive
-checkboxes reflect completed implementation and local validation, not owner
-real-game certification. The outstanding manual gates were transferred
+The archive folders retain historical task checkboxes. Superseded changes include explicit per-task disposition records; unchecked work is not silently marked complete. The outstanding manual gates were transferred
 explicitly to [issue #60](https://github.com/itshak/Daedalus/issues/60),
 without claiming they were performed.
 
@@ -169,67 +134,7 @@ Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
 ## Current OpenSpec work and owner acceptance
 
-**One OpenSpec implementation change is active:** `redesign-macos-desktop-experience`.
-Its native Fluent UX work is in progress, with tested initial navigation, multi-account
-warehouse reporting, selected-account task status/dispatch guards and contextual
-settings. The full visual design, native Mac screenshots, task-specific forms,
-accessibility audit and owner approval are **not complete** and the change is
-not archived. The earlier `validate-live-authentication` was archived on
-2026-11-19 after its seven implementation/preflight tasks were verified.
-Its three former unchecked owner-only tasks were **transferred as unperformed** into
-[owner acceptance issue #60](https://github.com/itshak/Daedalus/issues/60)
-and [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md), not marked passed or waived.
-
-### Remaining owner-only acceptance gates — NOT TESTED / NOT APPROVED
-
-| Owner gate | Evidence needed |
-| --- | --- |
-| Real Mac browser/MFA/CAPTCHA and encrypted world-cookie exchange | Authorized isolated-account evidence, server attestation and read-only comparison |
-| Worker rebind/expiry/manual recovery and one explicit task trial | Same lease, no duplicate operation, observed game effect and stop |
-| Host reboot durability and automatic HTTPS reconnect | Controlled full reboot under safe maintenance window, verified encrypted store |
-| Release/cutover approval | Sanitized owner results for every gate, plus explicit owner decision |
-
-The current implementation fails closed on unrecognized game-world player
-markup and refuses uncertain/replayed task dispatch. Green CI (including
-synthetic Playwright, Qt/Fluent, Linux/Windows/macOS, packaging and OpenSpec)
-does not replace live acceptance. The OpenSpec hygiene regression checks
-now allow an empty active-change set but continue to reject unchecked
-archived tasks and require visible owner acceptance tracking.
-
-## Headless-first Gameforge sign-in parity (implementation pending Mac acceptance)
-
-The UI redesign now includes the local `itshak/ikabot` warehouse-bot
-authentication sequence: headless Selenium Chrome login, exact-world
-`tokens.json` restore, opt-in legacy `config.ini` alias migration,
-account+world+HTTPS-origin macOS Keychain credentials, and a visible Chrome
-window **only when a CAPTCHA is detected**. The Accounts page provides
-single/all/selected sign-in; Warehouses All accounts refreshes missing
-sessions before aggregating snapshots. Session handoff still uses the
-existing one-time encrypted, exact-account server verification and cannot
-start or replay a task. Offline Selenium and synthetic Qt tests exercise
-the new coordinator without contacting Gameforge. **Live Mac login,
-CAPTCHA, owner reboot and game-task acceptance remain unverified** in
-[issue #60](https://github.com/itshak/Daedalus/issues/60). This OpenSpec
-change remains active until remaining implementation and review gates close.
-
-## Native Fluent desktop redesign (implementation in progress, 2026-11-19)
-
-The active `redesign-macos-desktop-experience` change now has an account-aware
-five-destination Fluent shell (Overview, Accounts, Warehouses, Automations, Activity),
-distinct Connection and Settings icons, scrolled settings/account/task pages,
-and consolidated Wine/Construction entry points in the Automations workspace.
-Warehouses expose **All accounts** (one click), **Selected accounts** (custom picker)
-and **This account**, preserving island grouping, the 220K filter, missing-vs-zero
-semantics and grouped text/CSV/JSON exports. Automations can inspect running
-statuses for all or selected accounts. Starting a task for selected accounts
-requires an explicit review, checks each account before any dispatch, generates
-a unique request per account and halts on the first uncertain receipt without
-retrying. The backend remains the authority and no live operations were run by
-the synthetic UI implementation.
-
-This is an incremental implementation, not yet complete production/visual
-acceptance. macOS preview/CI results and remaining tasks are tracked in the
-open change; issue #60 separately tracks owner-only real-game approval.
+All remaining agent work is tracked in `finish-v010-engineering`. Owner-only game, physical-device and production approval checks remain deferred and unpassed in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md) and [issue #60](https://github.com/itshak/Daedalus/issues/60). The headless-first Selenium workflow allows one visible recovery for a detected challenge or a failed headless attempt; no automated challenge solving. See the archived redesign for historical visual plans.
 
 ## Opt-in account metadata editor (shipped)
 
@@ -302,9 +207,9 @@ This documents **code quality policy**, not any policy on an individual's choice
 
 The native Mac GUI has launched successfully, and GitHub Actions verifies
 unsigned-preview macOS bundles. The app is not Apple-notarized. It now offers
-**manual** Mac Gameforge browser login and encrypted exact-account session
+headless-first Mac Gameforge login with visible fallback and encrypted exact-account session
 handoff, plus independently attested saved-cookie bootstrap on the Linux
-worker. Daedalus does not automate CAPTCHA/MFA or unattended account login.
+worker. Daedalus does not automate CAPTCHA/MFA; eligible monitored recovery uses protected credentials and independent verification.
 The controlled host service restart and one existing account's authenticated
 read-only warehouses passed. Real Mac browser recovery, live task trial,
 dedicated rebind and whole-host reboot still need owner testing. No

@@ -24,4 +24,4 @@ Run `npm ci`, `npm run test`, `npm run typecheck`, `npm run lint`, `npm run buil
 
 ## Known unfinished parts
 
-The seven-page shell, protected gateway, read-only warehouse/military/activity panels and read-only construction preview are implementation-stage features. Task-specific mutation form coverage, admin provisioning, Playwright/VoiceOver acceptance, actual authenticated end-to-end tests and operational cutover are separate verification gates. The web client deliberately does not provide a raw JSON-based mutation console.
+The current deployed preview includes typed native task editors, reviewed batch flows, military inventory and the sortable/filterable warehouse dashboard. See the permanent [operation coverage](../../docs/operation-coverage.json), [engineering successor](../../openspec/changes/finish-v010-engineering/tasks.md) and separate [owner acceptance](../../docs/V010-OWNER-ACCEPTANCE.md). No raw JSON mutation console is provided. Authenticated dashboard Playwright, cookie/rate-limit/CSP evidence, automated accessibility QA and owner-operated acceptance remain distinct gates.

@@ -8,6 +8,7 @@ Build one maintainable Daedalus application: existing public IkaBot operations a
 - Read and update an active `openspec/changes/<change-id>/` proposal, design, delta specs and tasks for substantive changes.
 - Workflow: explore → propose → apply → verify → archive.
 - On completion, check every verified implementation task, run offline tests and GitHub CI, archive with `openspec archive <change-id> -y`, and ensure the resulting updates are merged into canonical `openspec/specs/`. Keep unfinished implementation proposals active. If the owner explicitly defers all remaining human-only live acceptance, transfer those **unperformed** gates to a durable owner-assigned issue and keep production approval blocked; never check unperformed tasks as passed when archiving an implementation change.
+- Overlapping changes MAY be archived as explicitly superseded by a named active successor, not as completed implementation. Preserve all original checkboxes, record an exact per-unchecked-task disposition with source evidence or a durable successor/owner reference, and reconcile canonical requirements (including superseding decisions). The hygiene test requires these records and rejects unexplained unchecked archived tasks.
 - Validate with `openspec validate --all --strict --no-interactive`.
 - Prefix commits implementing a change with `[change-id]`.
 - Use English, normative SHALL/MUST requirements and Given/When/Then scenarios.
