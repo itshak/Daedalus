@@ -1512,11 +1512,11 @@ class Session:
         except requests.exceptions.RequestException:
             raise RuntimeError("Cookie-only world request could not be verified") from None
 
-    def _daedalus_cookie_read_ajax(self, *, url="", params=None, noIndex=False):
+    def _daedalus_cookie_read_ajax(self, *, url="", params=None, noIndex=False, reviewed_city=None):
         """Preserve specific upstream queue-view POSTs on a verified cookie worker.
 
-        This is an adapter for existing read-only requests, not a general
-        game POST proxy. The allowlist is checked by the caller.
+        The caller validates an exact upstream read or reviewed write form.
+        Reviewed writes require a fresh, matching city and no retry.
         """
         from ikabot.helpers.serverIdentity import attest_player_from_world_html
 
@@ -1525,14 +1525,21 @@ class Session:
                 or base.port not in (None, 443) or base.path != "/index.php"
                 or base.username or base.password or base.fragment or base.query):
             raise ValueError("Cookie-only queue view origin unavailable")
-        html = self.get()
+        html = self.get() if reviewed_city is None else self.get("view=city&cityId=" + reviewed_city)
         if not attest_player_from_world_html(html, self.username):
             raise RuntimeError("Queue view account verification failed")
+        if reviewed_city is not None:
+            selected = re.search(r"currentCityId:\s*(\d+),", html)
+            if selected is None or selected.group(1) != reviewed_city:
+                raise RuntimeError("Reviewed mutation city context changed")
         token = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
         if token is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", token.group(1)):
             raise RuntimeError("Queue view request token unavailable")
-        query = {} if params is None else dict(params, actionRequest=token.group(1))
+        query = {} if params is None else dict(params)
+        if "actionRequest" in query:
+            query["actionRequest"] = token.group(1)
         request_base = self.urlBase.replace("index.php", "") if noIndex else self.urlBase
+        failure = "Reviewed mutation response uncertain; reconcile before retry" if reviewed_city else "Queue view response could not be verified"
         try:
             response = self.s.post(
                 request_base + url.replace(actionRequest, token.group(1)),
@@ -1546,10 +1553,10 @@ class Session:
                     or self.__isExpired(response.text)
                     or self.__isSessionRotated(response.text, response=response)
                     or "TXT_ERROR_WRONG_REQUEST_ID" in response.text):
-                raise RuntimeError("Queue view response could not be verified")
+                raise RuntimeError(failure)
             return response.text
         except requests.exceptions.RequestException:
-            raise RuntimeError("Queue view response could not be verified") from None
+            raise RuntimeError(failure) from None
 
     def _daedalus_cookie_advisor_post(self, url):
         """Read the exact upstream military-advisor AJAX view without relogin."""
@@ -1801,6 +1808,16 @@ class Session:
             if url or payloadPost or ignoreExpire or noIndex or fullResponse or noQuery or kwargs or retry_on_failure:
                 raise ValueError("Cookie-only transport requires one bounded standard POST")
             return self._daedalus_reviewed_transport_post(params)
+        if getattr(self, "_daedalus_cookies_only", False) is True:
+            from ikabot.helpers.nativeMutationForms import matches, validate
+
+            if matches(url, params):
+                if payloadPost or ignoreExpire or fullResponse or noQuery or kwargs or retry_on_failure:
+                    raise ValueError("Reviewed cookie mutation requires one bounded POST")
+                city = validate(url, params, noIndex=noIndex)
+                return self._daedalus_cookie_read_ajax(
+                    url=url, params=params if not url else None, noIndex=noIndex, reviewed_city=city,
+                )
         if not retry_on_failure:
             kwargs["allow_redirects"] = False
         url_original = url

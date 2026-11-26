@@ -282,3 +282,15 @@ A native UI SHALL not pass incomplete engine task plans as valid. Interactive-on
 #### Scenario: Construction queue requires engine data
 - **WHEN** a building queue cannot be produced from verified IkaBot state
 - **THEN** no task launch is offered, even if the task's parameter names are known
+
+### Requirement: Reviewed cookie-session mutation compatibility
+For audited original construction, recruitment, layout, worker, donation, wine and study request forms, the protected cookie-session adapter SHALL preserve the upstream request fields and endpoint, verify the exact player and selected city using a fresh HTTPS world page, replace the request token from that page, submit at most once and reject malformed, mismatched or uncertain responses without relogin or replay. The upstream task preparation remains responsible for fresh ownership and reviewed operation constraints.
+
+#### Scenario: A reviewed city request is sent
+- **GIVEN** a verified cookie-only worker and a reviewed upstream mutation with the exact expected form
+- **WHEN** the original upstream helper submits the request
+- **THEN** only one same-world bounded POST SHALL be attempted; wrong city/player, additional fields or retry options SHALL fail closed
+
+#### Scenario: The server reply is lost
+- **WHEN** the protected reviewed POST receives an uncertain transport outcome
+- **THEN** it SHALL report uncertainty and MUST NOT repeat the mutation

@@ -7,7 +7,7 @@ create table if not exists public.web_operators (
   created_at timestamptz not null default now()
 );
 alter table public.web_operators enable row level security;
-revoke all on public.web_operators from anon;
+revoke all on public.web_operators from public,anon,authenticated;
 grant select on public.web_operators to authenticated;
 drop policy if exists web_operator_self_read on public.web_operators;
 create policy web_operator_self_read on public.web_operators for select to authenticated
@@ -18,7 +18,7 @@ create table if not exists public.web_preferences (
   updated_at timestamptz not null default now()
 );
 alter table public.web_preferences enable row level security;
-revoke all on public.web_preferences from anon;
+revoke all on public.web_preferences from public,anon,authenticated;
 grant select, insert, update, delete on public.web_preferences to authenticated;
 drop policy if exists web_preferences_own on public.web_preferences;
 create policy web_preferences_own on public.web_preferences for all to authenticated
@@ -35,5 +35,5 @@ create table if not exists public.web_audit (
   created_at timestamptz not null default now()
 );
 alter table public.web_audit enable row level security;
-revoke all on public.web_audit from anon,authenticated;
+revoke all on public.web_audit from public,anon,authenticated;
 -- Never store account snapshots or auth tokens in this table.

@@ -352,3 +352,86 @@ def test_actual_upstream_military_inventory_uses_protected_read_transport():
         with pytest.raises(ValueError, match="Unsupported cookie-only military inventory view"):
             session.post(params={**expected, "actionRequest": actionRequest, "currentCityId": "456"})
     assert http.post.call_count == 1
+
+
+@pytest.mark.parametrize("kind", ["build", "troops", "fleet", "layout", "resource", "tradegood", "academy", "temple", "donate", "wine", "study", "upgrade"])
+def test_reviewed_mutations_use_exact_upstream_forms_once(kind):
+    from unittest.mock import Mock
+    from ikabot.config import actionRequest
+    from ikabot.function import constructBuilding, trainArmy, reorganizeCityBuildings, modifyProduction, donate, tavernManager, research
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> currentCityId: 123, actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    base = session.urlBase.replace("index.php", "") if kind in ("build", "layout") else session.urlBase
+    http.post = Mock(return_value=SimpleNamespace(url=base, status_code=200, text="[]", content=b"[]", history=[]))
+    reference = Mock()
+    city = {"id": "123", "pos": 4}
+    def invoke(s):
+        if kind == "build":
+            return constructBuilding._submit_building(s, "123", 4, "7", actionRequest, reviewed=True)
+        if kind in ("troops", "fleet"):
+            return trainArmy.train(s, city, [{"unit_type_id": 301, "train": 7}], kind == "troops", reviewed=True)
+        if kind == "layout":
+            return reorganizeCityBuildings._submit_layout(s, "123", [(4, 7), (8, 9)], reviewed=True)
+        if kind in ("resource", "tradegood", "academy", "temple"):
+            return modifyProduction._submit_worker_assignment(s, "123", "5", kind, 4, 7, reviewed=True)
+        if kind == "donate":
+            return donate._submit_donation(s, "5", "resource", 10, city_id="123", reviewed=True)
+        if kind == "wine":
+            return tavernManager.TavernManager(s)._apply_level(city, {"position": 4}, 3, {"action_code": actionRequest}, reviewed=True)
+        if kind == "study":
+            return research.study(s, {"js_researchAdvisorChangeResearchType1": {"ajaxrequest": "type=2"}}, 1, reviewed=True)
+        return s.post("action=UpgradeExistingBuilding&actionRequest=REQUESTID&cityId=123&position=4&level=3&activeTab=tabSendTransporter&backgroundView=city&currentCityId=123&templateView=academy&ajax=1", retry_on_failure=False)
+
+    with patch.object(research, "getCity", return_value=city):
+        invoke(reference)
+        with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("legacy login")):
+            invoke(session)
+    args, kwargs = reference.post.call_args
+    original = kwargs.get("params", {})
+    expected = dict(original, actionRequest="abcdefgh1234") if original else {}
+    url = args[0].replace(actionRequest, "abcdefgh1234") if args else ""
+    http.post.assert_called_once_with(base + url, data={}, params=expected, verify=True, timeout=12, allow_redirects=False)
+    assert any("cityId=123" in call[0] for call in http.calls)
+    if original:
+        with pytest.raises(ValueError):
+            session.post(params={**original, "unexpected": "1"}, noIndex=kwargs.get("noIndex", False), retry_on_failure=False)
+        with pytest.raises(ValueError, match="bounded"):
+            session.post(params=original, noIndex=kwargs.get("noIndex", False))
+        assert http.post.call_count == 1
+
+
+def test_reviewed_mutation_rejects_wrong_city_wrong_player_and_timeout():
+    import requests
+    from unittest.mock import Mock
+    from ikabot.function.trainArmy import train
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> currentCityId: 999, actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(side_effect=requests.exceptions.Timeout())
+    args = (session, {"id": "123", "pos": 4}, [{"unit_type_id": 301, "train": 1}], True)
+    with pytest.raises(RuntimeError, match="city context"):
+        train(*args, reviewed=True)
+    http.text = http.text.replace("999", "123").replace("ExamplePlayer", "OtherPlayer")
+    with pytest.raises(RuntimeError, match="account verification"):
+        train(*args, reviewed=True)
+    http.post.assert_not_called()
+    http.text = http.text.replace("OtherPlayer", "ExamplePlayer")
+    with pytest.raises(RuntimeError, match="uncertain"):
+        train(*args, reviewed=True)
+    assert http.post.call_count == 1
+
+
+def test_original_tavern_read_has_no_extra_token():
+    from unittest.mock import Mock
+    from ikabot.function.tavernManager import TavernManager
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(return_value=SimpleNamespace(url=session.urlBase, status_code=200, text="[]", content=b"[]", history=[]))
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("legacy login")):
+        TavernManager(session)._get_tavern_data({"id": "123"}, {"position": 4})
+    http.post.assert_called_once_with(session.urlBase, data={}, params={"view": "tavern", "cityId": "123", "position": 4, "backgroundView": "city", "currentCityId": "123", "ajax": "1"}, verify=True, timeout=12, allow_redirects=False)
