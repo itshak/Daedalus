@@ -42,6 +42,11 @@ The Military page SHALL render each verified city, individual ground unit and sh
 ### Requirement: Persistent workspace navigation and warehouse data table
 The website SHALL restore the last valid workspace page after reload. The warehouse dashboard SHALL use a sortable data table with city, account, island, resource and capacity columns, search, island/world and resource filters, minimum unsecured stock and the existing 220K filter. Visible totals and exports SHALL follow the filtered report; unknown values MUST NOT be rendered as zero.
 
+#### Scenario: Display player names in warehouses
+- **WHEN** the operator selects accounts or views, searches, prints or exports warehouse snapshots
+- **THEN** the account labels use configured player names rather than login emails, disambiguate duplicate names by world and account ID, and preserve stable account-ID selection
+- **AND** a missing player name falls back to the account ID, not the email
+
 #### Scenario: Operator changes warehouse filters or sorting
 - **WHEN** the operator selects an island, resource threshold, search term or sort column
 - **THEN** the displayed rows and report totals update locally without new game requests and the export follows the visible sorted rows

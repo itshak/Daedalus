@@ -63,8 +63,8 @@ def main():
     if command("gh", "api", f"repos/{REPO}/git/ref/heads/main", "--jq", ".object.sha") != sha:
         raise SystemExit("The approved revision is no longer main")
     version = json.loads((root / "apps/web/package.json").read_text(encoding="utf-8"))["version"]
-    if not re.fullmatch(r"0\.1\.0-beta\.[1-9][0-9]*", version):
-        raise SystemExit("Expected first beta version metadata")
+    if not re.fullmatch(r"0\.1\.0(?:-beta\.[1-9][0-9]*)?", version):
+        raise SystemExit("Expected first release version metadata")
     tag = "v" + version
     runs = json.loads(command("gh", "run", "list", "--repo", REPO, "--branch", "main", "--commit", sha,
                               "--limit", "100", "--json", "name,headSha,status,conclusion,event,databaseId"))
@@ -94,7 +94,7 @@ def main():
         notes = folder / "notes.md"
         notes.write_text((root / "CHANGELOG.md").read_text(encoding="utf-8") +
                          f"\nSource revision: `{sha}`\n\nDMG SHA-256: `{digest}`\n\n"
-                         "Unnotarized beta candidate. Owner acceptance and coordinated deployment are pending.\n"
+                         "Unnotarized first prerelease. Live-game and physical Mac acceptance are not certified. See the release status and owner acceptance issue for rollout evidence.\n"
                          "See https://github.com/itshak/Daedalus/issues/60 and docs/BETA-OPERATION-SCOPE.md.\n", encoding="utf-8")
         if args.refresh_draft:
             # Keep the release unpublished. If asset upload fails, the draft

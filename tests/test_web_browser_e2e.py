@@ -41,7 +41,7 @@ def web_stack(tmp_path):
     access = jwt()
     counts = Counter()
     state = {"disabled": False, "running": False, "request_id":None, "ambiguous":False}
-    accounts = [{"id":name,"player":"Same player","world":world,"enabled":True,"session_status":"authenticated"} for name,world in [("alpha","s1-en"),("beta","s2-en")]]
+    accounts = [{"id":name,"email":name+"@example.invalid","player":"Same player","world":world,"enabled":True,"session_status":"authenticated"} for name,world in [("alpha","s1-en"),("beta","s2-en")]]
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*_):
             pass
@@ -86,7 +86,7 @@ def web_stack(tmp_path):
                 return self.reply({},401)
             counts[path]+=1
             if path=="/api/v1/accounts":return self.reply({"accounts":accounts})
-            if path=="/api/v1/health":return self.reply({"mode":"task_control_opt_in","version":"0.1.0b1"})
+            if path=="/api/v1/health":return self.reply({"mode":"task_control_opt_in","version":"0.1.0"})
             if path=="/api/v1/capabilities":return self.reply({"operations":[{"name":"alertAttacks","workflow":{"web":"native"}}]})
             if path.startswith("/api/v1/warehouses/"):
                 aid=path.split("/")[-1];is_a=aid=="alpha"
@@ -162,6 +162,11 @@ def test_authenticated_dashboard_browser(web_stack):
     nav.get_by_role("button",name="Warehouses").click()
     page.get_by_role("cell",name="Athens").wait_for()
     page.get_by_role("cell",name="Sparta").wait_for()
+    # Both identities have distinct login emails and the same player name.
+    # Warehouse display uses disambiguated players; login emails stay out.
+    page.get_by_role("cell",name="Same player · s1-en (alpha)",exact=True).wait_for()
+    page.get_by_role("cell",name="Same player · s2-en (beta)",exact=True).wait_for()
+    assert page.locator(".warehouse-data-table").get_by_text("alpha@example.invalid",exact=True).count()==0
     wood=page.get_by_role("columnheader",name="Wood",exact=True)
     sort=wood.get_by_role("button")
     sort.focus();page.keyboard.press("Enter")
@@ -182,6 +187,7 @@ def test_authenticated_dashboard_browser(web_stack):
     with page.expect_download() as download:
         page.get_by_label("Export report").select_option("csv")
     content=Path(download.value.path()).read_text();assert "Athens" in content and "Sparta" not in content
+    assert "Same player · s1-en (alpha)" in content and "@example.invalid" not in content
     nav.get_by_role("button",name="Military").click()
     page.get_by_role("cell",name="Synthetic Swordsman").first.wait_for()
     page.get_by_role("cell",name="Synthetic Ship").last.wait_for()
@@ -194,13 +200,16 @@ def test_authenticated_dashboard_browser(web_stack):
     page.get_by_role("cell",name="Athens").wait_for()
     # Verify selected-account scope is keyed by IDs even with duplicate display names.
     page.get_by_role("button",name="One",exact=True).click()
-    page.get_by_label("Choose single account").select_option("beta")
+    single=page.get_by_label("Choose single account")
+    assert single.locator("option").all_text_contents()==["Same player · s1-en (alpha)","Same player · s2-en (beta)"]
+    single.select_option("beta")
     page.get_by_role("cell",name="Sparta").wait_for()
     page.get_by_role("cell",name="Athens").wait_for(state="detached")
     page.get_by_role("button",name="Selected",exact=True).click()
     picker=page.locator(".selected-picker").get_by_role("checkbox")
     assert picker.count()==2
-    picker.first.check()
+    page.get_by_role("checkbox",name="Same player · s1-en (alpha)",exact=True).check()
+    assert page.locator(".selected-picker").get_by_text("beta@example.invalid",exact=True).count()==0
     page.get_by_role("cell",name="Athens").wait_for()
     page.get_by_role("cell",name="Sparta").wait_for()
     page.get_by_role("button",name="All accounts",exact=True).click()

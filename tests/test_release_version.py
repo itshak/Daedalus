@@ -59,7 +59,7 @@ def test_beta_refresh_rejects_published_releases_and_existing_tags():
 
     root = Path(__file__).resolve().parents[1]
     check = runpy.run_path(str(root / "scripts/prepare_beta_release.py"))["require_refreshable_draft"]
-    tag = "v0.1.0-beta.1"
+    tag = "v0.1.0"
     draft = {"tagName": tag, "isDraft": True, "isPrerelease": True}
     check(draft, tag, "")
     for invalid in ({**draft, "isDraft": False}, {**draft, "isPrerelease": False}, {**draft, "tagName": "v0.2.0"}):
