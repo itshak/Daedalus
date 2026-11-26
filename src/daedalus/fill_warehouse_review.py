@@ -4,6 +4,11 @@ from daedalus.daily_distribution_review import _city
 TASK = "fillCityWarehouse"
 RESOURCES = ("wood", "wine", "marble", "crystal", "sulfur")
 FILL_PREVIEW_MESSAGES = {
+    "fill_session_unavailable": "The selected account worker is disconnected or busy. Refresh account status and retry.",
+    "fill_inventory_unavailable": "The selected account city list could not be verified.",
+    "fill_worker_unavailable": "The warehouse preview worker did not return a usable response.",
+    "fill_scope_changed": "The owned city list changed or the warehouse observation could not be verified. Refresh city data.",
+    "fill_preflight_unavailable": "The selected account is not ready for a new automation. Check Activity and account status.",
     "fill_destination_unavailable": "Destination warehouse could not be read. Refresh city data and retry.",
     "fill_incoming_unavailable": "Incoming cargo could not be verified. No transfer was started.",
     "fill_source_unavailable": "Source city stock could not be read. Refresh city data and retry.",

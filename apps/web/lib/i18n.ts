@@ -2,6 +2,16 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Warehouse preview endpoint unavailable. Check backend and website versions.": "Служба предпросмотра недоступна. Проверьте версии сервера и сайта.",
+  "Warehouse preview backend failed. No transfer was started.": "Ошибка серверной части предпросмотра. Перевозка не запущена.",
+  "Warehouse preview access denied. Sign in again or check account permissions.": "Доступ к предпросмотру запрещён. Войдите заново или проверьте права доступа.",
+  "Warehouse preview connection failed. No transfer was started.": "Ошибка соединения при предпросмотре склада. Перевозка не запущена.",
+  "Warehouse preview response failed validation. No transfer was started.": "Ответ предпросмотра не прошёл проверку. Перевозка не запущена.",
+  "The selected account is not ready for a new automation. Check Activity and account status.": "Учётная запись не готова к новой автоматизации. Проверьте активность и статус.",
+  "The owned city list changed or the warehouse observation could not be verified. Refresh city data.": "Список своих городов изменился или данные склада не прошли проверку. Обновите данные городов.",
+  "The warehouse preview worker did not return a usable response.": "Серверный процесс не вернул корректный ответ предпросмотра склада.",
+  "The selected account city list could not be verified.": "Не удалось проверить список городов выбранной учётной записи.",
+  "The selected account worker is disconnected or busy. Refresh account status and retry.": "Выбранная учётная запись отключена или занята. Обновите статус и повторите попытку.",
   "Start becomes available after a successful preview and your approval.": "Кнопка запуска станет доступна после успешной проверки и вашего подтверждения.",
   "Reading current game data. This may take a minute; no automation has started.": "Чтение текущих игровых данных. Это может занять минуту; автоматизация ещё не запущена.",
   "Preview warehouse transfer": "Предпросмотр заполнения склада",

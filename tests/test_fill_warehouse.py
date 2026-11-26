@@ -162,3 +162,62 @@ def test_safe_preview_error_contract():
     assert str(FillPreviewUnavailable("fill_incoming_unavailable")) == FILL_PREVIEW_MESSAGES["fill_incoming_unavailable"]
     with pytest.raises(EngineIPCUnavailable, match="Invalid warehouse preview failure"):
         FillPreviewUnavailable("synthetic private payload")
+
+
+def test_fill_preview_actual_worker_handler_to_controller_api(offline, monkeypatch, tmp_path):
+    """Exercise the production routing, socket and API, with only game reads mocked."""
+    from fastapi.testclient import TestClient
+    from ikabot.helpers.ipc import IPCServer
+    from test_engine_ipc import fake_worker
+
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.accounts import load_accounts
+    from daedalus.api import create_app
+    from daedalus.daily_distribution_review import validate_ticket
+    from daedalus.fill_warehouse_review import FILL_PREVIEW_MESSAGES
+    from daedalus.recovery_runtime import RoutedAccountIPC
+    from daedalus.task_control import TaskController
+
+    offline.logged = True
+    offline.mundo, offline.servidor, offline.mail = "1", "en", ""
+    cities = {str(cid): {"name": name, "coords": "[1:2]", "tradegood": "2"}
+              for cid, name in NAMES.items()}
+    monkeypatch.setattr(worker.pedirInfo, "getIdsOfCities", lambda _s: (list(cities), cities))
+    server = IPCServer(default_session=offline)
+    config = tmp_path / "synthetic.toml"
+    config.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s1-en"\nplayer = "Mine"\n')
+    accounts = load_accounts(config)
+    owner = AccountSessionCoordinator(accounts, state_dir=tmp_path / "locks")
+    with fake_worker(tmp_path, responder=server.handle_request) as (_, requests, descriptor):
+        router = RoutedAccountIPC(ControlledIPCClient(tmp_path / "no-fallback.json"))
+        router.use("alpha", descriptor)
+        controller = TaskController(accounts, owner, router, ledger_path=tmp_path / "ledger.sqlite")
+        try:
+            client = TestClient(create_app(accounts_path=config, api_token="x"*48,
+                                           session_coordinator=owner, ipc_client=router,
+                                           task_controller=controller))
+            path = "/api/v1/accounts/alpha/reward-distribution-plan"
+            headers = {"Authorization": "Bearer " + "x"*48}
+            payload = {"task": "fillCityWarehouse", "draft": DRAFT}
+            result = client.post(path, headers=headers, json=payload)
+            assert result.status_code == 200, result.text
+            assert validate_ticket(result.json(), "alpha", "fillCityWarehouse", DRAFT)["observation"]["amount"] == 130
+            assert [r["action"] for r in requests] == [
+                "task_preflight_existing", "list_sessions", "list_cities_existing", "preview_fill_existing",
+            ]
+
+            def bad_source(_s, cid):
+                if cid == 102:
+                    raise ValueError("synthetic private detail")
+                return CITIES[cid]
+            monkeypatch.setattr(worker, "_city", bad_source)
+            failed = client.post(path, headers=headers, json=payload)
+            assert failed.status_code == 503
+            assert failed.json() == {"detail": FILL_PREVIEW_MESSAGES["fill_source_unavailable"]}
+            offline.logged = False
+            failed = client.post(path, headers=headers, json=payload)
+            assert failed.status_code == 503
+            assert failed.json() == {"detail": FILL_PREVIEW_MESSAGES["fill_session_unavailable"]}
+            assert all(r["action"] != "start_task_existing" for r in requests)
+        finally:
+            controller.close()

@@ -797,6 +797,9 @@ class IPCServer:
                         return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
                                 "username": session.username, "result": result}
                     except Exception:
+                        if action == "preview_fill_existing":
+                            return {"status": "error", "error": "Operation preview unavailable",
+                                    "reason": "fill_worker_unavailable"}
                         return {"status": "error", "error": "Operation preview unavailable"}
                 if action == "preview_shipments_existing":
                     from ikabot.function.sendResources import preview_native_shipments
