@@ -612,3 +612,23 @@ def test_native_military_actions_reject_wrong_identity_before_game_queries():
             })
             assert result["status"] == "error"
     session.post.assert_not_called()
+
+
+def test_active_validation_transient_http_failure_is_not_negative_session_evidence():
+    for status in (429, 500, 502, 503):
+        session = make_session()
+        session.urlBase = "https://s301-en.ikariam.gameforge.com/index.php?"
+        session.s.get.return_value = MagicMock(status_code=status, url=session.urlBase, text="Unavailable")
+        reply = IPCServer(default_session=session).handle_request({
+            "action": "validate_session_existing", "world": "s301-en", "player": "ExamplePlayer",
+        })
+        assert reply["status"] == "error"
+        assert "session_valid" not in reply
+    session = make_session()
+    session.urlBase = "https://s301-en.ikariam.gameforge.com/index.php?"
+    session.s.get.side_effect = OSError("synthetic timeout")
+    reply = IPCServer(default_session=session).handle_request({
+        "action": "validate_session_existing", "world": "s301-en", "player": "ExamplePlayer",
+    })
+    assert reply["status"] == "error"
+    assert "session_valid" not in reply

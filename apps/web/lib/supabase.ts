@@ -8,11 +8,12 @@ export async function serverSupabase() {
   if (!url || !key) return null;
   const store = await cookies();
   return createServerClient(url, key, {
+    cookieOptions: { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" },
     cookies: {
       getAll() { return store.getAll(); },
       setAll(changes) {
         for (const { name, value, options } of changes) {
-          try { store.set(name, value, { ...options, secure: process.env.NODE_ENV === "production" }); }
+          try { store.set(name, value, { ...options, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" }); }
           catch { /* Server components cannot write cookies; callback route refreshes them. */ }
         }
       }

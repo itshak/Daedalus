@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allowedRequest, validatedControllerOrigin } from '../lib/request-policy.ts';
+import { allowedRequest, validatedControllerOrigin, controllerQuery } from '../lib/request-policy.ts';
 const params = (text = '') => new URLSearchParams(text);
 test('backend origin is strictly HTTPS and lacks URL credentials/paths', () => {
   assert.equal(validatedControllerOrigin('https://daedalus.tongrix.com'), 'https://daedalus.tongrix.com');
@@ -122,4 +122,14 @@ test("activity history permits only bounded filters and cursor",()=>{
   for(const q of ["limit=101","status=raw","before=0","before=9999999999999999","raw=true","limit=1&limit=2"])
     assert.equal(allowedRequest("GET",path,params(q)),false);
   assert.equal(allowedRequest("POST",path,params()),false);
+});
+
+
+test("validated aggregate pagination is preserved and extra query parameters fail closed",()=>{
+  const path="accounts/a/world-reports/0123456789abcdef01234567".split("/");
+  assert.equal(controllerQuery("GET",path,params("offset=1000")),"?offset=1000");
+  assert.throws(()=>controllerQuery("GET",path,params("offset=0&raw=1")));
+  assert.equal(allowedRequest("GET",["accounts"],params("raw=true")),false);
+  assert.equal(allowedRequest("POST",["accounts","a","tasks"],params("raw=true")),false);
+  assert.equal(allowedRequest("GET","accounts/a/tasks/preflight".split("/"),params("task=research&task=other")),false);
 });

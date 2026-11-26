@@ -29,7 +29,7 @@ body:
     id: version
     attributes:
       label: Daedalus version or commit
-      placeholder: 0.1.0a0 / commit SHA
+      placeholder: 0.1.0b1 / commit SHA
     validations:
       required: true
   - type: input

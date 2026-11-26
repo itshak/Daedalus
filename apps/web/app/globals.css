@@ -352,3 +352,13 @@ tbody tr:hover {background:var(--surface-alt)}
 .warehouse-sort>span:last-child {opacity:.7;font-size:12px}
 .warehouse-data-table th:first-child,.warehouse-data-table td:first-child {white-space:nowrap}
 @media print {.warehouse-filters {display:none!important}.warehouse-sort>span:last-child {display:none}}
+
+/* Keep decorative hero art and the off-canvas drawer inside the mobile viewport.
+   Wide data tables retain their own accessible horizontal scroll containers. */
+@media(max-width:760px){
+  .app-shell,.main-panel,.main-content,.content-stack{min-width:0;max-width:100%}
+  .app-shell{overflow-x:clip}
+  .hero-art{display:none}
+  .topbar .breadcrumb>span,.topbar .breadcrumb>svg{display:none}
+  .topbar .breadcrumb{min-width:0;overflow:hidden;text-overflow:ellipsis}
+}

@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizedOperator } from "@/lib/supabase";
 import { allowedRequest, controllerOrigin } from "@/lib/controller";
+import { controllerQuery } from "@/lib/request-policy";
+import { gatewayTraffic } from "@/lib/traffic-guard";
 import { validReviewBatch } from "@/lib/reviewed-batch";
 import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaunch } from "@/lib/native-task-contract";
 
@@ -51,6 +53,9 @@ async function proxy(request: NextRequest, context: RouteContext) {
   if (request.method !== "GET" && operator.role === "viewer") return NextResponse.json({ error: "Read-only administrator" }, { status: 403, headers: responseHeaders });
   if (request.method !== "GET" && request.headers.get("origin") !== url.origin)
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403, headers: responseHeaders });
+  const read=request.method==="GET";
+  if(!gatewayTraffic.allow(operator.user.id+(read?":read":":write"),read?360:90,60_000))
+    return NextResponse.json({error:"Too many requests. Try again later."},{status:429,headers:{...responseHeaders,"Retry-After":"60"}});
   const origin = controllerOrigin();
   const token = process.env.DAEDALUS_API_TOKEN;
   if (!origin || !token || token.length < 32) return NextResponse.json({ error: "Backend connection is not provisioned" }, { status: 503, headers: responseHeaders });
@@ -121,11 +126,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     }
     body = JSON.stringify(value);
   }
-  const query = parts.at(-1) === "preflight" ? "?task=" + encodeURIComponent(url.searchParams.get("task") ?? "")
-    : parts.at(-1) === "activity" ? "?" + url.searchParams.toString()
-    : parts.at(-1) === "island-destinations" ? "?x=" + encodeURIComponent(url.searchParams.get("x") ?? "") + "&y=" + encodeURIComponent(url.searchParams.get("y") ?? "")
-    : parts.at(-1) === "market-quotes" ? "?resource_type=" + encodeURIComponent(url.searchParams.get("resource_type") ?? "") + "&side=" + encodeURIComponent(url.searchParams.get("side") ?? "")
-    : parts.at(-1) === "trainable-units" && url.searchParams.has("train_troops") ? "?train_troops=" + encodeURIComponent(url.searchParams.get("train_troops") ?? "") : "";
+  const query = controllerQuery(request.method,parts,url.searchParams);
   try {
     const upstream = await fetch(origin + "/api/v1/" + parts.map(encodeURIComponent).join("/") + query, {
       method: request.method, body,
@@ -135,7 +136,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     const text = await upstream.text();
     if (text.length > 2_000_000) return NextResponse.json({ error: "Response exceeds limit" }, { status: 502, headers: responseHeaders });
     let result: unknown;
-    try { result = JSON.parse(text); } catch { result = { error: "Invalid backend response" }; }
+    try { result = JSON.parse(text); } catch { return NextResponse.json({error: request.method === "GET" ? "Invalid backend response" : "Request outcome uncertain — check Activity before retrying"},{status:502,headers:responseHeaders}); }
     if (!upstream.ok) {
       const detail=parts.at(-1)==="reward-distribution-plan"&&upstream.status===503&&result&&typeof result==="object"&&"detail" in result?fillPreviewMessage(result.detail):null;
       const militaryError=upstream.status===503&&parts.length===3&&parts[0]==="accounts"?(parts[2]==="military"?"Military inventory unavailable. Check account connection and refresh.":parts[2]==="ship-movements"?"Military movements unavailable. Check account connection and refresh.":null):null;

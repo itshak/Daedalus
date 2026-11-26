@@ -12,11 +12,12 @@ const safeNumber = /^[1-9][0-9]{0,11}$/;
 
 export function allowedRequest(method: string, parts: string[], params: URLSearchParams): boolean {
   if (parts.some(part => !safePart.test(part))) return false;
+  if (method !== "GET" && params.size !== 0) return false;
   if (method === "GET") {
     if (extensionRoute(parts)||challengeRoute(parts)||proxyProfileRoute(parts)) return params.size===0;
     if (parts.join("/") === "release-status") return params.size===0;
-    if (parts.length === 1 && simpleRead.has(parts[0])) return true;
-    if (parts.length === 2 && parts[0] === "warehouses") return true;
+    if (parts.length === 1 && simpleRead.has(parts[0])) return params.size===0;
+    if (parts.length === 2 && parts[0] === "warehouses") return params.size===0;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "world-reports") return params.size===0;
     if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "world-reports" && /^[a-f0-9]{24}$/.test(parts[3])) return params.size===1 && /^(?:0|[1-9][0-9]{0,4})$/.test(params.get("offset")??"") && Number(params.get("offset"))<=10201;
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "administrative-status") return params.size===0;
@@ -26,12 +27,12 @@ export function allowedRequest(method: string, parts: string[], params: URLSearc
         && (!params.has("limit")||/^(?:[1-9][0-9]?|100)$/.test(params.get("limit")??""))
         && (!params.has("status")||["all","dispatching","started","rejected","unconfirmed","operator_reconciled"].includes(params.get("status")??""));
     if (parts.length === 3 && parts[0] === "accounts" && parts[2] === "island-destinations") return params.size===2 && ["x","y"].every(k=>/^(?:[1-9][0-9]?|100)$/.test(params.get(k)??""));
-    if (parts.length === 3 && parts[0] === "accounts" && (accountResources.has(parts[2]) || parts[2] === "recovery")) return true;
-    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "jobs") return true;
-    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "preflight") return params.has("task") && (params.get("task") ?? "").length <= 96;
+    if (parts.length === 3 && parts[0] === "accounts" && (accountResources.has(parts[2]) || parts[2] === "recovery")) return params.size===0;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "recovery" && parts[3] === "jobs") return params.size===0;
+    if (parts.length === 4 && parts[0] === "accounts" && parts[2] === "tasks" && parts[3] === "preflight") return params.size===1 && /^[A-Za-z][A-Za-z0-9_]{0,95}$/.test(params.get("task")??"");
     if (parts.length === 5 && parts[0] === "accounts" && parts[2] === "cities" && safeNumber.test(parts[3]) && cityResources.has(parts[4])) {
-      if (parts[4] === "market-quotes") return ["buy", "sell_to_offers", "create_offer"].includes(params.get("side") ?? "") && /^[0-4]$/.test(params.get("resource_type") ?? "");
-      return params.size === 0 || parts[4] === "trainable-units" && [...params.keys()].every(k => k === "train_troops");
+      if (parts[4] === "market-quotes") return params.size===2 && ["buy", "sell_to_offers", "create_offer"].includes(params.get("side") ?? "") && /^[0-4]$/.test(params.get("resource_type") ?? "");
+      return params.size === 0 || parts[4] === "trainable-units" && params.size===1 && ["true","false"].includes(params.get("train_troops")??"");
     }
     return false;
   }
@@ -61,4 +62,10 @@ export function validatedControllerOrigin(raw: string | undefined): string | nul
     if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return null;
     return url.origin;
   } catch { return null; }
+}
+
+/** Forward only a query already accepted by the route allowlist. */
+export function controllerQuery(method: string, parts: string[], params: URLSearchParams): string {
+  if (!allowedRequest(method, parts, params)) throw new Error("Invalid controller route");
+  return params.size ? "?" + params.toString() : "";
 }

@@ -723,6 +723,8 @@ class IPCServer:
             response = session.s.get(
                 base_url, timeout=8, verify=True, allow_redirects=False,
             )
+            if response.status_code == 429 or response.status_code >= 500:
+                raise RuntimeError("World validation temporarily unavailable")
             text = response.text
             destination = urlsplit(str(response.url))
             # A valid city page includes its actionRequest marker. A bare 200
@@ -743,8 +745,7 @@ class IPCServer:
                 and attest_player_from_world_html(text, str(session.username))
             )
         except (OSError, ValueError, TypeError, AttributeError):
-            valid = False
-            attested = False
+            raise RuntimeError("World validation inconclusive") from None
         return {
             "status": "ok", **identity,
             "session_valid": bool(valid and attested),

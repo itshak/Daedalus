@@ -25,3 +25,7 @@ Run `npm ci`, `npm run test`, `npm run typecheck`, `npm run lint`, `npm run buil
 ## Known unfinished parts
 
 The current deployed preview includes typed native task editors, reviewed batch flows, military inventory and the sortable/filterable warehouse dashboard. See the permanent [operation coverage](../../docs/operation-coverage.json), [engineering successor](../../openspec/changes/finish-v010-engineering/tasks.md) and separate [owner acceptance](../../docs/V010-OWNER-ACCEPTANCE.md). No raw JSON mutation console is provided. Authenticated dashboard Playwright, cookie/rate-limit/CSP evidence, automated accessibility QA and owner-operated acceptance remain distinct gates.
+
+## Beta gateway security
+
+Browser sign-in uses a same-origin server route and HttpOnly, SameSite=Lax Supabase session cookies (Secure in production). All private gateway requests re-check the verified Supabase user and non-disabled operator row. The CSP blocks external connections, frames and objects; inline script/style remains necessary for the current Next.js rendering path. The bounded in-memory per-instance traffic guards are defense in depth, **not distributed rate limiting**. Configure provider-side Supabase Auth limits and Vercel ingress limits before public exposure; verify them with an authorized synthetic test. Audit action metadata is available from the controller's existing redacted receipt history; Supabase audit-table ingestion is not yet implemented.

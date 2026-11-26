@@ -16,10 +16,12 @@ import argparse
 import importlib.util
 import os
 import platform
+import plistlib
 import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +118,22 @@ def launcher_source(build_sha: str = "") -> str:
     )
 
 
+def stamp_bundle_metadata(bundle: Path, revision: str = "") -> None:
+    """Record exact product version and optional reviewed source SHA before signing."""
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:[ab]\d+|rc\d+)?", version)
+    if match is None:
+        raise RuntimeError("Unsupported application release version")
+    target = bundle / "Contents" / "Info.plist"
+    with target.open("rb") as file:
+        metadata = plistlib.load(file)
+    metadata["CFBundleShortVersionString"] = match.group(1)
+    metadata["DaedalusReleaseVersion"] = version
+    metadata["DaedalusSourceRevision"] = revision if re.fullmatch(r"[0-9a-f]{40}", revision) else "unknown"
+    with target.open("wb") as file:
+        plistlib.dump(metadata, file)
+
+
 def require_native_browser_runtime(bundle: Path) -> None:
     """Fail the Mac preview build if its private WebEngine helper is missing."""
     if not any(path.is_file() and "QtWebEngineProcess" in path.name
@@ -164,6 +182,7 @@ def build(
         # Native Mac login cannot work if the Qt WebEngine renderer/helper is
         # omitted from the .app, even if ordinary Fluent widgets still launch.
         require_native_browser_runtime(bundle)
+        stamp_bundle_metadata(bundle, os.environ.get("GITHUB_SHA", ""))
 
         if adhoc_sign:
             subprocess.run(

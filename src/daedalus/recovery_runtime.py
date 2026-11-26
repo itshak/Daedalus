@@ -357,7 +357,10 @@ class RecoverySupervisor:
         try:
             valid=self.workers.router.validate_account(account)
         except (EngineIPCUnavailable,ValueError,OSError):
-            valid=False
+            # A transport/parse failure is not independent proof of rotation.
+            # Break the consecutive-negative sequence without authorizing login.
+            self._suspected.pop(account.id,None)
+            return
         if valid:
             self._suspected.pop(account.id,None)
             return

@@ -172,3 +172,20 @@ def test_blindbase_package_docs_warn_about_gatekeeper():
     assert "xattr -cr /Applications/Daedalus.app" in docs
     assert "not permit DMGs to silently auto-execute commands" in docs
     assert "Apple Developer ID signing and notarization" in docs
+
+
+def test_beta_bundle_metadata_matches_python_project(packager, tmp_path):
+    import plistlib
+    import tomllib
+
+    contents = tmp_path / "Daedalus.app" / "Contents"
+    contents.mkdir(parents=True)
+    target = contents / "Info.plist"
+    target.write_bytes(plistlib.dumps({"CFBundleIdentifier":packager.BUNDLE_IDENTIFIER}))
+    packager.stamp_bundle_metadata(contents.parent,"a"*40)
+    data=plistlib.loads(target.read_bytes())
+    version=tomllib.loads((packager.ROOT/"pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert data["DaedalusReleaseVersion"]==version
+    assert data["CFBundleShortVersionString"]=="0.1.0"
+    assert data["DaedalusSourceRevision"]=="a"*40
+    assert data["CFBundleIdentifier"]==packager.BUNDLE_IDENTIFIER
