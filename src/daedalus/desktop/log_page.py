@@ -23,6 +23,10 @@ from daedalus.account_display import account_player_names
 from daedalus.desktop.design_system import PageHeading
 
 _EVENTS = {
+    "military inventory refreshed": ("Military inventory refreshed", "Current troops and fleets were received from the authenticated account."),
+    "military movements refreshed": ("Military movements refreshed", "Current movements were received from the authenticated account."),
+    "backend military_overview request failed": ("Military inventory unavailable", "The backend could not verify current troops and fleets. Check account connection and retry the military refresh."),
+    "backend military_movements request failed": ("Military movements unavailable", "The backend could not verify current movements. Check account connection and retry."),
     "connected to daedalus api": ("Connection established", "Your backend is available."),
     "accounts refreshed": ("Accounts refreshed", "Account status was updated."),
     "warehouse snapshot report updated": (

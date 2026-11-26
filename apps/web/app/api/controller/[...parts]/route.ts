@@ -138,7 +138,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
     try { result = JSON.parse(text); } catch { result = { error: "Invalid backend response" }; }
     if (!upstream.ok) {
       const detail=parts.at(-1)==="reward-distribution-plan"&&upstream.status===503&&result&&typeof result==="object"&&"detail" in result?fillPreviewMessage(result.detail):null;
-      return NextResponse.json({error:detail??"Backend request could not complete",status:upstream.status},{status:upstream.status>=400&&upstream.status<=599?upstream.status:502,headers:responseHeaders});
+      const militaryError=upstream.status===503&&parts.length===3&&parts[0]==="accounts"?(parts[2]==="military"?"Military inventory unavailable. Check account connection and refresh.":parts[2]==="ship-movements"?"Military movements unavailable. Check account connection and refresh.":null):null;
+      return NextResponse.json({error:detail??militaryError??"Backend request could not complete",status:upstream.status},{status:upstream.status>=400&&upstream.status<=599?upstream.status:502,headers:responseHeaders});
     }
     return NextResponse.json(result, { status: upstream.status, headers: responseHeaders });
   } catch {

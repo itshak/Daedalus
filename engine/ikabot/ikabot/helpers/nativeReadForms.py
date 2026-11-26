@@ -10,7 +10,7 @@ from ikabot.config import actionRequest
 
 PARAM_VIEWS = frozenset({
     "barracks", "shipyard", "temple", "buildingSpeedup", "workshop",
-    "militaryAdvisor", "buildingGround", "deployment", "branchOffice", "branchOfficeOwnOffers",
+    "militaryAdvisor", "cityMilitary", "buildingGround", "deployment", "branchOffice", "branchOfficeOwnOffers",
 })
 URL_VIEWS = frozenset("view=" + view for view in (
     "saveCityBuildingsPositions", "researchAdvisor", "academy", "temple",
@@ -28,6 +28,16 @@ def _position(value):
 
 def validate_params(params, *, noIndex=False):
     view = params.get("view")
+    if view == "cityMilitary":
+        if (noIndex or set(params) != {"view", "activeTab", "cityId", "currentTab",
+                "currentCityId", "templateView", "actionRequest", "ajax"}
+                or not _id(params["cityId"])
+                or str(params["cityId"]) != str(params["currentCityId"])
+                or params["activeTab"] != "tabUnits" or params["currentTab"] != "tabUnits"
+                or params["templateView"] != view or str(params["ajax"]) != "1"
+                or params["actionRequest"] != actionRequest):
+            raise ValueError("Unsupported cookie-only military inventory view")
+        return
     if view == "deployment":
         if (noIndex or set(params) != {
                 "view", "deploymentType", "destinationCityId", "backgroundView",

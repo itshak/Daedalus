@@ -326,3 +326,29 @@ def test_shared_deployment_inventory_uses_original_read_form():
                              "currentCityId": "123", "actionRequest": actionRequest, "ajax": 1,
                              "function": "unexpected"})
     assert http.post.call_count == 1
+
+
+def test_actual_upstream_military_inventory_uses_protected_read_transport():
+    import json
+    from unittest.mock import Mock
+    from ikabot.config import actionRequest
+    from ikabot.function.viewArmy import getCityMilitaryData
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    reply = json.dumps([["updateGlobalData", {}], ["changeView", [None, "inventory"]]])
+    http.post = Mock(return_value=SimpleNamespace(
+        url=session.urlBase, status_code=200, text=reply, content=reply.encode(), history=[]))
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
+        assert getCityMilitaryData(session, "123") == "inventory"
+        expected = {"view": "cityMilitary", "activeTab": "tabUnits", "cityId": "123",
+                    "currentTab": "tabUnits", "currentCityId": "123", "templateView": "cityMilitary",
+                    "actionRequest": "abcdefgh1234", "ajax": "1"}
+        http.post.assert_called_once_with(session.urlBase, data={}, params=expected,
+                                         verify=True, timeout=12, allow_redirects=False)
+        with pytest.raises(ValueError, match="Unsupported cookie-only military inventory view"):
+            session.post(params={**expected, "actionRequest": actionRequest, "action": "CityScreen"})
+        with pytest.raises(ValueError, match="Unsupported cookie-only military inventory view"):
+            session.post(params={**expected, "actionRequest": actionRequest, "currentCityId": "456"})
+    assert http.post.call_count == 1
