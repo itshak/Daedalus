@@ -16,6 +16,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.account_display import account_player_names
 from daedalus.desktop.design_system import PageHeading
 from daedalus.desktop.pages import _populate, _table
 
@@ -105,10 +106,14 @@ class MilitaryPage(QWidget):
         self.account_combo.blockSignals(True)
         self.account_combo.clear()
         self.account_combo.addItem(f"All accounts ({len(live)})", userData="__all__")
+        labels = account_player_names(self._accounts)
         for item in self._accounts:
-            label = str(item.get("label") or item.get("player") or item["id"])[:100]
+            label = labels[str(item["id"])]
             world = str(item.get("world") or "")[:24]
-            self.account_combo.addItem(f"{label}  ·  {world}", userData=item["id"])
+            # Duplicate player names already include a world and account suffix.
+            if world and f" · {world} (" not in label:
+                label = f"{label} · {world}"
+            self.account_combo.addItem(label, userData=item["id"])
         selection = self.account_combo.findData(prior)
         self.account_combo.setCurrentIndex(max(0, selection))
         self.account_combo.blockSignals(False)
@@ -171,8 +176,7 @@ class MilitaryPage(QWidget):
         self._render()
 
     def _render(self, *_args: object, preserve_pending: bool = False) -> None:
-        labels = {str(a["id"]): str(a.get("label") or a.get("player") or a["id"])
-                  for a in self._accounts}
+        labels = account_player_names(self._accounts)
         selected = self.selected_account_ids()
         kind = "military_movements" if self._mode == "movements" else "military_overview"
         loaded = [aid for aid in selected if (aid, kind) in self._cache]

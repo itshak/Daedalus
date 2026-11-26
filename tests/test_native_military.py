@@ -171,9 +171,11 @@ def test_native_military_page_all_accounts_is_read_only_and_context_isolated():
     page = MilitaryPage()
     try:
         page.set_accounts([
-            {"id": "alpha", "label": "Athena", "world": "s301-en", "enabled": True},
-            {"id": "beta", "label": "Boreas", "world": "s302-en", "enabled": True},
+            {"id": "alpha", "label": "Imported IkaBot account 01", "player": "Athena", "world": "s301-en", "enabled": True},
+            {"id": "beta", "label": "Imported IkaBot account 02", "player": "Boreas", "world": "s302-en", "enabled": True},
         ])
+        assert page.account_combo.itemText(1) == "Athena · s301-en"
+        assert page.account_combo.itemText(2) == "Boreas · s302-en"
         scopes = []
         page.refresh_requested.connect(lambda ids, kind: scopes.append((ids, kind)))
         assert page.selected_account_ids() == ["alpha", "beta"]
@@ -186,6 +188,7 @@ def test_native_military_page_all_accounts_is_read_only_and_context_isolated():
                         "troops": [{"unit": "Swordsman", "amount": 17}], "fleet": []}],
         })
         assert page.tables[0].rowCount() == 1
+        assert page.tables[0].item(0, 0).text() == "Athena"
         assert "1/2" in page.status.text()
         assert "Boreas" not in page.tables[0].item(0, 0).text()
         page.set_unavailable("beta", "military_overview")
