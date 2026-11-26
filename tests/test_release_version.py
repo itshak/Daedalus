@@ -44,3 +44,9 @@ def test_beta_release_checks_exact_revision_and_checksum(tmp_path):
     dmg.write_bytes(b"changed-package")
     with pytest.raises(ValueError, match="mismatch"):
         module["verify_checksum"](dmg, checksum)
+
+
+def test_server_install_includes_offline_smoke_client():
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert any(req.startswith("httpx>=") for req in project["optional-dependencies"]["server"])
