@@ -30,6 +30,8 @@ jobs:
           daedalus doctor
       - name: Verify clean installed server extra and offline smoke
         shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/engine/ikabot
         run: |
           wheel=(dist/*.whl)
           python -m pip install "${wheel[0]}[server]"
