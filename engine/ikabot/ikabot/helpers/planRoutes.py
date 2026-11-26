@@ -16,6 +16,35 @@ from ikabot.helpers.fillProgress import mark
 from ikabot.helpers.pedirInfo import getShipCapacity
 
 
+def transport_feedback(response):
+    """Read named game feedback, independent of command ordering.
+
+    Never infer success from a generic state update or arbitrary nested type.
+    The raw response and localized server text must not cross the IPC boundary.
+    """
+    try:
+        rows = json.loads(response, strict=False)
+    except (ValueError, TypeError):
+        return "invalid_transport_response"
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+        return "invalid_transport_response"
+    feedback = []
+    for entry in rows:
+        if not isinstance(entry, list) or not entry or entry[0] != "provideFeedback":
+            continue
+        if len(entry) != 2 or not isinstance(entry[1], list) or len(entry[1]) > 100:
+            return "invalid_transport_response"
+        for item in entry[1]:
+            if not isinstance(item, dict) or type(item.get("type")) is not int:
+                return "invalid_transport_response"
+            feedback.append(item["type"])
+    if feedback and all(kind == 11 for kind in feedback):
+        return "transport_rejected"
+    if feedback and all(kind == 10 for kind in feedback):
+        return "accepted"
+    return "transport_feedback_unconfirmed"
+
+
 def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, useFreighters=False, checkpoint=None, route_index=None, verify_recipient=None, before_send=None):
     """This function will execute one route
     Parameters
@@ -33,18 +62,24 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
     send : list
         array of resources to send
     """
-    cookie_review = (before_send is not None
-                     and getattr(session, "_daedalus_cookies_only", False) is True)
+    cookie_review = getattr(session, "_daedalus_cookies_only", False) is True
+    guarded = before_send is not None or cookie_review
     # this can fail if a random request is made in between this two posts
     while True:
-        if cookie_review:
-            # The default view may be the advisor or island, not a city.
-            mark(session, "checking_current_city")
-            currId = getCurrentCityId(session)
-        else:
+        if not guarded:
             html = session.get()
             currId = getCity(html)["id"]
         city = getCity(session.get(city_url + originCityId))
+        if guarded:
+            # The guard reads the destination city and advisor. Those views can
+            # change selected-city context. Complete them before selecting origin.
+            if before_send is not None:
+                before_send()
+            if verify_recipient is not None:
+                verify_recipient(route_index)
+            # The default view may be the advisor or island, not a city.
+            mark(session, "checking_current_city")
+            currId = getCurrentCityId(session)
 
         # Change from the city the bot is sitting right now to the city we want to load resources from
         data = {
@@ -58,9 +93,9 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             "ajax": "1",
         }
 
-        if cookie_review:
+        if guarded:
             mark(session, "switching_city")
-            session._daedalus_reviewed_transport_post(data)
+            session.post(params=data, retry_on_failure=False)
         else:
             session.post(params=data)
 
@@ -96,7 +131,11 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
             shiptype = "usedFreightersShips"
             data[shiptype] = ships
             data["transporters"] = "0"
-        if verify_recipient is not None:
+        if guarded:
+            available = (getAvailableFreighters if useFreighters else getAvailableShips)(session)
+            if type(available) is not int or available < ships:
+                raise RuntimeError("Reviewed fleet changed; review before retry")
+        if verify_recipient is not None and not guarded:
             verify_recipient(route_index)
         # Re-read after changing the selected city and recipient verification.
         # Never silently omit a resource that vanished after the route planner
@@ -112,20 +151,29 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                        for n, wanted in zip(city["availableResources"], send))):
             raise RuntimeError("Transport source changed; review remaining cargo before retrying")
         for i, amount in enumerate(send):
-            if amount:
+            # Preserve upstream sendGoods form semantics, including explicit
+            # zeros for resource inputs present in the source city.
+            if city["availableResources"][i] > 0:
                 key = "cargo_resource" if i == 0 else "cargo_tradegood{:d}".format(i)
                 data[key] = amount
 
-        if before_send is not None:
-            before_send()
         # Reserve before transport POST; unknown outcomes remain uncertain.
         chunk_id = checkpoint.reserve(route_index, send) if checkpoint else None
         # The server may have accepted the cargo before a response was lost.
         # Never replay this non-idempotent POST at the transport layer.
         mark(session, "submitting")
-        resp = (session._daedalus_reviewed_transport_post(data) if cookie_review
-                else session.post(params=data, retry_on_failure=False))
+        resp = session.post(params=data, retry_on_failure=False)
         mark(session, "checking_transport_response")
+        if cookie_review:
+            feedback = transport_feedback(resp)
+            if feedback != "accepted":
+                mark(session, feedback)
+                if checkpoint and feedback == "transport_rejected":
+                    checkpoint.rejected(chunk_id, send)
+                raise RuntimeError("Reviewed transport not confirmed; reconcile before retry")
+            if checkpoint:
+                checkpoint.confirmed(chunk_id, send)
+            break
         try:
             outcome = json.loads(resp, strict=False)[3][1][0]["type"]
         except (ValueError, TypeError, KeyError, IndexError):
@@ -145,7 +193,7 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
         time.sleep(5)
 
 
-def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_recipient=None):
+def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_recipient=None, *, policy=None):
     """This function will execute all the routes passed to it, regardless if there are enough ships available to do so
     Parameters
     ----------
@@ -155,6 +203,9 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
         a list of tuples, each of which represent a route. A route is defined like so : (originCity,destinationCity,islandId,wood,wine,marble,crystal,sulfur). originCity and destintionCity should be passed as City objects
     """
     ship_capacity, freighter_capacity = getShipCapacity(session)
+    if policy is not None and (type((freighter_capacity if useFreighters else ship_capacity)) is not int
+                               or (freighter_capacity if useFreighters else ship_capacity) <= 0):
+        raise ValueError("Fleet capacity unavailable")
     for route_index, route in enumerate(routes):
         (origin_city, destination_city, island_id, *toSend) = route
         if checkpoint:
@@ -162,10 +213,20 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
         destination_city_id = destination_city["id"]
 
         while sum(toSend) > 0:
+            if policy is not None and not policy.before_wait(origin_city["id"], destination_city_id):
+                return
             session.setStatus(
                 f' Sending {toSend[0]}W, {toSend[1]}V, {toSend[2]}M, {toSend[3]}C, {toSend[4]}S | {origin_city["name"]} ---> {destination_city["name"]} '
             )
             ships_available = waitForArrival(session, useFreighters)
+            if policy is not None:
+                if type(ships_available) is not int or ships_available <= 0:
+                    raise ValueError("Fleet unavailable")
+                # Long-running reviewed tasks must not use obsolete fleet capacity.
+                ship_capacity, freighter_capacity = getShipCapacity(session)
+                capacity = freighter_capacity if useFreighters else ship_capacity
+                if type(capacity) is not int or capacity <= 0:
+                    raise ValueError("Fleet capacity unavailable")
             if useFreighters is False:
                 storageCapacityInShips = ships_available * ship_capacity
             else:
@@ -176,6 +237,8 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
             html = session.get(city_url + str(destination_city_id))
             destination_city = getCity(html)
             foreign = str(destination_city["id"]) != str(destination_city_id)
+            if policy is not None and (foreign or str(origin_city["id"]) != str(route[0]["id"])):
+                raise ValueError("Reviewed route city identity changed")
             if foreign is False:
                 storageCapacityInCity = destination_city["freeSpaceForResources"]
 
@@ -194,11 +257,15 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
                         toSend[i],
                         storageCapacityInShips,
                     )
-                send.append(min_val)
+                send.append(max(0, min_val))
                 storageCapacityInShips -= send[i]
-                if checkpoint is None:
-                    toSend[i] -= send[i]
 
+            if policy is not None:
+                send = policy.limit(origin_city, destination_city, island_id, send)
+                if send is None:
+                    return
+                if not any(send):
+                    break
             resources_to_send = sum(send)
             if resources_to_send == 0:
                 # no space available
@@ -224,10 +291,14 @@ def executeRoutes(session, routes, useFreighters=False, checkpoint=None, verify_
                 useFreighters,
                 checkpoint=checkpoint, route_index=route_index,
                 **({"verify_recipient": verify_recipient} if verify_recipient is not None else {}),
+                **({"before_send": lambda: policy.before_send(origin_city["id"], destination_city_id,
+                                                               island_id, send)} if policy is not None else {}),
             )
-            if checkpoint:
-                toSend = [remaining - transferred
-                          for remaining, transferred in zip(toSend, send)]
+            if policy is not None:
+                policy.after_send(send)
+            # Subtract only after a confirmed sender result, including a
+            # policy's independent cargo observation when applicable.
+            toSend = [remaining - transferred for remaining, transferred in zip(toSend, send)]
             time.sleep(random.randint(5, 15))
 
 
@@ -286,8 +357,8 @@ def getMinimumWaitingTime(session):
         idCiudad, actionRequest
     )
     if getattr(session, "_daedalus_cookies_only", False) is True:
-        from ikabot.function.fillCityWarehouse import _advisor_data
-        postdata = _advisor_data(session, idCiudad)
+        from ikabot.helpers.fleetAdvisor import advisor_data
+        postdata = advisor_data(session, idCiudad)
     else:
         posted = session.post(url)
         postdata = json.loads(posted, strict=False)
@@ -321,7 +392,7 @@ def waitForArrival(session, useFreighters=False):
     elif useFreighters is True: available_ships = getAvailableFreighters(session)
     while available_ships == 0:
         minimum_waiting_time_for_ship = getMinimumWaitingTime(session)
-        wait(minimum_waiting_time_for_ship)
+        wait(max(5, minimum_waiting_time_for_ship))
         if useFreighters is False: available_ships = getAvailableShips(session)
         elif useFreighters is True: available_ships = getAvailableFreighters(session)
     return available_ships

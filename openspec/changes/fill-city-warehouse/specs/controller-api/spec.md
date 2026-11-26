@@ -34,3 +34,15 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: A managed transfer fails or waits for ships
 - **WHEN** the warehouse worker is running or exits before its reviewed cargo is confirmed
 - **THEN** the controller SHALL expose a bounded execution stage and separately observed submitted and advisor-verified quantities, and the clients MUST NOT equate worker launch or exit with arrival
+
+#### Scenario: Transport feedback commands are reordered or rejected
+- **WHEN** the game returns a reviewed transport response
+- **THEN** the worker SHALL classify named feedback independently of command ordering, distinguish rejection from unconfirmed response, verify selected source context before submission, and MUST NOT count unknown outcomes as successful or replay them automatically.
+
+#### Scenario: Shared upstream shipment implementation
+- **WHEN** a reviewed warehouse allocation is executed
+- **THEN** the worker SHALL normalize the allocation through the existing IkaBot sendResources preparation, use the shared route executor and sender, and enforce warehouse-specific capacity and incoming-cargo rules through an internal policy rather than a separate transport loop
+
+#### Scenario: Verified cookie worker uses the common sender
+- **WHEN** the shared sender submits a transport on an already verified cookie-only session
+- **THEN** the standard Session.post interface SHALL preserve the upstream transport form, require the exact selected source and a fresh token, and perform one bounded submission without login or replay; contradictory responses MUST remain unconfirmed

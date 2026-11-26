@@ -1,15 +1,14 @@
 """Daedalus one-time owned-city fill, using IkaBot's existing transport sender."""
-import json
-import math
 import re
 import time
 
-from ikabot.config import actionRequest, materials_names_tec
+from ikabot.config import materials_names_tec
 from ikabot.helpers import pedirInfo
 from ikabot.helpers.decorators import task
 from ikabot.helpers.fillProgress import mark
+from ikabot.helpers.fleetAdvisor import advisor_data as _advisor_data
 from ikabot.helpers.naval import getAvailableFreighters, getAvailableShips, getTotalFreighters, getTotalShips
-from ikabot.helpers.planRoutes import sendGoods, waitForArrival
+from ikabot.function import sendResources
 from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.taskConfig import getCityById, requireOwnCity
 from ikabot.helpers.varios import decodeUnicodeEscape
@@ -53,22 +52,6 @@ def _city(session, cid):
     if str(city["id"]) != str(cid):
         raise ValueError("City identity changed")
     return city
-
-
-def _advisor_data(session, target):
-    """Read the fixed advisor view without a legacy POST on cookie-only workers."""
-    if getattr(session, "_daedalus_cookies_only", False) is True:
-        # Use the existing protected same-world GET transport; do not
-        # reauthenticate, read stored cookies, or switch to legacy POST.
-        html = session.get(f"view=militaryAdvisor&currentCityId={target}")
-        marker = re.search(r"ajax\.Responder,\s*(?=\[)", html)
-        if marker is None:
-            raise ValueError("Advisor response unavailable")
-        raw, _ = json.JSONDecoder(strict=False).raw_decode(html[marker.end():])
-        return raw
-    url = ("view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city"
-           f"&currentCityId={target}&actionRequest={actionRequest}&ajax=1")
-    return json.loads(session.post(url, retry_on_failure=False), strict=False)
 
 
 def incoming_amount(session, target, name, resource):
@@ -185,73 +168,98 @@ def prepare_fill(session, destination_city, resource, useFreighters=False, revie
             "reviewed_sources": reviewed_sources}
 
 
+class _WarehousePolicy:
+    """Only warehouse-specific rules; route execution remains in executeRoutes."""
+
+    def __init__(self, session, destination, resource, freighters):
+        self.session, self.destination = session, destination
+        self.index, self.resource = RESOURCES.index(resource), resource
+        self.freighters = freighters
+        self.sent = 0
+        self.before_incoming = 0
+        self.full = False
+
+    def _observe(self, source, target, island=None):
+        if int(target) != self.destination:
+            raise ValueError("Reviewed destination changed")
+        names, city, free, incoming = _target(self.session, self.destination, self.index)
+        if int(source) not in names or (island is not None and str(city["islandId"]) != str(island)):
+            raise ValueError("Storage or ownership changed; review before retrying")
+        return max(0, free - incoming), incoming
+
+    def _has_space(self, budget):
+        if budget:
+            return True
+        self.full = True
+        mark(self.session, "capacity_reached")
+        self.session.setStatus(f"Storage budget exhausted; submitted {self.sent:,}")
+        return False
+
+    def before_wait(self, source, target):
+        mark(self.session, "checking_destination")
+        budget, _ = self._observe(source, target)
+        if not self._has_space(budget):
+            return False
+        total = (getTotalFreighters if self.freighters else getTotalShips)(self.session)
+        if type(total) is not int or total <= 0:
+            raise ValueError("Selected fleet unavailable")
+        mark(self.session, "waiting_ships")
+        return True
+
+    def limit(self, origin, target, island, proposed):
+        mark(self.session, "checking_source")
+        stock = _amount(origin["availableResources"][self.index])
+        budget, _ = self._observe(origin["id"], target["id"], island)
+        if not self._has_space(budget):
+            return None
+        if any(n for i, n in enumerate(proposed) if i != self.index):
+            raise ValueError("Unexpected reviewed resource")
+        cargo = [0] * len(RESOURCES)
+        cargo[self.index] = min(_amount(proposed[self.index]), stock, budget)
+        return cargo
+
+    def before_send(self, source, target, island, cargo):
+        mark(self.session, "checking_guard")
+        budget, self.before_incoming = self._observe(source, target, island)
+        if cargo[self.index] > budget:
+            raise ValueError("Storage or ownership changed; review before retrying")
+
+    def after_send(self, cargo):
+        quantity = cargo[self.index]
+        self.sent += quantity
+        mark(self.session, "verifying_cargo", submitted=self.sent)
+        self.session.setStatus(f"Submitted {self.sent:,} {self.resource}; checking incoming cargo")
+        for attempt in range(3):
+            _, _, _, observed = _target(self.session, self.destination, self.index)
+            if observed >= self.before_incoming + quantity:
+                mark(self.session, "verifying_cargo", verified=self.sent)
+                return
+            if attempt < 2:
+                time.sleep(2)
+        self.session.setStatus(f"Submitted {self.sent:,}; incoming cargo unconfirmed. Review before retrying.")
+        raise RuntimeError("Warehouse cargo unconfirmed; reconcile before retrying")
+
+
 @task("fillCityWarehouse", prepare=prepare_fill, report_error=False)
 def fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None):
-    """Send at most the reviewed quantities, never refill automatically."""
+    """Translate the review to upstream JSON routes and use the shared sender."""
     mark(session, "preparing")
     config = prepare_fill(session, destination_city, resource, useFreighters, reviewed_sources)
     index = RESOURCES.index(resource)
     setInfoSignal(session, f"Fill warehouse: {resource} (one time)")
-    sent = 0
+    # Cap the reviewed amounts at fresh stock before upstream's strict
+    # preparation. The shared executor rechecks stock before each load.
+    routes = []
     for row in config["reviewed_sources"]:
-        source, remaining = row["city_id"], row["amount"]
-        while remaining:
-            mark(session, "checking_destination")
-            names, target, free, incoming = _target(session, destination_city, index)
-            if source not in names:
-                raise ValueError("Source no longer owned")
-            if free <= incoming:
-                mark(session, "capacity_reached")
-                session.setStatus(f"Storage budget exhausted; submitted {sent:,}")
-                return
-            total = (getTotalFreighters if useFreighters else getTotalShips)(session)
-            if type(total) is not int or total <= 0:
-                raise ValueError("Selected fleet unavailable")
-            mark(session, "waiting_ships")
-            ships = waitForArrival(session, useFreighters)
-            capacity = pedirInfo.getShipCapacity(session)[int(useFreighters)]
-            if type(capacity) is not int or capacity <= 0 or type(ships) is not int or ships <= 0:
-                raise ValueError("Fleet unavailable")
-            names, target, free, incoming = _target(session, destination_city, index)
-            if source not in names:
-                raise ValueError("Source no longer owned")
-            mark(session, "checking_source")
-            stock = _amount(_city(session, source)["availableResources"][index])
-            qty = min(remaining, stock, max(0, free-incoming), ships*capacity)
-            if qty <= 0:
-                break
-            cargo = [0]*5
-            cargo[index] = qty
-            before_incoming = incoming
-
-            def guard():
-                nonlocal before_incoming
-                mark(session, "checking_guard")
-                current_names, current, current_free, current_incoming = _target(session, destination_city, index)
-                if (source not in current_names or str(current["islandId"]) != str(target["islandId"])
-                        or qty > max(0, current_free-current_incoming)):
-                    raise ValueError("Storage or ownership changed; review before retrying")
-                before_incoming = current_incoming
-
-            sendGoods(session, str(source), str(destination_city), target["islandId"],
-                      math.ceil(qty/capacity), cargo, useFreighters, before_send=guard)
-            sent += qty
-            mark(session, "verifying_cargo", submitted=sent)
-            remaining -= qty
-            session.setStatus(f"Submitted {sent:,} {resource}; checking incoming cargo")
-            # Don't send another load against a potentially stale advisor. The
-            # accepted load must be visible as incoming before we proceed.
-            for attempt in range(3):
-                _, _, _, observed = _target(session, destination_city, index)
-                if observed >= before_incoming + qty:
-                    mark(session, "verifying_cargo", verified=sent)
-                    break
-                if attempt < 2:
-                    time.sleep(2)
-            else:
-                session.setStatus(f"Submitted {sent:,}; incoming cargo unconfirmed. Review before retrying.")
-                if getattr(session, "_daedalus_managed_fill", False) is True:
-                    raise RuntimeError("Warehouse cargo unconfirmed; reconcile before retrying")
-                return
-    mark(session, "finished")
-    session.setStatus(f"Warehouse fill finished; submitted {sent:,} {resource}")
+        amount = min(row["amount"], _amount(_city(session, row["city_id"])["availableResources"][index]))
+        if amount:
+            routes.append({"from": row["city_id"], "to": destination_city,
+                           "resources": {resource: amount}})
+    policy = _WarehousePolicy(session, destination_city, resource, useFreighters)
+    if routes:
+        # The exact same preparation and execution functions as sendResources CLI.
+        prepared = sendResources.prepare_sendResources(session, routes, useFreighters)
+        sendResources.execute_prepared_shipments(session, **prepared, policy=policy)
+    if not policy.full:
+        mark(session, "finished")
+        session.setStatus(f"Warehouse fill finished; submitted {policy.sent:,} {resource}")

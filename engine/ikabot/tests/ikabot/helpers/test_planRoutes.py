@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
-from ikabot.helpers.planRoutes import sendGoods, splitCargoBetweenFleets
+from ikabot.helpers.planRoutes import sendGoods, splitCargoBetweenFleets, transport_feedback
 
 
 class TestSplitCargoBetweenFleets(unittest.TestCase):
@@ -150,19 +150,68 @@ class TestShipmentOutcome(unittest.TestCase):
     def test_reviewed_cookie_sender_does_not_parse_default_view_as_city(self):
         self.session._daedalus_cookies_only = True
         self.session.get.return_value = "currentCityId: 7, not a city view"
-        self.session._daedalus_reviewed_transport_post.side_effect = [
-            "ok", '[null,null,null,[null,[{"type":10}]]]']
+        self.session.post.side_effect = [
+            "ok", '[["provideFeedback",[{"type":10}]],["updateGlobalData",{}]]']
         guard = Mock()
-        with patch("ikabot.helpers.planRoutes.getCity", return_value={
+        with patch("ikabot.helpers.planRoutes.getAvailableShips", return_value=1), patch("ikabot.helpers.planRoutes.getCity", return_value={
             "id": "1", "availableResources": [100] * 5
         }) as parser:
             sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0], before_send=guard)
         self.assertEqual(parser.call_count, 2)
-        calls = self.session._daedalus_reviewed_transport_post.call_args_list
-        self.assertEqual(calls[0].args[0]["currentCityId"], "7")
-        self.assertEqual(calls[1].args[0]["cargo_resource"], 10)
+        calls = self.session.post.call_args_list
+        self.assertEqual(calls[0].kwargs["params"]["currentCityId"], "7")
+        self.assertEqual(calls[1].kwargs["params"]["cargo_resource"], 10)
         guard.assert_called_once()
-        self.session.post.assert_not_called()
+        self.assertNotIn("normalTransportersMax", calls[1].kwargs["params"])
+        self.assertTrue(all(c.kwargs["retry_on_failure"] is False for c in calls))
+
+    def test_reviewed_payload_matches_upstream_for_trade_ships_and_freighters(self):
+        from ikabot.config import actionRequest
+        # Upstream stable 3ea1e0e and PR499 062feec/55d8877 use this same form.
+        # Positive-stock resources have explicit zero fields, empty stock is omitted.
+        expected = {
+            "action": "transportOperations", "function": "loadTransportersWithFreight",
+            "destinationCityId": "2", "islandId": "3", "oldView": "",
+            "position": "", "avatar2Name": "", "city2Name": "", "type": "",
+            "activeTab": "", "transportDisplayPrice": "0", "premiumTransporter": "0",
+            "capacity": "5", "max_capacity": "5", "jetPropulsion": "0",
+            "backgroundView": "city", "currentCityId": "1", "templateView": "transport",
+            "currentTab": "tabSendTransporter", "actionRequest": actionRequest, "ajax": "1",
+            "cargo_resource": 10, "cargo_tradegood1": 0,
+            "cargo_tradegood3": 0, "cargo_tradegood4": 0,
+        }
+        for freighters in (False, True):
+            with self.subTest(freighters=freighters):
+                self.session.reset_mock()
+                self.session._daedalus_cookies_only = True
+                self.session.get.return_value = "currentCityId: 1,"
+                self.session.post.side_effect = [
+                    "ok", '[["provideFeedback",[{"type":10}]]]']
+                with patch("ikabot.helpers.planRoutes.getAvailableShips", return_value=5), patch("ikabot.helpers.planRoutes.getAvailableFreighters", return_value=5), patch(
+                    "ikabot.helpers.planRoutes.getCity", return_value={
+                        "id": "1", "availableResources": [100, 100, 0, 100, 100],
+                    }
+                ):
+                    sendGoods(self.session, "1", "2", "3", 1, [10, 0, 0, 0, 0],
+                              freighters, before_send=Mock())
+                actual = self.session.post.call_args_list[1].kwargs["params"]
+                ships = {"transporters": "0", "usedFreightersShips": 1} if freighters else {"transporters": 1}
+                self.assertEqual(actual, {**expected, **ships})
+
+    def test_named_feedback_is_not_position_dependent(self):
+        self.assertEqual(transport_feedback('[["provideFeedback",[{"type":10}]],["updateGlobalData",{}]]'), "accepted")
+        self.assertEqual(transport_feedback('[["updateGlobalData",{}],["provideFeedback",[{"type":10}]]]'), "accepted")
+
+    def test_feedback_errors_and_unknown_are_never_success(self):
+        for response, expected in [
+            ('[["provideFeedback",[{"type":11}]]]', "transport_rejected"),
+            ('[["provideFeedback",[{"type":10},{"type":11}]]]', "transport_feedback_unconfirmed"),
+            ('[["updateGlobalData",{"type":10}]]', "transport_feedback_unconfirmed"),
+            ('[["provideFeedback",[{"type":99}]]]', "transport_feedback_unconfirmed"),
+            ('<html>private</html>', "invalid_transport_response"),
+            ('[["provideFeedback",[{"type":"10"}]]]', "invalid_transport_response"),
+        ]:
+            self.assertEqual(transport_feedback(response), expected)
 
     def test_confirmed_shipment_records_exact_cargo(self):
         self.session.post.side_effect = ["ok", '[null,null,null,[null,[{"type":10}]]]']

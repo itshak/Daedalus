@@ -40,3 +40,17 @@ review is not a shipment; repaired live dispatch and delivery remain open.
 ### Execution diagnostics follow-up
 
 A live launch reached the child process but exited without observed incoming cargo. The managed process now exposes a bounded stage and cumulative submitted/verified cargo counts. Default game views are not assumed to contain full city data. Real dispatch and arrival acceptance remain open; a process start is not shipment success.
+
+### Transport response follow-up
+
+Live execution reached response checking, but no cargo was observed. The raw response was not retained or accessed. Replace positional feedback parsing for reviewed cookie shipments with named provideFeedback classification; check source context after destination guard and include the observed normal fleet limit. Distinguish explicit rejection, invalid response, unconfirmed feedback and changed source. Live acceptance is still open.
+
+### Upstream CLI parity review
+
+Compared public stable 3ea1e0e, pinned PR #499 062feec and its current head 55d8877. All retain the same sendGoods payload and shared transport routine; the upstream JSON task normalizes routes before executing them. Restore the explicit zero cargo fields for positive source stock and do not introduce non-upstream fleet form fields. The reviewed warehouse planner retains its own storage guard and no-replay policy. Synthetic parity tests compare normalized arguments and exact request dictionaries. The historical server rejection is not conclusively diagnosed.
+
+### Full consolidation
+
+Removed the independent warehouse transport loop. The reviewed allocation is converted into upstream sendResources route JSON, normalized by the existing prepare function, and dispatched through shared route resolution, executeRoutes and sendGoods. Warehouse policy alone handles storage reservations and movement verification. Both normal and cookie-only shared senders use Session.post; the latter protects only existing transport actions with bounded nonredirecting requests and no implicit login. Exact upstream cargo fields restored. Shared military advisor reader avoids a dependency from generic fleet waits to the warehouse feature. Mixed success/rejection feedback remains uncertain.
+
+Synthetic sender-to-HTTP verification proves the route shape, final source context, one cargo submission and observed incoming cargo without network access. Live game acceptance remains unverified.

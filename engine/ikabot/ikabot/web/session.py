@@ -1535,6 +1535,11 @@ class Session:
         html = self.get()
         if not attest_player_from_world_html(html, self.username):
             raise RuntimeError("Reviewed transport account verification failed")
+        if params["action"] == "transportOperations":
+            selected = re.search(r"currentCityId:\s*(\d+),", html)
+            if selected is None or selected.group(1) != str(params.get("currentCityId")):
+                mark(self, "transport_source_mismatch")
+                raise RuntimeError("Reviewed transport source context changed")
         match = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
         if match is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", match.group(1)):
             raise RuntimeError("Reviewed transport request token unavailable")
@@ -1542,7 +1547,7 @@ class Session:
         if params["action"] == "transportOperations":
             mark(self, "submitting")
         try:
-            response = self.s.post(self.urlBase, params=query,
+            response = self.s.post(self.urlBase, data={}, params=query,
                                    allow_redirects=False, verify=True, timeout=12)
             arrived = urllib.parse.urlsplit(str(response.url))
             if (response.status_code != 200 or arrived.scheme != "https"
@@ -1717,6 +1722,14 @@ class Session:
         html : str
             response from the server
         """
+        if getattr(self, "_daedalus_cookies_only", False) is True and (
+                isinstance(params, dict) and
+                (params.get("action"), params.get("function")) in {
+                    ("header", "changeCurrentCity"),
+                    ("transportOperations", "loadTransportersWithFreight")}):
+            if url or payloadPost or ignoreExpire or noIndex or fullResponse or noQuery or kwargs or retry_on_failure:
+                raise ValueError("Cookie-only transport requires one bounded standard POST")
+            return self._daedalus_reviewed_transport_post(params)
         if not retry_on_failure:
             kwargs["allow_redirects"] = False
         url_original = url
