@@ -16,3 +16,5 @@ Keep the prior verified backend revision, DMG and Vercel deployment available. B
 The remaining engineering work is tracked in `finish-v010-engineering`; real game effects and physical Mac acceptance remain separately in [owner acceptance](V010-OWNER-ACCEPTANCE.md). No versioned beta release has been published by this preparation alone.
 
 CI workflow updates for browser E2E and bundle provenance assertions are committed on the engineering branch through the authorized GitHub integration. The server CLI retains its limited OAuth scope; GitHub branch protection remains in force. Require actual successful CI on the final revision.
+
+Native visual QA: `QT_QPA_PLATFORM=offscreen python scripts/capture_native_ui.py --output-dir ./qa-screenshots` renders the actual Qt client with synthetic fixtures. The matrix includes 19 primary/secondary views at 900×650 and 1200×800 in light/dark, and all 33 native operation editors at 900×650 in both themes (142 images). The Linux CI screenshot artifact must be generated successfully; physical macOS visual acceptance is separate.

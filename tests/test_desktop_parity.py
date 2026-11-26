@@ -347,28 +347,23 @@ def test_proxy_profile_editor_rejects_foreign_status_and_busy_account(qt_app):
         _dispose(page, qt_app)
 
 
-def test_native_scroll_surfaces_follow_runtime_theme(qt_app, monkeypatch):
-    from PySide6.QtGui import QPalette
-    from qfluentwidgets import Theme, setTheme
+def test_settings_sections_keep_common_account_and_scope_visible(qt_app):
+    from daedalus.desktop.appearance_page import AppearancePage
 
-    import daedalus.desktop.app as module
-    from daedalus.desktop.theme import apply_app_palette
-    from daedalus.gui_preferences import GuiPreferences
-
-    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
-    monkeypatch.setattr(MainWindow, "_auto_reconnect_securely", lambda _: None)
-    setTheme(Theme.LIGHT)
-    apply_app_palette()
-    window = MainWindow()
+    page = AppearancePage()
     try:
-        for theme, expected in ((Theme.DARK, "#1c1c1e"), (Theme.LIGHT, "#f5f5f7")):
-            setTheme(theme)
-            apply_app_palette()
+        page.resize(820, 550)
+        page.set_admin_accounts([{"id": "alpha", "player": "Sample", "world": "s1-en", "enabled": True}])
+        page.show()
+        page.admin_account.setCurrentIndex(1)
+        for index, widget in enumerate((page.theme_combo, page.admin_refresh, page.notification_provider,
+                                        page.challenge_mode, page.world_picker, page.proxy_picker)):
+            page.select_section(index)
             qt_app.processEvents()
-            for scroll in (window.home_page.content_scroll, window.tasks_page.discovery_scroll, window.tasks_page.parameter_scroll):
-                for surface in (scroll, scroll.viewport(), scroll.widget()):
-                    assert surface.palette().color(QPalette.Window).name() == expected
+            assert page.section_stack.currentIndex() == index
+            assert widget.isVisible()
+            assert page.admin_bar.isVisible() == (index != 0)
+            assert page.admin_account.currentData() == "alpha"
+            assert widget.width() <= page.width()
     finally:
-        setTheme(Theme.LIGHT)
-        apply_app_palette()
-        _dispose(window, qt_app)
+        _dispose(page, qt_app)

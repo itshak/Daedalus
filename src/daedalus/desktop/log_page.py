@@ -186,6 +186,7 @@ class LogPage(QWidget):
         self.timeline.setAccessibleName("Recent local Daedalus activity")
         self.timeline.setMaximumBlockCount(250)
         self.timeline.setPlainText("No local activity yet. Connect to see status updates.")
+        self.timeline.setMinimumHeight(85)
         root.addWidget(self.timeline, 1)
         server_controls = QHBoxLayout()
         server_controls.addWidget(BodyLabel("Server receipts"))
@@ -207,7 +208,8 @@ class LogPage(QWidget):
         self.server_timeline.setReadOnly(True)
         self.server_timeline.setMaximumBlockCount(160)
         self.server_timeline.setAccessibleName("Server task receipt history")
-        root.addWidget(self.server_timeline, 1)
+        self.server_timeline.setMinimumHeight(85)
+        root.addWidget(self.server_timeline, 2)
         self._server_ids = []
         self._server_rows = []
         self._server_before = None

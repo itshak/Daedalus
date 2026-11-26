@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -76,7 +77,9 @@ def _populate(table: ScrollTableWidget, rows: list[list[object]]) -> None:
     for row_index, values in enumerate(rows):
         for column_index, value in enumerate(values):
             label = "—" if value is None else str(value)
-            table.setItem(row_index, column_index, QTableWidgetItem(label))
+            item = QTableWidgetItem(label)
+            item.setToolTip(label)
+            table.setItem(row_index, column_index, item)
 
 
 
@@ -470,9 +473,11 @@ class AccountsPage(QWidget):
         )
         self.table.setToolTip("Select an account; tick Report to include it in warehouse printing")
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.table.setMinimumHeight(290)
-        for col, width in enumerate((240, 145, 140, 70, 90, 80, 72)):
+        self.table.setMinimumHeight(140)
+        for col, width in enumerate((180, 115, 140, 68, 75, 70, 64)):
             self.table.setColumnWidth(col, width)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemChanged.connect(self._report_item_changed)
         self.table.itemSelectionChanged.connect(self._update_assistance_buttons)
         self.table.cellDoubleClicked.connect(lambda row, col: self._edit() if col != 6 else None)
@@ -496,13 +501,13 @@ class AccountsPage(QWidget):
         )
         self.recovery_status_label.setWordWrap(True)
         layout.addWidget(self.recovery_status_label)
-        recovery_actions = QHBoxLayout()
+        recovery_actions = QGridLayout()
         recovery_actions.setSpacing(7)
-        self.recovery_import_button = PushButton("Import saved lobby token")
+        self.recovery_import_button = PushButton("Import token")
         self.recovery_import_button.clicked.connect(self._recovery_import)
-        self.recovery_policy_button = PushButton("Enable auto recovery")
+        self.recovery_policy_button = PushButton("Enable recovery")
         self.recovery_policy_button.clicked.connect(self._recovery_policy)
-        self.recovery_pause_button = PushButton("Pause browser use ▾")
+        self.recovery_pause_button = PushButton("Pause browser ▾")
         self.recovery_pause_menu = QMenu(self)
         for caption, seconds in (
             ("15 minutes", 900), ("30 minutes", 1800),
@@ -513,17 +518,18 @@ class AccountsPage(QWidget):
         self.recovery_pause_button.setMenu(self.recovery_pause_menu)
         self.recovery_resume_button = PushButton("Resume now")
         self.recovery_resume_button.clicked.connect(self._recovery_resume)
-        self.recovery_jobs_button = PushButton("Review saved jobs")
+        self.recovery_jobs_button = PushButton("Saved jobs")
         self.recovery_jobs_button.clicked.connect(self._recovery_jobs)
-        for button in (self.recovery_import_button, self.recovery_policy_button,
-                       self.recovery_pause_button, self.recovery_resume_button,
-                       self.recovery_jobs_button):
-            recovery_actions.addWidget(button)
-        recovery_actions.addStretch(1)
-        layout.addLayout(recovery_actions)
-        self.recovery_bulk_button = PushButton("Recovery for selected / all…")
+        self.recovery_import_button.setToolTip("Import the saved lobby token from the server")
+        self.recovery_pause_button.setToolTip("Pause recovery while using the game in a browser")
+        self.recovery_jobs_button.setToolTip("Review saved jobs for the selected account")
+        self.recovery_bulk_button = PushButton("Selected / all…")
         self.recovery_bulk_button.clicked.connect(self._recovery_bulk)
-        layout.addWidget(self.recovery_bulk_button)
+        for i, button in enumerate((self.recovery_import_button, self.recovery_policy_button,
+                                    self.recovery_pause_button, self.recovery_resume_button,
+                                    self.recovery_jobs_button, self.recovery_bulk_button)):
+            recovery_actions.addWidget(button, i // 3, i % 3)
+        layout.addLayout(recovery_actions)
         self._update_recovery_controls()
 
         # Keep existing named actions and backend signals for compatibility,
@@ -647,7 +653,7 @@ class AccountsPage(QWidget):
         enabled = policy.get("enabled") is True
         available = status.get("server_token_available") is True if status else False
         self.recovery_policy_button.setText(
-            "Disable auto recovery" if enabled else "Enable auto recovery"
+            "Disable recovery" if enabled else "Enable recovery"
         )
         selected = aid is not None
         self.recovery_import_button.setEnabled(selected and bool(status) and not available)
@@ -660,7 +666,7 @@ class AccountsPage(QWidget):
         self.recovery_bulk_button.setEnabled(bool(self._recovery_by_account))
         if not selected:
             self.recovery_status_label.setText(
-                "Choose an account to review its five-minute recovery policy and saved jobs."
+                "Select an account to manage recovery and saved jobs."
             )
             return
         if not status:
@@ -1385,6 +1391,9 @@ class OperationsPage(QWidget):
         layout.addLayout(header)
         self.table = _table(["Operation", "Kind", "Module", "Parameters", "Availability"])
         self.table.setAccessibleName("IkaBot operation catalog")
+        for col, width in enumerate((178, 135, 145, 140, 158)):
+            self.table.setColumnWidth(col, width)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.setToolTip("Read-only catalog. Double-click a background task to configure it.")
         self.table.itemSelectionChanged.connect(self._update_configure)
         self.table.cellDoubleClicked.connect(lambda *_args: self._configure_selected())
@@ -1557,9 +1566,13 @@ class WarehousesPage(QWidget):
         self.table.setToolTip("— means unknown, not zero. Export retains this distinction.")
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        for index, width in enumerate((155, 94, 94, 90, 90, 90, 90, 90, 100, 135, 87, 140)):
+        for index, width in enumerate((135, 70, 76, 70, 70, 70, 70, 70, 90, 135, 87, 125)):
             self.table.setColumnWidth(index, width)
+        # Keep account identity beside each city in the visual table. The
+        # logical columns and legacy export format remain unchanged.
+        self.table.horizontalHeader().moveSection(11, 1)
         self.status_label = CaptionLabel("No warehouse snapshots loaded")
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
         layout.addWidget(self.table, 1)
         self.demo_note = CaptionLabel("")

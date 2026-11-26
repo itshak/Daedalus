@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -208,7 +209,8 @@ class TasksPage(QWidget):
 
         # Large native forms must scroll instead of clipping at 900x650.
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(16, 4, 16, 8)
+        outer.setSpacing(4)
         scroll = QScrollArea(self)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setWidgetResizable(True)
@@ -233,8 +235,8 @@ class TasksPage(QWidget):
             onClick=lambda: self._show_section(0),
         )
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(9)
+        layout.setContentsMargins(4, 8, 4, 8)
+        layout.setSpacing(7)
         title = (
             "Wine automation" if workflow == "wine" else
             "Construction automation" if workflow == "construction" else
@@ -309,7 +311,7 @@ class TasksPage(QWidget):
         scope_row.addWidget(self.overview_choose_button)
         scope_row.addStretch(1)
 
-        layout.addWidget(SubtitleLabel("Choose action"))
+
         self.category_combo = ComboBox(self)
         self.category_combo.hide()
         self.category_combo.addItems(list(_CATEGORIES))
@@ -365,6 +367,7 @@ class TasksPage(QWidget):
         )
         self.task_description.setWordWrap(True)
         layout.addWidget(self.task_description)
+        self.task_description.hide()
         self.expert_note = CaptionLabel("")
         self.expert_note.setWordWrap(True)
         self.expert_note.hide()
@@ -372,7 +375,7 @@ class TasksPage(QWidget):
         self.prerequisite_label = CaptionLabel("Select an automation to check readiness.")
         self.prerequisite_label.setWordWrap(True)
         layout.addWidget(self.prerequisite_label)
-        layout.addWidget(SubtitleLabel("Settings"))
+        layout.addWidget(SubtitleLabel("Parameters"))
 
         self.parameter_scroll = QScrollArea()
         self.parameter_scroll.setWidgetResizable(True)
@@ -382,6 +385,9 @@ class TasksPage(QWidget):
         self.parameter_scroll.setMaximumHeight(3200)
         self.parameter_container = QWidget()
         self.parameter_layout = QFormLayout(self.parameter_container)
+        self.parameter_layout.setContentsMargins(0, 0, 4, 0)
+        self.parameter_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.parameter_layout.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self.parameter_scroll.setWidget(self.parameter_container)
         layout.addWidget(self.parameter_scroll)
         # Source-backed construction inventory: never a fabricated plan.
@@ -444,7 +450,8 @@ class TasksPage(QWidget):
         )
         self.start_button.clicked.connect(self._start)
         launch_row.addWidget(self.start_button)
-        self.queue_review_button = PushButton("Add reviewed account to batch")
+        self.queue_review_button = PushButton("Add to batch")
+        self.queue_review_button.setToolTip("Add this independently reviewed account to the launch batch")
         self.queue_review_button.clicked.connect(self._queue_review)
         launch_row.addWidget(self.queue_review_button)
         self.configure_footer = CardWidget(configure_root)
@@ -492,11 +499,15 @@ class TasksPage(QWidget):
         self.running_all_button = PushButton("All account statuses")
         self.running_all_button.clicked.connect(self._refresh_all)
         running_scope.addWidget(self.running_all_button)
-        layout.addLayout(running_scope)
-        self.running_refresh_button = PushButton("Refresh selected account")
+        self.running_refresh_button = PushButton("Refresh")
         self.running_refresh_button.clicked.connect(self._refresh)
-        layout.addWidget(self.running_refresh_button)
+        running_scope.addWidget(self.running_refresh_button)
+        layout.addLayout(running_scope)
         self.task_table = _table(["Automation", "Status", "Started", "Scope"])
+        self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.task_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.task_table.setColumnWidth(2, 180)
+        self.task_table.setColumnWidth(3, 140)
         self.task_table.setAccessibleName("Daedalus-managed automations for the chosen account")
         self.task_table.itemSelectionChanged.connect(self._set_controls)
         layout.addWidget(self.task_table, 2)
@@ -532,23 +543,30 @@ class TasksPage(QWidget):
         self.history_all_button = PushButton("All account statuses")
         self.history_all_button.clicked.connect(self._refresh_all)
         history_scope.addWidget(self.history_all_button)
-        layout.addLayout(history_scope)
-        self.history_refresh_button = PushButton("Refresh selected account")
+        self.history_refresh_button = PushButton("Refresh")
         self.history_refresh_button.clicked.connect(self._refresh)
-        layout.addWidget(self.history_refresh_button)
+        history_scope.addWidget(self.history_refresh_button)
+        layout.addLayout(history_scope)
         self.request_table = _table(["Automation", "Status", "Managed task", "Review"])
+        self.request_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.request_table.setColumnWidth(1, 140)
+        self.request_table.setColumnWidth(2, 140)
+        self.request_table.setColumnWidth(3, 175)
         self.request_table.setAccessibleName("Account-scoped automation request history")
         self.request_table.itemSelectionChanged.connect(self._set_controls)
         layout.addWidget(self.request_table, 1)
         self.request_details_button = PushButton("Request details…")
         self.request_details_button.clicked.connect(self._show_request_details)
-        layout.addWidget(self.request_details_button)
+        history_actions = QHBoxLayout()
+        history_actions.addWidget(self.request_details_button)
         self.reconcile_button = PushButton("Acknowledge manually verified request…")
         self.reconcile_button.setToolTip(
             "Only use after checking engine and game state to resolve an uncertain launch"
         )
         self.reconcile_button.clicked.connect(self._reconcile)
-        layout.addWidget(self.reconcile_button)
+        history_actions.addWidget(self.reconcile_button)
+        history_actions.addStretch(1)
+        layout.addLayout(history_actions)
 
         multi_panel = QWidget(self.stack)
         layout = QVBoxLayout(multi_panel)
@@ -567,6 +585,10 @@ class TasksPage(QWidget):
         layout.addLayout(scope_row)
         layout.addWidget(self.multi_summary)
         self.multi_table = _table(["Account", "Running tasks", "Needs review", "Status"])
+        self.multi_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        for column in (1, 2):
+            self.multi_table.setColumnWidth(column, 120)
+        self.multi_table.setColumnWidth(3, 160)
         layout.addWidget(self.multi_table, 1)
         layout.addWidget(SubtitleLabel("Independently reviewed account batch"))
         self.review_queue_note = CaptionLabel("Configure and approve each account separately, then add its review. Tickets expire after two minutes.")
@@ -2120,6 +2142,7 @@ class TasksPage(QWidget):
             if enabled and self._workflow is not None else
             "Task control disabled on this backend; use a privately enabled server."
         )
+        self.status_label.setVisible(not (enabled and self._all_task_names))
         self._clear()
         self._filter_tasks()
         self._update_bulk_buttons()
@@ -2282,7 +2305,7 @@ class TasksPage(QWidget):
             "Load options / preview building…" if name == "constructBuilding" else "Calculate actual upgrade costs & queue…")
         self.construction_preview_button.setEnabled(name in CITY_REVIEW_TASKS)
         if name in CITY_REVIEW_TASKS:
-            self.building_note.setText("Choose a city and settings, then preview.")
+            self.building_note.setText("Choose a city, then preview.")
 
         if show_buildings:
             self.building_note.setText("Choose a city to load its actual buildings.")
@@ -2291,6 +2314,9 @@ class TasksPage(QWidget):
             f"{_friendly_task(name)}  ·  {_category(name)}. {task_explanation(name)}"
             if name else "No automations match this filter."
         )
+        self.task_description.setVisible(not bool(name))
+        self.task_combo.setToolTip(self.task_description.text())
+        self.task_combo.setAccessibleDescription(self.task_description.text())
         self.task_description.setAccessibleName(
             f"Automation description: {_friendly_task(name)}" if name else
             "No matching automations"
@@ -2536,7 +2562,7 @@ class TasksPage(QWidget):
         self._prereq_ready = None
         self.prerequisite_label.setText(
             "Checking this account's task prerequisites…" if self._dispatch_enabled and name
-            else "Select an automation to see whether it is ready."
+            else "Choose an automation to check readiness."
         )
         self._set_controls()
         account_id = self.selected_account_id()
@@ -2598,8 +2624,7 @@ class TasksPage(QWidget):
             )
         elif self._prereq_ready:
             self.prerequisite_label.setText(
-                "Ready to configure. Known prerequisites passed; the engine will "
-                "perform its final checks before starting."
+                "Ready for review. Final checks run before launch."
             )
         elif result.get("reason") == "notifications_required":
             self.prerequisite_label.setText(
