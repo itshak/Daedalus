@@ -27,3 +27,7 @@
 - [x] Keep capacity and independently verified cargo as an internal warehouse policy; use protected transport through the standard Session.post interface.
 - [x] Test normalized CLI/warehouse routes and full synthetic sender-to-HTTP flow with selected-city changes, no legacy reauthentication and no automatic replay.
 - [ ] Pass required CI on the consolidated revision and verify a real shipment on production.
+
+- [x] Compare upstream fleet waiting and restore the exact AJAX advisor request at the cookie-session boundary.
+- [x] Test three consecutive loads with the actual shared fleet waiting routine and protected AJAX request, no live network.
+- [ ] Verify real fleet return, subsequent load and final delivery after deploying the fleet-wait correction.

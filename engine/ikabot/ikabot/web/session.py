@@ -1512,6 +1512,46 @@ class Session:
         except requests.exceptions.RequestException:
             raise RuntimeError("Cookie-only world request could not be verified") from None
 
+    def _daedalus_cookie_advisor_post(self, url):
+        """Read the exact upstream military-advisor AJAX view without relogin."""
+        from ikabot.helpers.serverIdentity import attest_player_from_world_html
+
+        if getattr(self, "_daedalus_cookies_only", False) is not True:
+            raise ValueError("Advisor requires a verified cookie worker")
+        pattern = (r"view=militaryAdvisor&oldView=city&oldBackgroundView=city"
+                   r"&backgroundView=city&currentCityId=[1-9][0-9]{0,11}"
+                   r"&actionRequest=" + re.escape(actionRequest) + r"&ajax=1")
+        if not isinstance(url, str) or not re.fullmatch(pattern, url):
+            raise ValueError("Unsupported cookie-only advisor request")
+        base = urllib.parse.urlsplit(self.urlBase)
+        if (base.scheme != "https" or base.hostname != self.host
+                or base.port not in (None, 443) or base.path != "/index.php"
+                or base.username or base.password or base.fragment or base.query):
+            raise ValueError("Cookie-only advisor origin unavailable")
+        html = self.get()
+        if not attest_player_from_world_html(html, self.username):
+            raise RuntimeError("Advisor account verification failed")
+        token = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
+        if token is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", token.group(1)):
+            raise RuntimeError("Advisor request token unavailable")
+        try:
+            response = self.s.post(
+                self.urlBase + url.replace(actionRequest, token.group(1)),
+                data={}, params={}, verify=True, timeout=12, allow_redirects=False,
+            )
+            arrived = urllib.parse.urlsplit(str(response.url))
+            if (response.status_code != 200 or arrived.scheme != "https"
+                    or arrived.hostname != self.host or arrived.port not in (None, 443)
+                    or arrived.path != "/index.php" or response.history
+                    or len(response.content) > 2_000_000
+                    or self.__isExpired(response.text)
+                    or self.__isSessionRotated(response.text, response=response)
+                    or "TXT_ERROR_WRONG_REQUEST_ID" in response.text):
+                raise RuntimeError("Advisor response could not be verified")
+            return response.text
+        except requests.exceptions.RequestException:
+            raise RuntimeError("Advisor response could not be verified") from None
+
     def _daedalus_reviewed_transport_post(self, params):
         """Single-attempt world POST for the reviewed owned-city sender only."""
         from ikabot.helpers.serverIdentity import attest_player_from_world_html
@@ -1722,6 +1762,11 @@ class Session:
         html : str
             response from the server
         """
+        if (getattr(self, "_daedalus_cookies_only", False) is True
+                and isinstance(url, str) and url.startswith("view=militaryAdvisor&")):
+            if payloadPost or params or ignoreExpire or noIndex or fullResponse or noQuery or kwargs:
+                raise ValueError("Unsupported cookie-only advisor options")
+            return self._daedalus_cookie_advisor_post(url)
         if getattr(self, "_daedalus_cookies_only", False) is True and (
                 isinstance(params, dict) and
                 (params.get("action"), params.get("function")) in {

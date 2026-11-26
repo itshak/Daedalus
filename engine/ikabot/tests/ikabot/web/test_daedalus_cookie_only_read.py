@@ -143,3 +143,27 @@ def test_cookie_transport_standard_post_refuses_implicit_retry():
                              "function": "loadTransportersWithFreight",
                              "actionRequest": actionRequest})
     http.post.assert_not_called()
+
+
+def test_upstream_advisor_ajax_post_is_read_only_and_never_reauthenticates():
+    from unittest.mock import Mock
+    from ikabot.config import actionRequest
+    from ikabot.helpers.fleetAdvisor import advisor_data
+
+    http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> actionRequest: "abcdefgh1234"')
+    session = session_with_existing_cookie(http)
+    session.username = "ExamplePlayer"
+    http.post = Mock(return_value=SimpleNamespace(
+        url=session.urlBase, status_code=200, text="[]", content=b"[]", history=[]))
+    url = ("view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city"
+           f"&currentCityId=123&actionRequest={actionRequest}&ajax=1")
+    with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
+        assert advisor_data(session, 123, ajax=True) == []
+        http.post.assert_called_once_with(
+            session.urlBase + url.replace(actionRequest, "abcdefgh1234"),
+            data={}, params={}, verify=True, timeout=12, allow_redirects=False)
+        with pytest.raises(ValueError, match="Unsupported cookie-only advisor request"):
+            session.post(url + "&action=transportOperations")
+        with pytest.raises(ValueError, match="Unsupported cookie-only advisor options"):
+            session.post(url, params={"action": "transportOperations"})
+    assert http.post.call_count == 1

@@ -5,9 +5,9 @@ import re
 from ikabot.config import actionRequest
 
 
-def advisor_data(session, target):
+def advisor_data(session, target, *, ajax=False):
     """Read the existing advisor without implicit reauthentication."""
-    if getattr(session, "_daedalus_cookies_only", False) is True:
+    if not ajax and getattr(session, "_daedalus_cookies_only", False) is True:
         # Use the existing protected same-world GET transport; do not
         # reauthenticate, read stored cookies, or switch to legacy POST.
         html = session.get(f"view=militaryAdvisor&currentCityId={target}")
@@ -18,4 +18,8 @@ def advisor_data(session, target):
         return raw
     url = ("view=militaryAdvisor&oldView=city&oldBackgroundView=city&backgroundView=city"
            f"&currentCityId={target}&actionRequest={actionRequest}&ajax=1")
+    # Keep the upstream AJAX call contract for the existing wait/report
+    # path. The cookie-only session adapter restricts it to one verified read.
+    if ajax:
+        return json.loads(session.post(url), strict=False)
     return json.loads(session.post(url, retry_on_failure=False), strict=False)

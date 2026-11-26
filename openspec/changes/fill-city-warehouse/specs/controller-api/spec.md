@@ -46,3 +46,7 @@ The controller SHALL offer a one-time, account-scoped transfer of one selected r
 #### Scenario: Verified cookie worker uses the common sender
 - **WHEN** the shared sender submits a transport on an already verified cookie-only session
 - **THEN** the standard Session.post interface SHALL preserve the upstream transport form, require the exact selected source and a fresh token, and perform one bounded submission without login or replay; contradictory responses MUST remain unconfirmed
+
+#### Scenario: Reviewed shipment exhausts available vessels
+- **WHEN** a verified load occupies all available vessels and reviewed cargo remains
+- **THEN** the shared upstream waitForArrival mechanism SHALL use its original military-advisor AJAX request through the protected cookie session, await the next fleet event, recheck available vessels, and continue the same reviewed allocation only when ships are available

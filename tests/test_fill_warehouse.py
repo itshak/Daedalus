@@ -12,6 +12,9 @@ from daedalus.engine_ipc import ControlledIPCClient, EngineIPCUnavailable
 from daedalus.fill_warehouse_review import draft_fill, validate_fill
 from daedalus.recovery_reconcile import restart_class_for
 
+REAL_WAIT_FOR_ARRIVAL = routes.waitForArrival
+REAL_AVAILABLE_SHIPS = routes.getAvailableShips
+
 DRAFT = {"destination_city": 103, "resource": "marble", "useFreighters": False}
 NAMES = {101: "Athens", 102: "Sparta", 103: "Corinth"}
 CITIES = {cid: {"id": str(cid), "name": NAMES[cid], "islandId": "8", "availableResources": [0, 0, stock, 0, 0],
@@ -465,3 +468,131 @@ def test_depleted_source_does_not_prevent_other_reviewed_sources(offline, monkey
     worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
         {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 100}])
     assert sent == [("102", 100)]
+
+
+def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monkeypatch):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlsplit
+
+    from ikabot.helpers.fillProgress import snapshot
+    from ikabot.web.session import Session
+
+    # Restore the real shared upstream wait implementation (the fixture stubs it).
+    # Import a reference captured before the fixture applies monkeypatches.
+    monkeypatch.setattr(routes, "waitForArrival", REAL_WAIT_FOR_ARRIVAL)
+    monkeypatch.setattr(routes, "get_random_wait_time", lambda: 0)
+    monkeypatch.setattr(routes, "getAvailableShips", REAL_AVAILABLE_SHIPS)
+    monkeypatch.setattr(routes, "getShipCapacity", lambda *_: (100, 1000))
+    city_data = {
+        cid: {**city, "availableResources": list(city["availableResources"]),
+              "freeSpaceForResources": list(city["freeSpaceForResources"])}
+        for cid, city in CITIES.items()
+    }
+    city_data[101]["availableResources"][2] = 300
+    city_data[103]["freeSpaceForResources"][2] = 500
+
+    class World:
+        def __init__(self):
+            self.selected = 103
+            self.pending = 20
+            self.free = 1
+            self.cargo = []
+            self.advisor_calls = 0
+            self.waits = []
+
+        @staticmethod
+        def response(url, page):
+            return SimpleNamespace(url=url, status_code=200, text=page,
+                                   content=page.encode(), history=[])
+
+        def get(self, url, **kwargs):
+            query = parse_qs(urlsplit(url).query)
+            if "cityId" in query:
+                self.selected = int(query["cityId"][0])
+            if "currentCityId" in query:
+                self.selected = int(query["currentCityId"][0])
+            page = ('<span id="avatarName">Mine</span> currentCityId: '
+                    + str(self.selected) + ', actionRequest: "synthetic-token-1234" '
+                    + 'id="GlobalMenu_freeTransporters">' + str(self.free) + '<')
+            return self.response(url, page)
+
+        def post(self, url, *, data, params, **kwargs):
+            assert data == {}
+            assert kwargs == {"allow_redirects": False, "verify": True, "timeout": 12}
+            if parse_qs(urlsplit(url).query).get("view") == ["militaryAdvisor"]:
+                self.advisor_calls += 1
+                assert self.free == 0
+                query = parse_qs(urlsplit(url).query)
+                assert query == {
+                    "view": ["militaryAdvisor"], "oldView": ["city"],
+                    "oldBackgroundView": ["city"], "backgroundView": ["city"],
+                    "currentCityId": [str(self.selected)], "actionRequest": ["synthetic-token-1234"],
+                    "ajax": ["1"],
+                }
+                assert params == {}
+                return self.response(url, json.dumps([
+                    ["updateGlobalData", {"time": 1000}],
+                    ["changeView", [None, None, {"viewScriptParams": {
+                        "militaryAndFleetMovements": [
+                            {"isOwnArmyOrFleet": True, "eventTime": 1120},
+                            {"isOwnArmyOrFleet": False, "eventTime": 1010},
+                        ]
+                    }}]],
+                ]))
+            assert params["actionRequest"] == "synthetic-token-1234"
+            if params["action"] == "header":
+                assert int(params["currentCityId"]) == self.selected
+                self.selected = int(params["cityId"])
+                return self.response(url, '[["updateGlobalData",{}]]')
+            assert self.free == 1
+            assert params["function"] == "loadTransportersWithFreight"
+            assert int(params["currentCityId"]) == self.selected == 101
+            assert params["transporters"] == 1
+            assert params["cargo_tradegood2"] == 100
+            self.free = 0
+            self.cargo.append(params["cargo_tradegood2"])
+            self.pending += params["cargo_tradegood2"]
+            city_data[101]["availableResources"][2] -= params["cargo_tradegood2"]
+            return self.response(url, '[["provideFeedback",[{"type":10}]]]')
+
+        def wait(self, seconds):
+            assert self.free == 0
+            self.waits.append(seconds)
+            self.free = 1
+
+    world = World()
+    session = Session.__new__(Session)
+    session.host = "s1-en.ikariam.gameforge.com"
+    session.urlBase = "https://" + session.host + "/index.php?"
+    session.s = world
+    session.username = "Mine"
+    session._daedalus_cookies_only = True
+    session._daedalus_managed_fill = True
+    session._daedalus_fill_progress = [0, 0, 0]
+    session.setStatus = Mock()
+
+    def read_city(_session, cid):
+        world.selected = int(cid)
+        return city_data[int(cid)]
+
+    def parse_city(page):
+        import re
+        return city_data[int(re.search(r"currentCityId: (\d+),", page).group(1))]
+
+    def incoming(_session, target, *_args):
+        world.selected = target
+        return world.pending
+
+    monkeypatch.setattr(worker, "_city", read_city)
+    monkeypatch.setattr(upstream, "getCityById", read_city)
+    monkeypatch.setattr(worker, "incoming_amount", incoming)
+    monkeypatch.setattr(routes, "getCity", parse_city)
+    monkeypatch.setattr(routes, "wait", world.wait)
+    monkeypatch.setattr(Session, "_Session__checkCookie", Mock(side_effect=AssertionError("legacy relogin")))
+    monkeypatch.setattr(Session, "_Session__token", Mock(side_effect=AssertionError("legacy token")))
+    worker.fill.__wrapped__(session, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 300}])
+    assert world.cargo == [100, 100, 100]
+    assert world.advisor_calls == 2
+    assert world.waits == [120, 120]
+    assert snapshot(session._daedalus_fill_progress) == {
+        "stage": "finished", "submitted": 300, "verified": 300}

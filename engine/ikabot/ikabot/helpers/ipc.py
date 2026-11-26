@@ -1586,16 +1586,9 @@ class IPCServer:
         if not ids or len(ids) > 100:
             raise ValueError("No verified owned city available for movements")
         city_id = _existing_city_id(ids[0])
-        url = (
-            "view=militaryAdvisor&oldView=city&oldBackgroundView=city"
-            f"&backgroundView=city&currentCityId={city_id}"
-            f"&actionRequest={config.actionRequest}&ajax=1"
-        )
-        if getattr(session, "_daedalus_cookies_only", False) is True:
-            from ikabot.function.fillCityWarehouse import _advisor_data
-            raw = _advisor_data(session, city_id)
-        else:
-            raw = json.loads(session.post(url), strict=False)
+        from ikabot.helpers.fleetAdvisor import advisor_data
+
+        raw = advisor_data(session, city_id, ajax=True)
         movements = raw[1][1][2]["viewScriptParams"]["militaryAndFleetMovements"]
         server_now = int(raw[0][1]["time"])
         if not isinstance(movements, list) or len(movements) > 250:
