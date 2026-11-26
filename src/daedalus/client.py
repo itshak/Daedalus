@@ -132,6 +132,15 @@ class DaedalusClient:
                     "Invalid automation parameters. Review the fields and try again."
                 ):
                     raise APIConnectionError(detail, response.status_code)
+            if response.status_code == 503 and path.endswith("/reward-distribution-plan") and payload.get("task") == "fillCityWarehouse":
+                from daedalus.fill_warehouse_review import FILL_PREVIEW_MESSAGES
+
+                try:
+                    detail = response.json().get("detail")
+                except (TypeError, ValueError, AttributeError):
+                    detail = None
+                if isinstance(detail, str) and detail in FILL_PREVIEW_MESSAGES.values():
+                    raise APIConnectionError(detail, 503)
             raise APIConnectionError("Backend task request was rejected", response.status_code)
         try:
             data = response.json()

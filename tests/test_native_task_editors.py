@@ -1083,3 +1083,43 @@ def test_fill_city_warehouse_has_native_city_and_resource_selectors(page):
     page._form_inputs["resource"].setCurrentIndex(2)
     assert page._form_config() == {"destination_city": 102, "resource": "marble", "useFreighters": False}
     assert "reviewed_sources" not in page._form_inputs
+
+
+def test_fill_preview_unlocks_reviewed_start_and_failure_is_visible(page, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    set_native(page, "fillCityWarehouse", [
+        field("destination_city", required=True), field("resource", required=True),
+        field("useFreighters", "boolean", default=False), field("reviewed_sources"),
+    ])
+    page.set_preflight({"account_id":"alpha","task":"fillCityWarehouse","ready":True,"reason":"none"})
+    page._form_inputs["destination_city"].setCurrentIndex(2)
+    page._form_inputs["resource"].setCurrentIndex(2)
+    assert not page.start_button.isEnabled()
+    requests = []
+    page.reward_distribution_preview_requested.connect(lambda *args: requests.append(args))
+    launches = []
+    page.launch_requested.connect(lambda *args: launches.append(args))
+    page._request_native_preview()
+    account, task, draft, nonce = requests[-1]
+    assert (account, task) == ("alpha","fillCityWarehouse")
+    page.set_reward_distribution_unavailable(nonce, "Incoming cargo could not be verified. No transfer was started.")
+    assert "Incoming cargo" in page.building_note.text()
+    assert not page.start_button.isEnabled()
+    page._request_native_preview()
+    _, _, draft, nonce = requests[-1]
+    page.set_reward_distribution_preview({
+        "account_id": account, "task": task, "draft": draft, "preview_id": "a"*43,
+        "expires_in": 120, "observation": {
+            "destination_city":102,"destination_name":"Sparta","stock":350,"free_space":150,
+            "incoming":20,"budget":130,"amount":130,"capacity":100,"total_ships":2,"available_ships":2,
+            "sources":[{"city_id":101,"city_name":"Athens","stock":100,"amount":100},
+                       {"city_id":103,"city_name":"Olympia","stock":200,"amount":30}],
+        }}, nonce)
+    assert "planned transfer: 130" in page.building_note.text()
+    assert page.start_button.isEnabled()
+    page.confirm_box.setChecked(True)
+    monkeypatch.setattr(QMessageBox,"question",lambda *_args: QMessageBox.Yes)
+    page._start()
+    assert len(launches) == 1
+    assert launches[0][:3] == ("alpha","fillCityWarehouse",{"preview_id":"a"*43})

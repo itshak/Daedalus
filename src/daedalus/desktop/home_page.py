@@ -17,6 +17,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
+from daedalus.account_display import account_player_names
 from daedalus.desktop.design_system import PageHeading
 
 
@@ -204,10 +205,9 @@ class HomePage(QWidget):
         self.account_combo.blockSignals(True)
         try:
             self.account_combo.clear()
+            labels = account_player_names(self._accounts)
             for account in self._accounts:
-                self.account_combo.addItem(
-                    str(account.get("label") or account.get("player") or account["id"])
-                )
+                self.account_combo.addItem(labels[str(account["id"])])
             if before in self._account_ids:
                 self.account_combo.setCurrentIndex(self._account_ids.index(before))
             else:

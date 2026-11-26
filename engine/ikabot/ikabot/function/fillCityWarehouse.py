@@ -17,6 +17,22 @@ RESOURCES = ("wood", "wine", "marble", "crystal", "sulfur")
 MAX_AMOUNT = 10**12
 
 
+class FillPreviewError(ValueError):
+    """Bounded reason code; never forward game HTML or exception details."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason)
+
+
+def _free_space(v):
+    # A legitimately overfilled warehouse can report negative remaining
+    # space. Treat it as full, not an invalid or positive allocation.
+    if type(v) is not int or not -MAX_AMOUNT <= v <= MAX_AMOUNT:
+        raise ValueError("Invalid storage observation")
+    return max(0, v)
+
+
 def _amount(v):
     if type(v) is not int or not 0 <= v <= MAX_AMOUNT:
         raise ValueError("Invalid resource observation")
@@ -52,11 +68,16 @@ def incoming_amount(session, target, name, resource):
         if type(returning) is not bool:
             raise ValueError("Movement direction unavailable")
         dest = row["origin" if returning else "target"]
-        label, player = dest.get("name"), dest.get("avatarName")
-        if not isinstance(label, str) or not isinstance(player, str):
+        label = dest.get("name")
+        if not isinstance(label, str) or not label:
             raise ValueError("Movement destination unavailable")
         if decodeUnicodeEscape(label) != name:
             continue
+        player = dest.get("avatarName")
+        if player is None:
+            player = ""
+        if not isinstance(player, str):
+            raise ValueError("Movement destination unavailable")
         # A matching city name with no attested player is ambiguous. Never
         # silently omit its cargo; duplicate names are conservatively counted.
         if player and decodeUnicodeEscape(player).casefold() != session.username.casefold():
@@ -85,7 +106,7 @@ def _target(session, target, resource):
         raise ValueError("Destination no longer owned")
     incoming = incoming_amount(session, target, names[target], resource)
     city = _city(session, target)
-    return names, city, _amount(city["freeSpaceForResources"][resource]), incoming
+    return names, city, _free_space(city["freeSpaceForResources"][resource]), incoming
 
 
 def preview_fill(session, draft):
@@ -93,21 +114,41 @@ def preview_fill(session, draft):
     if type(target) is not int or resource not in RESOURCES or type(freighters) is not bool:
         raise ValueError("Invalid warehouse fill draft")
     i = RESOURCES.index(resource)
-    names, city, free, incoming = _target(session, target, i)
+    try:
+        names = _owned(session)
+        if target not in names:
+            raise ValueError("Destination no longer owned")
+        city = _city(session, target)
+        free = _free_space(city["freeSpaceForResources"][i])
+        stock_at_target = _amount(city["availableResources"][i])
+    except Exception as exc:
+        raise FillPreviewError("fill_destination_unavailable") from exc
+    try:
+        incoming = incoming_amount(session, target, names[target], i)
+    except Exception as exc:
+        raise FillPreviewError("fill_incoming_unavailable") from exc
     budget = max(0, free-incoming)
     remaining = budget
     rows = []
     for cid in sorted(set(names)-{target}):
-        stock = _amount(_city(session, cid)["availableResources"][i])
+        try:
+            stock = _amount(_city(session, cid)["availableResources"][i])
+        except Exception as exc:
+            raise FillPreviewError("fill_source_unavailable") from exc
         amount = min(stock, remaining)
         remaining -= amount
         rows.append({"city_id": cid, "city_name": names[cid], "stock": stock, "amount": amount})
-    caps = pedirInfo.getShipCapacity(session)
-    capacity = caps[int(freighters)]
-    total = (getTotalFreighters if freighters else getTotalShips)(session)
-    available = (getAvailableFreighters if freighters else getAvailableShips)(session)
+    try:
+        caps = pedirInfo.getShipCapacity(session)
+        capacity = _amount(caps[int(freighters)])
+        total = _amount((getTotalFreighters if freighters else getTotalShips)(session))
+        available = _amount((getAvailableFreighters if freighters else getAvailableShips)(session))
+        if available > total or (budget != remaining and (not capacity or not total)):
+            raise ValueError("No usable fleet")
+    except Exception as exc:
+        raise FillPreviewError("fill_fleet_unavailable") from exc
     return {"destination_city": target, "destination_name": names[target],
-            "stock": _amount(city["availableResources"][i]), "free_space": free, "incoming": incoming,
+            "stock": stock_at_target, "free_space": free, "incoming": incoming,
             "budget": budget, "amount": budget-remaining, "sources": rows,
             "capacity": capacity, "total_ships": total, "available_ships": available}
 

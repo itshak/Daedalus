@@ -1,3 +1,4 @@
+import {controllerTimeout,isReviewPreview,fillPreviewMessage} from "@/lib/preview-request";
 import {validRewardDistributionRequest} from "@/lib/reward-distribution-review";
 import {proxyProfileRoute,validProxyDraft} from "@/lib/proxy-profiles";
 import {challengeRoute,validChallengeDraft} from "@/lib/challenge-policy";
@@ -15,6 +16,7 @@ import { validNativeConfig, validNativeLaunch, validWorkerDraft, validWorkerLaun
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 120;
 const responseHeaders = { "Cache-Control": "private, no-store, max-age=0", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff" };
 const buildingTargets = z.object({ upgrades: z.array(z.object({
   position: z.number().int().min(0).max(80),
@@ -128,16 +130,19 @@ async function proxy(request: NextRequest, context: RouteContext) {
     const upstream = await fetch(origin + "/api/v1/" + parts.map(encodeURIComponent).join("/") + query, {
       method: request.method, body,
       headers: { "Authorization": "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) },
-      redirect: "error", cache: "no-store", signal: AbortSignal.timeout(request.method === "GET" ? 12000 : 25000)
+      redirect: "error", cache: "no-store", signal: AbortSignal.timeout(controllerTimeout(parts,request.method))
     });
     const text = await upstream.text();
     if (text.length > 2_000_000) return NextResponse.json({ error: "Response exceeds limit" }, { status: 502, headers: responseHeaders });
     let result: unknown;
     try { result = JSON.parse(text); } catch { result = { error: "Invalid backend response" }; }
-    if (!upstream.ok) return NextResponse.json({ error: "Backend request could not complete", status: upstream.status }, { status: upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502, headers: responseHeaders });
+    if (!upstream.ok) {
+      const detail=parts.at(-1)==="reward-distribution-plan"&&upstream.status===503&&result&&typeof result==="object"&&"detail" in result?fillPreviewMessage(result.detail):null;
+      return NextResponse.json({error:detail??"Backend request could not complete",status:upstream.status},{status:upstream.status>=400&&upstream.status<=599?upstream.status:502,headers:responseHeaders});
+    }
     return NextResponse.json(result, { status: upstream.status, headers: responseHeaders });
   } catch {
-    return NextResponse.json({ error: request.method === "GET" ? "Backend temporarily unreachable" : "Request outcome uncertain — check Activity before retrying" }, { status: 503, headers: responseHeaders });
+    return NextResponse.json({ error: isReviewPreview(parts,request.method) ? "Preview timed out. No automation was started." : request.method === "GET" ? "Backend temporarily unreachable" : "Request outcome uncertain — check Activity before retrying" }, { status: 503, headers: responseHeaders });
   }
 }
 export const GET = proxy;

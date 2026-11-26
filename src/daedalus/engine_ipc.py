@@ -64,6 +64,18 @@ class EngineIPCUnavailable(RuntimeError):
     """A safe, nonsecret reason why no compatible engine is reachable."""
 
 
+class FillPreviewUnavailable(EngineIPCUnavailable):
+    """Only fixed, nonsecret warehouse preview errors are permitted."""
+
+    def __init__(self, reason):
+        from daedalus.fill_warehouse_review import FILL_PREVIEW_MESSAGES
+
+        if not isinstance(reason, str) or reason not in FILL_PREVIEW_MESSAGES:
+            raise EngineIPCUnavailable("Invalid warehouse preview failure")
+        self.reason = reason
+        super().__init__(FILL_PREVIEW_MESSAGES[reason])
+
+
 class EngineTaskRejected(RuntimeError):
     """Proven engine-side rejection before any child task process starts."""
 
@@ -306,6 +318,9 @@ class ExistingIPCClient:
                 and reply.get("status") == "rejected"):
             # Never expose raw engine error/traceback, only an audited code.
             raise EngineTaskRejected(reply.get("reason"))
+        if (payload.get("action") == "preview_fill_existing" and isinstance(reply, dict)
+                and reply.get("status") == "error" and "reason" in reply):
+            raise FillPreviewUnavailable(reply["reason"])
         if not isinstance(reply, dict) or reply.get("status") != "ok":
             # Engine errors may contain account data or cookie fragments.
             raise EngineIPCUnavailable("IkaBot IPC request failed")
@@ -397,7 +412,7 @@ class ExistingIPCClient:
         if clean["destination_city"] not in owned or not account.enabled:
             raise ValueError("Choose an owned destination")
         response = self._exchange({"action": "preview_fill_existing", "world": account.world,
-                                   "player": account.player, "draft": clean}, read_timeout=120)
+                                   "player": account.player, "draft": clean}, read_timeout=90)
         if not _is_exact_identity({"world": response.get("world"), "player": response.get("username")}, account):
             raise EngineIPCUnavailable("Invalid fill scope")
         try:

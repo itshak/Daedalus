@@ -3,6 +3,13 @@ from daedalus.daily_distribution_review import _city
 
 TASK = "fillCityWarehouse"
 RESOURCES = ("wood", "wine", "marble", "crystal", "sulfur")
+FILL_PREVIEW_MESSAGES = {
+    "fill_destination_unavailable": "Destination warehouse could not be read. Refresh city data and retry.",
+    "fill_incoming_unavailable": "Incoming cargo could not be verified. No transfer was started.",
+    "fill_source_unavailable": "Source city stock could not be read. Refresh city data and retry.",
+    "fill_fleet_unavailable": "Selected fleet is unavailable or its capacity could not be verified.",
+}
+
 
 
 def draft_fill(v):

@@ -1,4 +1,5 @@
 "use client";
+import {fillPreviewMessage} from "../lib/preview-request";
 import {parseRewardDistributionReview,policyTask,reviewRoute} from "../lib/reward-distribution-review";
 import {QueueReviewButton} from "./reviewed-batch-queue";
 import Image from "next/image";
@@ -15,7 +16,16 @@ async function api(path:string, body?:unknown):Promise<unknown> {
   const response=await fetch("/api/controller/"+path,{cache:"no-store",...(body===undefined?{}:{
     method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)
   })});
-  if (!response.ok) throw new Error("Request unavailable");
+  if (!response.ok) {
+    if(path.endsWith("/reward-distribution-plan")||path.endsWith("/shipment-plan")){
+      const data=await response.json().catch(()=>null);
+      const message=fillPreviewMessage(data?.error);
+      if(message)throw new Error(message);
+      if(data?.error==="Preview timed out. No automation was started.")throw new Error(data.error);
+      if(response.status===422)throw new Error("Preview settings were rejected. Refresh and review the selected account.");
+    }
+    throw new Error("Request unavailable");
+  }
   return response.json();
 }
 
@@ -51,6 +61,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [mode,setMode]=useState("consolidate");
   const [sendMode,setSendMode]=useState("keep");
   const [notify,setNotify]=useState("none");
+  const [preparing,setPreparing]=useState(false);
   const [review,setReview]=useState<{config:Config;summary:string;fingerprint:string;previewId?:string;ttl?:number}|null>(null);
   const [approved,setApproved]=useState(false);
   const [shipment,setShipment]=useState<ShipmentPlan|null>(null);
@@ -138,7 +149,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     if(!canReview||inFlight.current)return;
     edit();setMessage("");
     if(!needsShipmentReview&&!needsPolicyReview){setReview({config,summary,fingerprint});return;}
-    inFlight.current=true;setBusy(true);
+    inFlight.current=true;setBusy(true);setPreparing(true);
     try{
       if(needsPolicyReview){
         const data=parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config);
@@ -147,8 +158,14 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       }
       const data=task==="distributeResources"?parseRewardDistributionReview(await api(prefix+"/reward-distribution-plan",{task,draft:config}),account,task,config).shipment!:scopedShipmentPlan(await api(prefix+"/shipment-plan",config),account,config);
       if(mounted.current){setShipment(data);setReview({config,summary,fingerprint});}
-    }catch{if(mounted.current)setMessage("Shipment preview unavailable. Check stock, recipients and fleet.");}
-    finally{if(mounted.current)setBusy(false);inFlight.current=false;}
+    }catch(error){
+      if(mounted.current){
+        const reason=error instanceof Error?error.message:"";
+        setMessage(fillPreviewMessage(reason)??(["Preview timed out. No automation was started.","Preview settings were rejected. Refresh and review the selected account."].includes(reason)?reason:
+          task==="fillCityWarehouse"?"Warehouse preview unavailable. No transfer was started. Refresh and try again.":"Shipment preview unavailable. Check stock, recipients and fleet."));
+      }
+    }
+    finally{if(mounted.current){setBusy(false);setPreparing(false);}inFlight.current=false;}
   };
   const cancelLookup=()=>{
     lookupRevision.current++;setLookingUp(false);setLookupMessage("");
@@ -275,8 +292,10 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
       </>}
     </fieldset>
     {!valid&&!loading&&<p>{t("Complete the required settings before review.")}</p>}
-    {!notificationTest&&<p className="subtle-message">{t(task==="sendResources"?"The engine checks current game data again at launch. First-load timing is conditional.":"The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>}
-    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(needsShipmentReview?"Preview shipment capacity":"Review settings")}</button>
+    {!notificationTest&&<p className="subtle-message">{t(task==="fillCityWarehouse"?"Review reads current stock, warehouse space and incoming cargo. No transfer starts until you approve.":task==="sendResources"?"The engine checks current game data again at launch. First-load timing is conditional.":"The engine checks current game data again at launch. Capacity and travel estimates are not yet available here.")}</p>}
+    <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(preparing?"Checking current game data…":task==="fillCityWarehouse"?"Preview warehouse transfer":needsShipmentReview?"Preview shipment capacity":"Review settings")}</button>
+    {preparing&&<p role="status">{t("Reading current game data. This may take a minute; no automation has started.")}</p>}
+    {task==="fillCityWarehouse"&&!reviewed&&!preparing&&<p className="subtle-message">{t("Start becomes available after a successful preview and your approval.")}</p>}
     {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{batchTargets&&<ul>{batchTargets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
       {shipment&&<><p>{t("Available ships")}: {shipment.available_ships.toLocaleString()}/{shipment.total_ships.toLocaleString()} · {t("Cargo per vessel")}: {shipment.capacity.toLocaleString()}</p>
         <table><thead><tr><th>{t("Route")}</th><th>{t("Origin stock")}</th><th>{t("First load limit")}</th><th>{t("Minimum loads")}</th><th>{t("First-load estimate (seconds)")}</th><th>{t("Modeled final delivery (seconds)")}</th></tr></thead><tbody>{shipment.routes.map((r,i)=><tr key={i}><td>{r.origin_name} → {r.destination_name}{r.destination_space===null&&<p>{t("Recipient storage unknown")}</p>}</td><td>{r.stock.map((n,j)=>r.resources[j]?materialName(MATERIALS[j])+": "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.first_load_limit.toLocaleString()}</td><td>{r.minimum_loads??t("Unavailable")}</td><td>{r.first_load_timing? <>{r.first_load_timing.total_seconds.toLocaleString()}<p>{t("Queue")}: {r.first_load_timing.queue_seconds} · {t("Loading")}: {r.first_load_timing.loading_seconds} · {t("Travel")}: {r.first_load_timing.travel_seconds}</p></>:t("Unavailable")}</td><td>{r.full_route_model?.delivery_seconds.toLocaleString()??t("Unavailable")}</td></tr>)}</tbody></table>
