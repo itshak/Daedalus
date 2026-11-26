@@ -128,3 +128,7 @@ engine; arbitrary HTML, page tokens and raw cookies remain private. One
 owner-approved test returned seven city and seven warehouse records; the
 remaining live recovery, explicit task dispatch and production gates in
 `openspec/changes/validate-live-authentication` remain open.
+
+## Warehouse consolidation overlay
+
+The warehouse task is a Daedalus planner/policy, not an independent game transport engine. It translates the reviewed allocation into the upstream PR #499 sendResources route contract, reuses prepare_sendResources and shared route resolution, and applies its storage/incoming guards inside executeRoutes. The common sendGoods builds the upstream form (including explicit zero-valued available resource inputs). Cookie-only transport is a bounded adapter behind Session.post, not a second sender; ordinary CLI sessions retain existing behavior. The upstream baseline and PR head were source-compared; upstream stable and both reviewed PR #499 revisions use the same sendGoods form. Live compatibility is not inferred from synthetic tests.

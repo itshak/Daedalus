@@ -21,3 +21,9 @@
 - [x] Classify named game feedback without relying on response-array offset; distinguish rejected and unknown outcomes.
 - [x] Complete destination checks before final source selection and attest source context at submission.
 - [ ] Verify the response correction on a real reviewed shipment.
+
+- [x] Compare pinned and current upstream PR #499 transport and CLI JSON contracts.
+- [x] Consolidate warehouse execution into upstream sendResources preparation, shared route resolution, executeRoutes and sendGoods.
+- [x] Keep capacity and independently verified cargo as an internal warehouse policy; use protected transport through the standard Session.post interface.
+- [x] Test normalized CLI/warehouse routes and full synthetic sender-to-HTTP flow with selected-city changes, no legacy reauthentication and no automatic replay.
+- [ ] Pass required CI on the consolidated revision and verify a real shipment on production.

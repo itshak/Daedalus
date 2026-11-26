@@ -354,13 +354,21 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         is another player's city
     useFreighters : bool
     """
-    info = "\nSend resources\n"
-    setInfoSignal(session, info)
+    setInfoSignal(session, "\nSend resources\n")
+    execute_prepared_shipments(session, routes, useFreighters, transfer_id=transfer_id)
+
+
+def execute_prepared_shipments(session, routes, useFreighters=False, *, transfer_id=None, policy=None):
+    """Shared upstream route resolution/execution; internal policy is not a JSON field."""
+    if policy is not None:
+        pedirInfo.ids_cache = None
     own_ids, own_cities = getIdsOfCities(session)
     shipments = []
     for route in map(route_from_saved, routes):
         origin = str(route["from"])
         destination = str(route["to"])
+        if policy is not None and (origin not in own_ids or destination not in own_ids):
+            raise ValueError("Reviewed warehouse route no longer owned")
         if destination in own_ids:
             island_id = getCityById(session, destination)["islandId"]
             destination_name = decodeUnicodeEscape(own_cities[destination]["name"])
@@ -389,7 +397,8 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
         executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint,
                       verify_recipient=lambda index: _verify_recipient(session, routes[index]))
     else:
-        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint)
+        executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint,
+                      **({"policy": policy} if policy is not None else {}))
 
 
 @configurator

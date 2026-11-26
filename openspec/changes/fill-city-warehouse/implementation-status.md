@@ -48,3 +48,9 @@ Live execution reached response checking, but no cargo was observed. The raw res
 ### Upstream CLI parity review
 
 Compared public stable 3ea1e0e, pinned PR #499 062feec and its current head 55d8877. All retain the same sendGoods payload and shared transport routine; the upstream JSON task normalizes routes before executing them. Restore the explicit zero cargo fields for positive source stock and do not introduce non-upstream fleet form fields. The reviewed warehouse planner retains its own storage guard and no-replay policy. Synthetic parity tests compare normalized arguments and exact request dictionaries. The historical server rejection is not conclusively diagnosed.
+
+### Full consolidation
+
+Removed the independent warehouse transport loop. The reviewed allocation is converted into upstream sendResources route JSON, normalized by the existing prepare function, and dispatched through shared route resolution, executeRoutes and sendGoods. Warehouse policy alone handles storage reservations and movement verification. Both normal and cookie-only shared senders use Session.post; the latter protects only existing transport actions with bounded nonredirecting requests and no implicit login. Exact upstream cargo fields restored. Shared military advisor reader avoids a dependency from generic fleet waits to the warehouse feature. Mixed success/rejection feedback remains uncertain.
+
+Synthetic sender-to-HTTP verification proves the route shape, final source context, one cargo submission and observed incoming cargo without network access. Live game acceptance remains unverified.

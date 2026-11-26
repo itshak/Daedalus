@@ -4,6 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 from ikabot.function import fillCityWarehouse as worker
+from ikabot.function import sendResources as upstream
+from ikabot.helpers import planRoutes as routes
 
 from daedalus.accounts import Account
 from daedalus.engine_ipc import ControlledIPCClient, EngineIPCUnavailable
@@ -12,7 +14,7 @@ from daedalus.recovery_reconcile import restart_class_for
 
 DRAFT = {"destination_city": 103, "resource": "marble", "useFreighters": False}
 NAMES = {101: "Athens", 102: "Sparta", 103: "Corinth"}
-CITIES = {cid: {"id": str(cid), "islandId": "8", "availableResources": [0, 0, stock, 0, 0],
+CITIES = {cid: {"id": str(cid), "name": NAMES[cid], "islandId": "8", "availableResources": [0, 0, stock, 0, 0],
                 "freeSpaceForResources": [0, 0, space, 0, 0]}
           for cid, stock, space in ((101, 100, 400), (102, 200, 400), (103, 350, 150))}
 
@@ -27,7 +29,15 @@ def offline(monkeypatch):
     monkeypatch.setattr(worker, "getTotalShips", lambda _s: 3)
     monkeypatch.setattr(worker, "getAvailableShips", lambda _s: 2)
     monkeypatch.setattr(worker, "requireOwnCity", lambda _s, cid, _k: str(cid))
-    monkeypatch.setattr(worker, "waitForArrival", lambda *_: 2)
+    monkeypatch.setattr(routes, "waitForArrival", lambda *_: 2)
+    monkeypatch.setattr(routes, "getShipCapacity", lambda *_: (100, 1000))
+    monkeypatch.setattr(upstream, "getIdsOfCities", lambda *_: (
+        list(map(str, NAMES)), {str(cid): {"name": name} for cid, name in NAMES.items()}))
+    monkeypatch.setattr(upstream, "requireOwnCity", lambda _s, cid, _k: str(cid))
+    monkeypatch.setattr(upstream, "getCityById", lambda _s, cid: CITIES[int(cid)])
+    session.get.side_effect = lambda path: CITIES[int(path.split("=")[-1])]
+    monkeypatch.setattr(routes, "getCity", lambda city: city)
+    monkeypatch.setattr(upstream, "setInfoSignal", Mock())
     monkeypatch.setattr(worker, "setInfoSignal", Mock())
     monkeypatch.setattr(worker.time, "sleep", Mock())
     return session
@@ -51,16 +61,17 @@ def test_existing_cargo_can_consume_entire_capacity(offline, monkeypatch):
     assert o["amount"] == o["budget"] == 0
     assert all(r["amount"] == 0 for r in o["sources"])
     sender = Mock()
-    monkeypatch.setattr(worker, "sendGoods", sender)
+    monkeypatch.setattr(routes, "sendGoods", sender)
     worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[])
     sender.assert_not_called()
 
 
 def test_execution_stops_if_accepted_cargo_not_visible(offline, monkeypatch):
     sender = Mock(side_effect=lambda *args, **kwargs: kwargs["before_send"]())
-    monkeypatch.setattr(worker, "sendGoods", sender)
-    worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
-        {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 30}])
+    monkeypatch.setattr(routes, "sendGoods", sender)
+    with pytest.raises(RuntimeError, match="cargo unconfirmed"):
+        worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
+            {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 30}])
     assert sender.call_count == 1
     assert sender.call_args.args[5] == [0, 0, 100, 0, 0]
     assert "unconfirmed" in offline.setStatus.call_args.args[0]
@@ -77,7 +88,7 @@ def test_execution_rechecks_capacity_before_each_load(offline, monkeypatch):
         sent.append(args[5][2])
         pending[0] += args[5][2]
 
-    monkeypatch.setattr(worker, "sendGoods", sender)
+    monkeypatch.setattr(routes, "sendGoods", sender)
     worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
         {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 100}])
     assert sent == [100, 30]
@@ -94,7 +105,7 @@ def test_guard_rejects_storage_change_before_submission(offline, monkeypatch):
         kwargs["before_send"]()
         sent.append(args[5][2])
 
-    monkeypatch.setattr(worker, "sendGoods", sender)
+    monkeypatch.setattr(routes, "sendGoods", sender)
     with pytest.raises(ValueError, match="Storage or ownership changed"):
         worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
     assert sent == []
@@ -254,7 +265,7 @@ def test_managed_fill_reports_ambiguous_observation_as_failure(offline, monkeypa
     offline._daedalus_managed_fill = True
     offline._daedalus_fill_progress = [0, 0, 0]
     sender = Mock(side_effect=lambda *args, **kwargs: kwargs["before_send"]())
-    monkeypatch.setattr(worker, "sendGoods", sender)
+    monkeypatch.setattr(routes, "sendGoods", sender)
     with pytest.raises(RuntimeError, match="cargo unconfirmed"):
         worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
             {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 30}])
@@ -270,7 +281,7 @@ def test_progress_records_confirmed_cargo_and_last_stage(offline, monkeypatch):
     def sender(*args, **kwargs):
         kwargs["before_send"]()
         pending[0] += args[5][2]
-    monkeypatch.setattr(worker, "sendGoods", sender)
+    monkeypatch.setattr(routes, "sendGoods", sender)
     worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
     assert snapshot(offline._daedalus_fill_progress) == {
         "stage": "finished", "submitted": 100, "verified": 100}
@@ -280,7 +291,7 @@ def test_progress_retains_failure_stage(offline, monkeypatch):
     from ikabot.helpers.fillProgress import snapshot
     offline._daedalus_managed_fill = True
     offline._daedalus_fill_progress = [0, 0, 0]
-    monkeypatch.setattr(worker, "sendGoods", Mock(side_effect=RuntimeError("private")))
+    monkeypatch.setattr(routes, "sendGoods", Mock(side_effect=RuntimeError("private")))
     with pytest.raises(RuntimeError):
         worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 100}])
     assert snapshot(offline._daedalus_fill_progress) == {
@@ -305,20 +316,152 @@ def test_fill_json_load_matches_upstream_send_resources_cli(offline, monkeypatch
     monkeypatch.setattr(upstream, "requireOwnCity", lambda _s, cid, _n: str(cid))
     monkeypatch.setattr(upstream, "getCityById", lambda _s, cid: CITIES[int(cid)])
     monkeypatch.setattr(upstream, "setInfoSignal", Mock())
-    execute = Mock()
+    execute = Mock(wraps=routes.executeRoutes)
     monkeypatch.setattr(upstream, "executeRoutes", execute)
     prepared = upstream.prepare_sendResources(offline, **cli_config)
+    cli_sender = Mock()
+    monkeypatch.setattr(routes, "sendGoods", cli_sender)
     upstream.do_it.__wrapped__(offline, **prepared)
     route = execute.call_args.args[1][0]
+    cli_args = cli_sender.call_args.args
     pending = [20]
     monkeypatch.setattr(worker, "incoming_amount", lambda *_: pending[0])
     def sender(*args, **kwargs):
         kwargs["before_send"]()
         pending[0] += args[5][2]
     capture = Mock(side_effect=sender)
-    monkeypatch.setattr(worker, "sendGoods", capture)
+    monkeypatch.setattr(routes, "sendGoods", capture)
     worker.fill.__wrapped__(offline, **fill_config)
     args = capture.call_args.args
     assert (args[1], args[2], args[3], args[5], args[6]) == (
         route[0]["id"], route[1]["id"], route[2], list(route[3:]), prepared["useFreighters"])
     assert args[4] == 1
+    assert args[1:7] == cli_args[1:7]
+    assert execute.call_count == 2
+    assert "policy" not in execute.call_args_list[0].kwargs
+    assert execute.call_args_list[1].kwargs["policy"] is not None
+
+
+def test_warehouse_and_cli_share_real_sender_and_cookie_post_boundary(offline, monkeypatch):
+    """A synthetic world verifies real JSON preparation, route loop, and HTTP adapter."""
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlsplit
+
+    from ikabot.config import actionRequest
+    from ikabot.helpers.fillProgress import snapshot
+    from ikabot.web.session import Session
+
+    city_data = {cid: {**city, "availableResources": list(city["availableResources"])}
+                 for cid, city in CITIES.items()}
+
+    class World:
+        def __init__(self):
+            self.selected = 103
+            self.pending = 20
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            query = parse_qs(urlsplit(url).query)
+            if "cityId" in query:
+                self.selected = int(query["cityId"][0])
+            if "currentCityId" in query:
+                self.selected = int(query["currentCityId"][0])
+            page = ('<span id="avatarName">Mine</span> currentCityId: '
+                    + str(self.selected) + ', actionRequest: "synthetic-token-1234"')
+            return self.response(url, page)
+
+        @staticmethod
+        def response(url, page):
+            return SimpleNamespace(url=url, status_code=200, text=page,
+                                   content=page.encode(), history=[])
+
+        def post(self, url, *, data, params, **kwargs):
+            assert data == {}
+            assert kwargs == {"allow_redirects": False, "verify": True, "timeout": 12}
+            assert params["actionRequest"] == "synthetic-token-1234"
+            self.calls.append(dict(params))
+            if params["action"] == "header":
+                assert int(params["currentCityId"]) == self.selected
+                self.selected = int(params["cityId"])
+                return self.response(url, '[["updateGlobalData",{}]]')
+            assert params["function"] == "loadTransportersWithFreight"
+            assert int(params["currentCityId"]) == self.selected == 101
+            assert params["destinationCityId"] == "103"
+            assert params["transporters"] == 1
+            assert params["cargo_tradegood2"] == 100
+            assert "normalTransportersMax" not in params
+            self.pending += params["cargo_tradegood2"]
+            city_data[101]["availableResources"][2] -= params["cargo_tradegood2"]
+            return self.response(url, '[["provideFeedback",[{"type":10}]]]')
+
+    world = World()
+    session = Session.__new__(Session)
+    session.host = "s1-en.ikariam.gameforge.com"
+    session.urlBase = "https://" + session.host + "/index.php?"
+    session.s = world
+    session.username = "Mine"
+    session._daedalus_cookies_only = True
+    session._daedalus_managed_fill = True
+    session._daedalus_fill_progress = [0, 0, 0]
+    session.setStatus = Mock()
+
+    def read_city(_session, cid):
+        world.selected = int(cid)
+        return city_data[int(cid)]
+
+    def parse_city(page):
+        import re
+        return city_data[int(re.search(r"currentCityId: (\d+),", page).group(1))]
+
+    def incoming(_session, target, *_args):
+        world.selected = target  # the final guard changes selected-city context
+        return world.pending
+
+    monkeypatch.setattr(worker, "_city", read_city)
+    monkeypatch.setattr(upstream, "getCityById", read_city)
+    monkeypatch.setattr(worker, "incoming_amount", incoming)
+    monkeypatch.setattr(routes, "getCity", parse_city)
+    monkeypatch.setattr(routes, "getAvailableShips", lambda *_: 2)
+    monkeypatch.setattr(Session, "_Session__checkCookie", Mock(side_effect=AssertionError("legacy relogin")))
+    monkeypatch.setattr(Session, "_Session__token", Mock(side_effect=AssertionError("legacy token")))
+    config = json.loads(json.dumps({**DRAFT, "reviewed_sources": [{"city_id": 101, "amount": 100}]}))
+    worker.fill.__wrapped__(session, **config)
+    assert len(world.calls) == 2
+    assert world.calls[0]["function"] == "changeCurrentCity"
+    assert world.calls[0]["currentCityId"] == "103"
+    assert world.calls[1]["function"] == "loadTransportersWithFreight"
+    assert world.pending == 120
+    assert snapshot(session._daedalus_fill_progress) == {
+        "stage": "finished", "submitted": 100, "verified": 100}
+    assert actionRequest != "synthetic-token-1234"
+
+    # Same authenticated transport for ordinary upstream JSON task; only the
+    # warehouse policy is absent. Actual cargo form must be identical.
+    warehouse_payload = world.calls[1]
+    city_data[101]["availableResources"][2] = 100
+    world.pending, world.selected = 20, 103
+    world.calls.clear()
+    session._daedalus_managed_fill = False
+    prepared = upstream.prepare_sendResources(session, routes=[
+        {"from": 101, "to": 103, "resources": {"marble": 100}}], useFreighters=False)
+    upstream.do_it.__wrapped__(session, **prepared)
+    assert len(world.calls) == 2
+    assert world.calls[1] == warehouse_payload
+    assert world.pending == 120
+
+
+def test_depleted_source_does_not_prevent_other_reviewed_sources(offline, monkeypatch):
+    pending = [20]
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: pending[0])
+    monkeypatch.setitem(CITIES, 101, {**CITIES[101], "availableResources": [0]*5})
+    sent = []
+
+    def sender(*args, **kwargs):
+        kwargs["before_send"]()
+        sent.append((args[1], args[5][2]))
+        pending[0] += args[5][2]
+
+    monkeypatch.setattr(routes, "sendGoods", sender)
+    worker.fill.__wrapped__(offline, **DRAFT, reviewed_sources=[
+        {"city_id": 101, "amount": 100}, {"city_id": 102, "amount": 100}])
+    assert sent == [("102", 100)]

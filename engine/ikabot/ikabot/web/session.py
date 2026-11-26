@@ -1547,7 +1547,7 @@ class Session:
         if params["action"] == "transportOperations":
             mark(self, "submitting")
         try:
-            response = self.s.post(self.urlBase, params=query,
+            response = self.s.post(self.urlBase, data={}, params=query,
                                    allow_redirects=False, verify=True, timeout=12)
             arrived = urllib.parse.urlsplit(str(response.url))
             if (response.status_code != 200 or arrived.scheme != "https"
@@ -1722,6 +1722,14 @@ class Session:
         html : str
             response from the server
         """
+        if getattr(self, "_daedalus_cookies_only", False) is True and (
+                isinstance(params, dict) and
+                (params.get("action"), params.get("function")) in {
+                    ("header", "changeCurrentCity"),
+                    ("transportOperations", "loadTransportersWithFreight")}):
+            if url or payloadPost or ignoreExpire or noIndex or fullResponse or noQuery or kwargs or retry_on_failure:
+                raise ValueError("Cookie-only transport requires one bounded standard POST")
+            return self._daedalus_reviewed_transport_post(params)
         if not retry_on_failure:
             kwargs["allow_redirects"] = False
         url_original = url

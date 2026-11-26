@@ -92,8 +92,8 @@ def test_reviewed_cookie_transport_attests_identity_and_posts_once():
     params = {"action": "transportOperations", "function": "loadTransportersWithFreight",
               "actionRequest": actionRequest, "cargo_resource": 50, "currentCityId": "123"}
     with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("relogin")):
-        assert session._daedalus_reviewed_transport_post(params) == "[]"
-    http.post.assert_called_once_with(session.urlBase, params=dict(params, actionRequest="abcdefgh1234"),
+        assert session.post(params=params, retry_on_failure=False) == "[]"
+    http.post.assert_called_once_with(session.urlBase, data={}, params=dict(params, actionRequest="abcdefgh1234"),
                                      allow_redirects=False, verify=True, timeout=12)
     assert params["actionRequest"] == actionRequest
 
@@ -128,4 +128,18 @@ def test_reviewed_cookie_transport_refuses_changed_source_before_post():
         session._daedalus_reviewed_transport_post({
             "action": "transportOperations", "function": "loadTransportersWithFreight",
             "actionRequest": actionRequest, "currentCityId": "123"})
+    http.post.assert_not_called()
+
+
+def test_cookie_transport_standard_post_refuses_implicit_retry():
+    from ikabot.config import actionRequest
+    from unittest.mock import Mock
+
+    http = FakeHTTP()
+    session = session_with_existing_cookie(http)
+    http.post = Mock()
+    with pytest.raises(ValueError, match="one bounded standard POST"):
+        session.post(params={"action": "transportOperations",
+                             "function": "loadTransportersWithFreight",
+                             "actionRequest": actionRequest})
     http.post.assert_not_called()

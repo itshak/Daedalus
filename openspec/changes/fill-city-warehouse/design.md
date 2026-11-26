@@ -22,3 +22,25 @@ with root-managed operation scope and private expiring review state. An
 explicit exact request-ID confirmation is required for mutation. This is not
 a new delegated scoped bearer credential. No live identifiers, tokens,
 observations or game mutations are included in public CI.
+
+## Consolidated upstream transport pipeline
+
+The warehouse task is a planning/policy adapter only. Translate its reviewed
+source allocation into the upstream sendResources JSON route shape
+(`from`, `to`, `resources`, and `useFreighters`). The existing
+`prepare_sendResources` normalizes IDs, resource vectors and fleet selection;
+both CLI and warehouse invoke `execute_prepared_shipments` and the single
+`executeRoutes` / `sendGoods` implementation. An internal, non-JSON warehouse
+policy rechecks the aggregate remaining budget, source ownership, incoming
+cargo and confirmed movement before advancing the shared route loop. The
+reviewed amount is an upper bound, never a recurring refill or an obligation
+to exhaust depleted source stocks. Stock shrinkage before preparation may
+reduce a route or cause a safe rejection; capacity is refreshed after waits.
+
+The protected cookie-session adapter sits behind the existing Session.post
+interface for the two existing upstream transport actions. It preserves
+exact upstream form fields, checks the selected source and token immediately
+before submission, and refuses redirects, implicit login and automatic replay.
+Ambiguous or contradictory game feedback is not a definitive rejection;
+checkpoint and warehouse progress may only advance after their corresponding
+positive evidence. Normal upstream CLI sessions retain their existing path.
