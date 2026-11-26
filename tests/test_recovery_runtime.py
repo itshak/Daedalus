@@ -357,3 +357,43 @@ def test_dead_worker_is_definitive_loss_even_without_ipc_probe(system):
     assert j.event(a)["due_at"]==t[0]+300
     assert w.running.lease.phase==SessionPhase.NEEDS_ASSISTANCE
     assert w.starts==[]
+
+
+def test_restart_with_zero_workers_only_recovers_previously_verified_account(system, monkeypatch):
+    a,j,c,w,ctl,s,t=system
+    other=Account("account-b", "s53-ru", "Other synthetic player", "Other", True)
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    j.record_loss(a)
+    attempt=j.claim_due(a,force=True)
+    j.outcome(a,attempt["epoch"],success=True)
+    reopened=RecoveryStore(j.path,clock=lambda:t[0])
+    s=RecoverySupervisor([a,other],reopened,w,ctl,c,clock=lambda:t[0])
+    # Exercise startup reconciliation without an uncontrolled background thread.
+    class DormantThread:
+        def __init__(self,**_):pass
+        def start(self):pass
+    monkeypatch.setattr("daedalus.recovery_runtime.threading.Thread",DormantThread)
+    s.start()
+    assert reopened.event(a)["phase"]=="grace"
+    assert reopened.event(a)["due_at"]==t[0]+300
+    assert reopened.event(other) is None
+    t[0]+=299
+    s.tick()
+    assert w.starts==[]
+    t[0]+=1
+    s.tick()
+    assert w.starts==[a.id]
+    assert len(ctl.started)==1
+
+
+def test_identity_change_during_grace_never_starts_replacement_player(system):
+    a,j,c,w,ctl,s,t=system
+    j.capture_started(a,"alertAttacks",{"listen":True},"old")
+    j.record_loss(a)
+    replacement=Account(a.id,a.world,"Other synthetic player",a.label,True)
+    s=RecoverySupervisor([replacement],j,w,ctl,c,clock=lambda:t[0])
+    t[0]+=300
+    s.tick()
+    assert not w.starts and not ctl.started
+    assert j.event(replacement) is None
+    assert not j.desired(replacement)

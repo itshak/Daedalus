@@ -245,7 +245,10 @@ def activateMiracleHttpCall(session, island):
         "actionRequest": actionRequest,
         "ajax": "1",
     }
-    response = session.post(params=params)
+    if getattr(session, "_daedalus_cookies_only", False) is True:
+        response = session.post(params=params, retry_on_failure=False)
+    else:
+        response = session.post(params=params)
     return json.loads(response, strict=False)
 
 

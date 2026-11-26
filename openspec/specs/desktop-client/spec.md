@@ -1008,3 +1008,10 @@ account or pretending that all accounts were processed.
 - **WHEN** multi-account preflight runs
 - **THEN** no account in that cohort receives a new start request, and the user
   sees exactly which account requires attention
+
+### Requirement: Theme changes preserve readable native scroll surfaces
+Switching the Fluent appearance SHALL synchronize the palette of existing native Qt scroll viewports and content surfaces without overriding semantic Fluent widget styles. Warehouse scope controls SHALL expose descriptive accessible names and support keyboard activation.
+
+#### Scenario: Appearance changes at runtime
+- **WHEN** the user switches from light to dark and back with native content already created
+- **THEN** native scroll surfaces SHALL use the matching palette instead of retaining the previous theme background

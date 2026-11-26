@@ -52,7 +52,10 @@ def send_upgrade_request(session, city_id, position, unit_id, upgrade_type, acti
         "ajax": "1"
     }
     try:
-        resp = session.post(params=payload)
+        if getattr(session, "_daedalus_cookies_only", False) is True:
+            resp = session.post(params=payload, retry_on_failure=False)
+        else:
+            resp = session.post(params=payload)
         try:
             resp_text = resp if isinstance(resp, str) else resp.text
         except Exception:
@@ -155,12 +158,13 @@ def wait_for_upgrade_start(session, city_id, position, tab):
             data = json.loads(response, strict=False)
             template_data = next((b[1] for b in data if isinstance(b, list) and b[0] == "updateTemplateData"), None)
             if template_data and template_data.get("inProgress"):
-                return
+                return True
         except Exception:
             pass
 
         time.sleep(1)
         attempts += 1
+    return False
 
 from ikabot.helpers.decorators import configurator, task
 from ikabot.helpers.taskConfig import asId, asInt, getCityById, requireOwnCity
@@ -337,7 +341,8 @@ def run_city_upgrades(session, city_id, upgrades):
         session.setStatus("{}: upgrading {} ({}) {}→{}, target {}".format(city_name, unit["name"], desc, level, level + 1, target))
         success, error = send_upgrade_request(session, city_id, position, unit_id, upgrade_type, action_request, tab)
         if not success:
-            if error in ("insufficient_resources", "insufficient_workshop_level", "feedback"):
+            if (getattr(session, "_daedalus_cookies_only", False) is True
+                    or error in ("insufficient_resources", "insufficient_workshop_level", "feedback")):
                 session.setStatus("{}: upgrade aborted: {}".format(city_name, error))
                 try:
                     sendToBot(session, f"Upgrade aborted in city {city_name}: {error} for {unit['name']} ({desc}).")
@@ -346,7 +351,10 @@ def run_city_upgrades(session, city_id, upgrades):
                 return
             time.sleep(60)
         else:
-            wait_for_upgrade_start(session, city_id, position, tab)
+            observed = wait_for_upgrade_start(session, city_id, position, tab)
+            if getattr(session, "_daedalus_cookies_only", False) is True and observed is not True:
+                session.setStatus("Workshop submission unconfirmed; inspect before retrying")
+                return
 
     session.setStatus("{}: all workshop upgrades completed @{}".format(city_name, getDateTime()))
 

@@ -10,16 +10,17 @@ from urllib.parse import parse_qsl
 from ikabot.config import actionRequest
 
 
-ACTIONS = {"UpgradeExistingBuilding", "BuildNewBuilding", "SaveBuildingPositions"}
+ACTIONS = {"UpgradeExistingBuilding", "BuildNewBuilding", "SaveBuildingPositions", "StartWorkshopUpgrade", "DonateFavorToGod"}
 FUNCTIONS = {("CityScreen", "buildUnits"), ("CityScreen", "buildShips"),
              ("IslandScreen", "workerPlan"), ("CityScreen", "assignPriests"),
              ("IslandScreen", "donate"), ("CityScreen", "assignWinePerTick"),
-             ("Advisor", "doResearch")}
+             ("Advisor", "doResearch"), ("CityScreen", "activateWonder")}
 
 
 def matches(url, params):
     return (isinstance(url, str) and (url.startswith("action=UpgradeExistingBuilding&")
-            or url.startswith("action=Advisor&function=doResearch&"))) or (
+            or url.startswith("action=Advisor&function=doResearch&")
+            or url.startswith("action=DonateFavorToGod&"))) or (
         isinstance(params, dict) and (params.get("action") in ACTIONS
         or (params.get("action"), params.get("function")) in FUNCTIONS))
 
@@ -57,6 +58,21 @@ def validate(url, params, *, noIndex=False):
     elif action == "BuildNewBuilding":
         require(not url and noIndex and set(form) == city_fields | {"position", "building"}
                 and form["templateView"] == "buildingGround" and number(form["building"], 1, 999999))
+    elif action == "StartWorkshopUpgrade":
+        require(not url and not noIndex and set(form) == city_fields | {"position", "unitId", "upgradeType", "activeTab"}
+                and form["templateView"] == "workshop" and number(form["unitId"], 1, 9999999)
+                and form["upgradeType"] in ("offensive", "defensive")
+                and form["activeTab"] in ("tabUnits", "tabShips"))
+    elif (action, function) == ("CityScreen", "activateWonder"):
+        require(not url and not noIndex and set(form) == city_fields | {"position", "function"}
+                and form["templateView"] == "temple" and token == actionRequest)
+    elif action == "DonateFavorToGod":
+        require(bool(url) and set(form) == common | {"godId", "position", "backgroundView", "currentCityId", "currentTab"}
+                and form["templateView"] == "shrineOfOlympus" and form["currentTab"] == "tabOverview"
+                and form["backgroundView"] == "city" and token == actionRequest
+                and number(form["godId"], 1, 6) and number(form["position"], high=80)
+                and number(form["currentCityId"], 1))
+        return str(form["currentCityId"])
     elif action == "SaveBuildingPositions":
         moves = set(form) - city_fields
         require(not url and noIndex and city_fields <= set(form) and len(moves) % 2 == 0

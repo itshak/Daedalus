@@ -354,11 +354,11 @@ def test_actual_upstream_military_inventory_uses_protected_read_transport():
     assert http.post.call_count == 1
 
 
-@pytest.mark.parametrize("kind", ["build", "troops", "fleet", "layout", "resource", "tradegood", "academy", "temple", "donate", "wine", "study", "upgrade"])
+@pytest.mark.parametrize("kind", ["build", "troops", "fleet", "layout", "resource", "tradegood", "academy", "temple", "donate", "wine", "study", "upgrade", "workshop", "miracle", "shrine"])
 def test_reviewed_mutations_use_exact_upstream_forms_once(kind):
     from unittest.mock import Mock
     from ikabot.config import actionRequest
-    from ikabot.function import constructBuilding, trainArmy, reorganizeCityBuildings, modifyProduction, donate, tavernManager, research
+    from ikabot.function import constructBuilding, trainArmy, reorganizeCityBuildings, modifyProduction, donate, tavernManager, research, UpgradeUnits, activateMiracle, activateShrine
 
     http = FakeHTTP(text='<span id="avatarName">ExamplePlayer</span> currentCityId: 123, actionRequest: "abcdefgh1234"')
     session = session_with_existing_cookie(http)
@@ -366,6 +366,7 @@ def test_reviewed_mutations_use_exact_upstream_forms_once(kind):
     base = session.urlBase.replace("index.php", "") if kind in ("build", "layout") else session.urlBase
     http.post = Mock(return_value=SimpleNamespace(url=base, status_code=200, text="[]", content=b"[]", history=[]))
     reference = Mock()
+    reference.post.return_value = "[]"
     city = {"id": "123", "pos": 4}
     def invoke(s):
         if kind == "build":
@@ -380,11 +381,18 @@ def test_reviewed_mutations_use_exact_upstream_forms_once(kind):
             return donate._submit_donation(s, "5", "resource", 10, city_id="123", reviewed=True)
         if kind == "wine":
             return tavernManager.TavernManager(s)._apply_level(city, {"position": 4}, 3, {"action_code": actionRequest}, reviewed=True)
+        if kind == "workshop":
+            return UpgradeUnits.send_upgrade_request(s, "123", 4, "303", "offensive", actionRequest, "tabUnits")
+        if kind == "miracle":
+            return activateMiracle.activateMiracleHttpCall(s, {"ciudad": city})
+        if kind == "shrine":
+            return activateShrine.donateShrine(s, 1, "123", 4, "Pan")
         if kind == "study":
             return research.study(s, {"js_researchAdvisorChangeResearchType1": {"ajaxrequest": "type=2"}}, 1, reviewed=True)
         return s.post("action=UpgradeExistingBuilding&actionRequest=REQUESTID&cityId=123&position=4&level=3&activeTab=tabSendTransporter&backgroundView=city&currentCityId=123&templateView=academy&ajax=1", retry_on_failure=False)
 
-    with patch.object(research, "getCity", return_value=city):
+    session.setStatus = Mock()
+    with patch.object(research, "getCity", return_value=city), patch.object(activateShrine, "getFavor", return_value=100):
         invoke(reference)
         with patch.object(Session, "_Session__checkCookie", side_effect=AssertionError("legacy login")):
             invoke(session)

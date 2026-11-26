@@ -878,3 +878,24 @@ def test_server_activity_history_account_scope_and_filter(app):
     assert calls[-1] == ("beta",None,"all")
     assert not page.server_copy.isEnabled()
     page.close()
+
+
+def test_warehouse_selected_action_is_keyboard_accessible(app):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    page=WarehousesPage()
+    try:
+        page.set_accounts(accounts(3))
+        page.set_selected_accounts(["account-0", "account-2"])
+        selected=[]
+        page.load_selected_requested.connect(selected.append)
+        page.show()
+        page.load_selected_button.setFocus(Qt.TabFocusReason)
+        app.processEvents()
+        assert page.load_selected_button.accessibleName()=="Load warehouses for selected accounts"
+        assert page.load_selected_button.hasFocus()
+        QTest.keyClick(page.load_selected_button, Qt.Key_Space)
+        assert selected==[["account-0", "account-2"]]
+    finally:
+        _dispose(page,app)

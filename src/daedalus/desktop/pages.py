@@ -1485,6 +1485,7 @@ class WarehousesPage(QWidget):
         self.load_all_button.setEnabled(False)
         header.addWidget(self.load_all_button)
         self.load_selected_button = PushButton("Selected")
+        self.load_selected_button.setAccessibleName("Load warehouses for selected accounts")
         self.load_selected_button.setToolTip("Load the saved warehouse report selection")
         self.load_selected_button.clicked.connect(self._load_selected)
         self.load_selected_button.setEnabled(False)

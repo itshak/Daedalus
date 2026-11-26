@@ -345,3 +345,30 @@ def test_proxy_profile_editor_rejects_foreign_status_and_busy_account(qt_app):
         assert not page.proxy_test.isEnabled() and not page.proxy_save.isEnabled()
     finally:
         _dispose(page, qt_app)
+
+
+def test_native_scroll_surfaces_follow_runtime_theme(qt_app, monkeypatch):
+    from PySide6.QtGui import QPalette
+    from qfluentwidgets import Theme, setTheme
+
+    import daedalus.desktop.app as module
+    from daedalus.desktop.theme import apply_app_palette
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    monkeypatch.setattr(MainWindow, "_auto_reconnect_securely", lambda _: None)
+    setTheme(Theme.LIGHT)
+    apply_app_palette()
+    window = MainWindow()
+    try:
+        for theme, expected in ((Theme.DARK, "#1c1c1e"), (Theme.LIGHT, "#f5f5f7")):
+            setTheme(theme)
+            apply_app_palette()
+            qt_app.processEvents()
+            for scroll in (window.home_page.content_scroll, window.tasks_page.discovery_scroll, window.tasks_page.parameter_scroll):
+                for surface in (scroll, scroll.viewport(), scroll.widget()):
+                    assert surface.palette().color(QPalette.Window).name() == expected
+    finally:
+        setTheme(Theme.LIGHT)
+        apply_app_palette()
+        _dispose(window, qt_app)

@@ -87,6 +87,8 @@ def capture(output_dir: Path) -> list[Path]:
         patch("daedalus.connection_prefs.load_connection_url", return_value=None),
         patch("daedalus.desktop.ssh_tunnel.load_ssh_destination", return_value=None),
     ):
+        setTheme(Theme.LIGHT)
+        apply_app_palette()
         window = desktop_app.MainWindow()
         window.setWindowTitle("Daedalus — SYNTHETIC UI FIXTURES")
         window._show_accounts(SYNTHETIC_ACCOUNTS)
@@ -104,6 +106,7 @@ def capture(output_dir: Path) -> list[Path]:
             ("overview", window.home_page),
             ("accounts", window.accounts_page),
             ("warehouses", window.warehouses_page),
+            ("military", window.military_page),
             ("automations", window.tasks_page),
             ("activity", window.log_page),
             ("connection", window.connection_page),
