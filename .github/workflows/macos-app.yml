@@ -37,6 +37,8 @@ jobs:
         run: |
           test -f dist/Daedalus.app/Contents/MacOS/Daedalus
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' dist/Daedalus.app/Contents/Info.plist | grep -Fx io.github.itshak.daedalus
+          /usr/libexec/PlistBuddy -c 'Print :DaedalusSourceRevision' dist/Daedalus.app/Contents/Info.plist | grep -Fx "$GITHUB_SHA"
+          /usr/libexec/PlistBuddy -c 'Print :DaedalusReleaseVersion' dist/Daedalus.app/Contents/Info.plist | grep -Fx "$(python -c 'from daedalus import __version__; print(__version__)')"
           codesign --verify --deep --strict --verbose=2 dist/Daedalus.app
           if find dist/Daedalus.app -type f \( -name 'tokens.json' -o -name 'accounts.toml' -o -name '*.env' -o -name 'cookies.json' \) | grep .; then
             echo "Unexpected private runtime/configuration path in app" >&2
