@@ -737,6 +737,25 @@ def create_app(
         except (ValueError, EngineIPCUnavailable) as exc:
             raise HTTPException(status_code=503, detail="Island lookup unavailable") from exc
 
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/production", dependencies=[Depends(authorized)])
+    def account_production(account_id: str, city_id: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Production inventory unavailable")
+        try:
+            inventory = ipc_client.production_inventory(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned city not found") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated production data unavailable") from exc
+        return {"account_id": account_id, **inventory}
+
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/buildings", dependencies=[Depends(authorized)])
     def account_buildings(account_id: str, city_id: int) -> dict[str, object]:
         """Safe, read-only actual building rows; not an executable construction plan."""

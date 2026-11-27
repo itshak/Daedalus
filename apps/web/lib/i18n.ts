@@ -2,6 +2,15 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Production": "Производство",
+  "City workforce and resource capacity": "Рабочие и производственные мощности городов",
+  "Production resources": "Добыча ресурсов",
+  "City workforce": "Рабочие в городах",
+  "Workforce section": "Раздел занятости",
+  "Crystal": "Хрусталь",
+  "{count} city observations": "Получено данных о городах: {count}",
+  "Building absent": "Здание отсутствует",
+  "Read-only workforce observations. Assignment controls are not enabled yet.": "Данные о рабочих доступны только для чтения. Изменение занятости пока недоступно.",
   "Choose an eligible account in scope": "Выберите доступный аккаунт в рабочей области",
   "All accounts in scope": "Все аккаунты рабочей области",
   "Manage all accounts": "Управлять всеми аккаунтами",

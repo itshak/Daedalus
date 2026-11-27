@@ -40,6 +40,7 @@ from daedalus.desktop.home_page import HomePage
 from daedalus.desktop.log_page import LogPage
 from daedalus.desktop.military_page import MilitaryPage
 from daedalus.desktop.pages import AccountsPage, ConnectionPage, WarehousesPage
+from daedalus.desktop.production_page import ProductionPage
 from daedalus.desktop.selenium_auth import GameforgeCredentials
 from daedalus.desktop.selenium_credentials import (
     LoginCredentialError,
@@ -382,6 +383,10 @@ class APIWorker(QThread):
                     raise ValueError("Invalid construction preview")
                 supply = self.task_payload.get("supply")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades, supply=supply) if supply is not None else self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "production_cities" and self.account_id:
+                result = self.client.cities(self.account_id)
+            elif self.action == "production_inventory" and self.account_id and self.task_payload:
+                result = self.client.production_inventory(self.account_id, self.task_payload["city_id"])
             elif self.action == "military_overview" and self.account_id:
                 result = self.client.military_overview(self.account_id)
             elif self.action == "military_movements" and self.account_id:
@@ -646,6 +651,7 @@ class MainWindow(FluentWindow):
         self._pending_task_refresh: str | None = None
         self._pending_task_cities: str | None = None
         self._pending_military_reads: list[tuple[str, str]] = []
+        self._pending_production_reads: list[tuple[str, int | None]] = []
         self._pending_task_buildings: tuple[str, int] | None = None
         self._pending_workshop: tuple[str, int] | None = None
         self._pending_trainables: tuple[str, int, bool] | None = None
@@ -714,6 +720,7 @@ class MainWindow(FluentWindow):
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
         self.military_page = MilitaryPage(self)
+        self.production_page = ProductionPage(self)
         # One authoritative automation workspace and one catalog instance.
         # Preserve the public operations_page alias for legacy navigation
         # callers without constructing a disconnected second catalog.
@@ -738,6 +745,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.home_page, NAV_ICONS["overview"], "Overview")
         self.addSubInterface(self.accounts_page, NAV_ICONS["accounts"], "Accounts")
         self.addSubInterface(self.warehouses_page, NAV_ICONS["warehouses"], "Warehouses")
+        self.addSubInterface(self.production_page, NAV_ICONS["production"], "Production")
         self.addSubInterface(self.military_page, NAV_ICONS["military"], "Military")
         self.addSubInterface(self.tasks_page, NAV_ICONS["automations"], "Automations")
         self.addSubInterface(self.log_page, NAV_ICONS["activity"], "Activity")
@@ -875,6 +883,7 @@ class MainWindow(FluentWindow):
             lambda: self._request("capabilities")
         )
         self.military_page.refresh_requested.connect(self._queue_military_reads)
+        self.production_page.refresh_requested.connect(self._queue_production_reads)
         self.warehouses_page.load_requested.connect(
             lambda aid: self._request_warehouse_scope("warehouses", [aid])
         )
@@ -1036,6 +1045,8 @@ class MainWindow(FluentWindow):
             self._request("accounts")
         elif current is self.warehouses_page:
             self.warehouses_page._load_all()
+        elif current is self.production_page:
+            self.production_page.refresh()
         elif current is self.military_page:
             self.military_page.refresh()
         elif current is self.tasks_page:
@@ -1691,6 +1702,8 @@ class MainWindow(FluentWindow):
         if current is self.warehouses_page and ids:
             # Changing context is read-only: do not invoke automatic sign-in.
             self._perform_warehouse_scope("warehouses_all", ids)
+        elif current is self.production_page and ids:
+            self.production_page.refresh()
         elif current is self.military_page and ids:
             self.military_page.refresh()
         elif current is self.log_page and ids:
@@ -1718,6 +1731,7 @@ class MainWindow(FluentWindow):
         self._pending_batch_status = None
         self._pending_task_cities = None
         self._pending_military_reads.clear()
+        self._pending_production_reads.clear()
         self._pending_task_buildings = None
         self._pending_workshop = None
         self._pending_trainables = None
@@ -1742,6 +1756,7 @@ class MainWindow(FluentWindow):
         self.warehouses_page.set_accounts(rows)
         self.warehouses_page.set_selected_accounts(ids)
         self.military_page.set_accounts(rows)
+        self.production_page.set_accounts(rows)
         self.log_page.set_accounts(rows)
         self.home_page._warehouse_report_note = "Not loaded"
         self.home_page._task_report_note = "Not checked"
@@ -1949,6 +1964,26 @@ class MainWindow(FluentWindow):
                 self._notice("Request in progress", "Another backend request is still running.")
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
+
+    def _queue_production_reads(self, account_ids: list[str]) -> None:
+        if self.client is None:
+            self.production_page.finish_refresh()
+            return
+        allowed = set(self.production_page.eligible_ids())
+        self._pending_production_reads = [(aid, None) for aid in dict.fromkeys(account_ids[:100]) if aid in allowed]
+        self._run_next_production_read()
+
+    def _run_next_production_read(self) -> None:
+        if self.client is None or self._worker is not None:
+            return
+        allowed = set(self.production_page.eligible_ids())
+        while self._pending_production_reads:
+            aid, cid = self._pending_production_reads.pop(0)
+            if aid in allowed:
+                self._launch(self.client, "production_cities" if cid is None else "production_inventory",
+                             account_id=aid, task_payload=None if cid is None else {"city_id": cid})
+                return
+        self.production_page.finish_refresh()
 
     def _queue_military_reads(self, account_ids: list[str], kind: str) -> None:
         """One bounded read at a time, even for All accounts."""
@@ -2293,6 +2328,8 @@ class MainWindow(FluentWindow):
                     self._pending_batch_status = None
                     self._pending_task_cities = None
                     self._pending_military_reads.clear()
+                    self._pending_production_reads.clear()
+                    self.production_page.set_accounts([])
                     self.military_page.reset_backend_context()
                     self._pending_task_buildings = None
                     self._pending_workshop = None
@@ -2558,6 +2595,16 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
+        elif action == "production_cities":
+            aid = getattr(self._worker, "account_id", None)
+            if isinstance(aid, str):
+                ids = self.production_page.set_cities(aid, payload)
+                self._pending_production_reads[0:0] = [(aid, cid) for cid in ids]
+        elif action == "production_inventory":
+            aid = getattr(self._worker, "account_id", None)
+            request = getattr(self._worker, "task_payload", None)
+            if isinstance(aid, str) and isinstance(request, dict):
+                self.production_page.set_result(aid, request["city_id"], payload)
         elif action in {"military_overview", "military_movements"}:
             assert isinstance(payload, dict)
             worker = self._worker
@@ -2777,7 +2824,7 @@ class MainWindow(FluentWindow):
         return generation != self._scope_generation and (
             action.startswith("task_") and action not in {
                 "task_start", "task_stop", "task_start_batch", "task_reconcile",
-            } or action.startswith(("warehouses", "military", "server_activity"))
+            } or action.startswith(("warehouses", "military", "server_activity", "production"))
             or action in {"administrative_status", "world_reports", "proxy_profiles",
                           "challenge_policy", "extension_settings", "notification_settings", "recovery_jobs"}
         )
@@ -2835,6 +2882,11 @@ class MainWindow(FluentWindow):
                 self._automatic_login_failures += 1
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
+        if action in {"production_cities", "production_inventory"}:
+            aid = getattr(self._worker, "account_id", None)
+            request = getattr(self._worker, "task_payload", None) or {}
+            if isinstance(aid, str):
+                self.production_page.set_unavailable(aid, request.get("city_id"))
         if action in {"military_overview", "military_movements"}:
             worker = self._worker
             account_id = getattr(worker, "account_id", None)
@@ -3017,7 +3069,7 @@ class MainWindow(FluentWindow):
                           "task_buildings", "task_construction_preview", "task_workshop",
                           "task_trainables", "task_market", "task_academies",
                           "task_taverns", "task_miracles", "task_shrine", "task_piracy",
-                          "military_overview", "military_movements"}:
+                          "military_overview", "military_movements", "production_cities", "production_inventory"}:
             if action.startswith("native_login_"):
                 known_reason = str(error) if str(error) in {
                     "A Gameforge email is required for first-time account binding",
@@ -3085,6 +3137,8 @@ class MainWindow(FluentWindow):
             QTimer.singleShot(0, self._advance_automatic_login)
         if self._worker is None and not self._automatic_login_active:
             self._run_next_military_read()
+        if self._worker is None and not self._automatic_login_active:
+            self._run_next_production_read()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_task_cities()
         if self._worker is None and not self._automatic_login_active:

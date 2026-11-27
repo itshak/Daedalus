@@ -880,6 +880,20 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid layout preview")
         return data
 
+    def production_inventory(self, account_id: str, city_id: int) -> dict[str, object]:
+        from daedalus.production_inventory import validate_production_inventory
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid production city")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/production")
+        if not isinstance(data, dict) or data.get("account_id") != account_id:
+            raise APIConnectionError("Invalid production inventory scope")
+        try:
+            return {"account_id": account_id, **validate_production_inventory(
+                city_id, {k: v for k, v in data.items() if k != "account_id"})}
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid production inventory") from exc
+
     def worker_preview(self, account_id: str, city_id: int, task: str,
                        draft: dict[str, object]) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:

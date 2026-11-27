@@ -1,5 +1,5 @@
 export const WAREHOUSE_TTL_MS = 120_000;
-export const DASHBOARD_PAGES = ["overview", "accounts", "warehouses", "automations", "military", "activity", "settings"] as const;
+export const DASHBOARD_PAGES = ["overview", "accounts", "warehouses", "production", "automations", "military", "activity", "settings"] as const;
 export type DashboardPage = typeof DASHBOARD_PAGES[number];
 export function savedPage(value: string | null): DashboardPage {
   return DASHBOARD_PAGES.find(page => page === value) ?? "overview";

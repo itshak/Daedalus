@@ -6,7 +6,7 @@ import {notificationRoute} from "./notification-settings.ts";
 import {REVIEW_START_ROUTES} from "./generated-operation-contract.ts";
 const simpleRead = new Set(["health", "accounts", "capabilities", "task-control", "account-config", "recovery"]);
 const accountResources = new Set(["session", "cities", "academies", "taverns", "miracles", "shrine-status", "pirate-fortresses", "military", "ship-movements", "tasks"]);
-const cityResources = new Set(["buildings", "build-options", "attack-options", "trainable-units", "workshop-upgrades", "market-quotes"]);
+const cityResources = new Set(["production", "buildings", "build-options", "attack-options", "trainable-units", "workshop-upgrades", "market-quotes"]);
 const safePart = /^[a-zA-Z0-9_-]{1,72}$/;
 const safeNumber = /^[1-9][0-9]{0,11}$/;
 

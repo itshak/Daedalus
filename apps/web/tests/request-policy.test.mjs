@@ -133,3 +133,11 @@ test("validated aggregate pagination is preserved and extra query parameters fai
   assert.equal(allowedRequest("POST",["accounts","a","tasks"],params("raw=true")),false);
   assert.equal(allowedRequest("GET","accounts/a/tasks/preflight".split("/"),params("task=research&task=other")),false);
 });
+
+test('production inventory is read-only and strictly city-scoped', () => {
+  const path = 'accounts/a/cities/12/production'.split('/');
+  assert.equal(allowedRequest('GET', path, params()), true);
+  assert.equal(allowedRequest('GET', path, params('raw=true')), false);
+  assert.equal(allowedRequest('POST', path, params()), false);
+  assert.equal(allowedRequest('GET', 'accounts/a/cities/0/production'.split('/'), params()), false);
+});

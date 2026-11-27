@@ -841,6 +841,13 @@ class IPCServer:
                     return self._preview_build_existing(request)
                 if action == "preview_layout_existing":
                     return self._preview_layout_existing(request)
+                if action == "production_inventory_existing":
+                    from ikabot.function.productionWorkforce import read_city_production
+
+                    session = self._existing_session(request)
+                    inventory = read_city_production(session, request.get("city_id"))
+                    return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                            "username": session.username, "inventory": inventory}
                 if action == "preview_workers_existing":
                     return self._preview_workers_existing(request)
                 if action == "preview_donation_existing":
