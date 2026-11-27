@@ -920,3 +920,39 @@ def test_compact_accounts_recovery_actions_fit_without_overlap(app):
         assert not any(left.intersects(right) for i, left in enumerate(rects) for right in rects[i+1:])
     finally:
         _dispose(page, app)
+
+
+def test_shell_scope_targets_and_empty_selection(app, monkeypatch):
+    from types import SimpleNamespace
+
+    import daedalus.desktop.app as module
+    from daedalus.gui_preferences import GuiPreferences
+
+    monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
+    window = MainWindow()
+    try:
+        rows = accounts(3)
+        window._show_accounts(rows)
+        old_generation = window._scope_generation
+        window._set_working_scope(["account-1"])
+        assert window.tasks_page.selected_account_id() == "account-1"
+        assert window.tasks_page._account_ids == ["account-1"]
+        assert window.warehouses_page._included_ids == ["account-1"]
+        assert [row["id"] for row in window.accounts_page._accounts] == ["account-1"]
+        window._toggle_manage_all()
+        assert len(window.accounts_page._accounts) == 3
+        assert window.tasks_page._account_ids == ["account-1"]
+        window._worker = SimpleNamespace(scope_generation=old_generation)
+        assert window._stale_scope_read("task_cities")
+        assert window._stale_scope_read("warehouses")
+        assert not window._stale_scope_read("task_start")
+        window._worker = None
+        window._show_accounts([rows[0], rows[2]])
+        assert window._working_ids == []
+        assert not window.tasks_page._account_ids
+        assert not window.warehouses_page._included_ids
+        window._include_all_report_accounts()
+        assert window.tasks_page._account_ids == ["account-0", "account-2"]
+    finally:
+        window._worker = None
+        _dispose(window, app)

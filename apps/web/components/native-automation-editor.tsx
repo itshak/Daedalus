@@ -65,7 +65,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const [sendMode,setSendMode]=useState("keep");
   const [notify,setNotify]=useState("none");
   const [preparing,setPreparing]=useState(false);
-  const [review,setReview]=useState<{config:Config;summary:string;fingerprint:string;previewId?:string;ttl?:number}|null>(null);
+  const [review,setReview]=useState<{config:Config;summary:string;fingerprint:string;targets?:BatchTarget[];previewId?:string;ttl?:number}|null>(null);
   const [approved,setApproved]=useState(false);
   const [shipment,setShipment]=useState<ShipmentPlan|null>(null);
   const [busy,setBusy]=useState(false);
@@ -153,7 +153,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
   const prepare=async()=>{
     if(!canReview||inFlight.current)return;
     edit();setMessage("");
-    if(!needsShipmentReview&&!needsPolicyReview){setReview({config,summary,fingerprint});return;}
+    if(!needsShipmentReview&&!needsPolicyReview){setReview({config,summary,fingerprint,targets:batchTargets?.map(target=>({...target}))});return;}
     inFlight.current=true;setBusy(true);setPreparing(true);
     try{
       if(needsPolicyReview){
@@ -225,8 +225,8 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     if (!canLaunch || !review || inFlight.current)return;
     inFlight.current=true;setBusy(true);setLocked(true);setApproved(false);setMessage("");
     try {
-      if(batchTargets&&(task==="alertAttacks"||task==="alertLowWine")){
-        const rows=await launchAlertBatch(task,review.config,batchTargets,
+      if(review.targets&&(task==="alertAttacks"||task==="alertLowWine")){
+        const rows=await launchAlertBatch(task,review.config,review.targets,
           id=>api("accounts/"+encodeURIComponent(id)+"/tasks/preflight?task="+encodeURIComponent(task)),
           (id,rid)=>api("accounts/"+encodeURIComponent(id)+"/tasks",{task,config:review.config,confirmed:true,request_id:rid}),
           ()=>crypto.randomUUID(),()=>mounted.current);
@@ -320,7 +320,7 @@ export function NativeAutomationEditor({account,accountName,task,enabled,role,ba
     <button type="button" className="secondary-button" disabled={!canReview} onClick={()=>void prepare()}>{t(preparing?"Checking current game data…":task==="fillCityWarehouse"?"Preview warehouse transfer":needsShipmentReview?"Preview shipment capacity":"Review settings")}</button>
     {preparing&&<p role="status">{t("Reading current game data. This may take a minute; no automation has started.")}</p>}
     {task==="fillCityWarehouse"&&!reviewed&&!preparing&&<p className="subtle-message">{t("Start becomes available after a successful preview and your approval.")}</p>}
-    {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{batchTargets&&<ul>{batchTargets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
+    {reviewed&&review&&<section className="preview-panel"><h4>{t("Review automation")} · {batchTargets?t("Selected account scope"):accountName}</h4>{review.targets&&<ul>{review.targets.map(a=><li key={a.id}>{a.name}</li>)}</ul>}<p style={{whiteSpace:"pre-line"}}>{review.summary}</p>
       {shipment&&<><p>{t("Available ships")}: {shipment.available_ships.toLocaleString()}/{shipment.total_ships.toLocaleString()} · {t("Cargo per vessel")}: {shipment.capacity.toLocaleString()}</p>
         <table><thead><tr><th>{t("Route")}</th><th>{t("Origin stock")}</th><th>{t("First load limit")}</th><th>{t("Minimum loads")}</th><th>{t("First-load estimate (seconds)")}</th><th>{t("Modeled final delivery (seconds)")}</th></tr></thead><tbody>{shipment.routes.map((r,i)=><tr key={i}><td>{r.origin_name} → {r.destination_name}{r.destination_space===null&&<p>{t("Recipient storage unknown")}</p>}</td><td>{r.stock.map((n,j)=>r.resources[j]?materialName(MATERIALS[j])+": "+n.toLocaleString():null).filter(Boolean).join("; ")}</td><td>{r.first_load_limit.toLocaleString()}</td><td>{r.minimum_loads??t("Unavailable")}</td><td>{r.first_load_timing? <>{r.first_load_timing.total_seconds.toLocaleString()}<p>{t("Queue")}: {r.first_load_timing.queue_seconds} · {t("Loading")}: {r.first_load_timing.loading_seconds} · {t("Travel")}: {r.first_load_timing.travel_seconds}</p></>:t("Unavailable")}</td><td>{r.full_route_model?.delivery_seconds.toLocaleString()??t("Unavailable")}</td></tr>)}</tbody></table>
         <p>{t("Model assumes an exclusive fleet, symmetric return travel, unchanged loading and storage, and no extra waits. No combined multi-route ETA.")}</p>{!shipment.ready&&<p role="alert">{t("No usable fleet")}</p>}</>}

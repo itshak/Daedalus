@@ -5,7 +5,14 @@ Selection never changes game account enablement or grants mutation consent.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QLineEdit,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, SubtitleLabel
 
 from daedalus.account_display import account_display_name
@@ -20,6 +27,8 @@ class AccountSelectionDialog(QDialog):
         *, title: str = "Choose accounts", max_accounts: int | None = None,
         explanation: str | None = None,
         display_names: dict[str, str] | None = None,
+        allow_empty: bool = False,
+        allow_all: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -37,6 +46,8 @@ class AccountSelectionDialog(QDialog):
                 f"Account picker has {len(self._accounts)} entries, "
                 f"exceeding its declared limit of {max_accounts}"
             )
+        self.allow_empty = allow_empty
+        self.all_mode = False
         selected_ids = set(selected)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(METRICS.xl, METRICS.lg, METRICS.xl, METRICS.lg)
@@ -55,6 +66,12 @@ class AccountSelectionDialog(QDialog):
         outer.addWidget(self.all_checkbox)
         self.all_checkbox.stateChanged.connect(self._select_all)
 
+        search = QLineEdit(self)
+        search.setPlaceholderText("Search accounts")
+        if len(self._accounts) > 6:
+            outer.addWidget(search)
+        else:
+            search.hide()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -73,6 +90,7 @@ class AccountSelectionDialog(QDialog):
             checkbox.stateChanged.connect(self._update_count)
             self.checkboxes[aid] = checkbox
             entries.addWidget(checkbox)
+        search.textChanged.connect(self._filter_accounts)
         entries.addStretch(1)
         scroll.setWidget(holder)
         outer.addWidget(scroll, 1)
@@ -81,6 +99,9 @@ class AccountSelectionDialog(QDialog):
 
         actions = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         actions.button(QDialogButtonBox.Ok).setText("Use selected accounts")
+        if allow_all:
+            all_button = actions.addButton("All accounts", QDialogButtonBox.ActionRole)
+            all_button.clicked.connect(self._accept_all)
         actions.accepted.connect(self._accept_nonempty)
         actions.rejected.connect(self.reject)
         outer.addWidget(actions)
@@ -104,10 +125,18 @@ class AccountSelectionDialog(QDialog):
         self.all_checkbox.blockSignals(False)
 
     def _accept_nonempty(self) -> None:
-        if self.selected_ids():
+        if self.allow_empty or self.selected_ids():
             self.accept()
         else:
             self.count.setText("Choose at least one account.")
+
+    def _filter_accounts(self, query: str) -> None:
+        for box in self.checkboxes.values():
+            box.setVisible(query.casefold() in box.text().casefold())
+
+    def _accept_all(self) -> None:
+        self.all_mode = True
+        self.accept()
 
     def selected_ids(self) -> list[str]:
         return [aid for aid, checkbox in self.checkboxes.items() if checkbox.isChecked()]

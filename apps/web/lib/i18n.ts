@@ -2,6 +2,13 @@
 export type Locale = "en" | "ru";
 export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
+  "Choose an eligible account in scope": "Выберите доступный аккаунт в рабочей области",
+  "All accounts in scope": "Все аккаунты рабочей области",
+  "Manage all accounts": "Управлять всеми аккаунтами",
+  "Use working scope": "Использовать рабочую область",
+  "Apply account selection": "Применить выбор аккаунтов",
+  "{count} accounts selected": "Выбрано аккаунтов: {count}",
+  "All accounts ({count})": "Все аккаунты ({count})",
   "Execution stage": "Этап выполнения",
   "Submitted cargo": "Отправлено груза",
   "Verified incoming cargo": "Подтверждено входящего груза",
@@ -221,6 +228,7 @@ export const RU: Readonly<Record<string, string>> = {
   "A review has expired. Remove it and prepare a new preview.": "Срок действия плана истёк. Удалите его и подготовьте новый.",
   "Start these independently approved operations? Every account is checked first. Dispatch stops on uncertainty; earlier starts are not rolled back.": "Запустить отдельно подтверждённые операции? Сначала проверяются все аккаунты. При неопределённом результате запуск останавливается; предыдущие запуски не отменяются.",
   "Review and start queued accounts": "Проверить и запустить очередь",
+  "Choose an account": "Выберите аккаунт",
   "No queued reviews. Choose an account, prepare a supported operation and queue its approved preview.": "Очередь пуста. Выберите аккаунт, подготовьте поддерживаемую операцию и добавьте подтверждённый план.",
   "Prepare and approve a separate preview for each account. Up to 32 distinct accounts; tickets expire after two minutes.": "Подготовьте и подтвердите отдельный план для каждого аккаунта. До 32 аккаунтов; срок действия — две минуты.",
   "Independent account review queue": "Очередь индивидуальных планов аккаунтов",
@@ -456,6 +464,8 @@ export const RU: Readonly<Record<string, string>> = {
   "unconfirmed": "Не подтверждено",
   "Native settings": "Настройки операции",
   "Choose a city": "Выберите город",
+  "Clear": "Очистить",
+  "Select all": "Выбрать все",
   "Select all cities": "Выбрать все города",
   "From city": "Из города",
   "To city": "В город",

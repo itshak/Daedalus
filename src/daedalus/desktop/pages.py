@@ -398,6 +398,7 @@ class AccountsPage(QWidget):
     recovery_bulk_requested = Signal(object, bool)
     recovery_jobs_requested = Signal(str)
     report_selection_changed = Signal(object)
+    manage_all_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -431,6 +432,9 @@ class AccountsPage(QWidget):
         self.create_button = PrimaryPushButton("Add account")
         self.create_button.clicked.connect(self._create)
         self.create_button.setEnabled(False)
+        self.manage_all_button = PushButton("Manage all accounts")
+        self.manage_all_button.clicked.connect(self.manage_all_requested.emit)
+        header.addWidget(self.manage_all_button)
         header.addWidget(self.refresh_button)
         header.addWidget(self.create_button)
         layout.addLayout(header)

@@ -192,6 +192,7 @@ class TasksPage(QWidget):
         self._review_queue = {}
         self._construction_ticket = None
         self._bulk_account_ids: list[str] = []
+        self._bulk_explicit = False
         self._account_metadata: list[dict[str, object]] = []
         self._all_account_metadata: list[dict[str, object]] = []
         self._account_names: dict[str, str] = {}
@@ -289,6 +290,9 @@ class TasksPage(QWidget):
         self.account_combo.setAccessibleName("Player account for automation")
         self.account_combo.currentIndexChanged.connect(self._account_changed)
         account_row.addWidget(self.account_combo, 1)
+        self.only_account_label = BodyLabel("")
+        self.only_account_label.hide()
+        account_row.addWidget(self.only_account_label, 1)
         self.refresh_button = PushButton("Refresh")
         self.refresh_button.clicked.connect(self._refresh)
         account_row.addWidget(self.refresh_button)
@@ -651,6 +655,7 @@ class TasksPage(QWidget):
         self._prereq_ready = None
         self._unresolved = False
         self._bulk_account_ids.clear()
+        self._bulk_explicit = False
         self._template_filter = None
         self.set_accounts([])
         self.set_capabilities([], False)
@@ -696,7 +701,7 @@ class TasksPage(QWidget):
                 self.account_combo.setCurrentIndex(self._account_ids.index(previous))
         finally:
             self.account_combo.blockSignals(False)
-        if not self._bulk_account_ids:
+        if not self._bulk_explicit:
             self._bulk_account_ids = list(self._account_ids)
         for combo in (self.running_account_combo, self.history_account_combo):
             with QSignalBlocker(combo):
@@ -704,6 +709,9 @@ class TasksPage(QWidget):
                 for aid in self._account_ids:
                     combo.addItem(self._account_names[aid])
                 combo.setCurrentIndex(self.account_combo.currentIndex())
+        self.account_combo.setVisible(len(self._account_ids) != 1)
+        self.only_account_label.setVisible(len(self._account_ids) == 1)
+        self.only_account_label.setText(self._account_names[self._account_ids[0]] if len(self._account_ids) == 1 else "")
         self._update_bulk_buttons()
         self._account_changed()
 
@@ -1824,6 +1832,7 @@ class TasksPage(QWidget):
         )
         if dialog.exec() == dialog.Accepted:
             self._bulk_account_ids = dialog.selected_ids()
+            self._bulk_explicit = True
             self._invalidate_review()
             self._update_bulk_buttons()
 
