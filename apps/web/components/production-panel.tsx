@@ -145,7 +145,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
     <div className="under-tabs" role="group" aria-label={t("Workforce section")}>
       {(["resources","academy","temple"] as const).map(key=><button key={key} aria-pressed={section===key} className={section===key?"tab-selected":""} disabled={pending} onClick={()=>{setSection(key);reset();}}>{t(key==="resources"?"Production resources":key==="academy"?"Academy scientists":"Temple priests")}</button>)}
     </div>
-    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setBothPriority("");setMode("maximum");setFallback(false);setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
+    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select aria-label={t("Resource")} value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setBothPriority("");setMode("maximum");setFallback(false);setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
     {section==="resources"&&role!=="viewer"&&<section className="panel">
       <div className="panel-heading"><div><h3>{t("Reviewed production allocation")}</h3><p>{t("Choose one resource priority, or explicitly prioritize one site when filling both.")}</p></div></div>
       <div className="form-grid">
