@@ -1,8 +1,17 @@
 """Globally scoped production inventory and independently reviewed allocations."""
 import time
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QMessageBox, QTableWidgetItem, QAbstractItemView, QInputDialog
-from qfluentwidgets import CaptionLabel, ComboBox, PrimaryPushButton, PushButton, CheckBox, SpinBox
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QInputDialog,
+    QMessageBox,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from qfluentwidgets import CaptionLabel, CheckBox, ComboBox, PrimaryPushButton, PushButton, SpinBox
 
 from daedalus.account_display import account_player_names
 from daedalus.desktop.design_system import PageHeading
@@ -165,7 +174,7 @@ class ProductionPage(QWidget):
         try:
             self.targets.setRowCount(len(self._target_keys))
             for i, key in enumerate(self._target_keys):
-                aid, cid = key
+                aid, _cid = key
                 selected = QTableWidgetItem()
                 selected.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
                 selected.setCheckState(Qt.Unchecked if key in self._excluded else Qt.Checked)

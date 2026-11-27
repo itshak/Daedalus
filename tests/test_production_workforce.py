@@ -161,9 +161,10 @@ def staged_city(monkeypatch, tmp_path):
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from daedalus.recovery_state import RecoveryStore
     from ikabot.function import productionWorkforce as module
     from ikabot.helpers.productionJournal import ProductionJournal
+
+    from daedalus.recovery_state import RecoveryStore
 
     source = observed()
     session = SimpleNamespace(mundo=1, servidor="en", username="Example")
@@ -281,15 +282,17 @@ def test_decreasing_target_without_known_free_population(staged_city):
 def test_reviewed_api_dispatch_and_reconcile_fence(monkeypatch, tmp_path):
     import uuid
     from types import SimpleNamespace
+
     from fastapi.testclient import TestClient
+    from ikabot.function import productionWorkforce as module
+    from ikabot.helpers.productionJournal import ProductionJournal
+
     from daedalus.account_sessions import AccountSessionCoordinator
     from daedalus.accounts import load_accounts
     from daedalus.api import create_app
     from daedalus.engine_ipc import ControlledIPCClient
     from daedalus.recovery_state import RecoveryStore
     from daedalus.task_control import TaskController
-    from ikabot.function import productionWorkforce as module
-    from ikabot.helpers.productionJournal import ProductionJournal
 
     file = tmp_path / "accounts.toml"
     file.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s1-en"\nplayer = "Example"\n'

@@ -524,8 +524,9 @@ class RecoveryStore:
                 (account.world.casefold(), account.player.casefold())).fetchone() is not None
 
     def prepare_production(self, account: Account, run_id: str, plans: list) -> None:
-        from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
         from uuid import UUID
+
+        from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
 
         if not isinstance(run_id, str) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
             raise RecoveryConflict("Invalid production run identity")

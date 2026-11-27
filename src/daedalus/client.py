@@ -891,8 +891,9 @@ class DaedalusClient:
             raise APIConnectionError("Invalid production history") from exc
 
     def production_reconcile(self, account_id: str, run_id: str, *, preview_id=None, request_id=None):
-        from daedalus.production_inventory import validate_reconciliation
         from uuid import UUID
+
+        from daedalus.production_inventory import validate_reconciliation
         if not _ACCOUNT_ID.fullmatch(account_id) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
             raise ValueError("Invalid production run")
         path = f"accounts/{account_id}/production-runs/{run_id}/"
@@ -936,7 +937,10 @@ class DaedalusClient:
             if data.get("account_id") != account_id:
                 raise ValueError("Invalid account scope")
             if "priority" in clean:
-                from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
+                from daedalus.production_inventory import (
+                    validate_priority_draft,
+                    validate_priority_plan,
+                )
                 rows = validate_priority_draft(city_id, clean["priority"])
                 plans = data.get("plans")
                 if (data.get("task") != task or data.get("city_id") != city_id

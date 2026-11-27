@@ -697,7 +697,10 @@ class ExistingIPCClient:
         clean = validated_worker_draft(task, draft)
         owned = {row["id"] for row in self.cities(account)}
         if "priority" in clean:
-            from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
+            from daedalus.production_inventory import (
+                validate_priority_draft,
+                validate_priority_plan,
+            )
 
             rows = validate_priority_draft(city_id, clean["priority"])
             if not {row["city_id"] for row in rows} <= owned:
