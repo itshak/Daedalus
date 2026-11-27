@@ -1115,6 +1115,10 @@ class TasksPage(QWidget):
         elif task in POLICY_TASKS:
             lines = [configuration_summary(original), policy_summary(task, clean, observation),
                      "Observed current state; future eligibility and costs may change."]
+            if task == "fillCityWarehouse":
+                from daedalus.fill_warehouse_review import warehouse_recovery_message
+
+                lines.append(warehouse_recovery_message(result.get("recovery_reason")))
         else:
             lines = [f"{observation['mode'].replace('_', ' ')} · quoted total {observation['gold_total']:,} gold."]
             if observation["gold_available"] is not None:

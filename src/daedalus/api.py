@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -696,8 +697,28 @@ def create_app(
                 validate_market_observation(task, draft, observed)
                 config["reviewed_market"] = True
             ticket = operation_previews.issue(account_id, task, config)
-            return {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
-                    "preview_id": ticket, "expires_in": operation_previews.ttl}
+            response = {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
+                        "preview_id": ticket, "expires_in": operation_previews.ttl}
+            if task == "fillCityWarehouse":
+                from daedalus.recovery_reconcile import canonical_warehouse_fill
+
+                if canonical_warehouse_fill(config) is None:
+                    reason = "warehouse_untracked"
+                elif controller._recovery_store is None or recovery_supervisor is None:
+                    reason = "warehouse_recovery_unavailable"
+                else:
+                    policy = controller._recovery_store.policy(account)
+                    if not policy["enabled"] or not policy["auto_resume"]:
+                        reason = "warehouse_policy_disabled"
+                    elif not recovery_credentials or not recovery_credentials.available(account):
+                        reason = "warehouse_token_unavailable"
+                    elif policy["pause_indefinite"] or (policy["pause_until"] is not None
+                                                        and policy["pause_until"] > time.time()):
+                        reason = "warehouse_recovery_paused"
+                    else:
+                        reason = "warehouse_checkpoint_eligible"
+                response["recovery_reason"] = reason
+            return response
         except FillPreviewUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except ValueError as exc:

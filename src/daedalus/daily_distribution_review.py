@@ -83,7 +83,14 @@ def validate_daily(draft, value):
 
 def validate_ticket(value, account, task, draft):
     import re
-    if (not isinstance(value, dict) or set(value) != {"account_id", "task", "draft", "observation", "preview_id", "expires_in"}
+    fields = {"account_id", "task", "draft", "observation", "preview_id", "expires_in"}
+    if task == "fillCityWarehouse" and isinstance(value, dict) and "recovery_reason" in value:
+        from daedalus.fill_warehouse_review import WAREHOUSE_RECOVERY_MESSAGES
+
+        fields.add("recovery_reason")
+        if not isinstance(value["recovery_reason"], str) or value["recovery_reason"] not in WAREHOUSE_RECOVERY_MESSAGES:
+            raise ValueError("Invalid warehouse recovery status")
+    if (not isinstance(value, dict) or set(value) != fields
             or value.get("account_id") != account or value.get("task") != task
             or value.get("draft") != draft or not isinstance(value.get("preview_id"), str)
             or not re.fullmatch(r"[A-Za-z0-9_-]{43}", value["preview_id"])

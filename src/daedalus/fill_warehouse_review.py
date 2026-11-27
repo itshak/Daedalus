@@ -66,6 +66,20 @@ def fill_summary(d, o):
     lines += [f"{r['city_name']}: {r['amount']:,} of {r['stock']:,}" for r in o["sources"]]
     sources = sum(r["amount"] > 0 for r in o["sources"])
     lines.append("One-time transfer. Current storage and incoming cargo rechecked before every load.")
-    lines.append("Recovery: checkpointed remaining cargo only; ambiguous receipts require review."
+    lines.append("Recovery requires an enabled server policy and verified checkpoints. Ambiguous receipts require review."
                  if 0 < sources <= 40 else "Recovery: manual review (no checkpointable positive allocation or too many sources).")
     return "\n".join(lines)
+
+
+WAREHOUSE_RECOVERY_MESSAGES = {
+    "warehouse_untracked": "Manual review: no eligible positive allocation or more than 40 source cities.",
+    "warehouse_recovery_unavailable": "Automatic recovery is unavailable on this server.",
+    "warehouse_policy_disabled": "Automatic recovery is disabled for this account.",
+    "warehouse_token_unavailable": "Automatic recovery is blocked until a saved server login is available.",
+    "warehouse_recovery_paused": "Automatic recovery is paused.",
+    "warehouse_checkpoint_eligible": "Automatic recovery eligible: resumes only remaining reviewed cargo after fresh checks.",
+}
+
+
+def warehouse_recovery_message(reason):
+    return WAREHOUSE_RECOVERY_MESSAGES.get(reason, "Automatic recovery eligibility was not reported by the server.")

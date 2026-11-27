@@ -217,6 +217,9 @@ def test_fill_preview_actual_worker_handler_to_controller_api(offline, monkeypat
             result = client.post(path, headers=headers, json=payload)
             assert result.status_code == 200, result.text
             assert validate_ticket(result.json(), "alpha", "fillCityWarehouse", DRAFT)["observation"]["amount"] == 130
+            assert result.json()["recovery_reason"] == "warehouse_recovery_unavailable"
+            with pytest.raises(ValueError):
+                validate_ticket({**result.json(), "recovery_reason": "unknown"}, "alpha", "fillCityWarehouse", DRAFT)
             assert [r["action"] for r in requests] == [
                 "task_preflight_existing", "list_sessions", "list_cities_existing", "preview_fill_existing",
             ]
