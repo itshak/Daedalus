@@ -1022,3 +1022,10 @@ At the supported minimum window size, account recovery actions SHALL remain reac
 #### Scenario: Operator changes protected settings section
 - **WHEN** the operator selects an account and changes settings sections
 - **THEN** the selected account SHALL remain explicit and no settings mutation SHALL be triggered by navigation alone
+
+### Requirement: Native global account context
+The native shell SHALL expose equivalent scope and target invalidation behavior across relevant pages.
+
+#### Scenario: Operator switches pages
+- **WHEN** the operator navigates from warehouses to automations
+- **THEN** the same authorized working scope remains selected
