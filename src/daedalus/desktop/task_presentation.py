@@ -60,6 +60,7 @@ REVIEWED_FIELD_CONTROLS: dict[tuple[str, str], dict[str, Any]] = {
         "choices": ["wood", "wine", "marble", "crystal", "sulfur"],
         "choice_labels": ["Wood", "Wine", "Marble", "Crystal", "Sulfur"]},
     ("fillCityWarehouse", "reviewed_sources"): {"type": "hidden_derived"},
+    ("fillCityWarehouse", "transfer_id"): {"type": "hidden_derived"},
     ("fillCityWarehouse", "useFreighters"): {"type": "boolean", "label": "Use freighters"},
 
     ("buyResources", "city"): {

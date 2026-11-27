@@ -2476,7 +2476,9 @@ class MainWindow(FluentWindow):
                 safe = [
                     f"{row.get('task','Job')}: "
                     f"{row.get('desired_state','unknown')} "
-                    f"({'auto eligible' if row.get('restart_class') == 'continuous' else 'review needed'})"
+                    f"({'auto eligible' if row.get('restart_class') in {'continuous', 'fixed_transfer', 'warehouse_fill', 'reconcile_construction', 'convergent_transport'} and not (row.get('transfer_progress') or {}).get('uncertain') else 'review needed'})"
+                    + (f" · {row.get('recovery_reason','').replace('_',' ')}" if row.get("recovery_reason") else "")
+                    + (f" · observed: {row.get('observed_status')}" if row.get("observed_status") else "")
                     for row in job_rows if isinstance(row, dict)
                 ]
                 self._notice(

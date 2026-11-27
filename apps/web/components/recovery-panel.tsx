@@ -9,7 +9,7 @@ type Event = { phase: string; lost_at: number; due_at: number; attempts: number;
 type Recovery = { account_id: string; policy: Policy; event: Event; desired_jobs: number; auto_resume_eligible: number; manual_review: number; server_token_available: boolean; session_status: string };
 type Index = { enabled: boolean; supervisor_enabled: boolean; accounts: Recovery[] };
 type TransferProgress = { dispatched?:number[][]; remaining?:number[][]; uncertain:boolean; completed?:boolean };
-type SavedJob = {id:string;task:string;restart_class:string;desired_state:string;transfer_progress?:TransferProgress};
+type SavedJob = {id:string;task:string;restart_class:string;desired_state:string;transfer_progress?:TransferProgress;recovery_reason?:string;observed_status?:string};
 function cargoTotal(values?: number[][]) { return (values||[]).flat().reduce((sum,n)=>sum+n,0).toLocaleString(); }
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -30,6 +30,7 @@ function recoveryClassLabel(kind: string) {
     case "reconcile_construction": return "Checks remaining target levels";
     case "convergent_transport": return "Resumes source-stock threshold policy";
     case "fixed_transfer": return "Resumes only checkpointed unsent cargo";
+    case "warehouse_fill": return "Resumes remaining reviewed warehouse caps after fresh capacity and cargo checks";
     default: return "Manual review (no replay)";
   }
 }
@@ -107,7 +108,7 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
       <p>Five-minute grace after confirmed session loss, followed by verified reconnection and safe job restoration.</p>
     </div><button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={15}/> Refresh</button></div>
     <div className="recovery-explainer"><ShieldCheck size={20}/>
-      <span>Recovery is <strong>on by default for enabled accounts</strong>. Disable it per account to opt out, or use Pause while browsing; after confirmed session loss, automatic reconnect may end your browser session once the five-minute grace period passes. Unfinished construction, recurring threshold transport, and checkpointed own-city fixed shipments can resume. Uncertain shipments or game actions always require review.</span>
+      <span>Recovery is <strong>on by default for enabled accounts</strong>. Disable it per account to opt out, or use Pause while browsing; after confirmed session loss, automatic reconnect may end your browser session once the five-minute grace period passes. Unfinished construction, recurring threshold transport, checkpointed own-city fixed shipments, and eligible one-time warehouse fills can resume. Uncertain shipments or game actions always require review.</span>
     </div>
     {message && <div role="status" className="notice"><CircleAlert size={17}/><span>{message}</span></div>}
     {!data?.enabled ? <div className="empty-state"><strong>Recovery controller unavailable</strong><p>No automatic login is authorized from this panel.</p></div> :
@@ -154,8 +155,9 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
           </div>
           {jobAccount===r.account_id&&<div className="recovery-jobs">
             {!jobs?<p>Loading saved job records…</p>:jobs.jobs.length?<>{jobs.jobs.map(job=>
-              <div className="recovery-job" key={job.id}><span><strong>{job.task}</strong><small>{label(job.desired_state)}</small></span>
+              <div className="recovery-job" key={job.id}><span><strong>{job.task}</strong><small>Desired: {label(job.desired_state)}{job.observed_status?" · Observed: "+label(job.observed_status):""}</small></span>
                 <span><span>{recoveryClassLabel(job.restart_class)}</span>
+                {job.recovery_reason&&<small>{label(job.recovery_reason)}</small>}
                 {job.transfer_progress && <small>{job.transfer_progress.uncertain
                   ? "Needs review: a shipment dispatch is uncertain"
                   : "Accepted cargo: " + cargoTotal(job.transfer_progress.dispatched) +

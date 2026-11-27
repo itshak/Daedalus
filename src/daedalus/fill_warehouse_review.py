@@ -64,5 +64,8 @@ def fill_summary(d, o):
              f"Available budget: {o['budget']:,}; planned transfer: {o['amount']:,}",
              f"{o['available_ships']:,}/{o['total_ships']:,} vessels free; {o['capacity']:,} per vessel."]
     lines += [f"{r['city_name']}: {r['amount']:,} of {r['stock']:,}" for r in o["sources"]]
-    lines.append("One-time transfer. Current storage and incoming cargo rechecked before every load. No automatic replay.")
+    sources = sum(r["amount"] > 0 for r in o["sources"])
+    lines.append("One-time transfer. Current storage and incoming cargo rechecked before every load.")
+    lines.append("Recovery: checkpointed remaining cargo only; ambiguous receipts require review."
+                 if 0 < sources <= 40 else "Recovery: manual review (no checkpointable positive allocation or too many sources).")
     return "\n".join(lines)

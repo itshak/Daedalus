@@ -72,16 +72,16 @@ function policySummary(task:string,d:Draft,o:Draft):string{
       !int(o.stock,0,1e12)||!int(o.free_space,0,1e12)||!int(o.incoming,0,1e12)||!int(o.budget,0,1e12)||!int(o.amount,0,1e12)||
       o.budget!==Math.max(0,o.free_space-o.incoming)||!int(o.capacity,0,1e8)||!int(o.total_ships,0,1e8)||!int(o.available_ships,0,o.total_ships)||
       !Array.isArray(o.sources)||o.sources.length>99)return bad();
-    let remaining=o.budget,last=0;
+    let remaining=o.budget,last=0,positiveSources=0;
     const lines:string[]=[];
     for(const row of o.sources){
       if(!obj(row)||!keys(row,["city_id","city_name","stock","amount"])||!int(row.city_id,last+1,999999999999)||row.city_id===d.destination_city||
         !name(row.city_name)||!int(row.stock,0,1e12)||!int(row.amount,0,1e12)||row.amount!==Math.min(remaining,row.stock))return bad();
-      last=row.city_id;remaining-=row.amount;
+      last=row.city_id;remaining-=row.amount;if(row.amount>0)positiveSources++;
       lines.push(row.city_name+": "+row.amount.toLocaleString()+" / "+row.stock.toLocaleString());
     }
     if(o.amount!==o.budget-remaining||(o.amount>0&&(!o.capacity||!o.total_ships)))return bad();
-    return o.destination_name+" · "+d.resource+"\nCurrent stock: "+o.stock.toLocaleString()+"; free space: "+o.free_space.toLocaleString()+"; incoming: "+o.incoming.toLocaleString()+"\nAvailable budget: "+o.budget.toLocaleString()+"; planned transfer: "+o.amount.toLocaleString()+"\n"+o.available_ships+"/"+o.total_ships+" vessels free; "+o.capacity+" per vessel.\n"+lines.join("\n")+"\nOne-time transfer; check incoming cargo and storage before each load. No automatic replay.";
+    return o.destination_name+" · "+d.resource+"\nCurrent stock: "+o.stock.toLocaleString()+"; free space: "+o.free_space.toLocaleString()+"; incoming: "+o.incoming.toLocaleString()+"\nAvailable budget: "+o.budget.toLocaleString()+"; planned transfer: "+o.amount.toLocaleString()+"\n"+o.available_ships+"/"+o.total_ships+" vessels free; "+o.capacity+" per vessel.\n"+lines.join("\n")+"\nOne-time transfer; check incoming cargo and storage before each load.\n"+(positiveSources>0&&positiveSources<=40?"Recovery: checkpointed remaining cargo only; ambiguous receipts require review.":"Recovery: manual review (no checkpointable positive allocation or too many sources).");
   }
   if(["consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"].includes(task))
     return recurringSummary(task,d,o);

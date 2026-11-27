@@ -31,9 +31,10 @@ from daedalus.recovery_reconcile import (
     construction_plan,
     convergent_transport_plan,
     fixed_transfer_plan,
+    warehouse_fill_plan,
 )
 from daedalus.recovery_state import RecoveryConflict, RecoveryStore, identity
-from daedalus.task_control import TaskController, TaskUnavailable
+from daedalus.task_control import TRANSPORT_TASKS, TaskController, TaskUnavailable
 
 logger = logging.getLogger("daedalus.recovery_runtime")
 
@@ -296,14 +297,31 @@ class RecoverySupervisor:
 
     def start(self) -> None:
         self.store.protect_after_restart(list(self.accounts.values()))
-        # Only accounts PREVIOUSLY verified as recovered may be scheduled
-        # after an API restart. New policies with no prior login do nothing.
+        # A verified prior recovery or a durable accepted warehouse start
+        # proves prior authenticated ownership. A policy alone never does.
         for account in self.accounts.values():
             event=self.store.event(account)
-            if (event and event["phase"]=="restored" and
-                    self.store.policy(account)["enabled"] and
-                    self.workers.get(account) is None):
+            policy=self.store.policy(account)
+            if not policy["enabled"] or self.workers.get(account) is not None:
+                continue
+            if event and event["phase"]=="restored":
                 self.store.record_loss(account)
+            elif event is None and policy["auto_resume"] and not self.controller._ledger.has_unresolved(account.id):
+                for job in self.store.desired(account,include_config=True):
+                    if (job["restart_class"]!="warehouse_fill" or job["desired_state"]!="running"
+                            or not job["last_task_id"]):
+                        continue
+                    try:
+                        progress=self.store.fixed_transfer_progress(account,job["config"],task=job["task"])
+                    except (RecoveryConflict,ValueError,OSError):
+                        continue
+                    if progress["uncertain"]:
+                        continue
+                    if progress["completed"]:
+                        self.store.complete_job(account,job["id"],revision=job["revision"])
+                        continue
+                    self.store.record_loss(account)
+                    break
         with self._mutex:
             if self._thread is not None and self._thread.is_alive():
                 return
@@ -396,7 +414,7 @@ class RecoverySupervisor:
                 continue
             if job["restart_class"] not in (
                     "continuous", "reconcile_construction", "convergent_transport",
-                    "fixed_transfer"
+                    "fixed_transfer", "warehouse_fill"
                 ) or job["task"] in active:
                 totals["skipped"]+=1
                 continue
@@ -406,9 +424,14 @@ class RecoverySupervisor:
                    for j in jobs)>1:
                 totals["skipped"]+=1
                 continue
+            if (job["task"] in TRANSPORT_TASKS and
+                    ("fillCityWarehouse" in active or
+                     (job["task"]=="fillCityWarehouse" and active & TRANSPORT_TASKS))):
+                totals["skipped"]+=1
+                continue
             resume_config=job["config"]
             if job["restart_class"] in (
-                "reconcile_construction", "convergent_transport", "fixed_transfer"
+                "reconcile_construction", "convergent_transport", "fixed_transfer", "warehouse_fill"
             ):
                 try:
                     if job["restart_class"]=="reconcile_construction":
@@ -417,6 +440,8 @@ class RecoverySupervisor:
                         plan=fixed_transfer_plan(
                             self.store,self.controller._ipc,account,resume_config,
                         )
+                    elif job["restart_class"]=="warehouse_fill":
+                        plan=warehouse_fill_plan(self.store,self.controller._ipc,account,resume_config)
                     else:
                         plan=convergent_transport_plan(
                             self.controller._ipc,account,job["task"],resume_config,
@@ -424,8 +449,13 @@ class RecoverySupervisor:
                 except (EngineIPCUnavailable,TaskUnavailable,ValueError,OSError):
                     # Cannot prove the remaining operations: retry only a
                     # read-only preflight in a future healthy supervisor tick.
+                    if job["restart_class"]=="warehouse_fill":
+                        self.store.record_warehouse_reason(account, job["id"], job["revision"],
+                                                           "warehouse_observation_unavailable")
                     totals["skipped"]+=1
                     continue
+                if job["restart_class"]=="warehouse_fill":
+                    self.store.record_warehouse_reason(account, job["id"], job["revision"], plan.reason)
                 if plan.state=="completed":
                     if self.store.complete_job(
                         account,job["id"],revision=job["revision"],
@@ -464,7 +494,11 @@ class RecoverySupervisor:
                 live=self.controller.list_tasks(account.id)["engine_tasks"]
                 if not any(x.get("task_id")==result["task_id"] and
                            x.get("status")=="running" for x in live):
-                    raise TaskUnavailable("New task is not verified as running")
+                    if job["restart_class"] != "warehouse_fill":
+                        raise TaskUnavailable("New task is not verified as running")
+                    progress = self.store.fixed_transfer_progress(account, resume_config, task=job["task"])
+                    if progress["uncertain"] or not progress["completed"]:
+                        raise TaskUnavailable("New warehouse task has no verified completion")
                 latest=next((row for row in self.store.desired(account)
                             if row["id"]==job["id"]),None)
                 if (not self.store.resume_permitted(account, epoch)

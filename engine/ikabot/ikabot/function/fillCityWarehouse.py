@@ -53,7 +53,7 @@ def _city(session, cid):
     return city
 
 
-def incoming_amount(session, target, name, resource):
+def incoming_amount(session, target, name, resource, source_name=None):
     """Conservative matching: duplicate owned city names share reservations."""
     raw = _advisor_data(session, target)
     rows = raw[1][1][2]["viewScriptParams"]["militaryAndFleetMovements"]
@@ -79,6 +79,21 @@ def incoming_amount(session, target, name, resource):
         # silently omit its cargo; duplicate names are conservatively counted.
         if player and decodeUnicodeEscape(player).casefold() != session.username.casefold():
             continue
+        if source_name is not None:
+            # A checkpoint receipt needs a matching owned source, not merely
+            # an increase in unrelated cargo heading to the same warehouse.
+            if returning:
+                continue
+            source = row["origin"]
+            origin_name, origin_player = source.get("name"), source.get("avatarName")
+            if not isinstance(origin_name, str):
+                raise ValueError("Movement origin unavailable")
+            if decodeUnicodeEscape(origin_name) != source_name:
+                continue
+            if not player or not isinstance(origin_player, str) or not origin_player:
+                raise ValueError("Movement ownership unavailable")
+            if decodeUnicodeEscape(origin_player).casefold() != session.username.casefold():
+                continue
         cargo = row.get("resources")
         if not isinstance(cargo, list) or len(cargo) > 6:
             raise ValueError("Incoming cargo unavailable; inspect movements")
@@ -150,7 +165,7 @@ def preview_fill(session, draft):
             "capacity": capacity, "total_ships": total, "available_ships": available}
 
 
-def prepare_fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None):
+def prepare_fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None, transfer_id=None):
     if type(destination_city) is not int or type(useFreighters) is not bool or resource not in RESOURCES:
         raise ValueError("Invalid warehouse fill")
     requireOwnCity(session, destination_city, "destination_city")
@@ -163,8 +178,23 @@ def prepare_fill(session, destination_city, resource, useFreighters=False, revie
             raise ValueError("Invalid warehouse fill source")
         requireOwnCity(session, row["city_id"], "source_city")
         seen.add(row["city_id"])
-    return {"destination_city": destination_city, "resource": resource, "useFreighters": useFreighters,
-            "reviewed_sources": reviewed_sources}
+    config = {"destination_city": destination_city, "resource": resource, "useFreighters": useFreighters,
+              "reviewed_sources": reviewed_sources}
+    if transfer_id is not None:
+        from ikabot.helpers.fixedTransferJournal import FixedTransferJournal
+        FixedTransferJournal(session, transfer_id, _reviewed_routes(config), useFreighters, warehouse=True)
+        config["transfer_id"] = transfer_id
+    return config
+
+
+def _reviewed_routes(config):
+    index = RESOURCES.index(config["resource"])
+    routes = []
+    for row in config["reviewed_sources"]:
+        amounts = [0] * len(RESOURCES)
+        amounts[index] = row["amount"]
+        routes.append({"from": row["city_id"], "to": config["destination_city"], "resources": amounts})
+    return routes
 
 
 class _WarehousePolicy:
@@ -176,6 +206,8 @@ class _WarehousePolicy:
         self.freighters = freighters
         self.sent = 0
         self.before_incoming = 0
+        self.checkpoint = None
+        self.source = None
         self.full = False
 
     def _observe(self, source, target, island=None):
@@ -189,6 +221,8 @@ class _WarehousePolicy:
     def _has_space(self, budget):
         if budget:
             return True
+        if self.checkpoint is not None:
+            self.checkpoint.warehouse_capacity_reached()
         self.full = True
         mark(self.session, "capacity_reached")
         self.session.setStatus(f"Storage budget exhausted; submitted {self.sent:,}")
@@ -222,6 +256,18 @@ class _WarehousePolicy:
         budget, self.before_incoming = self._observe(source, target, island)
         if cargo[self.index] > budget:
             raise ValueError("Storage or ownership changed; review before retrying")
+        if self.checkpoint is not None:
+            self.source = int(source)
+            self.before_incoming = self._source_incoming()
+
+    def _source_incoming(self):
+        names = _owned(self.session)
+        if self.source not in names or self.destination not in names:
+            raise ValueError("Warehouse source or destination changed")
+        source_name, dest_name = names[self.source], names[self.destination]
+        if list(names.values()).count(source_name) != 1 or list(names.values()).count(dest_name) != 1:
+            raise ValueError("Ambiguous warehouse city names; review before retrying")
+        return incoming_amount(self.session, self.destination, dest_name, self.index, source_name)
 
     def after_send(self, cargo):
         quantity = cargo[self.index]
@@ -230,7 +276,11 @@ class _WarehousePolicy:
         self.session.setStatus(f"Submitted {self.sent:,} {self.resource}; checking incoming cargo")
         for attempt in range(3):
             _, _, _, observed = _target(self.session, self.destination, self.index)
+            if self.checkpoint is not None:
+                observed = self._source_incoming()
             if observed >= self.before_incoming + quantity:
+                if self.checkpoint is not None:
+                    self.checkpoint.warehouse_observed(cargo)
                 mark(self.session, "verifying_cargo", verified=self.sent)
                 return
             if attempt < 2:
@@ -240,25 +290,28 @@ class _WarehousePolicy:
 
 
 @task("fillCityWarehouse", prepare=prepare_fill, report_error=False)
-def fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None):
+def fill(session, destination_city, resource, useFreighters=False, reviewed_sources=None, transfer_id=None):
     """Translate the review to upstream JSON routes and use the shared sender."""
     mark(session, "preparing")
-    config = prepare_fill(session, destination_city, resource, useFreighters, reviewed_sources)
+    config = prepare_fill(session, destination_city, resource, useFreighters, reviewed_sources, transfer_id)
     index = RESOURCES.index(resource)
     setInfoSignal(session, f"Fill warehouse: {resource} (one time)")
     # Cap the reviewed amounts at fresh stock before upstream's strict
     # preparation. The shared executor rechecks stock before each load.
-    routes = []
-    for row in config["reviewed_sources"]:
-        amount = min(row["amount"], _amount(_city(session, row["city_id"])["availableResources"][index]))
-        if amount:
-            routes.append({"from": row["city_id"], "to": destination_city,
-                           "resources": {resource: amount}})
+    routes = _reviewed_routes(config) if transfer_id is not None else []
+    if transfer_id is None:
+        for row in config["reviewed_sources"]:
+            amount = min(row["amount"], _amount(_city(session, row["city_id"])["availableResources"][index]))
+            if amount:
+                routes.append({"from": row["city_id"], "to": destination_city,
+                               "resources": {resource: amount}})
     policy = _WarehousePolicy(session, destination_city, resource, useFreighters)
     if routes:
         # The exact same preparation and execution functions as sendResources CLI.
-        prepared = sendResources.prepare_sendResources(session, routes, useFreighters)
+        prepared = sendResources.prepare_sendResources(session, routes, useFreighters, transfer_id, warehouse=transfer_id is not None)
         sendResources.execute_prepared_shipments(session, **prepared, policy=policy)
     if not policy.full:
+        complete = policy.checkpoint is None or policy.checkpoint.warehouse_finish()
         mark(session, "finished")
-        session.setStatus(f"Warehouse fill finished; submitted {policy.sent:,} {resource}")
+        session.setStatus(f"Warehouse fill finished; submitted {policy.sent:,} {resource}" if complete else
+                          f"Warehouse fill held: source stock depleted; submitted {policy.sent:,} {resource}")

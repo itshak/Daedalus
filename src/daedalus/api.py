@@ -1714,15 +1714,32 @@ def create_app(
         account = account_by_id[account_id]
         jobs = journal.desired(account, include_config=True)
         for job in jobs:
-            if job["restart_class"] == "fixed_transfer":
+            if job["task"] == "fillCityWarehouse" and job["restart_class"] == "manual":
+                job["recovery_reason"] = "warehouse_untracked"
+            if job["restart_class"] in ("fixed_transfer", "warehouse_fill"):
                 try:
                     job["transfer_progress"] = journal.fixed_transfer_progress(
-                        account, job["config"],
+                        account, job["config"], task=job["task"],
                     )
                 except RecoveryConflict:
                     # Missing or corrupt progress must be visible as uncertain,
                     # not silently interpreted as zero shipments.
                     job["transfer_progress"] = {"uncertain": True}
+                if job["restart_class"] == "warehouse_fill":
+                    progress = job["transfer_progress"]
+                    job["recovery_reason"] = ("warehouse_receipt_uncertain" if progress["uncertain"]
+                                              else (progress.get("hold_reason") or "warehouse_intent_exhausted") if progress.get("completed")
+                                              else journal.warehouse_reason(account, job["id"], job["revision"])
+                                              or progress.get("hold_reason") or "warehouse_remaining")
+        if any(job["task"] == "fillCityWarehouse" for job in jobs):
+            try:
+                live = require_task_controller(account_id).list_tasks(account_id)["engine_tasks"]
+            except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError, ValueError, HTTPException):
+                live = None
+            for job in jobs:
+                if job["task"] == "fillCityWarehouse":
+                    job["observed_status"] = ("unavailable" if live is None else next(
+                        (r["status"] for r in live if r.get("task_id")==job["last_task_id"]), "not_observed"))
         return {"account_id":account_id,
                 "jobs":jobs,
                 "receipts":journal.receipts(account)}

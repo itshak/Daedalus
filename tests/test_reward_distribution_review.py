@@ -95,6 +95,7 @@ def test_review_ticket_scope_and_replay(monkeypatch,tmp_path,task,endpoint,draft
     monkeypatch.setattr(ipc,"preflight_task",lambda _a,t:{
         "task":t,"ready":True,"reason":"none","notifications_required":False,"checked":[]})
     monkeypatch.setattr(ipc,"has_account",lambda _a:True)
+    monkeypatch.setattr(ipc,"list_managed_tasks",lambda _a:[])
     monkeypatch.setattr(ipc,"native_reward_distribution_preview",lambda _a,_t,_d:observation)
     monkeypatch.setattr(ipc,"recurring_preview",lambda _a,_t,_d:observation)
     monkeypatch.setattr(ipc,"fill_preview",lambda _a,_d:observation)

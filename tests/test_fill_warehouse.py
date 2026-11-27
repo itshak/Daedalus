@@ -597,3 +597,109 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
     assert world.waits == [120, 120]
     assert snapshot(session._daedalus_fill_progress) == {
         "stage": "finished", "submitted": 300, "verified": 300}
+
+
+@pytest.fixture
+def checkpointed_fill(offline, monkeypatch, tmp_path):
+    from uuid import uuid4
+
+    from ikabot.helpers.fixedTransferJournal import FixedTransferJournal
+
+    from daedalus.recovery_state import RecoveryStore
+    account = Account("alpha", "s1-en", "Mine", "Mine", True)
+    offline.mundo, offline.servidor = "1", "en"
+    config = {**DRAFT, "reviewed_sources": [{"city_id": 101, "amount": 100},
+                                          {"city_id": 102, "amount": 30}],
+              "transfer_id": str(uuid4())}
+    db = RecoveryStore(tmp_path / "private" / "recovery.sqlite3")
+    db.prepare_fixed_transfer(account, config, task="fillCityWarehouse")
+    db.finish_fixed_transfer(account, config["transfer_id"], status="started", task_id="old")
+    monkeypatch.setenv("DAEDALUS_FIXED_TRANSFER_DB", str(db.path))
+    def journal():
+        return FixedTransferJournal(offline, config["transfer_id"], worker._reviewed_routes(config),
+                                    warehouse=True)
+    return account, config, db, journal
+
+
+def test_checkpointed_fill_restart_subtracts_only_accepted_and_visible_cargo(offline, checkpointed_fill, monkeypatch):
+    account, config, db, journal = checkpointed_fill
+    record = journal()
+    prior = [0, 0, 40, 0, 0]
+    chunk = record.reserve(0, prior)
+    record.confirmed(chunk, prior)
+    record.warehouse_observed(prior)
+    pending = [60]  # previous 40 + original incoming 20
+    sources = {"Athens": 40, "Sparta": 0}
+    monkeypatch.setattr(worker, "incoming_amount", lambda _s, _t, _n, _i, source=None:
+                        sources[source] if source else pending[0])
+    sent = []
+    def sender(*args, **kw):
+        kw["before_send"]()
+        cargo = args[5]
+        cp = kw["checkpoint"]
+        chunk_id = cp.reserve(kw["route_index"], cargo)
+        cp.confirmed(chunk_id, cargo)
+        sent.append(cargo[2])
+        pending[0] += cargo[2]
+        sources[NAMES[int(args[1])]] += cargo[2]
+    monkeypatch.setattr(routes, "sendGoods", sender)
+    worker.fill.__wrapped__(offline, **config)
+    assert sent == [60, 30]
+    progress = db.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+    assert progress["completed"] and not progress["uncertain"]
+    assert progress["remaining"] == [[0]*5, [0]*5]
+
+
+def test_accepted_but_unobserved_or_pending_receipt_blocks_restore(offline, checkpointed_fill):
+    from ikabot.helpers.fixedTransferJournal import FixedTransferUnsafe
+
+    from daedalus.recovery_reconcile import warehouse_fill_plan
+    account, config, db, journal = checkpointed_fill
+    cargo = [0, 0, 40, 0, 0]
+    chunk = journal().reserve(0, cargo)
+    ipc = Mock()
+    assert warehouse_fill_plan(db, ipc, account, config).reason == "warehouse_receipt_uncertain"
+    journal().confirmed(chunk, cargo)
+    assert db.fixed_transfer_progress(account, config, task="fillCityWarehouse")["uncertain"]
+    with pytest.raises(FixedTransferUnsafe):
+        journal().remaining(0, [0, 0, 100, 0, 0])
+    assert warehouse_fill_plan(db, ipc, account, config).state == "review"
+    ipc.fill_preview.assert_not_called()
+
+
+def test_arrived_cargo_not_subtracted_twice_and_empty_stock_is_held(offline, checkpointed_fill, monkeypatch):
+    from daedalus.recovery_reconcile import warehouse_fill_plan
+    account, config, db, journal = checkpointed_fill
+    cargo = [0, 0, 40, 0, 0]
+    chunk = journal().reserve(0, cargo)
+    journal().confirmed(chunk, cargo)
+    journal().warehouse_observed(cargo)
+    # The original 40 has arrived: free space dropped, inbound returned to 20.
+    dest = CITIES[103]
+    monkeypatch.setitem(CITIES, 103, {**dest, "freeSpaceForResources":[0,0,110,0,0],
+                                     "availableResources":[0,0,390,0,0]})
+    ipc = Mock()
+    ipc.cities.return_value = [{"id": k} for k in NAMES]
+    ipc.fill_preview.return_value = worker.preview_fill(offline, DRAFT)
+    plan = warehouse_fill_plan(db, ipc, account, config)
+    assert plan.state == "ready" and plan.config == config
+    assert ipc.fill_preview.return_value["budget"] == 90
+    assert db.fixed_transfer_progress(account, config, task="fillCityWarehouse")["remaining"][0][2] == 60
+    for cid in (101,102):
+        monkeypatch.setitem(CITIES,cid,{**CITIES[cid],"availableResources":[0]*5})
+    ipc.fill_preview.return_value = worker.preview_fill(offline, DRAFT)
+    assert warehouse_fill_plan(db, ipc, account, config).reason == "warehouse_source_stock_missing"
+    worker.fill.__wrapped__(offline, **config)
+    progress = db.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+    assert not progress["completed"] and not progress["uncertain"]
+    assert progress["hold_reason"] == "warehouse_source_stock_missing"
+
+
+def test_capacity_reached_is_terminal_even_if_space_later_reopens(offline, checkpointed_fill, monkeypatch):
+    from daedalus.recovery_reconcile import warehouse_fill_plan
+    account, config, db, _journal = checkpointed_fill
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: 150)
+    worker.fill.__wrapped__(offline, **config)
+    assert db.fixed_transfer_progress(account, config, task="fillCityWarehouse")["completed"]
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: 20)
+    assert warehouse_fill_plan(db, Mock(), account, config).state == "completed"

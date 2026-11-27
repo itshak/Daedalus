@@ -183,10 +183,10 @@ def sendGoods(session, originCityId, destinationCityId, islandId, ships, send, u
                 checkpoint.confirmed(chunk_id, send)
             break
         if outcome == 11:
-            if before_send is not None:
-                raise RuntimeError("Reviewed transport rejected; review before retrying")
             if checkpoint:
                 checkpoint.rejected(chunk_id, send)
+            if before_send is not None:
+                raise RuntimeError("Reviewed transport rejected; review before retrying")
             wait(getMinimumWaitingTime(session))
         else:
             raise RuntimeError("Unrecognized transport outcome needs manual reconciliation")

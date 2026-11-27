@@ -36,6 +36,10 @@ _SECRET_WORDS = frozenset({
 })
 
 
+TRANSPORT_TASKS = {"sendResources", "fillCityWarehouse", "consolidateResources",
+                               "resourceTransportManager", "distributeResources"}
+
+
 class TaskUnavailable(RuntimeError):
     """The task cannot run safely through the currently attached engine."""
 
@@ -444,12 +448,12 @@ class TaskController:
                 raise ValueError("Production requires a protected, reviewed journal")
             clean["production_run_id"] = request_id
         is_fixed = False
-        if task == "sendResources" and self._recovery_store is not None:
-            from daedalus.recovery_reconcile import canonical_fixed_transfer
+        if task in ("sendResources", "fillCityWarehouse") and self._recovery_store is not None:
+            from daedalus.recovery_reconcile import checkpoint_intent
             if track_desired:
                 if "transfer_id" in clean:
                     raise ValueError("Fixed transfer journal key is server-owned")
-                if canonical_fixed_transfer(clean) is not None:
+                if checkpoint_intent(task, clean) is not None:
                     clean["transfer_id"] = request_id
                     is_fixed = True
             else:
@@ -469,6 +473,12 @@ class TaskController:
                     {"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"}
                     for row in self._ipc.list_managed_tasks(account)):
                 raise TaskUnavailable("Stop existing worker assignment tasks first")
+            if task in TRANSPORT_TASKS:
+                active = {row.get("task") for row in self._ipc.list_managed_tasks(account)
+                          if row.get("status") in {"running", "stopping"}}
+                if ("fillCityWarehouse" in active or
+                        (task == "fillCityWarehouse" and active & TRANSPORT_TASKS)):
+                    raise TaskUnavailable("Stop overlapping warehouse transport tasks first")
             if task == "vacationMode":
                 if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
                     raise TaskUnavailable("Disable automatic recovery before activating vacation mode")
@@ -492,7 +502,7 @@ class TaskController:
             if is_fixed and track_desired:
                 # Record the immutable original intent before engine dispatch.
                 try:
-                    self._recovery_store.prepare_fixed_transfer(account, clean)
+                    self._recovery_store.prepare_fixed_transfer(account, clean, task=task)
                 except (ValueError, OSError, sqlite3.Error) as exc:
                     raise TaskUnavailable("Unable to persist fixed transfer intent") from exc
             fresh, receipt = self._ledger.reserve(account.id, request_id, task, digest)
