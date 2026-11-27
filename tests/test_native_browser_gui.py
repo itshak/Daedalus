@@ -133,7 +133,7 @@ def test_main_window_recovery_requests_explicit_permission_and_never_auto_runs(a
     monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
     window = MainWindow()
     try:
-        window.accounts_page.set_accounts([_account()])
+        window._show_accounts([_account()])
         window.client = object()
         request_calls = []
         monkeypatch.setattr(window, "_request", lambda *a, **kw: request_calls.append((a, kw)))

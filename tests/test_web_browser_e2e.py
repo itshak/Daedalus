@@ -40,7 +40,10 @@ def web_stack(tmp_path):
     token = secrets.token_urlsafe(40)
     access = jwt()
     counts = Counter()
-    state = {"disabled": False, "running": False, "request_id":None, "ambiguous":False}
+    state = {"disabled": False, "running": False, "request_id":None, "ambiguous":False,
+             "hidden_accounts": set(), "hold_alpha": False,
+             "alpha_started": threading.Event(), "alpha_release": threading.Event(),
+             "alpha_finished": threading.Event()}
     accounts = [{"id":name,"email":name+"@example.invalid","player":"Same player","world":world,"enabled":True,"session_status":"authenticated"} for name,world in [("alpha","s1-en"),("beta","s2-en")]]
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*_):
@@ -85,11 +88,15 @@ def web_stack(tmp_path):
             if self.headers.get("Authorization")!="Bearer "+token:
                 return self.reply({},401)
             counts[path]+=1
-            if path=="/api/v1/accounts":return self.reply({"accounts":accounts})
+            if path=="/api/v1/accounts":return self.reply({"accounts":[a for a in accounts if a["id"] not in state["hidden_accounts"]]})
             if path=="/api/v1/health":return self.reply({"mode":"task_control_opt_in","version":"0.1.0"})
             if path=="/api/v1/capabilities":return self.reply({"operations":[{"name":"alertAttacks","workflow":{"web":"native"}},{"name":"fillCityWarehouse","workflow":{"web":"native"}}]})
             if path.startswith("/api/v1/warehouses/"):
                 aid=path.split("/")[-1];is_a=aid=="alpha"
+                if is_a and state["hold_alpha"]:
+                    state["alpha_started"].set()
+                    state["alpha_release"].wait(5)
+                    state["alpha_finished"].set()
                 return self.reply({"account_id":aid,"cities":[{"account_id":aid,"city_id":1 if is_a else 2,"city_name":"Athens" if is_a else "Sparta","island":"12:34","resources":{"unsecured":{"wood":300000 if is_a else 10,"wine":0,"marble":0,"glass":0,"sulfur":0},"capacity":500000}}]})
             if path.endswith("/military"):
                 aid=path.split("/")[-2]
@@ -290,3 +297,90 @@ def test_authenticated_dashboard_browser(web_stack):
     assert counts["POST /api/v1/accounts/alpha/tasks"]==2
     state["disabled"]=True
     assert context.request.get(origin+"/api/controller/accounts").status==401
+
+
+
+def test_working_scope_isolation_and_review_cohort(web_stack):
+    context,origin,counts,state=web_stack
+    page=context.new_page();page.set_default_timeout(10_000);page.goto(origin+"/login")
+    page.get_by_label("Email address").fill(USER["email"])
+    page.get_by_label("Password",exact=True).fill("fixture-only-password")
+    page.get_by_role("button",name="Sign in securely").click()
+    page.get_by_role("heading",name="Overview",exact=True).wait_for()
+    nav=page.get_by_role("navigation",name="Main navigation")
+    trigger=page.locator(".scope-trigger")
+    trigger.get_by_text("All accounts (2)",exact=True).wait_for()
+
+    def select_beta():
+        trigger.click()
+        popup=page.locator(".scope-popover")
+        popup.get_by_role("button",name="Clear",exact=True).click()
+        popup.get_by_role("checkbox",name="Same player · s2-en (beta)",exact=True).check()
+        popup.get_by_role("button",name="Apply account selection").click()
+
+    def select_all():
+        trigger.click()
+        page.locator(".scope-popover").get_by_role("button",name="All accounts",exact=True).click()
+        trigger.get_by_text("All accounts (2)",exact=True).wait_for()
+
+    # A request that belonged to the previous cohort must not restore its rows.
+    state["hold_alpha"]=True
+    nav.get_by_role("button",name="Warehouses").click()
+    assert state["alpha_started"].wait(5)
+    select_beta()
+    page.get_by_role("cell",name="Sparta").wait_for()
+    state["alpha_release"].set()
+    assert state["alpha_finished"].wait(5)
+    page.wait_for_load_state("networkidle")
+    assert page.get_by_role("cell",name="Athens").count()==0
+    with page.expect_download() as download:
+        page.get_by_label("Export report").select_option("csv")
+    report=Path(download.value.path()).read_text()
+    assert "Sparta" in report and "Athens" not in report
+
+    nav.get_by_role("button",name="Accounts").click()
+    page.get_by_text("beta@example.invalid",exact=True).wait_for()
+    assert page.get_by_text("alpha@example.invalid",exact=True).count()==0
+    page.get_by_role("button",name="Manage all accounts",exact=True).click()
+    page.get_by_text("alpha@example.invalid",exact=True).wait_for()
+
+    nav.get_by_role("button",name="Military").click()
+    page.get_by_role("cell",name="Synthetic Ship").wait_for()
+    assert page.get_by_role("cell",name="Synthetic Ship").count()==1
+    assert counts["/api/v1/accounts/alpha/military"]==0
+    state["running"]=True
+    nav.get_by_role("button",name="Activity").click()
+    page.get_by_text("No currently reported managed tasks.").wait_for()
+    assert page.get_by_role("button",name="Stop",exact=True).count()==0
+    assert state["running"]
+    assert counts["/api/v1/accounts/alpha/tasks"]==0
+
+    # Removing the only explicitly selected account leaves an empty scope,
+    # including after that account subsequently becomes visible again.
+    state["hidden_accounts"].add("beta")
+    page.get_by_role("button",name="Refresh all observed data").click()
+    trigger.get_by_text("0 accounts selected",exact=True).wait_for()
+    state["hidden_accounts"].clear()
+    page.reload()
+    trigger.get_by_text("0 accounts selected",exact=True).wait_for()
+    select_all()
+
+    # The chosen cohort is frozen at review time; changing the subset
+    # invalidates consent instead of silently widening the pending operation.
+    nav.get_by_role("button",name="Automations").click()
+    page.get_by_role("button",name="Alert Attacks",exact=False).click()
+    page.get_by_label("Launch scope",exact=True).select_option("selected")
+    editor=page.locator(".editor-body")
+    alpha=editor.get_by_role("checkbox",name="Same player · s1-en (alpha)",exact=True)
+    beta=editor.get_by_role("checkbox",name="Same player · s2-en (beta)",exact=True)
+    alpha.check()
+    page.get_by_role("button",name="Review settings").click()
+    page.get_by_label("I approve starting this automation").check()
+    preview=page.locator(".preview-panel")
+    assert preview.get_by_text("Same player · s1-en (alpha)",exact=True).count()==1
+    assert preview.get_by_text("Same player · s2-en (beta)",exact=True).count()==0
+    beta.check()
+    assert page.get_by_role("button",name="Start automation").count()==0
+    assert counts["POST /api/v1/accounts/alpha/tasks"]==0
+    assert counts["POST /api/v1/accounts/beta/tasks"]==0
+    assert state["running"], "scope changes must not cancel a running task"

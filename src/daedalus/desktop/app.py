@@ -2305,6 +2305,7 @@ class MainWindow(FluentWindow):
                     self._pending_piracy = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
+                    self._authorized_accounts = []
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
                 self._working_ids = self._gui_preferences.working_for(self._active_backend_url) if self._active_backend_url else None
@@ -2688,9 +2689,11 @@ class MainWindow(FluentWindow):
             logger.info("Multi-account read-only managed task statuses refreshed")
         elif action in {"task_start_batch", "reviewed_batch"}:
             assert isinstance(payload, dict)
-            if getattr(self._worker, "scope_generation", self._scope_generation) == self._scope_generation:
-                for view in self._task_views:
+            for view in self._task_views:
+                if getattr(self._worker, "scope_generation", self._scope_generation) == self._scope_generation:
                     view.set_batch_launch_result(payload)
+                else:
+                    view.finish_launch()
             ids = payload.get("account_ids", [])
             if isinstance(ids, list):
                 self._pending_batch_status = [aid for aid in ids if any(row["id"] == aid for row in self._scope_rows())]
@@ -2776,7 +2779,7 @@ class MainWindow(FluentWindow):
                 "task_start", "task_stop", "task_start_batch", "task_reconcile",
             } or action.startswith(("warehouses", "military", "server_activity"))
             or action in {"administrative_status", "world_reports", "proxy_profiles",
-                          "challenge_policy", "extension_settings", "notification_settings"}
+                          "challenge_policy", "extension_settings", "notification_settings", "recovery_jobs"}
         )
 
     def _show_capabilities(self, data: object) -> None:

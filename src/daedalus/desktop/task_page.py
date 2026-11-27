@@ -2014,10 +2014,12 @@ class TasksPage(QWidget):
         ])
         summaries = "\n\n".join(self._account_description(aid) + " · " + _friendly_task(row["task"]) +
                                  "\n" + row["summary"] for aid,row in self._review_queue.items())
+        generation = self._selection_generation
         answer = QMessageBox.question(self, "Review independent account batch",
             summaries + "\n\nStart these exact independently approved operations? All tickets and prerequisites are checked first. Dispatch stops on uncertainty.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if answer == QMessageBox.Yes:
+        if (answer == QMessageBox.Yes and generation == self._selection_generation
+                and all(row["account_id"] in self._account_ids for row in entries)):
             self._pending_launch = True
             self._clear_review_queue()
             self.reviewed_batch_requested.emit(entries)
@@ -2050,9 +2052,9 @@ class TasksPage(QWidget):
         task = self.selected_task_name()
         # Display the *entire* approved scope, including worlds. Never hide
         # 20 accounts behind "and more" before an irreversible group action.
-        names = [
-            self._account_description(aid) for aid in self._bulk_account_ids
-        ]
+        targets = list(self._bulk_account_ids)
+        generation = self._selection_generation
+        names = [self._account_description(aid) for aid in targets]
         summary = "\n".join(f"• {name}" for name in names)
         answer = QMessageBox.question(
             self, "Review multi-account automation",
@@ -2064,9 +2066,10 @@ class TasksPage(QWidget):
             "dispatch stops without retrying. Game state can change.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
-        if answer == QMessageBox.Yes:
+        if (answer == QMessageBox.Yes and generation == self._selection_generation
+                and targets == self._bulk_account_ids and all(aid in self._account_ids for aid in targets)):
             self._pending_launch = True
-            self.batch_launch_requested.emit(list(self._bulk_account_ids), task, config)
+            self.batch_launch_requested.emit(targets, task, config)
             self._invalidate_review()
 
     def set_batch_launch_result(self, data: dict[str, object]) -> None:

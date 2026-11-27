@@ -1,9 +1,9 @@
 # Implementation checklist
 
-- [ ] Audit every web and native page, existing scope and account-specific editors; map exemptions.
+- [x] Audit every web and native page, existing scope and account-specific editors; map exemptions.
 - [x] Implement shared scope model, shell controls, persistence and authorized inventory reconciliation.
-- [ ] Wire all relevant reads, aggregation and targets; clear stale previews and guard request races.
-- [ ] Integrate explicit reviewed multi-account target selection with Production and existing bulk actions.
+- [x] Wire all relevant reads, aggregation and targets; clear stale previews and guard request races.
+- [x] Integrate explicit reviewed multi-account target selection in existing bulk actions; provide reusable scoped targets for the separate Production change.
 - [ ] Test all/one/selected/empty, removed accounts, duplicate player names, refresh/navigation, out-of-scope dispatch prevention, delayed results, native/web accessibility and EN/RU web; run CI.
 
 
@@ -20,6 +20,18 @@
 - Local evidence: web typecheck, 93 web tests, Next.js production-mode build,
   synthetic authenticated browser E2E (including city isolation, empty scope,
   refresh and approval invalidation), focused native scope/preferences tests,
-  Python lint and strict OpenSpec validation. Full native/Python/engine,
-  security and hosted CI still require verification. Keep the proposal active
-  until the remaining audit and verification gates are complete.
+  Python lint and strict OpenSpec validation. 239 native regression tests and two expanded authenticated browser E2E scenarios passed. Both hosted engine versions, macOS native/build, packaging and security checks passed on the initial revision. Corrected native test fixtures and OpenSpec status inventory; fresh hosted Python matrix and final CI are required before archival.
+
+## Page audit
+
+- Web: overview, warehouse snapshots/exports, military, activity, world reports,
+  account-bound settings, workflow editors and review queue use the shell roster.
+  Account management has an explicit manage-all escape; release, authentication
+  and controller health remain global. The native Home, Warehouses, Military,
+  Activities, task views and account-specific settings receive the scoped roster;
+  Connection and appearance preferences remain global.
+- Reads and review queues reset on scope changes, with native generation checks
+  and web keyed components. Existing running operations are not cancelled.
+- Native scope changes during an active Selenium sign-in cohort are deferred
+  until the sign-in finishes; this preserves the fixed authenticated cohort.
+- Production-specific inventory and reallocation are the next separate proposal.
