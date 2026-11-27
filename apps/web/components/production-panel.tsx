@@ -136,7 +136,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
     flight.current=true;setPending(true);setMessage("");
     try{
       const launched=await launchReviewedBatch(reviews.map(({review:r})=>({account_id:r.account_id,task:r.task,preview_id:r.preview_id})),post,()=>crypto.randomUUID(),()=>mounted.current);
-      if(mounted.current){setResults(launched);setMessage("Inspect Activity before retrying any operation.");}
+      if(mounted.current){setResults(launched);setMessage(launched.every(r=>r.status==="started")?"Reviewed production tasks started. Check execution history for completion.":"Inspect Activity before retrying any operation.");}
     }catch{if(mounted.current)setMessage("Batch check unavailable. Inspect Activity before preparing new reviews.");}
     finally{flight.current=false;if(mounted.current){setPending(false);setReviews([]);}}
   }
