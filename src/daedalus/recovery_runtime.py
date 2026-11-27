@@ -380,7 +380,7 @@ class RecoverySupervisor:
         totals={"restored":0,"completed":0,"skipped":0,"unconfirmed":0}
         if not self.store.resume_permitted(account, epoch):
             return totals
-        if self.controller._ledger.has_unresolved(account.id):
+        if self.controller._ledger.has_unresolved(account.id) or self.store.production_blocked(account):
             totals["skipped"]=len(self.store.desired(account))
             return totals
         try:

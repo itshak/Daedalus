@@ -696,6 +696,26 @@ class ExistingIPCClient:
                        draft: dict[str, object]) -> dict[str, object]:
         clean = validated_worker_draft(task, draft)
         owned = {row["id"] for row in self.cities(account)}
+        if "priority" in clean:
+            from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
+
+            rows = validate_priority_draft(city_id, clean["priority"])
+            if not {row["city_id"] for row in rows} <= owned:
+                raise ValueError("Production city is not owned by this account")
+            data = self.request("preview_workers_existing", account=account,
+                                city_id=city_id, worker_task=task, worker_draft=clean)
+            if not _is_exact_identity({"world": data.get("world"), "player": data.get("username")}, account):
+                raise EngineIPCUnavailable("Invalid production preview scope")
+            plans = data.get("plans")
+            try:
+                if not isinstance(plans, list) or len(plans) != len(rows):
+                    raise ValueError("Invalid production preview")
+                validated = [validate_priority_plan(row["city_id"], row["draft"], plan)
+                             for row, plan in zip(rows, plans)]
+            except ValueError as exc:
+                raise EngineIPCUnavailable("Invalid production preview") from exc
+            return {"account_id": account.id, "task": task, "city_id": city_id,
+                    "plans": validated, "ready": True, "config": {"production_plans": validated}}
         additional = clean.get("additional_city_ids", [])
         if city_id not in owned or city_id in additional or not set(additional) <= owned:
             raise ValueError("Worker city is not owned by this account")

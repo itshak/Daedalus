@@ -1034,6 +1034,8 @@ def create_app(
         config = plan.pop("config")
         ticket = None
         if plan["ready"] and task_controller is not None:
+            if "production_plans" in config and task_controller._recovery_store is None:
+                raise HTTPException(status_code=503, detail="Protected production journal unavailable")
             ticket = operation_previews.issue(account_id, task, config)
         return {**plan, "preview_id": ticket,
                 "expires_in": operation_previews.ttl if ticket else None}

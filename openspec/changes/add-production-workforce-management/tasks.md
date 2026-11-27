@@ -2,7 +2,7 @@
 
 - [ ] Audit upstream slider, citizen, overcharge semantics and safe authoritative readback; test unknown data and exact-count representability.
 - [x] Build scoped read-only production inventory and city/resource discovery via existing helpers; explicit unavailable data.
-- [ ] Add exact/percentage/max reviewed planner and default priority vs available-only policy with donor before/after and staged fallback.
+- [x] Add exact/percentage/max reviewed planner and default priority vs available-only policy with donor before/after and staged fallback.
 - [ ] Implement durable staged assignment, minimum release, authoritative readback, leftover restoration, compensation/recovery fencing and idempotency using upstream shared mutation helper.
 - [ ] Implement reviewed resource-specific batch plans for all/selected accounts and cities; per-city result and partial failures, no unrelated assignments.
 - [ ] Build Production web/native editors and bulk actions, academy/temple sections, default unchecked available-only checkbox and explicit review; translations/accessibility.
@@ -29,3 +29,10 @@
   to the task ledger, implement batch/per-city review and mutation UI,
   compensation and recovery fencing, and synthetic E2E. Actual slider
   readback and live mutation effects are not verified.
+
+## Staged implementation checkpoint
+
+- Exact/percentage/maximum, overcharge, default priority, available-only, explicit full-release fallback (known capacities and allocations), per-city exclusion and exact override are wired through existing worker review tickets, with 16-city per-account and 32-account review bounds.
+- Controller persists immutable account/city plan before engine dispatch. Engine uses upstream workerPlan helper with no transport retries, upstream wait, readback and durable release/target/restore receipts. Unfinished runs fence new tasks and recovery; completed runs release the fence. Stale pre-mutation cities are isolated.
+- Native and web resource-specific bulk review controls implemented; all-resources is still inventory only. Manual reconciliation UI, durable receipt presentation, additional fallback for unknown capacity, and production-specific synthetic E2E remain open. No definitive workerPlan rejection contract was verified; ambiguous rejection is fenced, never compensated blindly.
+- Local regression evidence: 107 focused engine/controller/recovery/parity tests, 41 native scope tests, 94 web tests, TypeScript and targeted lint. No game mutations.

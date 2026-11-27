@@ -906,7 +906,18 @@ class DaedalusClient:
         try:
             if data.get("account_id") != account_id:
                 raise ValueError("Invalid account scope")
-            validate_worker_observation(task, city_id, clean, data)
+            if "priority" in clean:
+                from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
+                rows = validate_priority_draft(city_id, clean["priority"])
+                plans = data.get("plans")
+                if (data.get("task") != task or data.get("city_id") != city_id
+                        or data.get("ready") is not True or not isinstance(plans, list)
+                        or len(plans) != len(rows)):
+                    raise ValueError("Invalid production preview")
+                for row, plan in zip(rows, plans):
+                    validate_priority_plan(row["city_id"], row["draft"], plan)
+            else:
+                validate_worker_observation(task, city_id, clean, data)
             if (not isinstance(data.get("preview_id"), str)
                     or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
                     or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):

@@ -135,7 +135,7 @@ Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
 ## Current OpenSpec work and owner acceptance
 
-The remaining v0.1.0 engineering work is tracked in `finish-v010-engineering`. The separate v0.1.1 proposal `unify-global-account-scope` is being implemented and verified; it does not authorize a production deployment. Owner-only game, physical-device and production approval checks remain deferred and unpassed in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md) and [issue #60](https://github.com/itshak/Daedalus/issues/60). The headless-first Selenium workflow allows one visible recovery for a detected challenge or a failed headless attempt; no automated challenge solving. See the archived redesign for historical visual plans.
+The remaining v0.1.0 engineering work is tracked in `finish-v010-engineering`. The separate `unify-global-account-scope` change is archived and merged (PR #119). Resource-specific Production workforce management is in progress (PR #120), with reviewed staged allocation and durable receipts; this does not authorize a production deployment. Owner-only game, physical-device and production approval checks remain deferred and unpassed in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md) and [issue #60](https://github.com/itshak/Daedalus/issues/60). The headless-first Selenium workflow allows one visible recovery for a detected challenge or a failed headless attempt; no automated challenge solving. See the archived redesign for historical visual plans.
 
 ## Opt-in account metadata editor (shipped)
 

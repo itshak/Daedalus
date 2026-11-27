@@ -383,6 +383,17 @@ class APIWorker(QThread):
                     raise ValueError("Invalid construction preview")
                 supply = self.task_payload.get("supply")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades, supply=supply) if supply is not None else self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "production_preview" and self.task_payload:
+                import time
+                grouped = self.task_payload["grouped"]
+                result = []
+                for aid, priority in grouped.items():
+                    review = self.client.worker_preview(aid, priority[0]["city_id"],
+                                                        "modifyProduction", {"priority": priority})
+                    result.append({**review, "deadline": time.monotonic() + review["expires_in"]})
+            elif self.action == "production_start" and self.task_payload:
+                from daedalus.reviewed_batch import dispatch_reviewed_batch
+                result = dispatch_reviewed_batch(self.client, self.task_payload["entries"])
             elif self.action == "production_cities" and self.account_id:
                 result = self.client.cities(self.account_id)
             elif self.action == "production_inventory" and self.account_id and self.task_payload:
@@ -884,6 +895,10 @@ class MainWindow(FluentWindow):
         )
         self.military_page.refresh_requested.connect(self._queue_military_reads)
         self.production_page.refresh_requested.connect(self._queue_production_reads)
+        self.production_page.preview_requested.connect(
+            lambda grouped: self._request_production_action("production_preview", {"grouped": grouped}))
+        self.production_page.start_requested.connect(
+            lambda entries: self._request_production_action("production_start", {"entries": entries}))
         self.warehouses_page.load_requested.connect(
             lambda aid: self._request_warehouse_scope("warehouses", [aid])
         )
@@ -1965,6 +1980,17 @@ class MainWindow(FluentWindow):
             return
         self._launch(self.client, action, account_id=account_id, task_payload=task_payload)
 
+    def _request_production_action(self, action, payload):
+        if self.client is None or self._worker is not None:
+            self.production_page.set_review_unavailable()
+            return
+        ids = set(payload["grouped"]) if action == "production_preview" else {
+            r["account_id"] for r in payload["entries"]}
+        if not ids or not ids <= set(self.production_page.eligible_ids()):
+            self.production_page.set_review_unavailable()
+            return
+        self._launch(self.client, action, task_payload=payload)
+
     def _queue_production_reads(self, account_ids: list[str]) -> None:
         if self.client is None:
             self.production_page.finish_refresh()
@@ -2595,6 +2621,10 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
+        elif action == "production_preview":
+            self.production_page.set_reviews(payload)
+        elif action == "production_start":
+            self.production_page.set_launch_result(payload)
         elif action == "production_cities":
             aid = getattr(self._worker, "account_id", None)
             if isinstance(aid, str):
@@ -2882,6 +2912,8 @@ class MainWindow(FluentWindow):
                 self._automatic_login_failures += 1
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
+        if action in {"production_preview", "production_start"}:
+            self.production_page.set_review_unavailable()
         if action in {"production_cities", "production_inventory"}:
             aid = getattr(self._worker, "account_id", None)
             request = getattr(self._worker, "task_payload", None) or {}
@@ -3137,8 +3169,10 @@ class MainWindow(FluentWindow):
             QTimer.singleShot(0, self._advance_automatic_login)
         if self._worker is None and not self._automatic_login_active:
             self._run_next_military_read()
-        if self._worker is None and not self._automatic_login_active:
+        if self._worker is None and not self._automatic_login_active and self._pending_production_reads:
             self._run_next_production_read()
+        elif self._worker is None and self.production_page._loading:
+            self.production_page.finish_refresh()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_task_cities()
         if self._worker is None and not self._automatic_login_active:

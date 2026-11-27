@@ -179,14 +179,29 @@ def execute_native_workers(session, task_name, city_id, percentage, expected, pr
     session.setStatus("Worker assignment submitted; verify the city")
 
 
-def prepare_modify_production(session, city_id, percentage, project, overcharge, expected, additional_city_ids=None):
+def prepare_modify_production(session, city_id=None, percentage=None, project=None, overcharge=None,
+                              expected=None, additional_city_ids=None, production_plans=None,
+                              production_run_id=None):
+    if production_plans is not None or production_run_id is not None:
+        from ikabot.helpers.productionJournal import ProductionJournal
+
+        if any(v is not None for v in (city_id, percentage, project, overcharge, expected, additional_city_ids)):
+            raise ValueError("Production plans cannot be combined with legacy worker settings")
+        ProductionJournal(session, production_run_id, production_plans)
+        return {"production_plans": production_plans, "production_run_id": production_run_id}
     return prepare_native_workers(session, "modifyProduction", city_id, percentage, expected, project, overcharge,
                                   additional_city_ids)
 
 
 @task("modifyProduction", prepare=prepare_modify_production)
-def native_modify_production(session, city_id: int, percentage: int, project: str,
-                             overcharge: bool, expected: dict, additional_city_ids: list = None):
+def native_modify_production(session, city_id: int = None, percentage: int = None, project: str = None,
+                             overcharge: bool = None, expected: dict = None, additional_city_ids: list = None,
+                             production_plans: list = None, production_run_id: str = None):
+    if production_plans is not None or production_run_id is not None:
+        from ikabot.function.productionWorkforce import execute_priority_production
+        prepare_modify_production(session, city_id, percentage, project, overcharge, expected,
+                                  additional_city_ids, production_plans, production_run_id)
+        return execute_priority_production(session, production_plans, production_run_id)
     execute_native_workers(session, "modifyProduction", city_id, percentage, expected, project, overcharge,
                            additional_city_ids)
 

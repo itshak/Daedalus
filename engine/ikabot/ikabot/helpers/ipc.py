@@ -1123,6 +1123,11 @@ class IPCServer:
         from ikabot.function.modifyProduction import preview_native_workers
 
         session = self._existing_session(request)
+        if request.get("task") == "modifyProduction" and "priority" in request:
+            from ikabot.function.productionWorkforce import preview_priority_production
+            plans = preview_priority_production(session, request.get("city_id"), request["priority"])
+            return {"status": "ok", "world": f"s{session.mundo}-{session.servidor}",
+                    "username": session.username, "plans": plans}
         plan = preview_native_workers(session, request.get("task"), request.get("city_id"),
                                       request.get("percentage"), request.get("project"),
                                       request.get("overcharge", False), request.get("additional_city_ids"))
