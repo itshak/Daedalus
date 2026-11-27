@@ -299,10 +299,11 @@ export function validWorkerDraft(task:unknown,draft:unknown):boolean {
     for(const row of draft.priority){
       if(!obj(row)||!exact(row,["city_id","draft"])||!city(row.city_id)||seen.has(row.city_id)||!obj(row.draft))return false;
       const d=row.draft;seen.add(row.city_id);
-      if(!exact(d,["resource","mode","amount","overcharge","available_only","allow_fallback"])
+      if(!exact(d,["resource","mode","amount","overcharge","available_only","allow_fallback",...(Object.hasOwn(d,"fill_both")?["fill_both"]:[])])
         ||typeof d.resource!=="string"||!["wood","wine","marble","crystal","sulfur"].includes(d.resource)
         ||typeof d.overcharge!=="boolean"||typeof d.available_only!=="boolean"||typeof d.allow_fallback!=="boolean"
         ||(d.available_only&&d.allow_fallback)
+        ||(Object.hasOwn(d,"fill_both")&&(d.fill_both!==true||d.mode!=="maximum"||d.allow_fallback))
         ||!(d.mode==="maximum"&&d.amount===null||d.mode==="percentage"&&integer(d.amount,0,100)&&(!d.overcharge||d.amount===100)
           ||d.mode==="exact"&&integer(d.amount,0,2000000)))return false;
     }

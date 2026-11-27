@@ -60,6 +60,12 @@ class ProductionPage(QWidget):
         self.table.setAccessibleName("Production workforce inventory")
         layout.addWidget(self.table, 1)
         policy = QHBoxLayout()
+        self.both_priority = ComboBox()
+        for key, text in (("", "Choose priority"), ("wood", "Wood first"), ("luxury", "Luxury first")):
+            self.both_priority.addItem(text, userData=key)
+        self.both_priority.setAccessibleName("Both-resource priority")
+        self.both_priority.currentIndexChanged.connect(self._resource_changed)
+        policy.addWidget(self.both_priority)
         self.mode = ComboBox()
         for key, text in (("maximum", "Maximum"), ("percentage", "Percentage"), ("exact", "Exact workers")):
             self.mode.addItem(text, userData=key)
@@ -102,6 +108,9 @@ class ProductionPage(QWidget):
     def _resource_changed(self):
         self._excluded.clear()
         self._overrides.clear()
+        if self.resource_combo.currentData() == "all":
+            self.mode.setCurrentIndex(0)
+            self.fallback.setChecked(False)
         self._discard_review()
         self._render()
 
@@ -112,9 +121,12 @@ class ProductionPage(QWidget):
 
     def _update_controls(self, *_):
         resource = self.resource_combo.currentData()
-        editing = not self._loading and not self._busy and not self._reviews and resource in {
-            "wood", "wine", "marble", "crystal", "sulfur"}
-        self.mode.setEnabled(editing)
+        both = resource == "all"
+        self.both_priority.setVisible(both)
+        self.both_priority.setEnabled(not self._busy and not self._reviews and not self._loading)
+        editing = not self._loading and not self._busy and not self._reviews and (
+            resource in {"wood", "wine", "marble", "crystal", "sulfur"} or both and bool(self.both_priority.currentData()))
+        self.mode.setEnabled(editing and not both)
         self.amount.setEnabled(editing and self.mode.currentData() != "maximum")
         if self.mode.currentData() == "percentage":
             self.amount.setMaximum(100)
@@ -122,8 +134,8 @@ class ProductionPage(QWidget):
             self.amount.setMaximum(2_000_000)
         self.overcharge.setEnabled(editing)
         self.available_only.setEnabled(editing)
-        self.fallback.setEnabled(editing and not self.available_only.isChecked())
-        self.targets.setVisible(resource in {"wood", "wine", "marble", "crystal", "sulfur"})
+        self.fallback.setEnabled(editing and not both and not self.available_only.isChecked())
+        self.targets.setVisible(resource in {"wood", "wine", "marble", "crystal", "sulfur"} or both and bool(self.both_priority.currentData()))
         self.targets.setEnabled(editing)
         self.preview_button.setEnabled(editing and bool(self._target_keys))
         self.confirm_button.setEnabled(not self._busy and bool(self._reviews))
@@ -148,7 +160,7 @@ class ProductionPage(QWidget):
     def _render_targets(self, names):
         resource = self.resource_combo.currentData()
         self._target_keys = [key for key, result in self._results.items()
-                             if resource == "wood" or resource == result["luxury"]]
+                             if resource in ("all", "wood") or resource == result["luxury"]]
         self.targets.blockSignals(True)
         try:
             self.targets.setRowCount(len(self._target_keys))
@@ -161,7 +173,7 @@ class ProductionPage(QWidget):
                 for column, value in ((1, names[aid]), (2, self._cities[key]),
                                       (3, self._overrides.get(key, ""))):
                     item = QTableWidgetItem(value)
-                    if column != 3:
+                    if column != 3 or resource == "all":
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     self.targets.setItem(i, column, item)
         finally:
@@ -180,7 +192,7 @@ class ProductionPage(QWidget):
             if key in self._excluded:
                 continue
             aid, cid = key
-            override = self._overrides.get(key, "")
+            override = "" if resource == "all" else self._overrides.get(key, "")
             if override and (not override.isascii() or not override.isdecimal() or len(override) > 7):
                 self.status.setText("Enter a valid exact override.")
                 return
@@ -189,6 +201,9 @@ class ProductionPage(QWidget):
                      "overcharge": self.overcharge.isChecked(),
                      "available_only": self.available_only.isChecked(),
                      "allow_fallback": self.fallback.isChecked() and not self.available_only.isChecked()}
+            if resource == "all":
+                draft.update(resource="wood" if self.both_priority.currentData() == "wood" else self._results[key]["luxury"],
+                             mode="maximum", amount=None, allow_fallback=False, fill_both=True)
             grouped.setdefault(aid, []).append({"city_id": cid, "draft": draft})
         try:
             if not grouped or len(grouped) > 32:

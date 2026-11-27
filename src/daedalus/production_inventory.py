@@ -40,8 +40,8 @@ def validate_production_inventory(city_id, data):
 
 
 def validate_production_draft(draft):
-    if not isinstance(draft, dict) or set(draft) != {
-            "resource", "mode", "amount", "overcharge", "available_only", "allow_fallback"}:
+    fields = {"resource", "mode", "amount", "overcharge", "available_only", "allow_fallback"}
+    if not isinstance(draft, dict) or set(draft) not in (fields, fields | {"fill_both"}):
         raise ValueError("Invalid production draft")
     mode, amount = draft["mode"], draft["amount"]
     if (draft["resource"] not in ("wood", "wine", "marble", "crystal", "sulfur")
@@ -51,7 +51,9 @@ def validate_production_draft(draft):
             or (mode == "percentage" and (type(amount) is not int or not 0 <= amount <= 100))
             or (mode == "exact" and (type(amount) is not int or not 0 <= amount <= 2_000_000))
             or (mode == "percentage" and draft["overcharge"] and amount != 100)
-            or (draft["available_only"] and draft["allow_fallback"])):
+            or (draft["available_only"] and draft["allow_fallback"])
+            or ("fill_both" in draft and (draft["fill_both"] is not True
+                or mode != "maximum" or draft["allow_fallback"]))):
         raise ValueError("Invalid production target")
     return dict(draft)
 
@@ -83,7 +85,7 @@ def validate_priority_plan(city_id, draft, plan):
         raise ValueError("Invalid production plan")
     if (type(plan["city_id"]) is not int or plan["city_id"] != city_id
             or type(plan["island_id"]) is not int or not 0 < plan["island_id"] < 10**12
-            or plan["resource"] != draft["resource"] or plan["luxury"] not in RESOURCES
+            or plan["resource"] != draft["resource"] or not isinstance(plan["luxury"], str) or plan["luxury"] not in RESOURCES
             or (plan["resource"] != "wood" and plan["resource"] != plan["luxury"])
             or plan["target_kind"] != ("resource" if plan["resource"] == "wood" else "tradegood")
             or plan["donor_kind"] != ("tradegood" if plan["target_kind"] == "resource" else "resource")
@@ -122,8 +124,14 @@ def validate_priority_plan(city_id, draft, plan):
         expected_release = (0 if draft["available_only"] else
                             min(plan["donor_before"], max(0, needed - (free or 0))))
         expected_target = min(desired, plan["target_before"] + (free or 0) + expected_release)
+        donor_after = plan["donor_before"] - expected_release
+        if draft.get("fill_both"):
+            if free is None:
+                raise ValueError("Both-resource planning requires known population")
+            secondary_cap = plan["donor_capacity"][0] + (plan["donor_capacity"][1] if draft["overcharge"] else 0)
+            donor_after = max(donor_after, min(secondary_cap, donor_after + free + plan["target_before"] + expected_release - expected_target))
         expected = {"donor_release": expected_release, "target_after": expected_target,
-                    "donor_after": plan["donor_before"] - expected_release,
+                    "donor_after": donor_after,
                     "shortfall": desired - expected_target}
         if any(type(plan[k]) is not int or plan[k] != v for k, v in expected.items()):
             raise ValueError("Invalid production feasibility")
@@ -158,7 +166,7 @@ def validate_production_progress(account_id, data):
             cities.add(row["city_id"])
             stages = set()
             for stage in row["stages"]:
-                if (not isinstance(stage, dict) or stage.get("stage") not in {"release", "target", "restore"}
+                if (not isinstance(stage, dict) or stage.get("stage") not in {"release", "target", "restore", "secondary"}
                         or stage["stage"] in stages or stage.get("kind") not in {"resource", "tradegood"}
                         or stage.get("status") not in {"pending", "confirmed"}
                         or type(stage.get("value")) is not int or not 0 <= stage["value"] <= 2_000_000):

@@ -38,7 +38,7 @@ def read_city_production(session, city_id):
         raise ValueError("Invalid production city")
     pedirInfo.ids_cache = None
     own = requireOwnCity(session, city_id, "Production city")
-    city = getCityById(session, own)
+    city = getCityById(session, own, allow_unknown_citizens=True)
     if str(city["id"]) != own:
         raise ValueError("Production city mismatch")
     island_id = int(city["islandId"])
@@ -67,8 +67,8 @@ def read_city_production(session, city_id):
 
 
 def validate_draft(draft):
-    if not isinstance(draft, dict) or set(draft) != {
-            "resource", "mode", "amount", "overcharge", "available_only", "allow_fallback"}:
+    fields = {"resource", "mode", "amount", "overcharge", "available_only", "allow_fallback"}
+    if not isinstance(draft, dict) or set(draft) not in (fields, fields | {"fill_both"}):
         raise ValueError("Invalid production draft")
     resource, mode, amount = draft["resource"], draft["mode"], draft["amount"]
     if (resource not in RESOURCE_NAMES or mode not in ("maximum", "percentage", "exact")
@@ -77,7 +77,9 @@ def validate_draft(draft):
             or (mode == "percentage" and (type(amount) is not int or not 0 <= amount <= 100))
             or (mode == "exact" and _count(amount) is None)
             or (mode == "percentage" and draft["overcharge"] and amount != 100)
-            or (draft["available_only"] and draft["allow_fallback"])):
+            or (draft["available_only"] and draft["allow_fallback"])
+            or ("fill_both" in draft and (draft["fill_both"] is not True
+                or mode != "maximum" or draft["allow_fallback"]))):
         raise ValueError("Invalid production target or population policy")
     return dict(draft)
 
@@ -121,11 +123,17 @@ def plan_city_production(observed, draft):
         deficit = max(0, needed - free)
         release = 0 if draft["available_only"] else min(donor_before, deficit)
         achievable = min(wanted, before + free + release)
+    donor_after = None if fallback else donor_before - release
+    if draft.get("fill_both"):
+        if free is None:
+            raise ValueError("Both-resource planning requires known population")
+        secondary_cap = donor["maximum"] + (donor["extra"] if draft["overcharge"] else 0)
+        donor_after = max(donor_after, min(secondary_cap, donor_after + free + before + release - achievable))
     return {"city_id": observed["city_id"], "island_id": observed["island_id"],
             "resource": resource, "luxury": observed["luxury"], "target_kind": kind, "donor_kind": donor_kind,
             "target_before": before, "donor_before": donor_before, "desired": wanted,
             "target_after": achievable, "donor_release": release,
-            "donor_after": None if fallback else donor_before - release,
+            "donor_after": donor_after,
             "shortfall": None if fallback else wanted - achievable, "fallback": fallback,
             "free_citizens": free, "target_capacity": [normal, extra],
             "donor_capacity": [donor["maximum"], donor["extra"]], "draft": draft}
@@ -230,7 +238,18 @@ def execute_city_production(session, plan, journal):
     if wanted != target:
         fresh = submit("target", plan["target_kind"], wanted, wanted, donor)
         target = wanted
-    if plan["donor_release"]:
+    if plan["draft"].get("fill_both"):
+        _same_counts(fresh, plan, target, donor)
+        site = fresh["sites"][plan["donor_kind"]]
+        free = _count(fresh.get("free_citizens"))
+        if free is None or any(_count(site.get(k)) is None for k in ("maximum", "extra", "current")):
+            raise ProductionNeedsReview("Secondary allocation is unknown")
+        cap = site["maximum"] + (site["extra"] if plan["draft"]["overcharge"] else 0)
+        secondary = max(donor, min(plan["donor_after"], cap, donor + free))
+        if secondary != donor:
+            fresh = submit("secondary", plan["donor_kind"], secondary, target, secondary)
+            donor = secondary
+    elif plan["donor_release"]:
         restored = donor_restore_target(plan, fresh, target)
         if restored != donor:
             fresh = submit("restore", plan["donor_kind"], restored, target, restored)

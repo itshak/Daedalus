@@ -373,7 +373,7 @@ def getIsland(html: str) -> IslandDict:
     # return isla
 
 
-def getCity(html: str) -> FullCityDict:
+def getCity(html: str, *, allow_unknown_citizens=False) -> FullCityDict:
     """This function uses the ``html`` passed to it as a string to extract, parse and return a City object
     Parameters
     ----------
@@ -417,7 +417,14 @@ def getCity(html: str) -> FullCityDict:
     city["isOwnCity"] = True
     city["availableResources"] = getAvailableResources(html, num=True)
     city["storageCapacity"] = getWarehouseCapacity(html)
-    city["freeCitizens"] = getFreeCitizens(html)
+    try:
+        city["freeCitizens"] = getFreeCitizens(html)
+    except (AttributeError, ValueError):
+        if not allow_unknown_citizens:
+            raise
+        # A missing population field is not zero. Only an explicitly
+        # unknown-aware caller can use the remaining city observation.
+        city["freeCitizens"] = None
     city["wineConsumptionPerHour"] = getWineConsumptionPerHour(html)
     city["resourcesListedForSale"] = getResourcesListedForSale(html)
     city["freeSpaceForResources"] = []

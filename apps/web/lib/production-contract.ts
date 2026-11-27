@@ -1,5 +1,5 @@
 import {validWorkerDraft} from "./native-task-contract";
-export type ProductionDraft={resource:string;mode:"maximum"|"percentage"|"exact";amount:number|null;overcharge:boolean;available_only:boolean;allow_fallback:boolean};
+export type ProductionDraft={resource:string;mode:"maximum"|"percentage"|"exact";amount:number|null;overcharge:boolean;available_only:boolean;allow_fallback:boolean;fill_both?:true};
 export type PriorityRow={city_id:number;draft:ProductionDraft};
 export type PriorityPlan={city_id:number;island_id:number;resource:string;luxury:string;target_kind:string;donor_kind:string;
   target_before:number;donor_before:number;desired:number;target_after:number|null;donor_release:number;donor_after:number|null;
@@ -34,7 +34,13 @@ export function verifyPriorityReview(v:unknown,account:string,rows:PriorityRow[]
       if(needed&&p.free_citizens===null)throw Error("Unknown population");
       const release=d.available_only?0:Math.min(p.donor_before,Math.max(0,needed-(p.free_citizens??0)));
       const target=Math.min(desired,p.target_before+(p.free_citizens??0)+release);
-      if(p.donor_release!==release||p.target_after!==target||p.donor_after!==p.donor_before-release||p.shortfall!==desired-target)throw Error("Invalid allocation");
+      let donor=p.donor_before-release;
+      if(d.fill_both){
+        if(p.free_citizens===null)throw Error("Unknown population");
+        const cap=p.donor_capacity[0]+(d.overcharge?p.donor_capacity[1]:0);
+        donor=Math.max(donor,Math.min(cap,donor+p.free_citizens+p.target_before+release-target));
+      }
+      if(p.donor_release!==release||p.target_after!==target||p.donor_after!==donor||p.shortfall!==desired-target)throw Error("Invalid allocation");
     }
   }
   return v as unknown as PriorityReview;
@@ -64,7 +70,7 @@ export function verifyProductionRuns(data:unknown,account:string):ProductionRun[
         ||!Array.isArray(row.stages)||row.stages.length>3)throw Error("Invalid production receipt");
       cities.add(row.city_id);const stages=new Set();
       for(const stage of row.stages){
-        if(!obj(stage)||!["release","target","restore"].includes(String(stage.stage))||stages.has(stage.stage)
+        if(!obj(stage)||!["release","target","restore","secondary"].includes(String(stage.stage))||stages.has(stage.stage)
           ||!["resource","tradegood"].includes(String(stage.kind))||!["pending","confirmed"].includes(String(stage.status))
           ||!int(stage.value,2000000))throw Error("Invalid stage");
         if(stage.observed!==undefined&&(!obj(stage.observed)||!int(stage.observed.resource,2000000)||!int(stage.observed.tradegood,2000000)))throw Error("Invalid readback");

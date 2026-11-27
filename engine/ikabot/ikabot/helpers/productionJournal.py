@@ -65,16 +65,19 @@ class ProductionJournal:
             rows = conn.execute("SELECT stage,status FROM production_stages WHERE run_id=? AND city_id=?",
                                 (self.run_id, plan["city_id"])).fetchall()
             prior = {r["stage"]: r["status"] for r in rows}
-            order = {"release": 0, "target": 1, "restore": 2}
+            order = {"release": 0, "target": 1, "restore": 2, "secondary": 2}
             if (stage not in order or stage in prior or any(v != "confirmed" for v in prior.values())
                     or any(order[k] >= order[stage] for k in prior)
                     or kind != plan["target_kind" if stage == "target" else "donor_kind"]
                     or type(value) is not int or not 0 <= value <= 2_000_000
                     or (stage == "release" and (not plan["donor_release"] or
                         value != plan["donor_before"] - plan["donor_release"]))
-                    or (stage == "target" and (value > plan["desired"] or
+                    or (stage == "target" and (value > plan["desired"] or (plan["target_after"] is not None and value > plan["target_after"]) or
                         plan["donor_release"] and "release" not in prior))
-                    or (stage == "restore" and ("release" not in prior or
+                    or (stage == "secondary" and (not plan["draft"].get("fill_both") or
+                        not plan["donor_before"] - plan["donor_release"] <= value <= plan["donor_after"] or
+                        (plan["donor_release"] and "release" not in prior)))
+                    or (stage == "restore" and (plan["draft"].get("fill_both") or "release" not in prior or
                         not plan["donor_before"] - plan["donor_release"] <= value <= plan["donor_before"]))):
                 raise ValueError("Unsafe production stage")
             conn.execute("""INSERT INTO production_stages

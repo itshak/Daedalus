@@ -94,7 +94,7 @@ def test_inventory_reuses_upstream_helpers(monkeypatch):
             assert url.endswith("2")
             return "island"
     monkeypatch.setattr(module, "requireOwnCity", lambda *args: "1")
-    monkeypatch.setattr(module, "getCityById", lambda *args: {
+    monkeypatch.setattr(module, "getCityById", lambda *args, **kwargs: {
         "id": "1", "islandId": "2", "name": "Synthetic", "freeCitizens": 200,
         "position": [{"building": "academy"}]})
     monkeypatch.setattr(module, "getIsland", lambda html: {"id": 2, "tipo": "3"})
@@ -374,3 +374,27 @@ def test_reviewed_api_dispatch_and_reconcile_fence(monkeypatch, tmp_path):
         with pytest.raises(ValueError):
             journal.reserve(plan, "target", "tradegood", 900)
     controller.close()
+
+
+@pytest.mark.parametrize("free,only,expected", [(200,False,(900,400)), (200,True,(600,700)), (700,False,(900,800))])
+def test_both_resource_priority_plan_and_execution(staged_city, free, only, expected):
+    from daedalus.production_inventory import validate_priority_plan
+    f = staged_city
+    f.source["free_citizens"] = free
+    settings = draft(fill_both=True, available_only=only)
+    plan, journal = f.approve(settings)
+    assert (plan["target_after"], plan["donor_after"]) == expected
+    assert validate_priority_plan(1, settings, plan) == plan
+    result = f.module.execute_city_production(f.session, plan, journal)
+    assert (result["target"], result["donor"]) == expected
+    if only:
+        assert not any(kind == "resource" and value < 700 for kind,value in f.calls)
+    if free == 700:
+        assert f.calls == [("tradegood",900),("resource",800)]
+
+
+def test_both_resource_plan_disallows_unreviewed_fallback():
+    with pytest.raises(ValueError):
+        plan_city_production(observed(None), draft(fill_both=True))
+    with pytest.raises(ValueError):
+        plan_city_production(observed(None), draft(fill_both=True, allow_fallback=True))

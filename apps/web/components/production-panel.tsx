@@ -46,6 +46,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
   const [errors,setErrors]=useState<string[]>([]);
   const [loading,setLoading]=useState(true);
   const [filter,setFilter]=useState("all");
+  const [bothPriority,setBothPriority]=useState("");
   const [section,setSection]=useState<"resources"|"academy"|"temple">("resources");
   const [mode,setMode]=useState<ProductionDraft["mode"]>("maximum");
   const [amount,setAmount]=useState("100");
@@ -97,10 +98,10 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
   const names=Object.fromEntries(accounts.map(a=>[a.id,a.name]));
   const show=(n:number|null)=>n===null?t("Unknown"):formatNumber(n,locale);
   const visible=rows.filter(row=>section!=="resources"||filter==="all"||filter==="wood"||!row.inventory||row.inventory.luxury===filter);
-  const eligible=visible.filter(row=>row.inventory&&filter!=="all"&&section==="resources"&&!excluded.includes(row.account+":"+row.cityId));
+  const eligible=visible.filter(row=>row.inventory&&(filter!=="all"||bothPriority!=="")&&section==="resources"&&!excluded.includes(row.account+":"+row.cityId));
   const keyOf=(row:Entry)=>row.account+":"+row.cityId;
   const amountValid=mode==="maximum"||/^\d+$/.test(amount)&&Number(amount)<=(mode==="percentage"?100:2000000)&&(!overcharge||mode!=="percentage"||Number(amount)===100);
-  const canEdit=role!=="viewer"&&!loading&&!pending&&!reviews.length&&section==="resources"&&filter!=="all";
+  const canEdit=role!=="viewer"&&!loading&&!pending&&!reviews.length&&section==="resources"&&(filter!=="all"||bothPriority!=="");
   async function post(path:string,body:unknown){
     const response=await fetch("/api/controller/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(!response.ok)throw Error("Unavailable");
@@ -110,8 +111,8 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
     if(!canEdit||!amountValid||!eligible.length||flight.current)return;
     const grouped=new Map<string,PriorityRow[]>();
     for(const row of eligible){
-      const override=overrides[keyOf(row)];
-      const draft:ProductionDraft={resource:filter,mode:override!==undefined&&override!==""?"exact":mode,amount:override!==undefined&&override!==""?Number(override):mode==="maximum"?null:Number(amount),overcharge,available_only:availableOnly,allow_fallback:!availableOnly&&fallback};
+      const override=filter==="all"?undefined:overrides[keyOf(row)];
+      const draft:ProductionDraft={resource:filter==="all"?(bothPriority==="wood"?"wood":row.inventory!.luxury):filter,mode:override!==undefined&&override!==""?"exact":mode,amount:override!==undefined&&override!==""?Number(override):mode==="maximum"?null:Number(amount),overcharge,available_only:availableOnly,allow_fallback:filter!=="all"&&!availableOnly&&fallback,...(filter==="all"?{fill_both:true as const}:{})};
       grouped.set(row.account,[...(grouped.get(row.account)??[]),{city_id:row.cityId,draft}]);
     }
     if(grouped.size>32||[...grouped.values()].some(r=>r.length>16)){setMessage("Review at most 16 cities per account and 32 accounts.");return;}
@@ -144,18 +145,19 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
     <div className="under-tabs" role="group" aria-label={t("Workforce section")}>
       {(["resources","academy","temple"] as const).map(key=><button key={key} aria-pressed={section===key} className={section===key?"tab-selected":""} disabled={pending} onClick={()=>{setSection(key);reset();}}>{t(key==="resources"?"Production resources":key==="academy"?"Academy scientists":"Temple priests")}</button>)}
     </div>
-    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
+    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setBothPriority("");setMode("maximum");setFallback(false);setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
     {section==="resources"&&role!=="viewer"&&<section className="panel">
-      <div className="panel-heading"><div><h3>{t("Reviewed production allocation")}</h3><p>{t("Choose one resource priority. All resources is an inventory view.")}</p></div></div>
+      <div className="panel-heading"><div><h3>{t("Reviewed production allocation")}</h3><p>{t("Choose one resource priority, or explicitly prioritize one site when filling both.")}</p></div></div>
       <div className="form-grid">
-        <label className="field"><span>{t("Target")}</span><select value={mode} disabled={!canEdit} onChange={e=>setMode(e.target.value as ProductionDraft["mode"])}><option value="maximum">{t("Maximum")}</option><option value="percentage">{t("Percentage")}</option><option value="exact">{t("Exact workers")}</option></select></label>
+        {filter==="all"&&<label className="field"><span>{t("Both-resource priority")}</span><select value={bothPriority} disabled={pending||!!reviews.length} onChange={e=>{setBothPriority(e.target.value);setMode("maximum");setFallback(false);setExcluded([]);setOverrides({});reset();}}><option value="">{t("Choose priority")}</option><option value="wood">{t("Wood first")}</option><option value="luxury">{t("Luxury first")}</option></select></label>}
+        <label className="field"><span>{t("Target")}</span><select value={mode} disabled={!canEdit||filter==="all"} onChange={e=>setMode(e.target.value as ProductionDraft["mode"])}><option value="maximum">{t("Maximum")}</option><option value="percentage">{t("Percentage")}</option><option value="exact">{t("Exact workers")}</option></select></label>
         {mode!=="maximum"&&<label className="field"><span>{t("Amount")}</span><input type="number" min={0} max={mode==="percentage"?100:2000000} value={amount} disabled={!canEdit} onChange={e=>setAmount(e.target.value)}/></label>}
         <label><input type="checkbox" checked={overcharge} disabled={!canEdit} onChange={e=>setOvercharge(e.target.checked)}/> {t("Include extra workers")}</label>
         <label><input type="checkbox" checked={availableOnly} disabled={!canEdit} onChange={e=>{setAvailableOnly(e.target.checked);if(e.target.checked)setFallback(false);}}/> {t("Use only available population")}</label>
-        <label><input type="checkbox" checked={fallback} disabled={!canEdit||availableOnly} onChange={e=>setFallback(e.target.checked)}/> {t("Allow reviewed temporary full donor release if population is unknown")}</label>
+        <label><input type="checkbox" checked={fallback} disabled={!canEdit||availableOnly||filter==="all"} onChange={e=>setFallback(e.target.checked)}/> {t("Allow reviewed temporary full donor release if population is unknown")}</label>
       </div>
-      {filter!=="all"&&<div className="table-scroll"><table><thead><tr><th>{t("Include")}</th><th>{t("Account")}</th><th>{t("City")}</th><th>{t("Exact override (optional)")}</th></tr></thead><tbody>
-        {visible.filter(r=>r.inventory).map(row=><tr key={keyOf(row)}><td><input type="checkbox" aria-label={row.cityName} checked={!excluded.includes(keyOf(row))} disabled={!canEdit} onChange={e=>setExcluded(old=>e.target.checked?old.filter(k=>k!==keyOf(row)):[...old,keyOf(row)])}/></td><td>{names[row.account]}</td><td>{row.cityName}</td><td><input type="number" min={0} max={2000000} aria-label={t("Exact override (optional)")+" "+row.cityName} value={overrides[keyOf(row)]??""} disabled={!canEdit||excluded.includes(keyOf(row))} onChange={e=>setOverrides(old=>({...old,[keyOf(row)]:e.target.value}))}/></td></tr>)}
+      {(filter!=="all"||bothPriority!=="")&&<div className="table-scroll"><table><thead><tr><th>{t("Include")}</th><th>{t("Account")}</th><th>{t("City")}</th><th>{t("Exact override (optional)")}</th></tr></thead><tbody>
+        {visible.filter(r=>r.inventory).map(row=><tr key={keyOf(row)}><td><input type="checkbox" aria-label={row.cityName} checked={!excluded.includes(keyOf(row))} disabled={!canEdit} onChange={e=>setExcluded(old=>e.target.checked?old.filter(k=>k!==keyOf(row)):[...old,keyOf(row)])}/></td><td>{names[row.account]}</td><td>{row.cityName}</td><td><input type="number" min={0} max={2000000} aria-label={t("Exact override (optional)")+" "+row.cityName} value={overrides[keyOf(row)]??""} disabled={!canEdit||filter==="all"||excluded.includes(keyOf(row))} onChange={e=>setOverrides(old=>({...old,[keyOf(row)]:e.target.value}))}/></td></tr>)}
       </tbody></table></div>}
       <div className="report-tools"><button className="primary-button" disabled={!canEdit||!amountValid||!eligible.length||eligible.some(r=>overrides[keyOf(r)]!==undefined&&overrides[keyOf(r)]!==""&&(!/^\d+$/.test(overrides[keyOf(r)])||Number(overrides[keyOf(r)])>2000000))} onClick={()=>void preview()}>{t("Preview")} · {eligible.length}</button>{reviews.length>0&&<button className="secondary-button" disabled={pending} onClick={reset}>{t("Cancel")}</button>}</div>
       {reviews.length>0&&<><div className="table-scroll"><table><thead><tr><th>{t("Account")}</th><th>{t("City")}</th><th>{t("Target before → after")}</th><th>{t("Donor before → after")}</th><th>{t("Maximum release")}</th><th>{t("Shortfall")}</th></tr></thead><tbody>{reviews.flatMap(({review:r})=>r.plans.map(p=><tr key={r.account_id+":"+p.city_id}><td>{names[r.account_id]}</td><td>{rows.find(x=>x.account===r.account_id&&x.cityId===p.city_id)?.cityName??p.city_id}</td><td>{p.resource}: {show(p.target_before)} → {show(p.target_after)}{p.fallback?" ("+t("Fallback")+")":""}</td><td>{show(p.donor_before)} → {show(p.donor_after)}</td><td>{show(p.donor_release)}</td><td>{show(p.shortfall)}</td></tr>))}</tbody></table></div>
