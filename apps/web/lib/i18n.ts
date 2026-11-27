@@ -34,7 +34,7 @@ export const RU: Readonly<Record<string, string>> = {
   "Donor before → after": "Другой ресурс: до → после",
   "Target before → after": "Цель: до → после",
   "Exact override (optional)": "Точное значение для города (необязательно)",
-  "Allow reviewed temporary full donor release if population is unknown": "Разрешить проверяемое временное освобождение всех рабочих другого ресурса, если население неизвестно",
+  "Allow reviewed temporary full donor release if population or capacity is unknown": "Разрешить проверяемое временное освобождение всех рабочих другого ресурса, если население или вместимость неизвестны",
   "Use only available population": "Использовать только свободное население",
   "Include extra workers": "Включить дополнительных рабочих",
   "Exact workers": "Точное число рабочих",

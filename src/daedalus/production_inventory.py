@@ -93,18 +93,27 @@ def validate_priority_plan(city_id, draft, plan):
         raise ValueError("Invalid production plan identity")
     for key in ("target_capacity", "donor_capacity"):
         if not isinstance(plan[key], list) or len(plan[key]) != 2 or any(
-                type(n) is not int or not 0 <= n <= 1_000_000 for n in plan[key]):
+                (n is not None or key != "target_capacity") and (type(n) is not int or not 0 <= n <= 1_000_000) for n in plan[key]):
             raise ValueError("Invalid production capacity")
-    for key in ("target_before", "donor_before", "desired", "donor_release"):
+    for key in ("target_before", "donor_before", "donor_release"):
         if type(plan[key]) is not int or not 0 <= plan[key] <= 2_000_000:
             raise ValueError("Invalid production quantity")
-    if (plan["target_before"] > sum(plan["target_capacity"])
+    if ((None not in plan["target_capacity"] and plan["target_before"] > sum(plan["target_capacity"]))
             or plan["donor_before"] > sum(plan["donor_capacity"])
             or plan["donor_release"] > plan["donor_before"]
             or (draft["available_only"] and plan["donor_release"])
             or not _count(plan["free_citizens"], 2_000_000)):
         raise ValueError("Invalid reviewed displacement")
     normal, extra = plan["target_capacity"]
+    if normal is None or extra is None:
+        if (draft["mode"] != "maximum" or not draft["allow_fallback"] or draft["available_only"]
+                or draft.get("fill_both") or not plan["fallback"] or not plan["donor_before"]
+                or plan["donor_release"] != plan["donor_before"]
+                or any(plan[k] is not None for k in ("desired","target_after","donor_after","shortfall"))):
+            raise ValueError("Invalid unknown-capacity fallback")
+        return plan
+    if type(plan["desired"]) is not int or not 0 <= plan["desired"] <= 2_000_000:
+        raise ValueError("Invalid production quantity")
     capacity = normal + (extra if draft["overcharge"] else 0)
     desired = (capacity if draft["mode"] == "maximum" else
                normal * draft["amount"] // 100 + (extra if draft["overcharge"] else 0)
@@ -161,7 +170,8 @@ def validate_production_progress(account_id, data):
                     or row.get("status") not in {"not_started", "running", "complete", "stale"}
                     or not isinstance(row.get("stages"), list) or len(row["stages"]) > 3
                     or any(type(row.get(k)) is not int or not 0 <= row[k] <= 2_000_000
-                           for k in ("target_before", "donor_before", "desired", "donor_release"))):
+                           for k in ("target_before", "donor_before", "donor_release"))
+                    or not _count(row.get("desired"), 2_000_000)):
                 raise ValueError("Invalid production city receipt")
             cities.add(row["city_id"])
             stages = set()

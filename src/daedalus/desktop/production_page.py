@@ -77,7 +77,7 @@ class ProductionPage(QWidget):
         self.overcharge = CheckBox("Include extra workers")
         self.available_only = CheckBox("Use only available population")
         self.fallback = CheckBox("Allow reviewed full donor release")
-        self.fallback.setToolTip("Only if available citizens are unknown; restore unused donor workers.")
+        self.fallback.setToolTip("Only if available citizens or target capacity are unknown; restore unused donor workers.")
         self.available_only.toggled.connect(lambda checked: self.fallback.setChecked(False) if checked else None)
         self.mode.currentIndexChanged.connect(self._update_controls)
         self.available_only.toggled.connect(self._update_controls)

@@ -66,13 +66,26 @@ class ProductionJournal:
                                 (self.run_id, plan["city_id"])).fetchall()
             prior = {r["stage"]: r["status"] for r in rows}
             order = {"release": 0, "target": 1, "restore": 2, "secondary": 2}
+            desired = plan["desired"]
+            if stage == "target" and desired is None:
+                # A newly observed capacity is authorized only by the explicit
+                # maximum fallback and its confirmed release observation.
+                record = conn.execute("""SELECT observation_json FROM production_stages
+                    WHERE run_id=? AND city_id=? AND stage='release' AND status='confirmed'""",
+                    (self.run_id, plan["city_id"])).fetchone()
+                if not record:
+                    raise ValueError("Unknown capacity requires verified donor release")
+                site = json.loads(record[0])["sites"][plan["target_kind"]]
+                if any(type(site.get(k)) is not int or not 0 <= site[k] <= 1_000_000 for k in ("maximum", "extra")):
+                    raise ValueError("Target capacity still unknown")
+                desired = site["maximum"] + (site["extra"] if plan["draft"]["overcharge"] else 0)
             if (stage not in order or stage in prior or any(v != "confirmed" for v in prior.values())
                     or any(order[k] >= order[stage] for k in prior)
                     or kind != plan["target_kind" if stage == "target" else "donor_kind"]
                     or type(value) is not int or not 0 <= value <= 2_000_000
                     or (stage == "release" and (not plan["donor_release"] or
                         value != plan["donor_before"] - plan["donor_release"]))
-                    or (stage == "target" and (value > plan["desired"] or (plan["target_after"] is not None and value > plan["target_after"]) or
+                    or (stage == "target" and (value > desired or (plan["target_after"] is not None and value > plan["target_after"]) or
                         plan["donor_release"] and "release" not in prior))
                     or (stage == "secondary" and (not plan["draft"].get("fill_both") or
                         not plan["donor_before"] - plan["donor_release"] <= value <= plan["donor_after"] or

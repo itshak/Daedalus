@@ -99,12 +99,25 @@ def plan_city_production(observed, draft):
     donor_kind = "tradegood" if kind == "resource" else "resource"
     target, donor = (observed.get("sites", {}).get(k, {}) for k in (kind, donor_kind))
     if any(site.get("available") is not True or any(_count(site.get(k)) is None
-            for k in ("maximum", "extra", "current")) for site in (target, donor)):
+            for k in ("current",)) for site in (target, donor)):
         raise ValueError("Both current allocations and capacities must be known")
     normal, extra, before, donor_before = (target["maximum"], target["extra"],
                                           target["current"], donor["current"])
-    cap = normal + (extra if draft["overcharge"] else 0)
     mode, amount = draft["mode"], draft["amount"]
+    free = _count(observed.get("free_citizens"))
+    if any(_count(donor.get(k)) is None for k in ("maximum", "extra")):
+        raise ValueError("Donor capacity must be known")
+    if normal is None or extra is None:
+        if (mode != "maximum" or draft["available_only"] or not draft["allow_fallback"]
+                or draft.get("fill_both") or not donor_before):
+            raise ValueError("Target capacity is unknown")
+        return {"city_id": observed["city_id"], "island_id": observed["island_id"],
+                "resource": resource, "luxury": observed["luxury"], "target_kind": kind, "donor_kind": donor_kind,
+                "target_before": before, "donor_before": donor_before, "desired": None,
+                "target_after": None, "donor_release": donor_before, "donor_after": None,
+                "shortfall": None, "fallback": True, "free_citizens": free,
+                "target_capacity": [normal, extra], "donor_capacity": [donor["maximum"], donor["extra"]], "draft": draft}
+    cap = normal + (extra if draft["overcharge"] else 0)
     wanted = (cap if mode == "maximum" else
               normal * amount // 100 + (extra if draft["overcharge"] else 0)
               if mode == "percentage" else amount)
@@ -157,14 +170,14 @@ def feasible_after_release(plan, fresh):
     if target["current"] != plan["target_before"] or donor["current"] != plan["donor_before"] - plan["donor_release"]:
         raise ValueError("Unexpected assignment after release")
     cap = target["maximum"] + (target["extra"] if plan["draft"]["overcharge"] else 0)
-    desired = min(plan["desired"], cap)
+    desired = cap if plan["desired"] is None else min(plan["desired"], cap)
     if free is None and desired > target["current"]:
         raise ValueError("Cannot verify available citizens after release")
     achievable = min(desired, target["current"] + (free or 0))
     if plan["target_after"] is not None:
         achievable = min(achievable, plan["target_after"])
     # A new capacity loss must not implicitly reduce an existing assignment.
-    if achievable < target["current"] and plan["desired"] >= target["current"]:
+    if achievable < target["current"] and (plan["desired"] is None or plan["desired"] >= target["current"]):
         raise ValueError("Target capacity changed after review")
     return achievable
 
@@ -235,6 +248,10 @@ def execute_city_production(session, plan, journal):
         donor -= plan["donor_release"]
         fresh = submit("release", plan["donor_kind"], donor, target, donor)
     wanted = feasible_after_release(plan, fresh)
+    desired = plan["desired"]
+    if desired is None:
+        site = fresh["sites"][plan["target_kind"]]
+        desired = site["maximum"] + (site["extra"] if plan["draft"]["overcharge"] else 0)
     if wanted != target:
         fresh = submit("target", plan["target_kind"], wanted, wanted, donor)
         target = wanted
@@ -255,7 +272,7 @@ def execute_city_production(session, plan, journal):
             fresh = submit("restore", plan["donor_kind"], restored, target, restored)
             donor = restored
     result = {"city_id": plan["city_id"], "target": target, "donor": donor,
-              "shortfall": plan["desired"] - target}
+              "shortfall": desired - target}
     journal.complete_city(plan, result)
     return result
 

@@ -398,3 +398,34 @@ def test_both_resource_plan_disallows_unreviewed_fallback():
         plan_city_production(observed(None), draft(fill_both=True))
     with pytest.raises(ValueError):
         plan_city_production(observed(None), draft(fill_both=True, allow_fallback=True))
+
+
+def test_unknown_capacity_requires_reviewed_maximum_and_fresh_readback(staged_city, monkeypatch):
+    from daedalus.production_inventory import validate_priority_plan
+    f = staged_city
+    f.source["sites"]["tradegood"]["maximum"] = None
+    with pytest.raises(ValueError, match="unknown"):
+        f.approve(draft())
+    settings = draft(allow_fallback=True)
+    plan, journal = f.approve(settings)
+    assert plan["desired"] is None and plan["donor_release"] == 700
+    assert validate_priority_plan(1, settings, plan) == plan
+    def reveal_capacity(*args, **kwargs):
+        f.submit(*args, **kwargs)
+        if len(f.calls) == 1:
+            f.source["sites"]["tradegood"]["maximum"] = 750
+    monkeypatch.setattr(f.module, "_submit_worker_assignment", reveal_capacity)
+    result = f.module.execute_city_production(f.session, plan, journal)
+    assert result == {"city_id":1,"target":900,"donor":400,"shortfall":0}
+    assert f.calls == [("resource",0),("tradegood",900),("resource",400)]
+
+
+def test_unknown_capacity_after_release_fences_instead_of_guessing(staged_city):
+    f = staged_city
+    f.source["sites"]["tradegood"]["maximum"] = None
+    plan, journal = f.approve(draft(allow_fallback=True))
+    with pytest.raises(ValueError, match="verify"):
+        f.module.execute_city_production(f.session, plan, journal)
+    assert f.calls == [("resource",0)]
+    with pytest.raises(ValueError, match="Incomplete"):
+        journal.begin_city(plan)

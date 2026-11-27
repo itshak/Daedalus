@@ -1,9 +1,9 @@
-import {validWorkerDraft} from "./native-task-contract";
+import {validWorkerDraft} from "./native-task-contract.ts";
 export type ProductionDraft={resource:string;mode:"maximum"|"percentage"|"exact";amount:number|null;overcharge:boolean;available_only:boolean;allow_fallback:boolean;fill_both?:true};
 export type PriorityRow={city_id:number;draft:ProductionDraft};
 export type PriorityPlan={city_id:number;island_id:number;resource:string;luxury:string;target_kind:string;donor_kind:string;
-  target_before:number;donor_before:number;desired:number;target_after:number|null;donor_release:number;donor_after:number|null;
-  shortfall:number|null;fallback:boolean;free_citizens:number|null;target_capacity:[number,number];donor_capacity:[number,number];draft:ProductionDraft};
+  target_before:number;donor_before:number;desired:number|null;target_after:number|null;donor_release:number;donor_after:number|null;
+  shortfall:number|null;fallback:boolean;free_citizens:number|null;target_capacity:[number|null,number|null];donor_capacity:[number,number];draft:ProductionDraft};
 export type PriorityReview={account_id:string;city_id:number;task:"modifyProduction";ready:true;plans:PriorityPlan[];preview_id:string;expires_in:number};
 function obj(v:unknown):v is Record<string,unknown>{return !!v&&typeof v==="object"&&!Array.isArray(v);}
 function int(v:unknown,max:number):v is number{return typeof v==="number"&&Number.isInteger(v)&&v>=0&&v<=max;}
@@ -20,10 +20,17 @@ export function verifyPriorityReview(v:unknown,account:string,rows:PriorityRow[]
       ||p.donor_kind!==(d.resource==="wood"?"tradegood":"resource")||!obj(p.draft)
       ||!validWorkerDraft("modifyProduction",{priority:[{city_id:p.city_id,draft:p.draft}]})
       ||Object.entries(d).some(([k,x])=>(p.draft as Record<string,unknown>)[k]!==x)
-      ||!cap(p.target_capacity)||!cap(p.donor_capacity)||!int(p.target_before,2000000)||!int(p.donor_before,2000000)
-      ||!int(p.desired,2000000)||!int(p.donor_release,2000000)||typeof p.fallback!=="boolean"
+      ||!Array.isArray(p.target_capacity)||p.target_capacity.length!==2||!p.target_capacity.every(n=>n===null||int(n,1000000))||!cap(p.donor_capacity)||!int(p.target_before,2000000)||!int(p.donor_before,2000000)
+      ||(p.desired!==null&&!int(p.desired,2000000))||!int(p.donor_release,2000000)||typeof p.fallback!=="boolean"
       ||(p.free_citizens!==null&&!int(p.free_citizens,2000000)))throw Error("Invalid production plan");
-    const [normal,extra]=p.target_capacity,maximum=normal+(d.overcharge?extra:0);
+    const [normal,extra]=p.target_capacity as [number|null,number|null];
+    if(normal===null||extra===null){
+      if(d.mode!=="maximum"||!d.allow_fallback||d.available_only||d.fill_both||!p.fallback||!p.donor_before
+        ||p.donor_release!==p.donor_before||p.desired!==null||p.target_after!==null||p.donor_after!==null||p.shortfall!==null
+        ||p.donor_before>p.donor_capacity[0]+p.donor_capacity[1])throw Error("Invalid unknown-capacity fallback");
+      continue;
+    }
+    const maximum=normal+(d.overcharge?extra:0);
     const desired=d.mode==="maximum"?maximum:d.mode==="percentage"?Math.floor(normal*d.amount!/100)+(d.overcharge?extra:0):d.amount!;
     const needed=Math.max(0,desired-p.target_before);
     if(p.desired!==desired||desired>maximum||p.target_before>normal+extra||p.donor_before>p.donor_capacity[0]+p.donor_capacity[1])throw Error("Invalid production capacity");
@@ -48,7 +55,7 @@ export function verifyPriorityReview(v:unknown,account:string,rows:PriorityRow[]
 
 const runPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export type ProductionRun={run_id:string;status:string;cities:{
-  city_id:number;resource:string;status:string;target_before:number;donor_before:number;desired:number;donor_release:number;
+  city_id:number;resource:string;status:string;target_before:number;donor_before:number;desired:number|null;donor_release:number;
   stages:{stage:string;kind:string;value:number;status:string;observed?:{resource:number;tradegood:number}}[];
   result:{city_id:number;target:number;donor:number;shortfall:number}|null
 }[]};
@@ -66,7 +73,7 @@ export function verifyProductionRuns(data:unknown,account:string):ProductionRun[
       if(!obj(row)||!int(row.city_id,999999999999)||!row.city_id||cities.has(row.city_id)
         ||!["wood","wine","marble","crystal","sulfur"].includes(String(row.resource))
         ||!["not_started","running","complete","stale"].includes(String(row.status))
-        ||!["target_before","donor_before","desired","donor_release"].every(k=>int(row[k],2000000))
+        ||!["target_before","donor_before","donor_release"].every(k=>int(row[k],2000000))||(row.desired!==null&&!int(row.desired,2000000))
         ||!Array.isArray(row.stages)||row.stages.length>3)throw Error("Invalid production receipt");
       cities.add(row.city_id);const stages=new Set();
       for(const stage of row.stages){
