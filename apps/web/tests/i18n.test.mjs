@@ -59,7 +59,7 @@ test("login, settings, global toolbar and HTML support persisted Russian", () =>
 });
 
 test("every static translated UI key used by dashboard or sign-in exists in glossary", () => {
-  const sources = [read("components/control-center.tsx"), read("app/login/page.tsx")];
+  const sources = [read("components/control-center.tsx"), read("components/account-scope-selector.tsx"), read("app/login/page.tsx")];
   for (const source of sources) {
     const used = [...source.matchAll(/\b(?:tr|t)\("([^"]+)"(?:\)|,)/g)].map(match => match[1]);
     const missing = [...new Set(used.filter(key => !Object.hasOwn(RU, key)))];

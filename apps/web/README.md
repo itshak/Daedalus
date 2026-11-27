@@ -31,3 +31,18 @@ The current deployed preview includes typed native task editors, reviewed batch 
 Browser sign-in uses a same-origin server route and HttpOnly, SameSite=Lax Supabase session cookies (Secure in production). All private gateway requests re-check the verified Supabase user and non-disabled operator row. The CSP blocks external connections, frames and objects; inline script/style remains necessary for the current Next.js rendering path. The bounded in-memory per-instance traffic guards are defense in depth, **not distributed rate limiting**. The deployed Vercel firewall now has an active valid API-prefix fixed-window IP limit (600 requests per 60 seconds), with stricter in-app login and operator limits. Provider open-signup and anonymous-user settings must be verified in the dashboard. Login now also rejects valid provider credentials without an active operator row, signs out locally, and returns no success or usable application session. The hosted project is on the Free plan: compromised-password protection requires Pro or higher ([provider documentation](https://supabase.com/docs/guides/auth/password-security)). Do not purchase an upgrade implicitly; use strong unique passwords and keep provisioning private. Audit action metadata is available from the controller's existing redacted receipt history; Gateway mutations now emit private server-side audit metadata with only operator UUID, role, fixed action, method and HTTP outcome. No body, request URL, account identifier or credential is logged by this audit helper. A controller HTTP response is not proof of a game effect. The reserved Supabase audit table remains inaccessible to anonymous/authenticated roles; the controller receipt history remains authoritative. The baseline SQL is rerunnable for existing installations and revokes all inherited default table grants before granting only the required operations. Live permissions were verified for both roles; neither can truncate any protected web table.
 
 Production automatic builds are version-gated; ordinary pushes and preview branches skip builds. Manual redeploys remain available through the Vercel dashboard with Ignore Build Step unchecked. See [release deployment policy](../../docs/BETA-RELEASE.md#version-gated-vercel-deployment-policy).
+
+
+## Working account scope
+
+Use the permanent header account menu to choose **All accounts**, a single
+player or several players. **Select all** selects the currently listed IDs;
+**All accounts** follows future authorized inventory changes. **Clear** then
+**Apply account selection** deliberately selects no accounts. The browser
+persists only this preference for the authenticated operator/controller
+context; sign-out clears it. Account administration has a separate, explicit
+**Manage all accounts** view. Single-target editors automatically use the
+only eligible account; with multiple eligible accounts, choose a target
+within scope. Bulk alert reviews name and freeze the chosen accounts.
+Changing context clears unsubmitted reviews; running tasks continue. A
+context choice is not an authorization grant.

@@ -32,6 +32,23 @@ class GuiPreferences:
     group_by_island: bool = False
     excluded_by_backend: dict[str, list[str]] = field(default_factory=dict)
 
+    working_by_backend: dict[str, list[str]] = field(default_factory=dict)
+
+    def working_for(self, server_url: str) -> list[str] | None:
+        ids = self.working_by_backend.get(backend_scope(server_url))
+        return None if ids is None else list(ids)
+
+    def set_working(self, server_url: str, ids: list[str] | None) -> None:
+        key = backend_scope(server_url)
+        if ids is None:
+            self.working_by_backend.pop(key, None)
+            return
+        if len(ids) > 100 or any(not _ACCOUNT_ID.fullmatch(x) for x in ids):
+            raise GuiPreferenceError("Invalid working account selection")
+        if key not in self.working_by_backend and len(self.working_by_backend) >= 16:
+            self.working_by_backend.pop(next(iter(self.working_by_backend)))
+        self.working_by_backend[key] = sorted(set(ids))
+
     def excluded_for(self, server_url: str) -> set[str]:
         return set(self.excluded_by_backend.get(backend_scope(server_url), []))
 
@@ -75,7 +92,7 @@ def _resolve(path: str | Path | None) -> Path:
 
 
 def _validate(data: object) -> GuiPreferences:
-    if not isinstance(data, dict) or set(data) != {
+    if not isinstance(data, dict) or set(data).difference({"working_by_backend"}) != {
         "version", "theme", "only_220k", "group_by_island", "excluded_by_backend"
     } or type(data["version"]) is not int or data["version"] != 1:
         raise GuiPreferenceError("Invalid GUI preference format")
@@ -84,9 +101,11 @@ def _validate(data: object) -> GuiPreferences:
     if type(data["only_220k"]) is not bool or type(data["group_by_island"]) is not bool:
         raise GuiPreferenceError("Invalid report preference")
     scopes = data["excluded_by_backend"]
-    if not isinstance(scopes, dict) or len(scopes) > 16:
+    working = data.get("working_by_backend", {})
+    if (not isinstance(scopes, dict) or len(scopes) > 16
+            or not isinstance(working, dict) or len(working) > 16):
         raise GuiPreferenceError("Invalid report account selections")
-    for scope, values in scopes.items():
+    for scope, values in list(scopes.items()) + list(working.items()):
         if (
             not isinstance(scope, str) or not _SCOPE.fullmatch(scope)
             or not isinstance(values, list) or len(values) > 100
@@ -99,6 +118,7 @@ def _validate(data: object) -> GuiPreferences:
         only_220k=data["only_220k"],
         group_by_island=data["group_by_island"],
         excluded_by_backend={key: list(values) for key, values in scopes.items()},
+        working_by_backend={key: list(values) for key, values in working.items()},
     )
 
 
@@ -131,6 +151,7 @@ def save_gui_preferences(prefs: GuiPreferences, path: str | Path | None = None) 
         "only_220k": prefs.only_220k,
         "group_by_island": prefs.group_by_island,
         "excluded_by_backend": prefs.excluded_by_backend,
+        "working_by_backend": prefs.working_by_backend,
     }
     _validate(document)
     if parent.is_symlink() or target.is_symlink():

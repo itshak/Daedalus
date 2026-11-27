@@ -121,3 +121,9 @@ Fixed-resource recovery checkpoints SHALL be stored outside the checkout in an o
 - **WHEN** a different authenticated world/player attempts to load that checkpoint
 - **THEN** the engine SHALL refuse to send any resources and SHALL not disclose other account material
 
+### Requirement: Working scope does not confer authorization
+Account scope preferences MUST NOT expand account authorization or reuse a review with an altered target set.
+
+#### Scenario: A stale scoped response arrives
+- **WHEN** an earlier scope request completes after a scope change
+- **THEN** it cannot populate current targets or enable dispatch

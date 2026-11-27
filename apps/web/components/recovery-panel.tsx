@@ -58,7 +58,7 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const records = data?.accounts ?? [];
+  const records = (data?.accounts ?? []).filter(record=>Object.hasOwn(byId,record.account_id));
 
   async function act(id: string, success: string, path: string, method: "POST" | "PUT", payload: unknown, confirmText: string) {
     if (!window.confirm(confirmText)) return;
@@ -84,11 +84,12 @@ export function RecoveryPanel({ accounts, role }: { accounts: Account[]; role: s
   const resume = (r:Recovery) => act(r.account_id,"Recovery queued",url(r.account_id,"resume-now"),"POST",{confirmed:true},
     "Reconnect NOW, possibly signing your active game browser out? Your exact player must verify before any approved safe job is restored.");
   async function bulk(enabled: boolean) {
-    if (!selected.length || !window.confirm((enabled?"Enable":"Disable")+" delayed reconnection for "+selected.length+" selected accounts? This may later log an active game browser out.")) return;
+    const targets=selected.filter(id=>Object.hasOwn(byId,id));
+    if (!targets.length || !window.confirm((enabled?"Enable":"Disable")+" delayed reconnection for "+targets.length+" selected accounts? This may later log an active game browser out.")) return;
     setWorking("bulk");setMessage("");
     try {
       const result=await api<{results:{account_id:string;status:string}[]}>("recovery/policy/bulk","POST",
-        {confirmed:true,account_ids:selected,enabled,auto_resume:enabled,grace_seconds:300});
+        {confirmed:true,account_ids:targets,enabled,auto_resume:enabled,grace_seconds:300});
       setMessage(result.results.map(r=>name(byId[r.account_id]||{id:r.account_id})+": "+label(r.status)).join(" · "));
       await refresh();
     } catch (error) {setMessage(error instanceof Error?error.message:"Bulk outcome uncertain");}

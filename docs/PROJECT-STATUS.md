@@ -4,7 +4,7 @@ Last reviewed: **2026-11-26**, against merged desktop and beta baseline `f22f098
 
 ## Current engineering backlog
 
-**Exactly one active OpenSpec implementation change:** [`finish-v010-engineering`](../openspec/changes/finish-v010-engineering/tasks.md). Six prior proposals were archived as superseded, not certified complete; all 122 previously unchecked tasks have a disposition. See [reconciliation and evidence](V010-RECONCILIATION.md), [permanent operation coverage](operation-coverage.json) and [owner-only acceptance](V010-OWNER-ACCEPTANCE.md) ([issue #60](https://github.com/itshak/Daedalus/issues/60)). Engineering closure does not waive stable release acceptance. E3 automated integration coverage, E4 recovery engineering and E5 automated UI QA are implemented; E1 remaining upstream compatibility, E2 deployment security and E6 release engineering remain open.
+**Active OpenSpec implementation changes:** [`finish-v010-engineering`](../openspec/changes/finish-v010-engineering/tasks.md). Six prior proposals were archived as superseded, not certified complete; all 122 previously unchecked tasks have a disposition. See [reconciliation and evidence](V010-RECONCILIATION.md), [permanent operation coverage](operation-coverage.json) and [owner-only acceptance](V010-OWNER-ACCEPTANCE.md) ([issue #60](https://github.com/itshak/Daedalus/issues/60)). Engineering closure does not waive stable release acceptance. E3 automated integration coverage, E4 recovery engineering and E5 automated UI QA are implemented; E1 remaining upstream compatibility, E2 deployment security and E6 release engineering remain open.
 
 Merged revision `f22f098` has a published Mac preview DMG/checksum, successful native desktop, engine, package, web and security workflows. A Windows Python 3.12 post-merge test hit a cold Node subprocess timeout; the final preparation change extends that bounded test allowance and requires a fresh CI result. The live backend was healthy in a read-only check; its checkout had identical backend/engine source to main. Actual game-changing task effects, full reboot, live restoration and final authenticated UI acceptance remain unverified. No new production changes were performed for the consolidation.
 
@@ -36,6 +36,7 @@ The following changes have implemented and archived OpenSpec requirements. The h
 
 | Change ID | Shipped capability | Original PR |
 | --- | --- | --- |
+| `unify-global-account-scope` | Persistent scoped web/native account context, scoped reads and reviewed-target invalidation; synthetic verification, no live acceptance | [#119](https://github.com/itshak/Daedalus/pull/119) |
 | `apple-style-nextjs-web-control-center` | Web client and BFF baseline; outstanding engineering/owner items transferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-apple-style-nextjs-web-control-center/consolidation-record.md) |
 | `delayed-session-reconnect-and-task-restoration` | Recovery and fixed-cargo baseline; outstanding safety verification transferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-delayed-session-reconnect-and-task-restoration/consolidation-record.md) |
 | `fill-city-warehouse` | Shared upstream warehouse filling; owner delivery acceptance deferred; superseded, not fully accepted | [Disposition](../openspec/changes/archive/2026-11-26-fill-city-warehouse/consolidation-record.md) |
@@ -134,7 +135,7 @@ Mac-first plan lives in [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
 
 ## Current OpenSpec work and owner acceptance
 
-All remaining agent work is tracked in `finish-v010-engineering`. Owner-only game, physical-device and production approval checks remain deferred and unpassed in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md) and [issue #60](https://github.com/itshak/Daedalus/issues/60). The headless-first Selenium workflow allows one visible recovery for a detected challenge or a failed headless attempt; no automated challenge solving. See the archived redesign for historical visual plans.
+The remaining v0.1.0 engineering work is tracked in `finish-v010-engineering`. The separate v0.1.1 proposal `unify-global-account-scope` is being implemented and verified; it does not authorize a production deployment. Owner-only game, physical-device and production approval checks remain deferred and unpassed in [V010-OWNER-ACCEPTANCE.md](V010-OWNER-ACCEPTANCE.md) and [issue #60](https://github.com/itshak/Daedalus/issues/60). The headless-first Selenium workflow allows one visible recovery for a detected challenge or a failed headless attempt; no automated challenge solving. See the archived redesign for historical visual plans.
 
 ## Opt-in account metadata editor (shipped)
 

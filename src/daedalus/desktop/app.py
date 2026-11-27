@@ -18,10 +18,12 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     NavigationItemPosition,
+    PushButton,
     Theme,
     setTheme,
 )
 
+from daedalus.account_display import account_player_names
 from daedalus.accounts import Account
 from daedalus.client import APIConnectionError, DaedalusClient
 from daedalus.connection_prefs import (
@@ -30,6 +32,7 @@ from daedalus.connection_prefs import (
     remember_connection,
     saved_connection,
 )
+from daedalus.desktop.account_scope import AccountSelectionDialog
 from daedalus.desktop.appearance_page import AppearancePage
 from daedalus.desktop.branding import application_icon
 from daedalus.desktop.design_system import NAV_ICONS
@@ -683,6 +686,12 @@ class MainWindow(FluentWindow):
         self._active_backend_url: str | None = None
         self._server_login_vaults: dict[str, dict[str, object]] = {}
         self._syncing_report_preferences = False
+        self._authorized_accounts: list[dict[str, object]] = []
+        self._working_ids: list[str] | None = None
+        self._scope_generation = 0
+        self._pending_scope_refresh = False
+        self._manage_all = False
+        self._applying_scope = False
         try:
             self._gui_preferences = load_gui_preferences()
         except GuiPreferenceError:
@@ -697,6 +706,10 @@ class MainWindow(FluentWindow):
         self._selenium_watchdog.setSingleShot(True)
         self._selenium_watchdog.timeout.connect(self._selenium_timeout)
 
+        self.scope_button = PushButton("All accounts (0)", self.titleBar)
+        self.scope_button.setAccessibleName("Account scope")
+        self.scope_button.clicked.connect(self._choose_working_scope)
+        self.titleBar.hBoxLayout.insertWidget(2, self.scope_button)
         self.home_page = HomePage(self)
         self.accounts_page = AccountsPage(self)
         self.warehouses_page = WarehousesPage(self)
@@ -770,12 +783,13 @@ class MainWindow(FluentWindow):
             lambda: self.switchTo(self.connection_page)
         )
         self.appearance_page.report_accounts_requested.connect(
-            self.warehouses_page._choose_accounts
+            self._choose_working_scope
         )
         self.appearance_page.report_all_requested.connect(
             self._include_all_report_accounts
         )
         self.accounts_page.report_selection_changed.connect(self._on_report_selection_changed)
+        self.accounts_page.manage_all_requested.connect(self._toggle_manage_all)
         self.accounts_page.refresh_requested.connect(lambda: self._request("accounts"))
         self.accounts_page.account_change_requested.connect(
             lambda revision, rows: self._request(
@@ -871,9 +885,7 @@ class MainWindow(FluentWindow):
             lambda ids: self._request_warehouse_scope("warehouses_all", ids)
         )
         self.warehouses_page.report_scope_changed.connect(
-            lambda ids: self.accounts_page.set_report_exclusions(
-                set(self.warehouses_page._account_ids).difference(ids)
-            )
+            self._set_working_scope
         )
         for view in self._task_views:
             view.cities_requested.connect(self._queue_task_cities)
@@ -1097,7 +1109,8 @@ class MainWindow(FluentWindow):
         if self.client is None or self._worker is not None or self._automatic_login_active:
             self._notice("Please finish the current request", "Warehouse refresh can be repeated safely.")
             return
-        ids = list(dict.fromkeys(account_ids))
+        allowed = {str(row["id"]) for row in self._scope_rows()}
+        ids = [aid for aid in dict.fromkeys(account_ids) if aid in allowed]
         if not ids or action not in {"warehouses", "warehouses_batch", "warehouses_all"}:
             return
         pending = [
@@ -1115,6 +1128,10 @@ class MainWindow(FluentWindow):
         self._perform_warehouse_scope(action, ids)
 
     def _perform_warehouse_scope(self, action: str, account_ids: list[str]) -> None:
+        allowed = {str(row["id"]) for row in self._scope_rows()}
+        account_ids = [aid for aid in account_ids if aid in allowed]
+        if not account_ids:
+            return
         if action == "warehouses":
             self._request(action, account_id=account_ids[0])
         else:
@@ -1610,29 +1627,130 @@ class MainWindow(FluentWindow):
         else:
             self._request("task_list", account_id=account_id)
 
+    def _scope_rows(self) -> list[dict[str, object]]:
+        return [row for row in self._authorized_accounts
+                if self._working_ids is None or row["id"] in self._working_ids]
+
+    def _choose_working_scope(self) -> None:
+        rows = self._authorized_accounts
+        names = account_player_names([{k: row[k] for k in ("id", "player", "world") if k in row} for row in rows])
+        dialog = AccountSelectionDialog(
+            rows, [str(row["id"]) for row in self._scope_rows()], self,
+            title="Account scope", display_names=names, allow_empty=True, allow_all=True,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self._set_working_scope(None if dialog.all_mode else dialog.selected_ids())
+
     def _include_all_report_accounts(self) -> None:
-        """Settings and Warehouses share one persisted account selection."""
-        # Setting exclusions updates and persists the warehouse scope through
-        # the existing report_selection_changed signal (no duplicate write).
-        self.accounts_page.set_report_exclusions(set())
+        self._set_working_scope(None)
 
     def _on_report_selection_changed(self, selected: list[str]) -> None:
-        self.warehouses_page.set_selected_accounts(selected)
-        self.appearance_page.set_report_scope(
-            len(self.warehouses_page._account_ids), len(
-                self.warehouses_page._included_ids
-            ),
-        )
-        if self._syncing_report_preferences or self._active_backend_url is None:
+        if not self._applying_scope and not self._syncing_report_preferences:
+            self._set_working_scope(selected)
+
+    def _toggle_manage_all(self) -> None:
+        self._manage_all = not self._manage_all
+        self._render_scope_accounts()
+
+    def _render_scope_accounts(self) -> None:
+        scoped = self._scope_rows()
+        visible = self._authorized_accounts if self._manage_all else scoped
+        self._applying_scope = True
+        try:
+            self.accounts_page.set_accounts(visible)
+            self.accounts_page.set_report_exclusions(
+                {str(row["id"]) for row in visible} - {str(row["id"]) for row in scoped}
+            )
+            self.accounts_page.manage_all_button.setText(
+                "Show working scope" if self._manage_all else "Manage all accounts"
+            )
+        finally:
+            self._applying_scope = False
+
+    def _set_working_scope(self, ids: list[str] | None) -> None:
+        if self._automatic_login_active or self._selenium_worker is not None:
+            self._notice("Sign-in in progress", "Finish the current sign-in cohort before changing the working scope.")
+            self._render_scope_accounts()
+            return
+        valid = {str(row["id"]) for row in self._authorized_accounts}
+        self._working_ids = None if ids is None else sorted(set(ids) & valid)
+        self._manage_all = False
+        self._apply_working_scope()
+        self._persist_working_scope()
+        self._pending_scope_refresh = True
+        self._refresh_working_view()
+
+    def _refresh_working_view(self) -> None:
+        if not self._pending_scope_refresh or self._worker is not None:
+            return
+        self._pending_scope_refresh = False
+        if self.client is None:
+            return
+        current = self.stackedWidget.currentWidget()
+        ids = [str(row["id"]) for row in self._scope_rows()]
+        if current is self.warehouses_page and ids:
+            # Changing context is read-only: do not invoke automatic sign-in.
+            self._perform_warehouse_scope("warehouses_all", ids)
+        elif current is self.military_page and ids:
+            self.military_page.refresh()
+        elif current is self.log_page and ids:
+            self.log_page._server_reset()
+
+    def _persist_working_scope(self) -> None:
+        if not self._active_backend_url:
             return
         try:
+            self._gui_preferences.set_working(self._active_backend_url, self._working_ids)
             self._gui_preferences.set_excluded(
-                self._active_backend_url, self.accounts_page.report_exclusions(),
+                self._active_backend_url,
+                {str(row["id"]) for row in self._authorized_accounts}
+                - {str(row["id"]) for row in self._scope_rows()},
             )
         except (ValueError, GuiPreferenceError):
-            self._notice("Invalid report selection", "Unable to save selected accounts")
+            self._notice("Invalid account scope", "Unable to save selected accounts")
             return
         self._save_gui_preferences()
+
+    def _apply_working_scope(self) -> None:
+        self._scope_generation += 1
+        self._preflight_queue.clear()
+        self._pending_task_refresh = None
+        self._pending_batch_status = None
+        self._pending_task_cities = None
+        self._pending_military_reads.clear()
+        self._pending_task_buildings = None
+        self._pending_workshop = None
+        self._pending_trainables = None
+        self._pending_market = None
+        self._pending_academies = None
+        self._pending_taverns = None
+        self._pending_miracles = None
+        self._pending_shrine = None
+        self._pending_piracy = None
+        self._pending_construction_preview = None
+        rows = self._scope_rows()
+        ids = [str(row["id"]) for row in rows]
+        names = account_player_names([{k: row[k] for k in ("id", "player", "world") if k in row} for row in self._authorized_accounts])
+        self.scope_button.setText(
+            f"All accounts ({len(ids)})" if self._working_ids is None
+            else names[ids[0]] if len(ids) == 1 else f"{len(ids)} accounts selected"
+        )
+        self._render_scope_accounts()
+        self.warehouses_page.clear_reports()
+        self.military_page.reset_backend_context()
+        self.appearance_page.set_admin_accounts(rows)
+        self.warehouses_page.set_accounts(rows)
+        self.warehouses_page.set_selected_accounts(ids)
+        self.military_page.set_accounts(rows)
+        self.log_page.set_accounts(rows)
+        self.home_page._warehouse_report_note = "Not loaded"
+        self.home_page._task_report_note = "Not checked"
+        self.home_page.set_accounts(rows)
+        self.appearance_page.set_report_scope(len(self._authorized_accounts), len(ids))
+        for view in self._task_views:
+            view.set_accounts(rows)
+            view.multi_table.setRowCount(0)
+            view.multi_summary.setText("Refresh task status for the working scope.")
 
     def _auto_reconnect_securely(self) -> None:
         if self.client is not None or self._worker is not None:
@@ -2090,6 +2208,7 @@ class MainWindow(FluentWindow):
         worker = APIWorker(
             client, action, account_id=account_id, task_payload=task_payload, parent=self,
         )
+        worker.scope_generation = self._scope_generation
         self._worker = worker
         if action == "connect":
             self.connection_page.set_connecting(True)
@@ -2100,6 +2219,8 @@ class MainWindow(FluentWindow):
         worker.start()
 
     def _on_completed(self, action: str, payload: object) -> None:
+        if self._stale_scope_read(action):
+            return
         if action == "ssh_connect":
             assert isinstance(payload, dict)
             self._pending_client = payload["client"]
@@ -2184,9 +2305,13 @@ class MainWindow(FluentWindow):
                     self._pending_piracy = None
                     self._pending_construction_preview = None
                     self.tasks_page.reset_backend_context()
+                    self._authorized_accounts = []
                     self.home_page.set_accounts([])
                 excluded = self._gui_preferences.excluded_for(self._active_backend_url) if self._active_backend_url else set()
-                self.accounts_page.set_report_exclusions(excluded)
+                self._working_ids = self._gui_preferences.working_for(self._active_backend_url) if self._active_backend_url else None
+                if self._working_ids is None and excluded:
+                    self._working_ids = [str(row["id"]) for row in payload["accounts"] if row["id"] not in excluded]
+                self._manage_all = False
                 self.accounts_page.set_connected_ids(
                     payload.get("connected_accounts")
                     if isinstance(payload.get("connected_accounts"), list) else None
@@ -2196,7 +2321,7 @@ class MainWindow(FluentWindow):
                 self._show_accounts(payload["accounts"])
             finally:
                 self._syncing_report_preferences = False
-            self._on_report_selection_changed(self.accounts_page.selected_report_account_ids())
+            self._persist_working_scope()
             self._show_capabilities(payload["capabilities"])
             enabled = bool(payload["capabilities"].get("session_monitoring", False))
             self._seen_assistance_ids.clear()
@@ -2565,10 +2690,13 @@ class MainWindow(FluentWindow):
         elif action in {"task_start_batch", "reviewed_batch"}:
             assert isinstance(payload, dict)
             for view in self._task_views:
-                view.set_batch_launch_result(payload)
+                if getattr(self._worker, "scope_generation", self._scope_generation) == self._scope_generation:
+                    view.set_batch_launch_result(payload)
+                else:
+                    view.finish_launch()
             ids = payload.get("account_ids", [])
             if isinstance(ids, list):
-                self._pending_batch_status = ids
+                self._pending_batch_status = [aid for aid in ids if any(row["id"] == aid for row in self._scope_rows())]
             if payload.get("blocked"):
                 self._notice(
                     "Multi-account automation blocked",
@@ -2603,7 +2731,7 @@ class MainWindow(FluentWindow):
             logger.info("Task operation acknowledged: %s", action)
             self._notice("Task operation accepted", str(payload.get("status", "Complete")))
             account_id = payload.get("account_id")
-            if isinstance(account_id, str):
+            if isinstance(account_id, str) and any(row["id"] == account_id for row in self._scope_rows()):
                 self._pending_task_refresh = account_id
 
     def _show_verified_worker_immediately(self, account_id: str) -> None:
@@ -2613,7 +2741,7 @@ class MainWindow(FluentWindow):
         its worker's current world/player. Avoid waiting for a full sign-in
         cohort to finish, while the subsequent backend refresh remains truth.
         """
-        visible = [dict(row) for row in self.accounts_page._accounts]
+        visible = [dict(row) for row in self._authorized_accounts]
         if not any(row.get("id") == account_id for row in visible):
             return
         for row in visible:
@@ -2629,30 +2757,30 @@ class MainWindow(FluentWindow):
         # Server metadata is displayed immediately; per-account Keychain reads
         # happen only in the killable login subprocess, never in the Qt loop.
         cached_emails = {
-            str(row["id"]): row["email"] for row in self.accounts_page._accounts
+            str(row["id"]): row["email"] for row in self._authorized_accounts
             if isinstance(row.get("id"), str) and isinstance(row.get("email"), str)
         }
         visible = [dict(raw) for raw in data]
         for account in visible:
             if not account.get("email") and account.get("id") in cached_emails:
                 account["email"] = cached_emails[account["id"]]
-        self.accounts_page.set_accounts(visible)
-        self.appearance_page.set_admin_accounts(visible)
-        self.warehouses_page.set_accounts(visible)
-        self.military_page.set_accounts(visible)
-        self.log_page.set_accounts(visible)
-        self.home_page.set_accounts(visible)
-        # Refresh inclusion *after* the warehouse account map is replaced.
-        # This also handles accounts newly created via metadata editing.
-        self.warehouses_page.set_selected_accounts(
-            self.accounts_page.selected_report_account_ids()
+        self._authorized_accounts = visible
+        if self._working_ids is not None:
+            valid = {str(row["id"]) for row in visible}
+            self._working_ids = [aid for aid in self._working_ids if aid in valid]
+        self._apply_working_scope()
+        if not self._syncing_report_preferences:
+            self._persist_working_scope()
+
+    def _stale_scope_read(self, action: str) -> bool:
+        generation = getattr(self._worker, "scope_generation", self._scope_generation)
+        return generation != self._scope_generation and (
+            action.startswith("task_") and action not in {
+                "task_start", "task_stop", "task_start_batch", "task_reconcile",
+            } or action.startswith(("warehouses", "military", "server_activity"))
+            or action in {"administrative_status", "world_reports", "proxy_profiles",
+                          "challenge_policy", "extension_settings", "notification_settings", "recovery_jobs"}
         )
-        self.appearance_page.set_report_scope(
-            len(self.warehouses_page._account_ids),
-            len(self.warehouses_page._included_ids),
-        )
-        for view in self._task_views:
-            view.set_accounts(data)
 
     def _show_capabilities(self, data: object) -> None:
         assert isinstance(data, dict)
@@ -2663,6 +2791,8 @@ class MainWindow(FluentWindow):
         self.accounts_page.set_monitoring_enabled(bool(data.get("session_monitoring", False)))
 
     def _on_failed(self, action: str, error: str) -> None:
+        if self._stale_scope_read(action):
+            return
         if action == "proxy_profiles":
             self.appearance_page.set_proxy_unavailable(getattr(self._worker, "account_id", None))
         if action == "world_reports":
@@ -2850,7 +2980,7 @@ class MainWindow(FluentWindow):
             )
         if action in {"task_start", "task_stop", "task_reconcile"} and self._worker is not None:
             account_id = getattr(self._worker, "account_id", None)
-            if isinstance(account_id, str):
+            if isinstance(account_id, str) and any(row["id"] == account_id for row in self._scope_rows()):
                 self._pending_task_refresh = account_id
         if action in {"warehouses", "warehouses_batch", "warehouses_all"}:
             self.warehouses_page.status_label.setText(
@@ -2979,6 +3109,8 @@ class MainWindow(FluentWindow):
             self._run_next_piracy()
         if self._worker is None and not self._automatic_login_active:
             self._run_next_preflight()
+        if self._worker is None and not self._automatic_login_active:
+            self._refresh_working_view()
 
     def _notice(self, title: str, message: str) -> None:
         # Fluent InfoBarManager stacks TOP_RIGHT notifications automatically.

@@ -215,7 +215,7 @@ def test_recovery_status_refresh_waits_for_finished_worker(qt_app, monkeypatch):
     monkeypatch.setattr(window, "_notice", lambda *args: notices.append(args))
     try:
         window.client = object()  # Synthetic connected sentinel; no HTTP client.
-        window.accounts_page.set_accounts([
+        window._show_accounts([
             {"id": "alpha", "world": "s301-en", "player": "ExamplePlayer",
              "enabled": True},
         ])

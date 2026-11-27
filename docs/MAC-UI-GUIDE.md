@@ -110,15 +110,23 @@ See also [GUI migration](GUI-MIGRATION.md), [native Mac login](NATIVE-MAC-LOGIN.
 
 ## Account scope by screen
 
-| Screen | All configured accounts | Selected accounts | Single-account or restricted action |
-| --- | --- | --- | --- |
-| Overview | Direct jump to combined Warehouses and all-account Automation status | Choose subsets on the destination screen | Account cards open that account's context |
-| Accounts | Refresh configured accounts, check attached IkaBot sessions, include all in reports | Report checkboxes choose an arbitrary subset, synchronized with Warehouses | Browser sign-in, metadata editing, recovery and removal remain account-specific; multi-login and bulk destructive editing are intentionally unavailable |
-| Warehouses | Primary **All accounts** read-only combined report and print/export | **Choose accounts…** and **Selected (N)**; same combined export formats | **This account** is a secondary focused report |
-| Automations | **View all task statuses**, including disabled accounts | **View selected statuses** for any count; separately authorize **Start for selected** for 1–32 enabled accounts only | Task stop, uncertain-request reconciliation and interactive login remain individually verified; disabled or excessive selections cannot start mutations |
-| Activity | Sanitized local desktop events only (not a fabricated backend audit) | Not supported: historical events are not consistently account-tagged | Consult per-account Automations History for authoritative request IDs |
-| Connection and Settings | Backend-wide connection and local preferences | Not applicable: these are backend/application settings | No account credential or session mutation from these destinations |
+The title-bar **Account scope** control is the shared working context. Choose
+all accounts dynamically, one player or an explicit subset; clear all
+checkboxes and accept to choose none. The preference is local to the
+connected backend. All scoped screens receive the same effective authorized
+roster. Account-specific selectors refine that roster, never expand it.
+Changing scope clears old reports and task reviews, but does not stop
+running game tasks.
 
+| Screen | Working context |
+| --- | --- |
+| Overview | Scoped account cards and session summaries |
+| Accounts | Scoped account table; explicit **Manage all accounts** for administration |
+| Warehouses | All/selected/single within the working scope; existing combined exports |
+| Automations | Scoped enabled execution targets and scoped status targets; one eligible account is automatic |
+| Military | Scoped inventories and movements |
+| Activity | Scoped server receipts; untagged local diagnostic events remain application-wide |
+| Settings | Global appearance and connection; account-specific administrative controls are scoped |
 
 ## Redesign follow-up: guided discovery and scope continuity
 
@@ -140,11 +148,9 @@ human-readable status; select **Task details** or **Request details** for
 managed IDs and process/request identifiers. Stop only targets an authorized,
 running, backend-managed task; uncertain requests never retry themselves. Every multi-account start consent names **all** selected account labels, worlds and IDs, including groups larger than 12.
 
-Settings now includes a *Warehouse reporting* account-scope summary,
-**Choose report accounts** and **Include all accounts**, synchronized with
-the Accounts report checkboxes and the Warehouses picker. These choices are
-local display/report preferences scoped to the connected backend; they are
-not game mutations, and do not change account enablement. Connection displays
+Settings includes a working-scope summary and shortcuts to the same shell
+selection. These choices are local UI preferences scoped to the connected
+backend; they do not change account enablement or grant authorization. Connection displays
 explicit in-progress feedback and sanitized guidance for rejected tokens,
 untrusted TLS, unreachable servers and unavailable Keychain. Authentication uses **Sign in automatically (headless)** for one, all or selected accounts and can run from warehouse refresh when a session is missing. The older manual browser remains an Advanced fallback.
 

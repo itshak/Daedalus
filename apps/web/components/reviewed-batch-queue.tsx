@@ -4,18 +4,18 @@ import {useLanguage} from "./language-provider";
 import {launchReviewedBatch,type QueuedReview,type BatchResult} from "../lib/reviewed-batch";
 type Queue={entries:QueuedReview[];busy:boolean;add:(entry:QueuedReview)=>boolean;remove:(account:string)=>void;clear:()=>void;start:()=>Promise<void>;results:BatchResult[];message:string};
 const Context=createContext<Queue|null>(null);
-export function ReviewedBatchProvider({role,children}:{role:string;children:ReactNode}){
+export function ReviewedBatchProvider({role,children,accountIds}:{role:string;children:ReactNode;accountIds:string[]}){
   const {t}=useLanguage();
   const [entries,setEntries]=useState<QueuedReview[]>([]),[busy,setBusy]=useState(false),[results,setResults]=useState<BatchResult[]>([]),[message,setMessage]=useState("");
   const flight=useRef(false),mounted=useRef(true);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   function add(entry:QueuedReview){
-    if(role==="viewer"||flight.current||entries.length>=32||entries.some(e=>e.account_id===entry.account_id)||entry.expiresAt<=Date.now())return false;
+    if(role==="viewer"||!accountIds.includes(entry.account_id)||flight.current||entries.length>=32||entries.some(e=>e.account_id===entry.account_id)||entry.expiresAt<=Date.now())return false;
     setEntries(old=>[...old,entry]);return true;
   }
   async function start(){
     if(role==="viewer"||flight.current||!entries.length)return;
-    if(entries.some(e=>e.expiresAt<=Date.now())){setMessage("A review has expired. Remove it and prepare a new preview.");return;}
+    if(entries.some(e=>!accountIds.includes(e.account_id)||e.expiresAt<=Date.now())){setMessage("A review has expired. Remove it and prepare a new preview.");return;}
     if(!window.confirm(t("Start these independently approved operations? Every account is checked first. Dispatch stops on uncertainty; earlier starts are not rolled back.")))return;
     flight.current=true;setBusy(true);setMessage("");setResults([]);
     const draft=entries.map(({account_id,task,preview_id})=>({account_id,task,preview_id}));

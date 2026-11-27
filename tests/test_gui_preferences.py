@@ -107,3 +107,18 @@ def test_ssh_backend_scope_uses_private_stable_host_not_ephemeral_port():
     for bad in ("ssh://-oProxyCommand=x", "ssh://../a", "ssh://host?cookie=secret"):
         with pytest.raises(ValueError):
             backend_scope(bad)
+
+
+def test_working_scope_round_trip_distinguishes_empty_and_all(tmp_path):
+    path = tmp_path / "gui.json"
+    url = "https://controller.example"
+    prefs = GuiPreferences()
+    assert prefs.working_for(url) is None
+    for ids in (["alpha", "beta"], ["beta"], []):
+        prefs.set_working(url, ids)
+        save_gui_preferences(prefs, path)
+        assert load_gui_preferences(path).working_for(url) == ids
+        assert load_gui_preferences(path).working_for("https://other.example") is None
+    prefs.set_working(url, None)
+    save_gui_preferences(prefs, path)
+    assert load_gui_preferences(path).working_for(url) is None
