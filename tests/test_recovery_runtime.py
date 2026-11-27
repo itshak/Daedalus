@@ -397,3 +397,49 @@ def test_identity_change_during_grace_never_starts_replacement_player(system):
     assert not w.starts and not ctl.started
     assert j.event(replacement) is None
     assert not j.desired(replacement)
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_warehouse_cold_start_requires_durable_safe_receipt(system, monkeypatch, uncertain):
+    from uuid import uuid4
+
+    a,j,_c,w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],
+                            status="unconfirmed" if uncertain else "started",
+                            task_id=None if uncertain else "old")
+    # No earlier recovery epoch or prior reconnect.
+    assert j.event(a) is None
+
+    class DormantThread:
+        def __init__(self,**_):pass
+        def start(self):pass
+
+    monkeypatch.setattr("daedalus.recovery_runtime.threading.Thread",DormantThread)
+    s.start()
+    if uncertain:
+        assert j.event(a) is None
+        return
+    assert j.event(a)["phase"]=="grace"
+    assert j.event(a)["due_at"]==t[0]+300
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",
+                        lambda *_:SimpleNamespace(state="ready",reason="warehouse_remaining",config=cfg))
+    ctl._ipc=object()
+    def start(aid,task,config,request_id,*,confirmed,track_desired):
+        assert aid==a.id and task=="fillCityWarehouse" and config==cfg
+        assert confirmed and not track_desired and request_id
+        ctl.started.append({"task":task,"task_id":"warehouse-restored"})
+        return {"status":"started","task_id":"warehouse-restored"}
+    ctl.start=start
+    t[0]+=299
+    s.tick()
+    assert not w.starts
+    t[0]+=1
+    s.tick()
+    assert w.starts==[a.id]
+    assert len(ctl.started)==1
+    s.tick()
+    assert len(ctl.started)==1

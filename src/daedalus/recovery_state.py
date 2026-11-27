@@ -736,6 +736,8 @@ class RecoveryStore:
             pending = conn.execute("""SELECT COUNT(*) FROM fixed_transfer_chunks
                 WHERE transfer_id=? AND status='pending'""", (tid,)).fetchone()[0]
             if task == "fillCityWarehouse":
+                confirmed_chunks = conn.execute("""SELECT route_index,cargo_json FROM fixed_transfer_chunks
+                    WHERE transfer_id=? AND status='confirmed'""", (tid,)).fetchall()
                 pending += conn.execute("""SELECT COUNT(*) FROM fixed_transfer_chunks c
                     LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
                     WHERE c.transfer_id=? AND c.status='confirmed' AND v.chunk_id IS NULL""", (tid,)).fetchone()[0]
@@ -750,6 +752,18 @@ class RecoveryStore:
                                   for v, cap in zip(vector, limits))
                            for vector, limits in zip(sent, target))):
                 raise ValueError("Invalid fixed shipment counters")
+            if task == "fillCityWarehouse":
+                totals = [[0] * 5 for _ in target]
+                for chunk in confirmed_chunks:
+                    index = chunk["route_index"]
+                    cargo = json.loads(chunk["cargo_json"])
+                    if (type(index) is not int or not 0 <= index < len(target)
+                            or not isinstance(cargo, list) or len(cargo) != 5
+                            or any(type(v) is not int or v < 0 for v in cargo)):
+                        raise ValueError("Invalid warehouse receipt")
+                    totals[index] = [a + b for a, b in zip(totals[index], cargo)]
+                if totals != sent:
+                    raise ValueError("Warehouse receipt totals do not match checkpoint")
         except (ValueError, TypeError) as exc:
             raise RecoveryConflict("Fixed transfer progress is corrupt") from exc
         return {

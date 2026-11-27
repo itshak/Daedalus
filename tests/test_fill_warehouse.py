@@ -703,3 +703,16 @@ def test_capacity_reached_is_terminal_even_if_space_later_reopens(offline, check
     assert db.fixed_transfer_progress(account, config, task="fillCityWarehouse")["completed"]
     monkeypatch.setattr(worker, "incoming_amount", lambda *_: 20)
     assert warehouse_fill_plan(db, Mock(), account, config).state == "completed"
+
+
+def test_warehouse_checkpoint_counter_without_receipt_fails_closed(checkpointed_fill):
+    import sqlite3
+
+    from daedalus.recovery_state import RecoveryConflict
+
+    account, config, db, _journal = checkpointed_fill
+    with sqlite3.connect(db.path) as conn:
+        conn.execute("UPDATE fixed_transfers SET dispatched_json=? WHERE transfer_id=?",
+                     ("[[0,0,40,0,0],[0,0,0,0,0]]", config["transfer_id"]))
+    with pytest.raises(RecoveryConflict):
+        db.fixed_transfer_progress(account, config, task="fillCityWarehouse")

@@ -24,7 +24,7 @@ The reviewed desktop and web forms expose bounded selections; the upstream engin
 | `donate` | `city_id`, `project`, `amount`, `expected_island` (derived), `expected_level` (derived), `expected_donated` (derived), `expected_required` (derived) | Owned island resource/luxury project and amount; protected original donation submission; effect pending. |
 | `donationBot` | `cities_dict`, `waiting_time`, `donate_method`, `cities_ids` (derived) | Reviewed policy by city, method and interval; recurring donation effect pending. |
 | `dumpWorld` | `waiting_time`, `coords`, `radius` (derived), `shallow`, `non_empty_islands`, `show_progress` (derived), `managed_report_id` (derived) | Bounded area and aggregate report only; raw player data excluded; live scan completion pending. |
-| `fillCityWarehouse` | `destination_city`, `resource`, `useFreighters`, `reviewed_sources` (derived) | One owned destination and resource; shared upstream cargo and fleet wait; no automatic replay of uncertain loads; multiple fleet cycles pending. |
+| `fillCityWarehouse` | `destination_city`, `resource`, `useFreighters`, `reviewed_sources` (derived) | One owned destination and resource; shared upstream cargo and fleet wait; checkpointed remaining cargo may restore after a verified reconnect (up to 40 reviewed sources); uncertain or legacy loads require review. |
 | `getStatus` | Existing view / no settings | Managed account and task status, not raw process inspection. |
 | `importExportCookie` | Existing view / no settings | Protected local handoff only; no web raw cookie import/export. |
 | `killTasks` | Existing view / no settings | Managed task stop only; no arbitrary PID or kill-all. |
