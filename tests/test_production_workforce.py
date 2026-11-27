@@ -276,3 +276,101 @@ def test_decreasing_target_without_known_free_population(staged_city):
     result = f.module.execute_city_production(f.session, plan, journal)
     assert f.calls == [("tradegood", 250)]
     assert result["donor"] == 700
+
+
+def test_reviewed_api_dispatch_and_reconcile_fence(monkeypatch, tmp_path):
+    import uuid
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.accounts import load_accounts
+    from daedalus.api import create_app
+    from daedalus.engine_ipc import ControlledIPCClient
+    from daedalus.recovery_state import RecoveryStore
+    from daedalus.task_control import TaskController
+    from ikabot.function import productionWorkforce as module
+    from ikabot.helpers.productionJournal import ProductionJournal
+
+    file = tmp_path / "accounts.toml"
+    file.write_text('schema = 1\n[[accounts]]\nid = "alpha"\nworld = "s1-en"\nplayer = "Example"\n'
+                    '[[accounts]]\nid = "beta"\nworld = "s1-en"\nplayer = "Other"\n')
+    accounts = load_accounts(file)
+    coordinator = AccountSessionCoordinator(accounts, state_dir=tmp_path / "leases")
+    ipc = ControlledIPCClient()
+    store = RecoveryStore(tmp_path / "private" / "recovery.db")
+    sample = observed()
+    sample["city_name"] = "Town"
+    sample["sites"].update(academy={"available": False, "reason": "building_absent"},
+                           temple={"available": False, "reason": "building_absent"})
+    session = SimpleNamespace(mundo=1, servidor="en", username="Example")
+    monkeypatch.setattr(module, "read_city_production", lambda *_: copy.deepcopy(sample))
+    monkeypatch.setattr(ipc, "cities", lambda _account: [{"id": 1, "name": "Town"}])
+    monkeypatch.setattr(ipc, "has_account", lambda account: True)
+    monkeypatch.setattr(ipc, "preflight_task", lambda account, task: {"task": task, "ready": True, "reason": "none"})
+    monkeypatch.setattr(ipc, "list_managed_tasks", lambda account: [])
+    def exchange(payload, **kwargs):
+        reply = {"status": "ok", "world": payload["world"], "username": payload["player"]}
+        if payload["action"] == "production_inventory_existing":
+            return {**reply, "inventory": copy.deepcopy(sample)}
+        assert payload["action"] == "preview_workers_existing"
+        return {**reply, "plans": module.preview_priority_production(session, payload["city_id"], payload["priority"])}
+    monkeypatch.setattr(ipc, "_exchange", exchange)
+    starts = []
+    def start(account, task, config, request_id):
+        # The controller must persist the exact immutable plan BEFORE dispatch.
+        journal = ProductionJournal(session, config["production_run_id"], config["production_plans"], db_path=store.path)
+        starts.append((account.id, task, config, journal))
+        return {"task_id": "a" * 24, "pid": 1234}
+    monkeypatch.setattr(ipc, "start_managed_task", start)
+    controller = TaskController(accounts, coordinator, ipc, ledger_path=tmp_path / "tasks.sqlite",
+                                recovery_store=store)
+    token = "x" * 48
+    auth = {"Authorization": "Bearer " + token}
+    with TestClient(create_app(accounts_path=file, api_token=token, session_coordinator=coordinator,
+                               task_controller=controller, ipc_client=ipc)) as client:
+        path = "/api/v1/accounts/alpha/cities/1/worker-plan"
+        request = {"task": "modifyProduction", "draft": {"priority": [{"city_id": 1, "draft": draft()}]}}
+        assert client.post(path, json=request).status_code == 401
+        assert client.post(path, headers=auth, json={"task": "modifyProduction", "draft": {
+            "priority": [{"city_id": 1, "draft": draft()}, {"city_id": 2, "draft": draft()}]}}).status_code == 422
+        review = client.post(path, headers=auth, json=request)
+        assert review.status_code == 200, review.text
+        payload = {"task": "modifyProduction", "preview_id": review.json()["preview_id"],
+                   "request_id": str(uuid.uuid4()), "confirmed": True}
+        route = "/api/v1/accounts/alpha/tasks/worker-start"
+        assert client.post(route.replace("alpha", "beta"), headers=auth, json=payload).status_code == 409
+        assert not starts
+        started = client.post(route, headers=auth, json=payload)
+        assert started.status_code == 200, started.text
+        assert len(starts) == 1
+        assert client.post(route, headers=auth, json=payload).status_code == 200
+        assert len(starts) == 1
+        assert controller.preflight("alpha", "alertAttacks")["unresolved_request"] is True
+        assert store.production_blocked(accounts[0])
+        assert not store.production_blocked(accounts[1])
+        plan = starts[0][2]["production_plans"][0]
+        journal = starts[0][3]
+        journal.begin_city(plan)
+        journal.reserve(plan, "release", "resource", 400)
+        sample["sites"]["resource"]["current"] = 400
+        history_path = "/api/v1/accounts/alpha/production-runs"
+        history = client.get(history_path, headers=auth).json()
+        assert history["runs"][0]["cities"][0]["stages"][0]["status"] == "pending"
+        reconcile_path = history_path + "/" + payload["request_id"]
+        # The new run remains fenced until actual counts are independently reviewed.
+        preview = client.post(reconcile_path + "/reconcile-plan", headers=auth, json={})
+        assert preview.status_code == 200, preview.text
+        assert preview.json()["observations"][0]["resource"] == 400
+        approve = {"preview_id": preview.json()["preview_id"], "request_id": str(uuid.uuid4()), "confirmed": True}
+        sample["sites"]["resource"]["current"] = 401
+        assert client.post(reconcile_path + "/reconcile", headers=auth, json=approve).status_code == 409
+        assert store.production_blocked(accounts[0])
+        sample["sites"]["resource"]["current"] = 400
+        result = client.post(reconcile_path + "/reconcile", headers=auth, json=approve)
+        assert result.status_code == 200, result.text
+        assert result.json()["status"] == "reconciled"
+        assert not store.production_blocked(accounts[0])
+        assert len(starts) == 1
+        with pytest.raises(ValueError):
+            journal.reserve(plan, "target", "tradegood", 900)
+    controller.close()

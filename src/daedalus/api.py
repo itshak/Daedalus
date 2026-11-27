@@ -1804,6 +1804,48 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
 
+    @app.get("/api/v1/accounts/{account_id}/production-runs", dependencies=[Depends(authorized)])
+    def production_runs(account_id: str) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        if controller._recovery_store is None:
+            raise HTTPException(status_code=503, detail="Production journal unavailable")
+        return {"account_id": account_id,
+                "runs": controller._recovery_store.production_progress(account_by_id[account_id])}
+
+    @app.post("/api/v1/accounts/{account_id}/production-runs/{run_id}/reconcile-plan",
+              dependencies=[Depends(authorized)])
+    def production_reconcile_plan(account_id: str, run_id: str,
+                                  payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        if payload != {}:
+            raise HTTPException(status_code=422, detail="Invalid reconciliation review")
+        try:
+            review = controller.production_reconciliation(account_id, run_id)
+        except (ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=409, detail="Production reconciliation unavailable") from exc
+        ticket = operation_previews.issue(account_id, "production_reconcile", {
+            "run_id": run_id, "observations": review["observations"]})
+        return {**review, "preview_id": ticket, "expires_in": operation_previews.ttl}
+
+    @app.post("/api/v1/accounts/{account_id}/production-runs/{run_id}/reconcile",
+              dependencies=[Depends(authorized)])
+    def production_reconcile(account_id: str, run_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        key, request_id = payload.get("preview_id"), payload.get("request_id")
+        if (set(payload) != {"preview_id", "request_id", "confirmed"} or payload["confirmed"] is not True
+                or not isinstance(key, str) or len(key) != 43 or not isinstance(request_id, str)):
+            raise HTTPException(status_code=422, detail="Explicit production reconciliation required")
+        try:
+            if UUID(request_id).version != 4 or str(UUID(request_id)) != request_id:
+                raise ValueError
+            config = operation_previews.claim(key, account_id, "production_reconcile", request_id)
+            if config["run_id"] != run_id:
+                raise ValueError
+            return controller.production_reconciliation(account_id, run_id, reviewed=config["observations"])
+        except (ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=409, detail="Production reconciliation unavailable") from exc
+
     @app.post("/api/v1/tasks/reviewed-batch-check", dependencies=[Depends(authorized)])
     def reviewed_batch_check(payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
         from daedalus.reviewed_batch import validated_batch_entries

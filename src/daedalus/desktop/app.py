@@ -383,6 +383,21 @@ class APIWorker(QThread):
                     raise ValueError("Invalid construction preview")
                 supply = self.task_payload.get("supply")
                 result = self.client.construction_preview(self.account_id, city_id, upgrades, supply=supply) if supply is not None else self.client.construction_preview(self.account_id, city_id, upgrades)
+            elif self.action == "production_history" and self.task_payload:
+                result = []
+                for aid in self.task_payload["account_ids"]:
+                    try:
+                        result.append(self.client.production_runs(aid))
+                    except (ValueError, APIConnectionError):
+                        result.append({"account_id": aid, "error": True})
+            elif self.action in {"production_reconcile_plan", "production_reconcile"} and self.task_payload:
+                from uuid import uuid4
+                request = self.task_payload
+                if self.action == "production_reconcile_plan":
+                    result = self.client.production_reconcile(request["account_id"], request["run_id"])
+                else:
+                    result = self.client.production_reconcile(request["account_id"], request["run_id"],
+                        preview_id=request["preview_id"], request_id=str(uuid4()))
             elif self.action == "production_preview" and self.task_payload:
                 import time
                 grouped = self.task_payload["grouped"]
@@ -899,6 +914,12 @@ class MainWindow(FluentWindow):
             lambda grouped: self._request_production_action("production_preview", {"grouped": grouped}))
         self.production_page.start_requested.connect(
             lambda entries: self._request_production_action("production_start", {"entries": entries}))
+        self.production_page.history_requested.connect(
+            lambda ids: self._request_production_action("production_history", {"account_ids": ids}))
+        self.production_page.reconciliation_requested.connect(
+            lambda payload: self._request_production_action("production_reconcile_plan", payload))
+        self.production_page.reconcile_confirmed.connect(
+            lambda payload: self._request_production_action("production_reconcile", payload))
         self.warehouses_page.load_requested.connect(
             lambda aid: self._request_warehouse_scope("warehouses", [aid])
         )
@@ -1984,9 +2005,16 @@ class MainWindow(FluentWindow):
         if self.client is None or self._worker is not None:
             self.production_page.set_review_unavailable()
             return
-        ids = set(payload["grouped"]) if action == "production_preview" else {
-            r["account_id"] for r in payload["entries"]}
-        if not ids or not ids <= set(self.production_page.eligible_ids()):
+        if action == "production_preview":
+            ids = set(payload["grouped"])
+        elif action == "production_start":
+            ids = {r["account_id"] for r in payload["entries"]}
+        elif action == "production_history":
+            ids = set(payload["account_ids"])
+        else:
+            ids = {payload["account_id"]}
+        allowed = {row["id"] for row in self._scope_rows()} if action == "production_history" else set(self.production_page.eligible_ids())
+        if not ids or not ids <= allowed:
             self.production_page.set_review_unavailable()
             return
         self._launch(self.client, action, task_payload=payload)
@@ -2621,6 +2649,19 @@ class MainWindow(FluentWindow):
             )
             self.home_page.set_warehouse_report(successful, len(payload) - successful)
             logger.info("Multi-account warehouse report updated")
+        elif action in {"production_history", "production_reconcile_plan"}:
+            generation = self._scope_generation
+            handler = self.production_page.set_history if action == "production_history" else self.production_page.set_reconciliation
+            def show_when_idle():
+                if generation != self._scope_generation:
+                    return
+                if self._worker is not None:
+                    QTimer.singleShot(50, show_when_idle)
+                    return
+                handler(payload)
+            QTimer.singleShot(0, show_when_idle)
+        elif action == "production_reconcile":
+            self.production_page.set_reconciled(payload)
         elif action == "production_preview":
             self.production_page.set_reviews(payload)
         elif action == "production_start":
@@ -2912,7 +2953,7 @@ class MainWindow(FluentWindow):
                 self._automatic_login_failures += 1
                 self._reset_automatic_attempt()
                 self._automatic_login_pending_advance = True
-        if action in {"production_preview", "production_start"}:
+        if action in {"production_preview", "production_start", "production_history", "production_reconcile_plan", "production_reconcile"}:
             self.production_page.set_review_unavailable()
         if action in {"production_cities", "production_inventory"}:
             aid = getattr(self._worker, "account_id", None)

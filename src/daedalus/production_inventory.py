@@ -128,3 +128,68 @@ def validate_priority_plan(city_id, draft, plan):
         if any(type(plan[k]) is not int or plan[k] != v for k, v in expected.items()):
             raise ValueError("Invalid production feasibility")
     return plan
+
+
+def validate_production_progress(account_id, data):
+    import re
+
+    if (not isinstance(data, dict) or data.get("account_id") != account_id
+            or not isinstance(data.get("runs"), list) or len(data["runs"]) > 20):
+        raise ValueError("Invalid production history")
+    ids = set()
+    for run in data["runs"]:
+        if (not isinstance(run, dict) or not isinstance(run.get("run_id"), str)
+                or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", run["run_id"])
+                or run["run_id"] in ids or run.get("status") not in
+                {"prepared", "complete", "partial", "rejected", "reconciled"}
+                or not isinstance(run.get("cities"), list) or not 1 <= len(run["cities"]) <= 16):
+            raise ValueError("Invalid production run")
+        ids.add(run["run_id"])
+        cities = set()
+        for row in run["cities"]:
+            if (not isinstance(row, dict) or type(row.get("city_id")) is not int
+                    or not 0 < row["city_id"] < 10**12 or row["city_id"] in cities
+                    or row.get("resource") not in {"wood", *RESOURCES}
+                    or row.get("status") not in {"not_started", "running", "complete", "stale"}
+                    or not isinstance(row.get("stages"), list) or len(row["stages"]) > 3
+                    or any(type(row.get(k)) is not int or not 0 <= row[k] <= 2_000_000
+                           for k in ("target_before", "donor_before", "desired", "donor_release"))):
+                raise ValueError("Invalid production city receipt")
+            cities.add(row["city_id"])
+            stages = set()
+            for stage in row["stages"]:
+                if (not isinstance(stage, dict) or stage.get("stage") not in {"release", "target", "restore"}
+                        or stage["stage"] in stages or stage.get("kind") not in {"resource", "tradegood"}
+                        or stage.get("status") not in {"pending", "confirmed"}
+                        or type(stage.get("value")) is not int or not 0 <= stage["value"] <= 2_000_000):
+                    raise ValueError("Invalid production stage")
+                stages.add(stage["stage"])
+            result = row.get("result")
+            if result is not None and (not isinstance(result, dict) or result.get("city_id") != row["city_id"]
+                    or any(type(result.get(k)) is not int or not 0 <= result[k] <= 2_000_000
+                           for k in ("target", "donor", "shortfall"))):
+                raise ValueError("Invalid production result")
+    return data
+
+
+def validate_reconciliation(account_id, run_id, data, *, resolved=False):
+    import re
+
+    if (not isinstance(data, dict) or data.get("account_id") != account_id or data.get("run_id") != run_id
+            or data.get("status") != ("reconciled" if resolved else "review")
+            or not isinstance(data.get("observations"), list) or not 1 <= len(data["observations"]) <= 16):
+        raise ValueError("Invalid production reconciliation")
+    if not resolved and (not isinstance(data.get("preview_id"), str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
+            or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):
+        raise ValueError("Invalid reconciliation ticket")
+    seen = set()
+    for row in data["observations"]:
+        if (not isinstance(row, dict) or set(row) != {"city_id", "city_name", "island_id", "luxury", "resource", "tradegood"}
+                or any(type(row[k]) is not int or not 0 < row[k] < 10**12 for k in ("city_id", "island_id"))
+                or not isinstance(row["city_name"], str) or not 0 < len(row["city_name"]) <= 100
+                or row["luxury"] not in RESOURCES or row["city_id"] in seen
+                or any(type(row[k]) is not int or not 0 <= row[k] <= 2_000_000 for k in ("resource", "tradegood"))):
+            raise ValueError("Invalid reconciled allocation")
+        seen.add(row["city_id"])
+    return data

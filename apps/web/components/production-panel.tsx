@@ -3,6 +3,7 @@
 import {useEffect,useRef,useState} from "react";
 import {verifyPriorityReview,type PriorityRow,type PriorityReview,type ProductionDraft} from "../lib/production-contract";
 import {launchReviewedBatch,type BatchResult} from "../lib/reviewed-batch";
+import {ProductionRuns} from "./production-runs";
 import {useLanguage} from "./language-provider";
 import {formatNumber} from "../lib/i18n";
 
@@ -177,5 +178,6 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
       })}</tbody></table></div>}
       {!loading&&!!accounts.length&&!visible.length&&<p className="subtle-message">{t("No current snapshot")}</p>}
     </section>
+    <ProductionRuns accounts={accounts} role={role}/>
   </div>;
 }

@@ -578,6 +578,45 @@ class TaskController:
             result = self._ipc.stop_managed_task(account, task_id)
             return {"account_id": account.id, **result}
 
+    def _production_observations(self, account, run_id):
+        if self._recovery_store is None:
+            raise TaskUnavailable("Production journal unavailable")
+        if self._ledger.has_unresolved(account.id):
+            raise TaskUnavailable("Reconcile the uncertain task launch before reviewing its allocations")
+        self._lease(account)
+        if any(row.get("task") == "modifyProduction" and row.get("status") in {"running", "stopping"}
+               for row in self._ipc.list_managed_tasks(account)):
+            raise TaskUnavailable("Stop the production worker before reconciliation")
+        plans = self._recovery_store.production_intent(account, run_id)
+        observations = []
+        for plan in plans:
+            inv = self._ipc.production_inventory(account, plan["city_id"])
+            if (inv["city_id"] != plan["city_id"] or inv["island_id"] != plan["island_id"]
+                    or inv["luxury"] != plan["luxury"]):
+                raise TaskUnavailable("Production city identity changed")
+            counts = {}
+            for kind in ("resource", "tradegood"):
+                site = inv["sites"][kind]
+                if site["available"] is not True or type(site["current"]) is not int:
+                    raise TaskUnavailable("Current allocations cannot be verified")
+                counts[kind] = site["current"]
+            observations.append({"city_id": inv["city_id"], "city_name": inv["city_name"],
+                                 "island_id": inv["island_id"], "luxury": inv["luxury"], **counts})
+        return observations
+
+    def production_reconciliation(self, account_id: str, run_id: str, *, reviewed=None):
+        if not isinstance(run_id, str) or not _REQUEST_ID.fullmatch(run_id) or UUID(run_id).version != 4:
+            raise ValueError("Invalid production run ID")
+        account = self._account(account_id)
+        with self._mutex:
+            observations = self._production_observations(account, run_id)
+            if reviewed is not None:
+                if reviewed != observations:
+                    raise ValueError("Production reconciliation review is stale")
+                self._recovery_store.reconcile_production(account, run_id, observations)
+            return {"account_id": account.id, "run_id": run_id, "observations": observations,
+                    "status": "reconciled" if reviewed is not None else "review"}
+
     def acknowledge_uncertain_request(
         self, account_id: str, request_id: str, *, confirmed: bool,
     ) -> dict[str, str]:

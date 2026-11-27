@@ -118,6 +118,10 @@ class RecoveryStore:
                     observation_json TEXT, updated_at REAL NOT NULL,
                     PRIMARY KEY(run_id,city_id,stage)
                 );
+                CREATE TABLE IF NOT EXISTS production_reconciliations(
+                    run_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL,
+                    reconciled_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS resume_receipts(
                     account_id TEXT NOT NULL, logical_id TEXT NOT NULL,
                     epoch TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -525,7 +529,7 @@ class RecoveryStore:
 
         if not isinstance(run_id, str) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
             raise RecoveryConflict("Invalid production run identity")
-        if not isinstance(plans, list) or not plans or not isinstance(plans[0], dict):
+        if not isinstance(plans, list) or not plans or any(not isinstance(p, dict) for p in plans):
             raise RecoveryConflict("Invalid production plans")
         rows = [{"city_id": p.get("city_id"), "draft": p.get("draft")} for p in plans]
         clean = validate_priority_draft(rows[0]["city_id"], rows)
@@ -553,6 +557,29 @@ class RecoveryStore:
                 (self._clock(), run_id, account.id, identity(account), run_id))
             conn.commit()
 
+    def production_intent(self, account: Account, run_id: str) -> list[dict]:
+        with self._db() as conn:
+            row = conn.execute("""SELECT intent_json FROM production_runs
+                WHERE run_id=? AND account_id=? AND identity=? AND status='prepared'""",
+                (run_id, account.id, identity(account))).fetchone()
+            if row is None:
+                raise RecoveryConflict("Production run does not require reconciliation")
+            return json.loads(row["intent_json"])
+
+    def reconcile_production(self, account: Account, run_id: str, observations: list) -> None:
+        """Archive operator-reviewed actual counts, without applying another assignment."""
+        canonical = json.dumps(observations, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = conn.execute("""UPDATE production_runs SET status='reconciled',updated_at=?
+                WHERE run_id=? AND account_id=? AND identity=? AND status='prepared'""",
+                (self._clock(), run_id, account.id, identity(account))).rowcount
+            if changed != 1:
+                raise RecoveryConflict("Production run is no longer pending")
+            conn.execute("INSERT INTO production_reconciliations VALUES(?,?,?)",
+                         (run_id, canonical, self._clock()))
+            conn.commit()
+
     def production_progress(self, account: Account) -> list[dict]:
         with self._db() as conn:
             runs = conn.execute("""SELECT run_id,status,updated_at,intent_json FROM production_runs
@@ -566,13 +593,25 @@ class RecoveryStore:
                 for plan in json.loads(run["intent_json"]):
                     cid = plan["city_id"]
                     city = cities.get(cid)
-                    stages = [dict(r) for r in conn.execute("""SELECT stage,kind,value,status
-                        FROM production_stages WHERE run_id=? AND city_id=? ORDER BY rowid""", (run["run_id"],cid))]
+                    stages = []
+                    for receipt in conn.execute("""SELECT stage,kind,value,status,observation_json
+                        FROM production_stages WHERE run_id=? AND city_id=? ORDER BY rowid""", (run["run_id"],cid)):
+                        stage = dict(receipt)
+                        observed = stage.pop("observation_json")
+                        if observed:
+                            inv = json.loads(observed)
+                            stage["observed"] = {kind: inv["sites"][kind]["current"] for kind in ("resource", "tradegood")}
+                        stages.append(stage)
                     rows.append({"city_id": cid, "resource": plan["resource"],
+                        "target_before": plan["target_before"], "donor_before": plan["donor_before"],
+                        "desired": plan["desired"], "donor_release": plan["donor_release"],
                         "status": city["status"] if city else "not_started", "stages": stages,
                         "result": json.loads(city["result_json"]) if city and city["result_json"] else None})
+                resolved = conn.execute("SELECT observation_json FROM production_reconciliations WHERE run_id=?",
+                                        (run["run_id"],)).fetchone()
                 results.append({"run_id":run["run_id"], "status":run["status"],
-                                "updated_at":run["updated_at"], "cities":rows})
+                                "updated_at":run["updated_at"], "cities":rows,
+                                "reconciled_observations": json.loads(resolved[0]) if resolved else None})
             return results
 
     def prepare_fixed_transfer(self, account: Account, config: dict) -> str:

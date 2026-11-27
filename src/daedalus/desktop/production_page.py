@@ -1,7 +1,7 @@
 """Globally scoped production inventory and independently reviewed allocations."""
 import time
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QMessageBox, QTableWidgetItem, QAbstractItemView
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QMessageBox, QTableWidgetItem, QAbstractItemView, QInputDialog
 from qfluentwidgets import CaptionLabel, ComboBox, PrimaryPushButton, PushButton, CheckBox, SpinBox
 
 from daedalus.account_display import account_player_names
@@ -14,6 +14,9 @@ class ProductionPage(QWidget):
     refresh_requested = Signal(list)
     preview_requested = Signal(dict)
     start_requested = Signal(list)
+    history_requested = Signal(list)
+    reconciliation_requested = Signal(dict)
+    reconcile_confirmed = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +31,8 @@ class ProductionPage(QWidget):
         self._excluded = set()
         self._overrides = {}
         self._target_keys = []
+        self._history = []
+        self._reconciliation = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 22)
         layout.addWidget(PageHeading("Production", "Current city workforce and resource capacity"))
@@ -43,6 +48,9 @@ class ProductionPage(QWidget):
         self.refresh_button = PrimaryPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         toolbar.addWidget(self.refresh_button)
+        self.history_button = PushButton("Execution history")
+        self.history_button.clicked.connect(self._request_history)
+        toolbar.addWidget(self.history_button)
         layout.addLayout(toolbar)
         self.status = CaptionLabel("Use free citizens first; other production may release workers.")
         self.status.setWordWrap(True)
@@ -123,6 +131,7 @@ class ProductionPage(QWidget):
         self.review_table.setVisible(bool(self._reviews))
         self.resource_combo.setEnabled(not self._busy)
         self.refresh_button.setEnabled(not self._busy and not self._loading)
+        self.history_button.setEnabled(not self._busy and not self._loading and bool(self._accounts))
 
     def _target_changed(self, item):
         if not 0 <= item.row() < len(self._target_keys):
@@ -255,12 +264,91 @@ class ProductionPage(QWidget):
             self.status.setText(f'Received {len(result.get("submitted", []))} account launch receipts. Check per-city results.')
         self._update_controls()
 
+    def _request_history(self):
+        if not self.history_button.isEnabled():
+            return
+        self._busy = True
+        self._update_controls()
+        self.history_requested.emit(list(self._accounts))
+
+    def set_history(self, result):
+        self._busy = False
+        self._history = result
+        self._update_controls()
+        names = account_player_names([{k: row.get(k) for k in ("id", "player", "world")}
+                                      for row in self._accounts.values()])
+        lines, pending = [], []
+        for item in result:
+            aid = item.get("account_id")
+            if aid not in names:
+                continue
+            if item.get("error"):
+                lines.append(f"{names[aid]}: unavailable")
+                continue
+            for run in item["runs"]:
+                status = "running or needs review" if run["status"] == "prepared" else run["status"]
+                lines.append(f'{names[aid]} · {status} · {run["run_id"]}')
+                for city in run["cities"]:
+                    city_name = self._cities.get((aid, city["city_id"]), str(city["city_id"]))
+                    lines.append(f'  {city_name} · {city["resource"]}: {city["status"]}')
+                    for stage in city["stages"]:
+                        observed = stage.get("observed")
+                        counts = f' (wood {observed["resource"]}, luxury {observed["tradegood"]})' if observed else ""
+                        lines.append(f'    {stage["stage"]}: {stage["value"]} · {stage["status"]}{counts}')
+                    if city["result"]:
+                        r = city["result"]
+                        lines.append(f'    Verified: target {r["target"]}, other resource {r["donor"]}, shortfall {r["shortfall"]}')
+                if run["status"] == "prepared" and aid in self.eligible_ids():
+                    pending.append((aid, run["run_id"]))
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Production execution history")
+        dialog.setText("Actual receipts; pending assignments are never automatically retried.")
+        dialog.setDetailedText("\n".join(lines) or "No production receipts")
+        dialog.setStandardButtons(QMessageBox.Close)
+        reconcile = dialog.addButton("Review actual allocations", QMessageBox.ActionRole) if pending else None
+        dialog.exec()
+        if reconcile is not None and dialog.clickedButton() is reconcile:
+            labels = [f"{names[aid]} · {run}" for aid, run in pending]
+            selected, accepted = QInputDialog.getItem(self, "Reconcile production",
+                "Choose a stopped or interrupted run", labels, 0, False)
+            if accepted and selected in labels:
+                aid, run = pending[labels.index(selected)]
+                if aid not in self.eligible_ids():
+                    return
+                self._busy = True
+                self._update_controls()
+                self.reconciliation_requested.emit({"account_id": aid, "run_id": run})
+
+    def set_reconciliation(self, review):
+        self._busy = False
+        self._update_controls()
+        if review["account_id"] not in self.eligible_ids():
+            return
+        lines = [f'{r["city_name"]}: wood {r["resource"]}, {r["luxury"]} {r["tradegood"]}'
+                 for r in review["observations"]]
+        if QMessageBox.question(self, "Review actual allocations",
+            "\n".join(lines) + "\n\nAcknowledge these counts and clear the production fence? "
+            "This does not change any workers. Any new assignment requires a fresh review.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        self._busy = True
+        self._update_controls()
+        self.reconcile_confirmed.emit({"account_id": review["account_id"], "run_id": review["run_id"],
+                                      "preview_id": review["preview_id"]})
+
+    def set_reconciled(self, result):
+        self._busy = False
+        self._update_controls()
+        self.status.setText("Production fence cleared. No workers were changed.")
+
     def set_accounts(self, accounts):
         self._accounts = {row["id"]: dict(row) for row in accounts if isinstance(row.get("id"), str)}
         self._cities.clear()
         self._results.clear()
         self._unavailable.clear()
         self._busy = False
+        self._history = []
+        self._reconciliation = None
         self._excluded.clear()
         self._overrides.clear()
         self._discard_review()

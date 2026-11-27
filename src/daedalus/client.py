@@ -880,6 +880,35 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid layout preview")
         return data
 
+    def production_runs(self, account_id: str) -> dict[str, object]:
+        from daedalus.production_inventory import validate_production_progress
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid production account")
+        data = self._read(f"accounts/{account_id}/production-runs")
+        try:
+            return validate_production_progress(account_id, data)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid production history") from exc
+
+    def production_reconcile(self, account_id: str, run_id: str, *, preview_id=None, request_id=None):
+        from daedalus.production_inventory import validate_reconciliation
+        from uuid import UUID
+        if not _ACCOUNT_ID.fullmatch(account_id) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
+            raise ValueError("Invalid production run")
+        path = f"accounts/{account_id}/production-runs/{run_id}/"
+        resolved = preview_id is not None
+        if resolved:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{43}", preview_id) or UUID(request_id).version != 4:
+                raise ValueError("Invalid production reconciliation ticket")
+            data = self._write(path+"reconcile", {"preview_id": preview_id, "request_id": request_id,
+                                                  "confirmed": True})
+        else:
+            data = self._write(path+"reconcile-plan", {})
+        try:
+            return validate_reconciliation(account_id, run_id, data, resolved=resolved)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid production reconciliation") from exc
+
     def production_inventory(self, account_id: str, city_id: int) -> dict[str, object]:
         from daedalus.production_inventory import validate_production_inventory
 

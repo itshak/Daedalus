@@ -39,3 +39,53 @@ export function verifyPriorityReview(v:unknown,account:string,rows:PriorityRow[]
   }
   return v as unknown as PriorityReview;
 }
+
+const runPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export type ProductionRun={run_id:string;status:string;cities:{
+  city_id:number;resource:string;status:string;target_before:number;donor_before:number;desired:number;donor_release:number;
+  stages:{stage:string;kind:string;value:number;status:string;observed?:{resource:number;tradegood:number}}[];
+  result:{city_id:number;target:number;donor:number;shortfall:number}|null
+}[]};
+export type ReconcileReview={account_id:string;run_id:string;status:"review"|"reconciled";preview_id?:string;expires_in?:number;
+  observations:{city_id:number;city_name:string;island_id:number;luxury:string;resource:number;tradegood:number}[]};
+export function verifyProductionRuns(data:unknown,account:string):ProductionRun[]{
+  if(!obj(data)||data.account_id!==account||!Array.isArray(data.runs)||data.runs.length>20)throw Error("Invalid history");
+  const runs=new Set();
+  for(const run of data.runs){
+    if(!obj(run)||typeof run.run_id!=="string"||!runPattern.test(run.run_id)||runs.has(run.run_id)
+      ||!["prepared","complete","partial","rejected","reconciled"].includes(String(run.status))
+      ||!Array.isArray(run.cities)||run.cities.length<1||run.cities.length>16)throw Error("Invalid production run");
+    runs.add(run.run_id);const cities=new Set();
+    for(const row of run.cities){
+      if(!obj(row)||!int(row.city_id,999999999999)||!row.city_id||cities.has(row.city_id)
+        ||!["wood","wine","marble","crystal","sulfur"].includes(String(row.resource))
+        ||!["not_started","running","complete","stale"].includes(String(row.status))
+        ||!["target_before","donor_before","desired","donor_release"].every(k=>int(row[k],2000000))
+        ||!Array.isArray(row.stages)||row.stages.length>3)throw Error("Invalid production receipt");
+      cities.add(row.city_id);const stages=new Set();
+      for(const stage of row.stages){
+        if(!obj(stage)||!["release","target","restore"].includes(String(stage.stage))||stages.has(stage.stage)
+          ||!["resource","tradegood"].includes(String(stage.kind))||!["pending","confirmed"].includes(String(stage.status))
+          ||!int(stage.value,2000000))throw Error("Invalid stage");
+        if(stage.observed!==undefined&&(!obj(stage.observed)||!int(stage.observed.resource,2000000)||!int(stage.observed.tradegood,2000000)))throw Error("Invalid readback");
+        stages.add(stage.stage);
+      }
+      if(row.result!==null&&(!obj(row.result)||row.result.city_id!==row.city_id||!int(row.result.target,2000000)
+        ||!int(row.result.donor,2000000)||!int(row.result.shortfall,2000000)))throw Error("Invalid result");
+    }
+  }
+  return data.runs as ProductionRun[];
+}
+export function verifyReconciliation(data:unknown,account:string,run:string,resolved=false):ReconcileReview{
+  if(!obj(data)||data.account_id!==account||data.run_id!==run||data.status!==(resolved?"reconciled":"review")
+    ||!Array.isArray(data.observations)||data.observations.length<1||data.observations.length>16
+    ||(!resolved&&(typeof data.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(data.preview_id)||!int(data.expires_in,120)||!data.expires_in)))throw Error("Invalid reconciliation");
+  const seen=new Set();
+  for(const row of data.observations){
+    if(!obj(row)||!int(row.city_id,999999999999)||!row.city_id||seen.has(row.city_id)||!int(row.island_id,999999999999)||!row.island_id
+      ||typeof row.city_name!=="string"||!row.city_name||row.city_name.length>100||!["wine","marble","crystal","sulfur"].includes(String(row.luxury))
+      ||!int(row.resource,2000000)||!int(row.tradegood,2000000))throw Error("Invalid reconciliation observation");
+    seen.add(row.city_id);
+  }
+  return data as unknown as ReconcileReview;
+}

@@ -7,7 +7,8 @@ export function controllerTimeout(parts:string[],method:string):number {
   const warehouseStart=method==="POST"&&parts.length===4&&parts[0]==="accounts"&&parts[2]==="tasks"&&parts[3]==="fill-warehouse-start";
   const productionRead=method==="GET"&&parts.length===5&&parts[0]==="accounts"&&parts[2]==="cities"&&parts[4]==="production";
   const workerReview=method==="POST"&&((parts.length===5&&parts[4]==="worker-plan")||(parts.length===4&&parts[3]==="worker-start"));
-  return productionRead?90000:workerReview?115000:isReviewPreview(parts,method)||warehouseStart?115000:method==="GET"?12000:25000;
+  const reconciliation=method==="POST"&&parts.length===5&&parts[2]==="production-runs";
+  return productionRead?90000:reconciliation?115000:workerReview?115000:isReviewPreview(parts,method)||warehouseStart?115000:method==="GET"?12000:25000;
 }
 const fillMessages=[
   "The selected account worker is disconnected or busy. Refresh account status and retry.",
