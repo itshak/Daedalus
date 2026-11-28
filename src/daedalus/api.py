@@ -737,6 +737,25 @@ def create_app(
         except (ValueError, EngineIPCUnavailable) as exc:
             raise HTTPException(status_code=503, detail="Island lookup unavailable") from exc
 
+    @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/production", dependencies=[Depends(authorized)])
+    def account_production(account_id: str, city_id: int) -> dict[str, object]:
+        account = account_by_id.get(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if not account.enabled:
+            raise HTTPException(status_code=409, detail="Account is disabled")
+        if not 0 < city_id < 10**12:
+            raise HTTPException(status_code=422, detail="Invalid city")
+        if demo_mode or ipc_client is None:
+            raise HTTPException(status_code=503, detail="Production inventory unavailable")
+        try:
+            inventory = ipc_client.production_inventory(account, city_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Owned city not found") from exc
+        except EngineIPCUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Authenticated production data unavailable") from exc
+        return {"account_id": account_id, **inventory}
+
     @app.get("/api/v1/accounts/{account_id}/cities/{city_id}/buildings", dependencies=[Depends(authorized)])
     def account_buildings(account_id: str, city_id: int) -> dict[str, object]:
         """Safe, read-only actual building rows; not an executable construction plan."""
@@ -1015,6 +1034,8 @@ def create_app(
         config = plan.pop("config")
         ticket = None
         if plan["ready"] and task_controller is not None:
+            if "production_plans" in config and task_controller._recovery_store is None:
+                raise HTTPException(status_code=503, detail="Protected production journal unavailable")
             ticket = operation_previews.issue(account_id, task, config)
         return {**plan, "preview_id": ticket,
                 "expires_in": operation_previews.ttl if ticket else None}
@@ -1782,6 +1803,48 @@ def create_app(
             raise HTTPException(status_code=503, detail="Existing authenticated task worker unavailable") from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Task dispatch status is unconfirmed") from exc
+
+    @app.get("/api/v1/accounts/{account_id}/production-runs", dependencies=[Depends(authorized)])
+    def production_runs(account_id: str) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        if controller._recovery_store is None:
+            raise HTTPException(status_code=503, detail="Production journal unavailable")
+        return {"account_id": account_id,
+                "runs": controller._recovery_store.production_progress(account_by_id[account_id])}
+
+    @app.post("/api/v1/accounts/{account_id}/production-runs/{run_id}/reconcile-plan",
+              dependencies=[Depends(authorized)])
+    def production_reconcile_plan(account_id: str, run_id: str,
+                                  payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        if payload != {}:
+            raise HTTPException(status_code=422, detail="Invalid reconciliation review")
+        try:
+            review = controller.production_reconciliation(account_id, run_id)
+        except (ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=409, detail="Production reconciliation unavailable") from exc
+        ticket = operation_previews.issue(account_id, "production_reconcile", {
+            "run_id": run_id, "observations": review["observations"]})
+        return {**review, "preview_id": ticket, "expires_in": operation_previews.ttl}
+
+    @app.post("/api/v1/accounts/{account_id}/production-runs/{run_id}/reconcile",
+              dependencies=[Depends(authorized)])
+    def production_reconcile(account_id: str, run_id: str,
+                             payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:
+        controller = require_task_controller(account_id)
+        key, request_id = payload.get("preview_id"), payload.get("request_id")
+        if (set(payload) != {"preview_id", "request_id", "confirmed"} or payload["confirmed"] is not True
+                or not isinstance(key, str) or len(key) != 43 or not isinstance(request_id, str)):
+            raise HTTPException(status_code=422, detail="Explicit production reconciliation required")
+        try:
+            if UUID(request_id).version != 4 or str(UUID(request_id)) != request_id:
+                raise ValueError
+            config = operation_previews.claim(key, account_id, "production_reconcile", request_id)
+            if config["run_id"] != run_id:
+                raise ValueError
+            return controller.production_reconciliation(account_id, run_id, reviewed=config["observations"])
+        except (ValueError, TaskUnavailable, EngineIPCUnavailable, SessionBusyError) as exc:
+            raise HTTPException(status_code=409, detail="Production reconciliation unavailable") from exc
 
     @app.post("/api/v1/tasks/reviewed-batch-check", dependencies=[Depends(authorized)])
     def reviewed_batch_check(payload: Annotated[dict[str, object], Body()]) -> dict[str, object]:

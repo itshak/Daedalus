@@ -8,6 +8,12 @@ CITY_REVIEW_TASKS = WORKER_TASKS | {"trainArmy", "donate", "reorganizeCityBuildi
 def validated_worker_draft(task: object, draft: object) -> dict[str, object]:
     if not isinstance(task, str) or task not in WORKER_TASKS or not isinstance(draft, dict):
         raise ValueError("Unknown worker operation")
+    if task == "modifyProduction" and set(draft) == {"priority"}:
+        from daedalus.production_inventory import validate_priority_draft
+        rows = draft["priority"]
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            raise ValueError("Invalid priority production draft")
+        return {"priority": validate_priority_draft(rows[0].get("city_id"), rows)}
     production = task == "modifyProduction"
     keys = {"percentage", "project", "overcharge"} if production else {"percentage"}
     if (not keys <= set(draft) <= keys | {"additional_city_ids"} or type(draft.get("percentage")) is not int

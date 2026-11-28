@@ -1,6 +1,6 @@
 /** Redacted operational audit metadata. No body, headers, account, URL, or credentials. */
 import { REVIEW_START_ROUTES } from "./generated-operation-contract.ts";
-const actions=new Set([...REVIEW_START_ROUTES,"tasks","reviewed-batch-check","stop","acknowledge","policy","bulk","pause","unpause","resume-now","import-saved-token","shipment-plan","reward-distribution-plan","construction-plan","training-plan","donation-plan","worker-plan","layout-plan","build-plan","station-plan","grind-plan","attack-plan","vacation-plan","construction-start","training-start","donation-start","worker-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","begin","replace","clear","register","unregister","save","test"]);
+const actions=new Set([...REVIEW_START_ROUTES,"tasks","reconcile-plan","reconcile","reviewed-batch-check","stop","acknowledge","policy","bulk","pause","unpause","resume-now","import-saved-token","shipment-plan","reward-distribution-plan","construction-plan","training-plan","donation-plan","worker-plan","layout-plan","build-plan","station-plan","grind-plan","attack-plan","vacation-plan","construction-start","training-start","donation-start","worker-start","layout-start","build-start","station-start","grind-start","attack-start","vacation-start","begin","replace","clear","register","unregister","save","test"]);
 export function gatewayAuditRecord(method:string,parts:string[],role:string,status:number,operatorId:string){
   if(method!=="POST"&&method!=="PUT")return null;
   const action=parts.at(-1)??"";

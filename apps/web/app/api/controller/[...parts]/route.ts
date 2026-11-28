@@ -89,6 +89,8 @@ async function proxy(request: NextRequest, context: RouteContext) {
       if(!item || typeof item!=="object" || Object.keys(item).length!==2 || !validWorkerDraft(item.task,item.draft))
         return NextResponse.json({error:"Invalid worker draft"},{status:422,headers:responseHeaders});
     }
+    if (parts[2]==="production-runs"&&!(parts[4]==="reconcile-plan"?z.object({}).strict().safeParse(value).success:constructionStart.safeParse(value).success))
+      return NextResponse.json({error:"Explicit production reconciliation required"},{status:422,headers:responseHeaders});
     if (parts.at(-1) === "worker-start" && !validWorkerLaunch(value))
       return NextResponse.json({error:"Explicit worker review required"},{status:422,headers:responseHeaders});
     if(parts.at(-1)==="reward-distribution-plan"&&!validRewardDistributionRequest(value))return NextResponse.json({error:"Invalid operation preview"},{status:422,headers:responseHeaders});

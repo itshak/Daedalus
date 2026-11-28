@@ -10,6 +10,10 @@ from urllib.parse import parse_qsl
 from ikabot.config import actionRequest
 
 
+class ReviewedMutationNotSubmitted(RuntimeError):
+    """Explicit local preflight refusal before the reviewed mutation POST."""
+
+
 ACTIONS = {"UpgradeExistingBuilding", "BuildNewBuilding", "SaveBuildingPositions", "StartWorkshopUpgrade", "DonateFavorToGod"}
 FUNCTIONS = {("CityScreen", "buildUnits"), ("CityScreen", "buildShips"),
              ("IslandScreen", "workerPlan"), ("CityScreen", "assignPriests"),

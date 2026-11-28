@@ -103,6 +103,25 @@ class RecoveryStore:
                 );
                 CREATE INDEX IF NOT EXISTS fixed_transfer_pending
                     ON fixed_transfer_chunks(transfer_id, status);
+                CREATE TABLE IF NOT EXISTS production_runs(
+                    run_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                    identity TEXT NOT NULL, world TEXT NOT NULL, player TEXT NOT NULL,
+                    intent_json TEXT NOT NULL, status TEXT NOT NULL, updated_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS production_cities(
+                    run_id TEXT NOT NULL, city_id INTEGER NOT NULL, status TEXT NOT NULL,
+                    result_json TEXT, PRIMARY KEY(run_id,city_id)
+                );
+                CREATE TABLE IF NOT EXISTS production_stages(
+                    run_id TEXT NOT NULL, city_id INTEGER NOT NULL, stage TEXT NOT NULL,
+                    kind TEXT NOT NULL, value INTEGER NOT NULL, status TEXT NOT NULL,
+                    observation_json TEXT, updated_at REAL NOT NULL,
+                    PRIMARY KEY(run_id,city_id,stage)
+                );
+                CREATE TABLE IF NOT EXISTS production_reconciliations(
+                    run_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL,
+                    reconciled_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS resume_receipts(
                     account_id TEXT NOT NULL, logical_id TEXT NOT NULL,
                     epoch TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -497,6 +516,104 @@ class RecoveryStore:
                 ) and j["desired_state"]=="running" for j in jobs),
                 "manual_review":sum(j["restart_class"]=="manual" and
                                     j["desired_state"]=="running" for j in jobs)}
+
+    def production_blocked(self, account: Account) -> bool:
+        with self._db() as conn:
+            return conn.execute("""SELECT 1 FROM production_runs
+                WHERE world=? AND player=? AND status='prepared' LIMIT 1""",
+                (account.world.casefold(), account.player.casefold())).fetchone() is not None
+
+    def prepare_production(self, account: Account, run_id: str, plans: list) -> None:
+        from uuid import UUID
+
+        from daedalus.production_inventory import validate_priority_draft, validate_priority_plan
+
+        if not isinstance(run_id, str) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
+            raise RecoveryConflict("Invalid production run identity")
+        if not isinstance(plans, list) or not plans or any(not isinstance(p, dict) for p in plans):
+            raise RecoveryConflict("Invalid production plans")
+        rows = [{"city_id": p.get("city_id"), "draft": p.get("draft")} for p in plans]
+        clean = validate_priority_draft(rows[0]["city_id"], rows)
+        plans = [validate_priority_plan(r["city_id"], r["draft"], p) for r, p in zip(clean, plans)]
+        canonical = json.dumps(plans, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("""SELECT 1 FROM production_runs
+                WHERE world=? AND player=? AND status='prepared'""",
+                (account.world.casefold(), account.player.casefold())).fetchone():
+                raise RecoveryConflict("Earlier production needs reconciliation")
+            conn.execute("""INSERT INTO production_runs
+                VALUES(?,?,?,?,?,?,'prepared',?)""",
+                (run_id, account.id, identity(account), account.world.casefold(),
+                 account.player.casefold(), canonical, self._clock()))
+            conn.commit()
+
+    def reject_production(self, account: Account, run_id: str) -> None:
+        """Only a definitive no-child-start receipt can release this fence."""
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("""UPDATE production_runs SET status='rejected',updated_at=?
+                WHERE run_id=? AND account_id=? AND identity=? AND status='prepared'
+                AND NOT EXISTS (SELECT 1 FROM production_cities WHERE run_id=?)""",
+                (self._clock(), run_id, account.id, identity(account), run_id))
+            conn.commit()
+
+    def production_intent(self, account: Account, run_id: str) -> list[dict]:
+        with self._db() as conn:
+            row = conn.execute("""SELECT intent_json FROM production_runs
+                WHERE run_id=? AND account_id=? AND identity=? AND status='prepared'""",
+                (run_id, account.id, identity(account))).fetchone()
+            if row is None:
+                raise RecoveryConflict("Production run does not require reconciliation")
+            return json.loads(row["intent_json"])
+
+    def reconcile_production(self, account: Account, run_id: str, observations: list) -> None:
+        """Archive operator-reviewed actual counts, without applying another assignment."""
+        canonical = json.dumps(observations, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = conn.execute("""UPDATE production_runs SET status='reconciled',updated_at=?
+                WHERE run_id=? AND account_id=? AND identity=? AND status='prepared'""",
+                (self._clock(), run_id, account.id, identity(account))).rowcount
+            if changed != 1:
+                raise RecoveryConflict("Production run is no longer pending")
+            conn.execute("INSERT INTO production_reconciliations VALUES(?,?,?)",
+                         (run_id, canonical, self._clock()))
+            conn.commit()
+
+    def production_progress(self, account: Account) -> list[dict]:
+        with self._db() as conn:
+            runs = conn.execute("""SELECT run_id,status,updated_at,intent_json FROM production_runs
+                WHERE account_id=? AND identity=? ORDER BY updated_at DESC LIMIT 20""",
+                (account.id, identity(account))).fetchall()
+            results = []
+            for run in runs:
+                cities = {r["city_id"]: r for r in conn.execute(
+                    "SELECT city_id,status,result_json FROM production_cities WHERE run_id=?", (run["run_id"],))}
+                rows = []
+                for plan in json.loads(run["intent_json"]):
+                    cid = plan["city_id"]
+                    city = cities.get(cid)
+                    stages = []
+                    for receipt in conn.execute("""SELECT stage,kind,value,status,observation_json
+                        FROM production_stages WHERE run_id=? AND city_id=? ORDER BY rowid""", (run["run_id"],cid)):
+                        stage = dict(receipt)
+                        observed = stage.pop("observation_json")
+                        if observed:
+                            inv = json.loads(observed)
+                            stage["observed"] = {kind: inv["sites"][kind]["current"] for kind in ("resource", "tradegood")}
+                        stages.append(stage)
+                    rows.append({"city_id": cid, "resource": plan["resource"],
+                        "target_before": plan["target_before"], "donor_before": plan["donor_before"],
+                        "desired": plan["desired"], "donor_release": plan["donor_release"],
+                        "status": city["status"] if city else "not_started", "stages": stages,
+                        "result": json.loads(city["result_json"]) if city and city["result_json"] else None})
+                resolved = conn.execute("SELECT observation_json FROM production_reconciliations WHERE run_id=?",
+                                        (run["run_id"],)).fetchone()
+                results.append({"run_id":run["run_id"], "status":run["status"],
+                                "updated_at":run["updated_at"], "cities":rows,
+                                "reconciled_observations": json.loads(resolved[0]) if resolved else None})
+            return results
 
     def prepare_fixed_transfer(self, account: Account, config: dict) -> str:
         """Persist approved absolute cargo intent BEFORE engine task dispatch."""

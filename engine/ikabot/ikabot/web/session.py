@@ -1519,6 +1519,11 @@ class Session:
         Reviewed writes require a fresh, matching city and no retry.
         """
         from ikabot.helpers.serverIdentity import attest_player_from_world_html
+        from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
+
+        def preflight_error(message):
+            # Only this pre-POST section can prove no reviewed mutation was submitted.
+            return ReviewedMutationNotSubmitted(message) if reviewed_city is not None else RuntimeError(message)
 
         base = urllib.parse.urlsplit(self.urlBase)
         if (base.scheme != "https" or base.hostname != self.host
@@ -1527,14 +1532,14 @@ class Session:
             raise ValueError("Cookie-only queue view origin unavailable")
         html = self.get() if reviewed_city is None else self.get("view=city&cityId=" + reviewed_city)
         if not attest_player_from_world_html(html, self.username):
-            raise RuntimeError("Queue view account verification failed")
+            raise preflight_error("Queue view account verification failed")
         if reviewed_city is not None:
             selected = re.search(r"currentCityId:\s*(\d+),", html)
             if selected is None or selected.group(1) != reviewed_city:
-                raise RuntimeError("Reviewed mutation city context changed")
+                raise preflight_error("Reviewed mutation city context changed")
         token = re.search(r'actionRequest"?:\s*"([^"]+)"', html)
         if token is None or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", token.group(1)):
-            raise RuntimeError("Queue view request token unavailable")
+            raise preflight_error("Queue view request token unavailable")
         query = {} if params is None else dict(params)
         if "actionRequest" in query:
             query["actionRequest"] = token.group(1)

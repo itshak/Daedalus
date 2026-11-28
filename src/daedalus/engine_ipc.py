@@ -51,7 +51,7 @@ _MAX_REPLY_BYTES = 512 * 1024
 _ALLOWED = frozenset({
     "ping", "list_sessions", "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing",
     "validate_session_existing", "task_preflight_existing", "list_buildings_existing",
-    "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+    "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "production_inventory_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
     "list_trainables_existing", "market_quotes_existing",
     "list_academies_existing", "list_taverns_existing",
     "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
@@ -179,7 +179,7 @@ class ExistingIPCClient:
         if action in {
             "preview_shipments_existing", "island_destinations_existing", "list_cities_existing", "warehouse_snapshots_existing", "validate_session_existing",
             "task_preflight_existing", "list_buildings_existing",
-            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
+            "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing", "list_build_options_existing", "preview_build_existing", "preview_layout_existing", "preview_workers_existing", "production_inventory_existing", "preview_donation_existing", "preview_construction_existing", "list_workshop_upgrades_existing",
             "list_trainables_existing", "market_quotes_existing",
             "list_academies_existing", "list_taverns_existing",
             "list_miracles_existing", "shrine_status_existing", "administrative_status_existing",
@@ -193,7 +193,7 @@ class ExistingIPCClient:
         if account is not None:
             payload.update(world=account.world, player=account.player)
         if action in {"list_buildings_existing", "preview_construction_existing",
-                      "preview_donation_existing", "preview_workers_existing", "preview_layout_existing",
+                      "preview_donation_existing", "preview_workers_existing", "production_inventory_existing", "preview_layout_existing",
                       "list_build_options_existing", "preview_build_existing", "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
                       "list_workshop_upgrades_existing", "list_trainables_existing",
                       "market_quotes_existing"}:
@@ -280,7 +280,7 @@ class ExistingIPCClient:
             "preview_vacation_existing", "list_attack_units_existing", "preview_attack_existing", "preview_grind_existing", "preview_station_existing",
             "list_build_options_existing", "preview_build_existing",
             "preview_layout_existing",
-            "preview_workers_existing",
+            "preview_workers_existing", "production_inventory_existing",
             "preview_donation_existing",
             "preview_construction_existing", "military_overview_existing",
             "ship_movements_existing",
@@ -679,10 +679,46 @@ class ExistingIPCClient:
             raise EngineIPCUnavailable("Invalid layout preview") from exc
         return {"account_id": account.id, **plan}
 
+    def production_inventory(self, account: Account, city_id: int) -> dict[str, object]:
+        from daedalus.production_inventory import validate_production_inventory
+
+        if city_id not in {row["id"] for row in self.cities(account)}:
+            raise ValueError("Production city is not owned by this account")
+        data = self.request("production_inventory_existing", account=account, city_id=city_id)
+        if not _is_exact_identity({"world": data.get("world"), "player": data.get("username")}, account):
+            raise EngineIPCUnavailable("Invalid production inventory scope")
+        try:
+            return validate_production_inventory(city_id, data.get("inventory"))
+        except ValueError as exc:
+            raise EngineIPCUnavailable("Invalid production inventory") from exc
+
     def worker_preview(self, account: Account, city_id: int, task: str,
                        draft: dict[str, object]) -> dict[str, object]:
         clean = validated_worker_draft(task, draft)
         owned = {row["id"] for row in self.cities(account)}
+        if "priority" in clean:
+            from daedalus.production_inventory import (
+                validate_priority_draft,
+                validate_priority_plan,
+            )
+
+            rows = validate_priority_draft(city_id, clean["priority"])
+            if not {row["city_id"] for row in rows} <= owned:
+                raise ValueError("Production city is not owned by this account")
+            data = self.request("preview_workers_existing", account=account,
+                                city_id=city_id, worker_task=task, worker_draft=clean)
+            if not _is_exact_identity({"world": data.get("world"), "player": data.get("username")}, account):
+                raise EngineIPCUnavailable("Invalid production preview scope")
+            plans = data.get("plans")
+            try:
+                if not isinstance(plans, list) or len(plans) != len(rows):
+                    raise ValueError("Invalid production preview")
+                validated = [validate_priority_plan(row["city_id"], row["draft"], plan)
+                             for row, plan in zip(rows, plans)]
+            except ValueError as exc:
+                raise EngineIPCUnavailable("Invalid production preview") from exc
+            return {"account_id": account.id, "task": task, "city_id": city_id,
+                    "plans": validated, "ready": True, "config": {"production_plans": validated}}
         additional = clean.get("additional_city_ids", [])
         if city_id not in owned or city_id in additional or not set(additional) <= owned:
             raise ValueError("Worker city is not owned by this account")

@@ -397,7 +397,8 @@ class TaskController:
         account = self._account(account_id)
         result = self._ipc.preflight_task(account, task)
         return {"account_id": account_id, **result,
-                "unresolved_request": self._ledger.has_unresolved(account_id)}
+                "unresolved_request": self._ledger.has_unresolved(account_id) or (
+                    self._recovery_store is not None and self._recovery_store.production_blocked(account))}
 
     def start(
         self, account_id: str, task: str, config: object,
@@ -436,6 +437,12 @@ class TaskController:
                 raise ValueError("Choose verified island coordinates")
         if task == "dumpWorld" and "managed_report_id" in clean:
             raise ValueError("Map report identity is server-owned")
+        is_production = task == "modifyProduction" and "production_plans" in clean
+        if is_production:
+            if (set(clean) != {"production_plans"} or not track_desired
+                    or self._recovery_store is None):
+                raise ValueError("Production requires a protected, reviewed journal")
+            clean["production_run_id"] = request_id
         is_fixed = False
         if task == "sendResources" and self._recovery_store is not None:
             from daedalus.recovery_reconcile import canonical_fixed_transfer
@@ -455,6 +462,13 @@ class TaskController:
             existing = self._ledger.existing(account.id, request_id, task, digest)
             if existing is not None:
                 return existing
+            if self._recovery_store is not None and self._recovery_store.production_blocked(account):
+                raise TaskUnavailable("Earlier production requires reconciliation")
+            if is_production and any(
+                    row.get("status") in {"running", "stopping"} and row.get("task") in
+                    {"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"}
+                    for row in self._ipc.list_managed_tasks(account)):
+                raise TaskUnavailable("Stop existing worker assignment tasks first")
             if task == "vacationMode":
                 if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
                     raise TaskUnavailable("Disable automatic recovery before activating vacation mode")
@@ -470,6 +484,11 @@ class TaskController:
             # Lease validation cannot submit a game task. Reject before reserving
             # a dispatch so a local ownership failure cannot become unconfirmed.
             self._lease(account)
+            if is_production:
+                try:
+                    self._recovery_store.prepare_production(account, request_id, clean["production_plans"])
+                except (ValueError, OSError, sqlite3.Error) as exc:
+                    raise TaskUnavailable("Unable to persist production review") from exc
             if is_fixed and track_desired:
                 # Record the immutable original intent before engine dispatch.
                 try:
@@ -490,6 +509,8 @@ class TaskController:
                     self._recovery_store.finish_fixed_transfer(
                         account, request_id, status="rejected",
                     )
+                if is_production:
+                    self._recovery_store.reject_production(account, request_id)
                 if exc.reason == "notifications_required":
                     raise TaskPrerequisiteMissing(exc.reason) from exc
                 raise TaskRejected(exc.reason) from exc
@@ -508,7 +529,7 @@ class TaskController:
             receipt = {"account_id": account.id, "request_id": request_id,
                        "task": task, "status": "started",
                        "task_id": started["task_id"], "pid": started["pid"]}
-            if track_desired and self._recovery_store is not None and task != "vacationMode":
+            if track_desired and self._recovery_store is not None and task != "vacationMode" and not is_production:
                 try:
                     if is_fixed:
                         self._recovery_store.finish_fixed_transfer(
@@ -539,7 +560,9 @@ class TaskController:
         # Read can discover an already-running task after a backend restart.
         return {"account_id": account.id,
                 "engine_tasks": self._ipc.list_managed_tasks(account),
-                "requests": self._ledger.entries(account.id)}
+                "requests": self._ledger.entries(account.id),
+                **({"production_runs": self._recovery_store.production_progress(account)}
+                   if self._recovery_store is not None else {})}
 
     def stop(self, account_id: str, task_id: str) -> dict[str, object]:
         account = self._account(account_id)
@@ -554,6 +577,45 @@ class TaskController:
             self._lease(account)
             result = self._ipc.stop_managed_task(account, task_id)
             return {"account_id": account.id, **result}
+
+    def _production_observations(self, account, run_id):
+        if self._recovery_store is None:
+            raise TaskUnavailable("Production journal unavailable")
+        if self._ledger.has_unresolved(account.id):
+            raise TaskUnavailable("Reconcile the uncertain task launch before reviewing its allocations")
+        self._lease(account)
+        if any(row.get("task") == "modifyProduction" and row.get("status") in {"running", "stopping"}
+               for row in self._ipc.list_managed_tasks(account)):
+            raise TaskUnavailable("Stop the production worker before reconciliation")
+        plans = self._recovery_store.production_intent(account, run_id)
+        observations = []
+        for plan in plans:
+            inv = self._ipc.production_inventory(account, plan["city_id"])
+            if (inv["city_id"] != plan["city_id"] or inv["island_id"] != plan["island_id"]
+                    or inv["luxury"] != plan["luxury"]):
+                raise TaskUnavailable("Production city identity changed")
+            counts = {}
+            for kind in ("resource", "tradegood"):
+                site = inv["sites"][kind]
+                if site["available"] is not True or type(site["current"]) is not int:
+                    raise TaskUnavailable("Current allocations cannot be verified")
+                counts[kind] = site["current"]
+            observations.append({"city_id": inv["city_id"], "city_name": inv["city_name"],
+                                 "island_id": inv["island_id"], "luxury": inv["luxury"], **counts})
+        return observations
+
+    def production_reconciliation(self, account_id: str, run_id: str, *, reviewed=None):
+        if not isinstance(run_id, str) or not _REQUEST_ID.fullmatch(run_id) or UUID(run_id).version != 4:
+            raise ValueError("Invalid production run ID")
+        account = self._account(account_id)
+        with self._mutex:
+            observations = self._production_observations(account, run_id)
+            if reviewed is not None:
+                if reviewed != observations:
+                    raise ValueError("Production reconciliation review is stale")
+                self._recovery_store.reconcile_production(account, run_id, observations)
+            return {"account_id": account.id, "run_id": run_id, "observations": observations,
+                    "status": "reconciled" if reviewed is not None else "review"}
 
     def acknowledge_uncertain_request(
         self, account_id: str, request_id: str, *, confirmed: bool,

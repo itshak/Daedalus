@@ -27,6 +27,13 @@ class TestCityHelpers(unittest.TestCase):
         session.get.assert_called_once_with("view=city&cityId=123")
         mock_get_city.assert_called_once_with("<html>")
 
+    @patch("ikabot.helpers.taskConfig.getCity", return_value={"id": "123", "freeCitizens": None})
+    def test_get_city_unknown_population_is_opt_in(self, mock_get_city):
+        session = MagicMock()
+        session.get.return_value = "<html>"
+        self.assertIsNone(getCityById(session, 123, allow_unknown_citizens=True)["freeCitizens"])
+        mock_get_city.assert_called_once_with("<html>", allow_unknown_citizens=True)
+
     def test_find_building_position(self):
         city = {"position": [
             {"position": 0, "building": "townHall"},

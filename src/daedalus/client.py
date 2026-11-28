@@ -880,6 +880,50 @@ class DaedalusClient:
             raise APIConnectionError("Backend returned invalid layout preview")
         return data
 
+    def production_runs(self, account_id: str) -> dict[str, object]:
+        from daedalus.production_inventory import validate_production_progress
+        if not _ACCOUNT_ID.fullmatch(account_id):
+            raise ValueError("Invalid production account")
+        data = self._read(f"accounts/{account_id}/production-runs")
+        try:
+            return validate_production_progress(account_id, data)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid production history") from exc
+
+    def production_reconcile(self, account_id: str, run_id: str, *, preview_id=None, request_id=None):
+        from uuid import UUID
+
+        from daedalus.production_inventory import validate_reconciliation
+        if not _ACCOUNT_ID.fullmatch(account_id) or UUID(run_id).version != 4 or str(UUID(run_id)) != run_id:
+            raise ValueError("Invalid production run")
+        path = f"accounts/{account_id}/production-runs/{run_id}/"
+        resolved = preview_id is not None
+        if resolved:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{43}", preview_id) or UUID(request_id).version != 4:
+                raise ValueError("Invalid production reconciliation ticket")
+            data = self._write(path+"reconcile", {"preview_id": preview_id, "request_id": request_id,
+                                                  "confirmed": True})
+        else:
+            data = self._write(path+"reconcile-plan", {})
+        try:
+            return validate_reconciliation(account_id, run_id, data, resolved=resolved)
+        except ValueError as exc:
+            raise APIConnectionError("Invalid production reconciliation") from exc
+
+    def production_inventory(self, account_id: str, city_id: int) -> dict[str, object]:
+        from daedalus.production_inventory import validate_production_inventory
+
+        if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
+            raise ValueError("Invalid production city")
+        data = self._read(f"accounts/{account_id}/cities/{city_id}/production")
+        if not isinstance(data, dict) or data.get("account_id") != account_id:
+            raise APIConnectionError("Invalid production inventory scope")
+        try:
+            return {"account_id": account_id, **validate_production_inventory(
+                city_id, {k: v for k, v in data.items() if k != "account_id"})}
+        except ValueError as exc:
+            raise APIConnectionError("Backend returned invalid production inventory") from exc
+
     def worker_preview(self, account_id: str, city_id: int, task: str,
                        draft: dict[str, object]) -> dict[str, object]:
         if not _ACCOUNT_ID.fullmatch(account_id) or type(city_id) is not int or not 0 < city_id < 10**12:
@@ -892,7 +936,21 @@ class DaedalusClient:
         try:
             if data.get("account_id") != account_id:
                 raise ValueError("Invalid account scope")
-            validate_worker_observation(task, city_id, clean, data)
+            if "priority" in clean:
+                from daedalus.production_inventory import (
+                    validate_priority_draft,
+                    validate_priority_plan,
+                )
+                rows = validate_priority_draft(city_id, clean["priority"])
+                plans = data.get("plans")
+                if (data.get("task") != task or data.get("city_id") != city_id
+                        or data.get("ready") is not True or not isinstance(plans, list)
+                        or len(plans) != len(rows)):
+                    raise ValueError("Invalid production preview")
+                for row, plan in zip(rows, plans):
+                    validate_priority_plan(row["city_id"], row["draft"], plan)
+            else:
+                validate_worker_observation(task, city_id, clean, data)
             if (not isinstance(data.get("preview_id"), str)
                     or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_id"])
                     or type(data.get("expires_in")) is not int or not 1 <= data["expires_in"] <= 120):

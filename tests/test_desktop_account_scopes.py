@@ -48,7 +48,7 @@ def test_navigation_has_unique_icons_and_only_one_regular_automation(app, monkey
     monkeypatch.setattr(module, "load_gui_preferences", lambda: GuiPreferences())
     window = MainWindow()
     try:
-        assert len({icon.value for icon in NAV_ICONS.values()}) == len(NAV_ICONS) == 8
+        assert len({icon.value for icon in NAV_ICONS.values()}) == len(NAV_ICONS) == 9
         assert window.military_page.objectName() == "military_page"
         assert NAV_ICONS["connection"] != NAV_ICONS["settings"]
         assert NAV_ICONS["automations"] != NAV_ICONS["activity"]
@@ -956,3 +956,82 @@ def test_shell_scope_targets_and_empty_selection(app, monkeypatch):
     finally:
         window._worker = None
         _dispose(window, app)
+
+
+def test_production_inventory_scope_and_refresh_guard(app):
+    from daedalus.desktop.production_page import ProductionPage
+
+    page = ProductionPage()
+    try:
+        page.set_accounts(accounts(2))
+        requests = []
+        page.refresh_requested.connect(requests.append)
+        page.refresh()
+        page.refresh()
+        assert requests == [["account-0", "account-1"]]
+        assert not page.refresh_button.isEnabled()
+        assert page.set_cities("account-0", [{"id": 1, "name": "Synthetic"}]) == [1]
+        observation = {
+            "account_id": "account-0", "city_id": 1, "city_name": "Synthetic", "island_id": 2,
+            "luxury": "crystal", "free_citizens": None,
+            "sites": {
+                "resource": {"available": True, "current": None, "maximum": 500, "extra": 100},
+                "tradegood": {"available": True, "current": 200, "maximum": 500, "extra": 100},
+                "academy": {"available": False, "reason": "building_absent"},
+                "temple": {"available": False, "reason": "building_absent"},
+            },
+        }
+        page.set_result("account-0", 1, observation)
+        assert page.table.rowCount() == 2
+        assert "Synthetic" == page.table.item(0, 1).text()
+        page.finish_refresh()
+        assert page.refresh_button.isEnabled()
+        page.set_accounts(accounts(2)[1:])
+        page.set_result("account-0", 1, observation)
+        assert page.table.rowCount() == 0
+        page.refresh()
+        assert requests[-1] == ["account-1"]
+    finally:
+        _dispose(page, app)
+
+
+def test_production_default_fallback_and_scoped_native_review(app):
+    from daedalus.desktop.production_page import ProductionPage
+
+    page = ProductionPage()
+    try:
+        page.set_accounts(accounts(2))
+        page.refresh()
+        for i, name in enumerate(("Athens", "Sparta")):
+            aid, city = f"account-{i}", i + 1
+            page.set_cities(aid, [{"id": city, "name": name}])
+            page.set_result(aid, city, {"account_id": aid, "city_id": city,
+                "city_name": name, "island_id": 2, "luxury": "crystal", "free_citizens": None,
+                "sites": {
+                    "resource": {"available": True, "current": 400, "maximum": 500, "extra": 100},
+                    "tradegood": {"available": True, "current": 200, "maximum": 500, "extra": 100},
+                    "academy": {"available": False, "reason": "building_absent"},
+                    "temple": {"available": False, "reason": "building_absent"},
+                }})
+        page.finish_refresh()
+        page.resource_combo.setCurrentIndex(4)
+        assert page.resource_combo.currentData() == "crystal"
+        assert page.fallback.isChecked() and not page.available_only.isChecked()
+        requests = []
+        page.preview_requested.connect(requests.append)
+        page.preview_button.click()
+        assert set(requests[0]) == {"account-0", "account-1"}
+        assert all(rows[0]["draft"]["allow_fallback"] for rows in requests[0].values())
+        page.set_review_unavailable()
+        page.available_only.setChecked(True)
+        page.preview_button.click()
+        assert all(rows[0]["draft"]["available_only"] and not rows[0]["draft"]["allow_fallback"]
+                   for rows in requests[1].values())
+        page.set_review_unavailable()
+        page.resource_combo.setCurrentIndex(6)
+        calls = []
+        page.configure_workers.connect(calls.append)
+        page.configure_button.click()
+        assert calls == ["modifyAcademyWorkers"]
+    finally:
+        _dispose(page, app)

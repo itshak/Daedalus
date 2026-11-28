@@ -44,6 +44,7 @@ def web_stack(tmp_path):
              "hidden_accounts": set(), "hold_alpha": False,
              "alpha_started": threading.Event(), "alpha_release": threading.Event(),
              "alpha_finished": threading.Event()}
+    state.update(production_reviews={}, invalid_production=False, production_blocked=False)
     accounts = [{"id":name,"email":name+"@example.invalid","player":"Same player","world":world,"enabled":True,"session_status":"authenticated"} for name,world in [("alpha","s1-en"),("beta","s2-en")]]
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*_):
@@ -69,6 +70,31 @@ def web_stack(tmp_path):
             if self.headers.get("Authorization")!="Bearer "+token:
                 return self.reply({},401)
             counts["POST "+path]+=1
+            if path.endswith("/worker-plan") and body.get("task") == "modifyProduction":
+                aid = path.split("/")[4]
+                city = int(path.split("/")[-2])
+                rows = body["draft"]["priority"]
+                ticket = ("a" if aid == "alpha" else "b") * 43
+                plans = []
+                for row in rows:
+                    d = row["draft"]
+                    assert d["resource"] == "crystal" and d["mode"] == "maximum"
+                    plans.append({"city_id":row["city_id"],"island_id":8,"resource":"crystal","luxury":"crystal",
+                        "target_kind":"tradegood","donor_kind":"resource","target_before":10,"donor_before":80,
+                        "desired":100,"target_after":100,"donor_release":70,"donor_after":10,"shortfall":0,
+                        "fallback":False,"free_citizens":20,"target_capacity":[100,20],"donor_capacity":[100,20],"draft":d})
+                state["production_reviews"][aid] = ticket
+                return self.reply({"account_id": "wrong" if state["invalid_production"] else aid,
+                    "city_id":city,"task":"modifyProduction","ready":True,"plans":plans,"preview_id":ticket,"expires_in":120})
+            if path=="/api/v1/tasks/reviewed-batch-check":
+                entries=body["entries"]
+                assert all(state["production_reviews"][r["account_id"]]==r["preview_id"] for r in entries)
+                return self.reply({"account_ids":[r["account_id"] for r in entries],
+                    "blocked":[{"account_id":entries[0]["account_id"],"reason":"review_unavailable"}] if state["production_blocked"] else []})
+            if path.endswith("/tasks/worker-start"):
+                aid=path.split("/")[4]
+                assert body["confirmed"] is True and body["preview_id"]==state["production_reviews"][aid]
+                return self.reply({"account_id":aid,"task":"modifyProduction","request_id":body["request_id"],"status":"started"})
             if path=="/api/v1/accounts/alpha/tasks":
                 state["request_id"]=body.get("request_id")
                 if state["ambiguous"]:return self.reply({"detail":"Fixture response lost"},503)
@@ -98,6 +124,17 @@ def web_stack(tmp_path):
                     state["alpha_release"].wait(5)
                     state["alpha_finished"].set()
                 return self.reply({"account_id":aid,"cities":[{"account_id":aid,"city_id":1 if is_a else 2,"city_name":"Athens" if is_a else "Sparta","island":"12:34","resources":{"unsecured":{"wood":300000 if is_a else 10,"wine":0,"marble":0,"glass":0,"sulfur":0},"capacity":500000}}]})
+            if path.endswith("/production"):
+                aid=path.split("/")[4]
+                city=int(path.split("/")[-2])
+                return self.reply({"account_id":aid,"city_id":city,"city_name":"Athens" if aid=="alpha" else "Sparta",
+                    "island_id":8,"luxury":"crystal","free_citizens":20,"sites":{
+                        "resource":{"available":True,"current":80,"maximum":100,"extra":20},
+                        "tradegood":{"available":True,"current":10,"maximum":100,"extra":20},
+                        "academy":{"available":False,"reason":"building_absent"},
+                        "temple":{"available":False,"reason":"building_absent"}}})
+            if path.endswith("/production-runs"):
+                return self.reply({"account_id":path.split("/")[4],"runs":[]})
             if path.endswith("/military"):
                 aid=path.split("/")[-2]
                 return self.reply({"account_id":aid,"observed_at":int(time.time()),"cities":[{"city_id":1,"city_name":"Athens" if aid=="alpha" else "Sparta","troops":[{"unit":"Synthetic Swordsman","amount":17}],"fleet":[{"unit":"Synthetic Ship","amount":3}]}]})
@@ -384,3 +421,50 @@ def test_working_scope_isolation_and_review_cohort(web_stack):
     assert counts["POST /api/v1/accounts/alpha/tasks"]==0
     assert counts["POST /api/v1/accounts/beta/tasks"]==0
     assert state["running"], "scope changes must not cancel a running task"
+
+def test_production_priority_review_browser(web_stack):
+    context, origin, counts, state = web_stack
+    login=context.request.post(origin+"/api/login",headers={"Origin":origin},
+        data={"email":USER["email"],"password":"fixture-only-password"})
+    assert login.ok
+    page=context.new_page()
+    page.set_default_timeout(15_000)
+    page.goto(origin)
+    page.get_by_role("navigation",name="Main navigation").get_by_role("button",name="Production").click()
+    page.get_by_label("Resource",exact=True).select_option("crystal")
+    page.get_by_role("checkbox",name="Athens",exact=True).wait_for()
+    page.get_by_role("checkbox",name="Sparta",exact=True).wait_for()
+    assert not page.get_by_role("checkbox",name="Use only available population").is_checked()
+    assert page.get_by_role("checkbox",name="Allow reviewed temporary full donor release",exact=False).is_checked()
+    preview=page.get_by_role("button",name="Preview · 2",exact=True)
+    confirm=page.get_by_role("button",name="Confirm and start",exact=False)
+    state["invalid_production"]=True
+    preview.click()
+    page.get_by_text("Production preview unavailable. No assignments were started.",exact=True).wait_for()
+    assert confirm.count()==0
+    state["invalid_production"]=False
+    preview.click()
+    confirm.wait_for()
+    page.get_by_role("cell",name="crystal: 10 → 100").first.wait_for()
+    assert counts["POST /api/v1/accounts/alpha/tasks/worker-start"]==0
+    state["production_blocked"]=True
+    page.on("dialog",lambda dialog:dialog.accept())
+    confirm.click()
+    page.get_by_text("Inspect Activity before retrying any operation.",exact=True).wait_for()
+    assert counts["POST /api/v1/accounts/alpha/tasks/worker-start"]==0
+    state["production_blocked"]=False
+    # A scope change must discard the previously reviewed cohort.
+    preview.click()
+    confirm.wait_for()
+    page.locator(".scope-trigger").click()
+    page.locator(".scope-popover").get_by_role("button",name="Clear",exact=True).click()
+    page.get_by_role("checkbox",name="Same player · s2-en (beta)",exact=True).check()
+    page.get_by_role("button",name="Apply account selection").click()
+    confirm.wait_for(state="detached")
+    page.get_by_label("Resource",exact=True).select_option("crystal")
+    page.get_by_role("button",name="Preview · 1",exact=True).click()
+    confirm.wait_for()
+    confirm.click()
+    page.get_by_text("Reviewed production tasks started. Check execution history for completion.",exact=True).wait_for()
+    assert counts["POST /api/v1/accounts/alpha/tasks/worker-start"]==0
+    assert counts["POST /api/v1/accounts/beta/tasks/worker-start"]==1

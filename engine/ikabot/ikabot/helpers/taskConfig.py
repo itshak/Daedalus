@@ -17,7 +17,7 @@ from ikabot.helpers.pedirInfo import getIdsOfCities
 from ikabot.helpers.varios import decodeUnicodeEscape
 
 
-def getCityById(session, city_id):
+def getCityById(session, city_id, *, allow_unknown_citizens=False):
     """Fetches a city
     Parameters
     ----------
@@ -28,7 +28,10 @@ def getCityById(session, city_id):
     -------
     city : dict
     """
-    return getCity(session.get(city_url + str(city_id)))
+    html = session.get(city_url + str(city_id))
+    if allow_unknown_citizens:
+        return getCity(html, allow_unknown_citizens=True)
+    return getCity(html)
 
 
 def findBuildingPosition(city, building):
