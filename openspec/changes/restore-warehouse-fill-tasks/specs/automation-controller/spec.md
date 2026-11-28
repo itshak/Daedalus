@@ -11,3 +11,13 @@ Newly approved warehouse-fill jobs SHALL be eligible for automatic restoration o
 #### Scenario: Shipment acknowledgement is uncertain
 - **WHEN** durable evidence cannot prove the prior effect
 - **THEN** automatic restoration does not dispatch and the reason is shown to the operator
+
+
+#### Scenario: Unknown warehouse cargo could overlap another restored transport
+- **WHEN** a warehouse checkpoint has pending or accepted-but-unobserved cargo
+- **THEN** automatic transport restoration for that account remains held, including other transport workflows
+- **AND** independent non-transport monitoring jobs may recover normally
+
+#### Scenario: The approved intent or destination budget is exhausted
+- **WHEN** receipt reconciliation proves all approved cargo was submitted or a fresh destination observation proves the remaining storage budget is zero
+- **THEN** the completed intent and reason are durably retired, and shall not be restarted merely because space reopens or a later job is approved

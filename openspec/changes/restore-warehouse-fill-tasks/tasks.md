@@ -4,7 +4,9 @@
 - [x] Implement durable per-source bounded receipts and fresh reconciliation via existing upstream helpers; preserve no-replay rules.
 - [x] Implement safe startup and reconnect restoration and completed/held outcomes, including stop/epoch fencing.
 - [x] Expose eligibility and reasons before launch and in web/native recovery views.
-- [ ] Test simulated multi-shipment restart, in-transit and arrived cargo, ambiguous write, legacy jobs, changed stock, stop/reconnect, upstream parity; document live acceptance.
+- [x] Test simulated multi-shipment restart, in-transit and arrived cargo, ambiguous write, legacy jobs, changed stock, stop/reconnect and upstream parity; document separate live acceptance.
+- [ ] Verify complete CI on final combined revision.
+- [ ] Verify real-game multi-shipment recovery, cargo attribution, capacity and live acceptance (unperformed).
 
 
 ## Implementation evidence
