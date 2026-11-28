@@ -430,18 +430,60 @@ class RecoveryStore:
             **({"config":json.loads(r["config_json"])} if include_config else {}),
         } for r in rows]
 
-    def complete_job(self, account: Account, job_id: str, *, revision: int) -> bool:
-        """Mark an absolute construction target completed only after game readback."""
+    def complete_job(self, account: Account, job_id: str, *, revision: int,
+                     warehouse_reason: str | None = None, epoch: str | None = None) -> bool:
+        """Persist a verified terminal observation and preserve its reason."""
         with self._mutex, self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if epoch is not None and not self._resume_permitted(conn, account, epoch):
+                return False
+            if warehouse_reason is not None:
+                if warehouse_reason not in {"warehouse_capacity_reached", "warehouse_intent_exhausted"}:
+                    raise RecoveryConflict("Invalid warehouse completion reason")
+                job = conn.execute("""SELECT j.restart_class, f.status FROM desired_jobs j
+                    JOIN fixed_transfers f ON f.transfer_id=j.logical_id
+                    WHERE j.logical_id=? AND j.account_id=? AND j.identity=?
+                    AND j.revision=? AND j.desired_state='running'""",
+                    (job_id, account.id, identity(account), revision)).fetchone()
+                if job is None or job["restart_class"] != "warehouse_fill":
+                    return False
+                pending = conn.execute("""SELECT 1 FROM fixed_transfer_chunks c
+                    LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
+                    WHERE c.transfer_id=? AND (c.status='pending' OR
+                    (c.status='confirmed' AND v.chunk_id IS NULL)) LIMIT 1""", (job_id,)).fetchone()
+                if pending or job["status"] not in ("prepared", "running", "held_stock", "complete", "capacity_reached"):
+                    return False
             changed = conn.execute("""UPDATE desired_jobs
                 SET desired_state='completed', revision=revision+1
                 WHERE account_id=? AND identity=? AND logical_id=?
                   AND revision=? AND desired_state='running'
                   AND restart_class IN ('reconcile_construction','fixed_transfer','warehouse_fill')""",
                 (account.id, identity(account), job_id, revision)).rowcount
+            if changed and warehouse_reason is not None:
+                conn.execute("UPDATE fixed_transfers SET status=?,updated_at=? WHERE transfer_id=?",
+                             ("capacity_reached" if warehouse_reason == "warehouse_capacity_reached" else "complete",
+                              self._clock(), job_id))
+                conn.execute("""INSERT INTO warehouse_fill_recovery(transfer_id,revision,reason) VALUES(?,?,?)
+                    ON CONFLICT(transfer_id) DO UPDATE SET revision=excluded.revision,reason=excluded.reason""",
+                    (job_id, revision+1, warehouse_reason))
             conn.commit()
             return changed == 1
+
+    def settle_warehouse_jobs(self, account: Account) -> None:
+        """Retire already verified terminal jobs before matching a new launch.
+
+        Caller must have established that no warehouse worker is active.
+        """
+        for job in self.desired(account, include_config=True):
+            if job["restart_class"] != "warehouse_fill" or job["desired_state"] != "running":
+                continue
+            try:
+                progress = self.fixed_transfer_progress(account, job["config"], task=job["task"])
+            except RecoveryConflict:
+                continue
+            if progress["completed"] and not progress["uncertain"]:
+                self.complete_job(account, job["id"], revision=job["revision"],
+                                  warehouse_reason=progress.get("hold_reason") or "warehouse_intent_exhausted")
 
     def _resume_permitted(self, conn, account: Account, epoch: str) -> bool:
         policy = self._policy(conn, account)
@@ -773,7 +815,10 @@ class RecoveryStore:
             "uncertain": pending > 0 or row["status"] not in (
                 ("prepared", "running", "complete", "capacity_reached", "held_stock")
                 if task == "fillCityWarehouse" else ("prepared", "running", "complete")),
-            "completed": all(t == s for t, s in zip(target, sent)) or (task == "fillCityWarehouse" and row["status"] == "capacity_reached"),
+            "completed": (all(t == s for t, s in zip(target, sent)) or
+                          (task == "fillCityWarehouse" and row["status"] == "capacity_reached"))
+                         and (task != "fillCityWarehouse" or (pending == 0 and row["status"] in
+                              ("prepared", "running", "complete", "capacity_reached", "held_stock"))),
             **({"hold_reason": "warehouse_source_stock_missing"} if task == "fillCityWarehouse" and row["status"] == "held_stock" else {}),
             **({"hold_reason": "warehouse_capacity_reached"} if task == "fillCityWarehouse" and row["status"] == "capacity_reached" else {}),
         }

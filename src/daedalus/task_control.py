@@ -479,6 +479,8 @@ class TaskController:
                 if ("fillCityWarehouse" in active or
                         (task == "fillCityWarehouse" and active & TRANSPORT_TASKS)):
                     raise TaskUnavailable("Stop overlapping warehouse transport tasks first")
+                if self._recovery_store is not None and "fillCityWarehouse" not in active:
+                    self._recovery_store.settle_warehouse_jobs(account)
             if task == "vacationMode":
                 if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
                     raise TaskUnavailable("Disable automatic recovery before activating vacation mode")

@@ -719,3 +719,46 @@ def test_warehouse_checkpoint_counter_without_receipt_fails_closed(checkpointed_
                      ("[[0,0,40,0,0],[0,0,0,0,0]]", config["transfer_id"]))
     with pytest.raises(RecoveryConflict):
         db.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+
+def test_verified_capacity_completion_survives_revision_and_reopened_space(offline, checkpointed_fill, monkeypatch):
+    from daedalus.recovery_reconcile import warehouse_fill_plan
+
+    account, config, db, _journal = checkpointed_fill
+    ipc = Mock()
+    ipc.cities.return_value = [{"id": k} for k in NAMES]
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: 150)
+    ipc.fill_preview.return_value = worker.preview_fill(offline, DRAFT)
+    plan = warehouse_fill_plan(db, ipc, account, config)
+    assert plan.reason == "warehouse_capacity_reached"
+    job = db.desired(account)[0]
+    assert db.complete_job(account, job["id"], revision=job["revision"], warehouse_reason=plan.reason)
+    complete = db.desired(account)[0]
+    assert complete["desired_state"] == "completed"
+    assert db.warehouse_reason(account, complete["id"], complete["revision"]) == plan.reason
+    assert warehouse_fill_plan(db, Mock(), account, config).reason == plan.reason
+
+
+def test_settle_terminal_warehouse_jobs_and_reject_wrong_executor(offline, checkpointed_fill, monkeypatch):
+    from ikabot.helpers.fixedTransferJournal import FixedTransferJournal, FixedTransferUnsafe
+
+    account, config, db, _journal = checkpointed_fill
+    with pytest.raises(FixedTransferUnsafe, match="warehouse observation"):
+        FixedTransferJournal(offline, config["transfer_id"], worker._reviewed_routes(config))
+    monkeypatch.setattr(worker, "incoming_amount", lambda *_: 150)
+    worker.fill.__wrapped__(offline, **config)
+    db.settle_warehouse_jobs(account)
+    job = db.desired(account)[0]
+    assert job["desired_state"] == "completed"
+    assert db.warehouse_reason(account, job["id"], job["revision"]) == "warehouse_capacity_reached"
+
+
+def test_warehouse_recovery_reports_unavailable_fleet(checkpointed_fill):
+    from daedalus.engine_ipc import FillPreviewUnavailable
+    from daedalus.recovery_reconcile import warehouse_fill_plan
+
+    account, config, db, _journal = checkpointed_fill
+    ipc = Mock()
+    ipc.cities.return_value = [{"id": k} for k in NAMES]
+    ipc.fill_preview.side_effect = FillPreviewUnavailable("fill_fleet_unavailable")
+    plan = warehouse_fill_plan(db, ipc, account, config)
+    assert (plan.state, plan.reason) == ("deferred", "warehouse_fleet_unavailable")

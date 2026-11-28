@@ -318,7 +318,8 @@ class RecoverySupervisor:
                     if progress["uncertain"]:
                         continue
                     if progress["completed"]:
-                        self.store.complete_job(account,job["id"],revision=job["revision"])
+                        self.store.complete_job(account,job["id"],revision=job["revision"],
+                                                warehouse_reason=progress.get("hold_reason") or "warehouse_intent_exhausted")
                         continue
                     self.store.record_loss(account)
                     break
@@ -408,6 +409,8 @@ class RecoverySupervisor:
             return totals
         active={str(row["task"]) for row in running
                 if row.get("status") in ("running","stopping")}
+        if "fillCityWarehouse" not in active:
+            self.store.settle_warehouse_jobs(account)
         jobs=self.store.desired(account,include_config=True)
         for job in jobs:
             if job["desired_state"]!="running":
@@ -458,7 +461,8 @@ class RecoverySupervisor:
                     self.store.record_warehouse_reason(account, job["id"], job["revision"], plan.reason)
                 if plan.state=="completed":
                     if self.store.complete_job(
-                        account,job["id"],revision=job["revision"],
+                        account,job["id"],revision=job["revision"], epoch=epoch,
+                        warehouse_reason=plan.reason if job["restart_class"]=="warehouse_fill" else None,
                     ):
                         totals["completed"]+=1
                     else:

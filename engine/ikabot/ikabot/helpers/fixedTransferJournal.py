@@ -102,9 +102,11 @@ class FixedTransferJournal:
             raise FixedTransferUnsafe("Fixed transfer is not approved for this identity")
         if row["status"] == "held_stock" and not self.warehouse:
             raise FixedTransferUnsafe("Unexpected transport state")
+        job = conn.execute("SELECT task,restart_class,desired_state FROM desired_jobs WHERE logical_id=?",
+                           (self.transfer_id,)).fetchone()
+        if not self.warehouse and job is not None and job["restart_class"] == "warehouse_fill":
+            raise FixedTransferUnsafe("Warehouse checkpoint requires warehouse observation policy")
         if self.warehouse:
-            job = conn.execute("SELECT task,restart_class,desired_state FROM desired_jobs WHERE logical_id=?",
-                               (self.transfer_id,)).fetchone()
             if (job is None or job["task"] != "fillCityWarehouse"
                     or job["restart_class"] != "warehouse_fill"
                     or job["desired_state"] not in ("dispatching", "running")):

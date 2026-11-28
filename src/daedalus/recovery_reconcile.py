@@ -261,6 +261,7 @@ def fixed_transfer_plan(store: Any, ipc: Any, account: Account,
 
 def warehouse_fill_plan(store: Any, ipc: Any, account: Account, config: dict[str, Any]) -> ResumePlan:
     """Reconcile remaining caps and fresh storage, not historical stock totals."""
+    from daedalus.engine_ipc import FillPreviewUnavailable
     from daedalus.fill_warehouse_review import validate_fill
     if restart_class_for("fillCityWarehouse", config) != "warehouse_fill":
         return ResumePlan("review", "warehouse_untracked")
@@ -268,13 +269,18 @@ def warehouse_fill_plan(store: Any, ipc: Any, account: Account, config: dict[str
     if progress["uncertain"]:
         return ResumePlan("review", "warehouse_receipt_uncertain")
     if progress["completed"]:
-        return ResumePlan("completed", "warehouse_intent_exhausted")
+        return ResumePlan("completed", progress.get("hold_reason") or "warehouse_intent_exhausted")
     own_ids = {city["id"] for city in ipc.cities(account)}
     if config["destination_city"] not in own_ids or any(
             row["city_id"] not in own_ids for row in config["reviewed_sources"]):
         return ResumePlan("review", "warehouse_city_changed")
     draft = {k: config[k] for k in ("destination_city", "resource", "useFreighters")}
-    fresh = validate_fill(draft, ipc.fill_preview(account, draft))
+    try:
+        fresh = validate_fill(draft, ipc.fill_preview(account, draft))
+    except FillPreviewUnavailable as exc:
+        if exc.reason == "fill_fleet_unavailable":
+            return ResumePlan("deferred", "warehouse_fleet_unavailable")
+        raise
     if fresh["budget"] == 0:
         return ResumePlan("completed", "warehouse_capacity_reached")
     if fresh["total_ships"] <= 0 or fresh["capacity"] <= 0:

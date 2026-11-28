@@ -140,6 +140,7 @@ def test_shipment_ticket_scopes_launch_and_rejects_external_bypass(monkeypatch, 
         return {"task_id": "a"*24, "pid": 1234, "task": task, "status": "running"}
 
     monkeypatch.setattr(ipc, "start_managed_task", start)
+    monkeypatch.setattr(ipc, "list_managed_tasks", lambda _a: [])
     controller = TaskController(accounts, owner, ipc, ledger_path=tmp_path / "tasks.sqlite")
     token = "x"*48
     auth = {"Authorization": "Bearer " + token}
