@@ -67,3 +67,33 @@ def test_beta_refresh_rejects_published_releases_and_existing_tags():
             check(invalid, tag, "")
     with pytest.raises(ValueError):
         check(draft, tag, "existing tag")
+
+def test_stage_later_beta_only_with_matching_metadata(tmp_path):
+    import runpy
+
+    import pytest
+
+    root = Path(__file__).resolve().parents[1]
+    check = runpy.run_path(str(root / "scripts/prepare_beta_release.py"))["release_version"]
+    (tmp_path / "apps/web").mkdir(parents=True)
+    (tmp_path / "src/daedalus").mkdir(parents=True)
+    def stage(py, web, *, runtime=None, lock_version=None):
+        (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{py}"\n')
+        (tmp_path / "src/daedalus/__init__.py").write_text(f'__version__ = "{runtime or py}"\n')
+        (tmp_path / "apps/web/package.json").write_text(json.dumps({"version": web}))
+        (tmp_path / "apps/web/package-lock.json").write_text(json.dumps({
+            "version": web, "packages": {"": {"version": lock_version or web}}}))
+    stage("0.1.1", "0.1.1")
+    assert check(tmp_path) == "0.1.1"
+    stage("0.2.0b1", "0.2.0-beta.1")
+    assert check(tmp_path) == "0.2.0-beta.1"
+    for py, web in (("1.0.0", "1.0.0"), ("0.1.0", "0.1.1"), ("0.1.01", "0.1.01")):
+        stage(py, web)
+        with pytest.raises(ValueError):
+            check(tmp_path)
+    stage("0.1.1", "0.1.1", runtime="0.1.0")
+    with pytest.raises(ValueError):
+        check(tmp_path)
+    stage("0.1.1", "0.1.1", lock_version="0.1.0")
+    with pytest.raises(ValueError):
+        check(tmp_path)

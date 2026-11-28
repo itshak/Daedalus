@@ -6,11 +6,13 @@ secret extraction, tag movement, stable publishing, or backend deployment.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import re
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 
 REPO = "itshak/Daedalus"
@@ -47,6 +49,23 @@ def require_refreshable_draft(release, tag, existing_tag):
         raise ValueError("Refusing to replace a published release, non-beta draft, or existing tag")
 
 
+def release_version(root):
+    """Accept coordinated 0.x beta versions without relaxing stable publishing."""
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    web = json.loads((root / "apps/web/package.json").read_text(encoding="utf-8"))["version"]
+    lock = json.loads((root / "apps/web/package-lock.json").read_text(encoding="utf-8"))
+    tree = ast.parse((root / "src/daedalus/__init__.py").read_text(encoding="utf-8"))
+    runtime = [node.value.value for node in tree.body if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+               and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)]
+    if (not isinstance(web, str) or not re.fullmatch(
+            r"0\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-beta\.[1-9][0-9]*)?", web)
+            or runtime != [project] or re.sub(r"b(\d+)$", r"-beta.\1", project) != web
+            or lock["version"] != web or lock["packages"][""]["version"] != web):
+        raise ValueError("Expected matching Python, runtime, web and lockfile beta versions")
+    return web
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revision", required=True, help="Exact approved main commit SHA")
@@ -62,9 +81,7 @@ def main():
         raise SystemExit("Run from a clean checkout of the exact approved revision")
     if command("gh", "api", f"repos/{REPO}/git/ref/heads/main", "--jq", ".object.sha") != sha:
         raise SystemExit("The approved revision is no longer main")
-    version = json.loads((root / "apps/web/package.json").read_text(encoding="utf-8"))["version"]
-    if not re.fullmatch(r"0\.1\.0(?:-beta\.[1-9][0-9]*)?", version):
-        raise SystemExit("Expected first release version metadata")
+    version = release_version(root)
     tag = "v" + version
     runs = json.loads(command("gh", "run", "list", "--repo", REPO, "--branch", "main", "--commit", sha,
                               "--limit", "100", "--json", "name,headSha,status,conclusion,event,databaseId"))
@@ -94,7 +111,7 @@ def main():
         notes = folder / "notes.md"
         notes.write_text((root / "CHANGELOG.md").read_text(encoding="utf-8") +
                          f"\nSource revision: `{sha}`\n\nDMG SHA-256: `{digest}`\n\n"
-                         "Unnotarized first prerelease. Live-game and physical Mac acceptance are not certified. See the release status and owner acceptance issue for rollout evidence.\n"
+                         "Unnotarized prerelease. Live-game and physical Mac acceptance are not certified. See the release status and owner acceptance issue for rollout evidence.\n"
                          "See https://github.com/itshak/Daedalus/issues/60 and docs/BETA-OPERATION-SCOPE.md.\n", encoding="utf-8")
         if args.refresh_draft:
             # Keep the release unpublished. If asset upload fails, the draft
