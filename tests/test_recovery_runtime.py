@@ -473,3 +473,40 @@ def test_uncertain_warehouse_fences_other_automatic_transport_but_not_alerts(sys
     s.tick()
     assert [r["task"] for r in ctl.started]==["alertAttacks"]
     assert j.summary(a)["manual_review"]==1
+
+
+def test_fast_warehouse_completion_does_not_race_restoration_receipt(system, monkeypatch):
+    from uuid import uuid4
+
+    a,j,_c,_w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],status="started",task_id="old")
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",
+                        lambda *_:SimpleNamespace(state="ready",reason="warehouse_remaining",config=cfg))
+    ctl._ipc=object()
+    def start(*_a, **_kw):
+        # Fresh engine guard observes no destination capacity before the
+        # new task is listed. No game cargo was submitted.
+        with j._db() as conn:
+            conn.execute("UPDATE fixed_transfers SET status='capacity_reached' WHERE transfer_id=?",
+                         (cfg["transfer_id"],))
+        return {"status":"started","task_id":"fast-warehouse"}
+    def list_tasks(_):
+        j.settle_warehouse_jobs(a)
+        return {"engine_tasks":[]}
+    ctl.start=start
+    ctl.list_tasks=list_tasks
+    ctl.stop=lambda *_:pytest.fail("A completed warehouse job is not a user stop")
+    j.record_loss(a)
+    t[0]+=300
+    s.tick()
+    row=j.desired(a)[0]
+    assert row["desired_state"]=="completed"
+    assert row["last_task_id"]=="fast-warehouse"
+    assert j.warehouse_reason(a,row["id"],row["revision"])=="warehouse_capacity_reached"
+    assert j.receipts(a)[0]["status"]=="started"
+    s.tick()
+    assert len(j.receipts(a))==1

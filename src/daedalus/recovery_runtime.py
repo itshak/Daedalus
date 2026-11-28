@@ -489,6 +489,7 @@ class RecoverySupervisor:
                 )
                 totals["skipped"]+=1
                 continue
+            receipt_resolved=False
             try:
                 result=self.controller.start(
                     account.id,prepared["task"],resume_config,
@@ -497,6 +498,7 @@ class RecoverySupervisor:
                 if result.get("status")!="started":
                     raise TaskUnavailable("No fresh engine start receipt")
                 live=self.controller.list_tasks(account.id)["engine_tasks"]
+                fast_completion=None
                 if not any(x.get("task_id")==result["task_id"] and
                            x.get("status")=="running" for x in live):
                     if job["restart_class"] != "warehouse_fill":
@@ -504,6 +506,7 @@ class RecoverySupervisor:
                     progress = self.store.fixed_transfer_progress(account, resume_config, task=job["task"])
                     if progress["uncertain"] or not progress["completed"]:
                         raise TaskUnavailable("New warehouse task has no verified completion")
+                    fast_completion=progress.get("hold_reason") or "warehouse_intent_exhausted"
                 latest=next((row for row in self.store.desired(account)
                             if row["id"]==job["id"]),None)
                 if (not self.store.resume_permitted(account, epoch)
@@ -521,13 +524,31 @@ class RecoverySupervisor:
                     account,job["id"],epoch,status="started",
                     task_id=result["task_id"],revision=prepared["revision"],
                 )
-                active.add(job["task"])
-                totals["restored"]+=1
+                receipt_resolved=True
+                if fast_completion:
+                    # A very short warehouse job may complete before the task
+                    # listing sees it. Resolve its launch receipt first, then
+                    # retire the intent without treating it as stopped.
+                    if self.store.complete_job(account,job["id"],revision=prepared["revision"],
+                                               epoch=epoch,warehouse_reason=fast_completion):
+                        totals["completed"]+=1
+                    else:
+                        latest=next((row for row in self.store.desired(account)
+                                     if row["id"]==job["id"]),None)
+                        totals["completed" if latest and latest["desired_state"]=="completed" else "skipped"]+=1
+                else:
+                    active.add(job["task"])
+                    totals["restored"]+=1
             except Exception:  # noqa: BLE001 - sanitized boundary or independent recovery loop
                 # A lost IPC response may already have launched the task.
                 # Stop the account's entire reconciliation, never retry it.
-                self.store.finish_resume(account,job["id"],epoch,status="unconfirmed")
-                totals["unconfirmed"]+=1
+                if receipt_resolved:
+                    # The launch receipt is already durable; a later local
+                    # terminal-state write failure cannot make it unconfirmed.
+                    totals["skipped"]+=1
+                else:
+                    self.store.finish_resume(account,job["id"],epoch,status="unconfirmed")
+                    totals["unconfirmed"]+=1
                 break
         return totals
 

@@ -451,14 +451,18 @@ class RecoveryStore:
                     LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
                     WHERE c.transfer_id=? AND (c.status='pending' OR
                     (c.status='confirmed' AND v.chunk_id IS NULL)) LIMIT 1""", (job_id,)).fetchone()
-                if pending or job["status"] not in ("prepared", "running", "held_stock", "complete", "capacity_reached"):
+                unresolved_resume = conn.execute("""SELECT 1 FROM resume_receipts
+                    WHERE account_id=? AND logical_id=? AND status IN ('dispatching','unconfirmed') LIMIT 1""",
+                    (account.id, job_id)).fetchone()
+                if pending or unresolved_resume or job["status"] not in ("prepared", "running", "held_stock", "complete", "capacity_reached"):
                     return False
             changed = conn.execute("""UPDATE desired_jobs
                 SET desired_state='completed', revision=revision+1
                 WHERE account_id=? AND identity=? AND logical_id=?
                   AND revision=? AND desired_state='running'
-                  AND restart_class IN ('reconcile_construction','fixed_transfer','warehouse_fill')""",
-                (account.id, identity(account), job_id, revision)).rowcount
+                  AND restart_class IN ('reconcile_construction','fixed_transfer','warehouse_fill')
+                  AND (restart_class!='warehouse_fill' OR ? IS NOT NULL)""",
+                (account.id, identity(account), job_id, revision, warehouse_reason)).rowcount
             if changed and warehouse_reason is not None:
                 conn.execute("UPDATE fixed_transfers SET status=?,updated_at=? WHERE transfer_id=?",
                              ("capacity_reached" if warehouse_reason == "warehouse_capacity_reached" else "complete",
