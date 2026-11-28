@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Daedalus is in **beta (0.1.0)** and has no supported stable release. Security reports about the current default branch and experimental builds are still welcome. Do not assume the project is suitable for production accounts or public network exposure.
+Daedalus is in **beta (0.1.1)** and has no supported stable release. Security reports about the current default branch and experimental builds are still welcome. Do not assume the project is suitable for production accounts or public network exposure.
 
 ## Privately report a vulnerability
 

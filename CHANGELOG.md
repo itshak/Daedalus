@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 — coordinated beta
+
+- Unified account scope across web and native clients, including scoped reads and reviewed mutation invalidation.
+- Production workforce inventory and resource-priority allocation, with reviewed donor release and verified compensation or uncertainty fencing.
+- Restart-safe warehouse fill using bounded original source caps, durable cargo receipts, fresh reconciliation and upstream fleet waiting; legacy/uncertain work remains manual.
+- Native saved-cookie workers participate in delayed automatic recovery and authoritative connection/worker indicators refresh in both clients.
+- Immutable release tooling supports coordinated later beta versions.
+
+The implementation revision passed 959 offline tests (5 skipped) and all applicable CI checks. Real-game effects, actual browser takeover and physical Mac installation remain deferred to owner acceptance [#124](https://github.com/itshak/Daedalus/issues/124); no stable certification.
+
 ## 0.1.0 — first public prerelease
 
 Python, web and macOS application version: `0.1.0`. This is a beta-quality first release, not stable certification. The publication status is authoritative on GitHub Releases.
