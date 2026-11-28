@@ -1,0 +1,5 @@
+# Design
+
+Native cookie startup uses the existing independent world/player IPC proof and shared account coordinator, then transfers the live process and lease to RecoveryWorkers. TaskController adopts that same verified lease; the cookie manager no longer competes for worker shutdown or recovery. The existing supervisor polls native workers, confirms rotation, stops the old process group and records durable loss before delayed reauthentication. Automatic policy opt-out does not turn off health observation. Saved-cookie retry skips accounts with an existing recovery event. After a terminal recovery failure, explicit native login can release a confirmed stopped owner; a freshly verified replacement resolves the failed epoch. Manual review and uncertain-dispatch gates remain unchanged.
+
+The account API excludes known nonauthenticated owned workers from its connected list. The existing desktop assistance poll also fetches account and worker status, replacing stale success or setting unknown on failed polling. No direct network implementation or new login mechanism is introduced.

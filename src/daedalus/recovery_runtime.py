@@ -110,11 +110,14 @@ class ManagedAccountWorker:
         self.process = process
         self.lease = lease
         self.router = router
+        self._stopped = False
 
     def alive(self) -> bool:
         return self.process.poll() is None
 
     def stop(self) -> None:
+        if self._stopped:
+            return
         self.router.drop(self.account.id)
         # Stop all Gameforge task descendants, not merely the IkaBot parent.
         if os.name == "posix":
@@ -129,6 +132,7 @@ class ManagedAccountWorker:
         except subprocess.TimeoutExpired as exc:
             raise RecoveryWorkerError("Recovery worker cleanup is uncertain") from exc
         self.descriptor.unlink(missing_ok=True)
+        self._stopped = True
 
 
 class RecoveryWorkers:
@@ -148,6 +152,31 @@ class RecoveryWorkers:
     def get(self, account: Account) -> ManagedAccountWorker | None:
         with self._mutex:
             return self._workers.get(account.id)
+
+    def adopt_cookie_worker(self, worker: ManagedAccountWorker) -> None:
+        """Transfer an independently verified native worker to the recovery owner."""
+        account = worker.account
+        with self._mutex:
+            if (account.id in self._workers or worker.router is not self.router
+                    or self.owner.active_lease(account.id) is not worker.lease
+                    or worker.lease.phase is not SessionPhase.AUTHENTICATED
+                    or not worker.alive()):
+                raise RecoveryWorkerError("Cookie worker is not an eligible local owner")
+            self.controller.adopt_verified_saved_worker(account.id, worker.lease)
+            if self.broker is not None:
+                self.broker.verified_auto_reconnect(worker.lease, confirmed=True)
+            self._workers[account.id] = worker
+
+    def release_stopped_for_manual_login(self, account: Account) -> None:
+        """Explicit native handoff may replace only a confirmed stopped owner."""
+        with self._mutex:
+            worker = self._workers.get(account.id)
+            if (worker is None or worker.account != account or worker.alive()
+                    or worker.lease.phase is SessionPhase.AUTHENTICATED):
+                raise RecoveryWorkerError("No stopped recovery worker to release")
+            worker.stop()
+            worker.lease.close()
+            del self._workers[account.id]
 
     @staticmethod
     def _descriptor(account: Account) -> Path:
@@ -372,6 +401,7 @@ class RecoverySupervisor:
             if existing.phase is SessionPhase.AUTHENTICATED:
                 existing.transition(SessionPhase.NEEDS_ASSISTANCE)
             self.store.record_loss(account)
+            worker.stop()
             return
         try:
             valid=self.workers.router.validate_account(account)
@@ -555,7 +585,7 @@ class RecoverySupervisor:
     def tick(self) -> None:
         """One bounded reconciliation cycle; called only in backend thread/tests."""
         for account in self.accounts.values():
-            if not self.store.policy(account)["enabled"]:
+            if not account.enabled:
                 continue
             try:
                 self._observe(account)

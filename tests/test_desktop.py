@@ -548,3 +548,28 @@ def test_native_oneclick_demo_does_not_persist_ephemeral_bearer(qt_app, monkeypa
         window.close()
         assert backend is not None
         assert not backend.running
+
+def test_periodic_account_poll_replaces_stale_green_indicators(qt_app, monkeypatch):
+    window = MainWindow()
+    monkeypatch.setattr(window, "_notice", lambda *_: None)
+    row = {"id": "alpha", "world": "s301-en", "player": "Example",
+           "enabled": True, "label": "Synthetic", "session_status": "authenticated"}
+    try:
+        window._show_accounts([row])
+        window.accounts_page.set_connected_ids(["alpha"])
+        window._on_completed("assistance_pending", {
+            "enabled": True, "tickets": [],
+            "accounts": [dict(row, session_status="needs_assistance")],
+            "connected_accounts": [],
+        })
+        assert window.accounts_page._accounts[0]["session_status"] == "needs_assistance"
+        assert not window.accounts_page._connected_ids
+        window._on_failed("assistance_pending", "unavailable")
+        assert window.accounts_page._accounts[0]["session_status"] == "unknown"
+        assert window.accounts_page._connected_ids is None
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qt_app.processEvents()

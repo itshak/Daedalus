@@ -229,7 +229,14 @@ class NativeBrowserHandoff:
                         "This worker is busy or has an uncertain task; reconcile it before login"
                     ) from exc
             elif self.owner.status(account_id) != "not_connected":
-                raise NativeHandoffUnavailable("Another worker owns this game account")
+                prepare = getattr(self.cookie_workers, "prepare_manual_login", None)
+                if callable(prepare):
+                    try:
+                        prepare(account)
+                    except (RuntimeError, OSError, ValueError) as exc:
+                        raise NativeHandoffUnavailable("Another worker owns this game account") from exc
+                if self.owner.status(account_id) != "not_connected":
+                    raise NativeHandoffUnavailable("Another worker owns this game account")
             ticket = str(uuid.uuid4())
             private = x25519.X25519PrivateKey.generate()
             self._pending[ticket] = _Pending(account, private, self.clock() + self.ttl,

@@ -18,8 +18,9 @@ def account_owner(tmp_path):
     return account, owner
 
 
+@pytest.mark.parametrize("managed", [False, True])
 def test_verified_cookie_worker_attaches_only_after_private_ipc_player_probe(
-    monkeypatch, tmp_path, account_owner,
+    monkeypatch, tmp_path, account_owner, managed,
 ):
     import daedalus.browser_cookie_workers as module
 
@@ -63,7 +64,15 @@ def test_verified_cookie_worker_attaches_only_after_private_ipc_player_probe(
         use=lambda aid, path: calls.append(("routed", aid, path)),
         drop=lambda aid: calls.append(("dropped", aid)),
     )
-    workers = BrowserCookieWorkers(owner, router, launch_timeout=1)
+    manager = None
+    if managed:
+        from daedalus.recovery_runtime import RecoveryWorkers
+        ctl = SimpleNamespace(adopt_verified_saved_worker=lambda aid, lease: (
+            calls.append(("adopted", aid, lease))
+        ))
+        manager = RecoveryWorkers(owner, ctl, router, SimpleNamespace())
+    workers = BrowserCookieWorkers(owner, router, launch_timeout=1,
+                                   recovery_workers=manager)
     assert owner.status("alpha") == "not_connected"
     workers.start(account)
     assert owner.status("alpha") == "authenticated"
@@ -72,7 +81,15 @@ def test_verified_cookie_worker_attaches_only_after_private_ipc_player_probe(
     )
     with pytest.raises(RecoveryWorkerError, match="Another worker owns"):
         workers.start(account)
-    workers.close()
+    if managed:
+        assert manager.get(account).lease is owner.active_lease(account.id)
+        assert not workers._workers
+        assert any(isinstance(call, tuple) and call[0] == "adopted" for call in calls)
+        workers.close()
+        assert owner.status("alpha") == "authenticated"
+        manager.close()
+    else:
+        workers.close()
     assert owner.status("alpha") == "not_connected"
     assert ("dropped", "alpha") in calls
 

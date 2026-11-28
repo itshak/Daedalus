@@ -358,6 +358,9 @@ class TaskController:
         """
         with self._mutex:
             account = self._account(account_id)
+            previous = self._owned.get(account_id)
+            if previous is not None and previous.phase is SessionPhase.CLOSED:
+                self._owned.pop(account_id, None)
             if (
                 lease.account != account
                 or lease._coordinator is not self._coordinator
@@ -392,7 +395,8 @@ class TaskController:
     def owned_sessions(self) -> tuple[OwnedAccountSession, ...]:
         """Immutable snapshot for the opt-in trusted monitor; no IPC request."""
         with self._mutex:
-            return tuple(self._owned.values())
+            return tuple(lease for lease in self._owned.values()
+                         if lease.phase is not SessionPhase.CLOSED)
 
     def preflight(self, account_id: str, task: str) -> dict[str, object]:
         """Never reserve a dispatch; return only checked prerequisites."""

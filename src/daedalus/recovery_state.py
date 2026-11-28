@@ -384,6 +384,18 @@ class RecoveryStore:
                  now, account.id, epoch))
             conn.commit()
 
+    def note_verified_manual_recovery(self, account: Account) -> None:
+        """A separately attested explicit browser login resolves a failed epoch."""
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            event = self._event(conn, account)
+            if event and event["phase"] == "failed":
+                now = self._clock()
+                conn.execute("""UPDATE events SET state='restored',due_at=?,
+                    last_reason='verified',updated_at=? WHERE account_id=? AND epoch=?""",
+                    (now, now, account.id, event["epoch"]))
+            conn.commit()
+
     def capture_started(self, account: Account, task: str, config: dict,
                         task_id: str, *, restart_class: str | None = None) -> str:
         clean, digest = validated_configuration(config)

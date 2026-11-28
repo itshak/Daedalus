@@ -18,6 +18,8 @@ The Next.js dashboard shows recovery phases, confirmed loss time, countdown, pau
 
 Disabling the account policy cancels pending reconnection, not a game operation that was already committed.
 
+Native-browser cookie workers share the same verified recovery supervisor when it is enabled. A live process is not proof of authentication; confirmed rotation stops the invalid worker, updates the account state and records the grace deadline. The Mac periodically refreshes session and worker indicators, including an unknown state when the status request fails. The server still requires an explicitly imported protected lobby credential for unattended login. An exhausted recovery can be replaced through explicit native browser sign-in after the old worker is confirmed stopped.
+
 ## Jobs after reconnect
 
 When a managed IkaBot task is launched through Daedalus, the controller now persists its validated, secret-free configuration as a **desired running job**, separate from the original durable task receipt. Stopping the task changes desired state to stopped *before* contacting a potentially unavailable old worker, so it is not unintentionally revived during the next recovery.
