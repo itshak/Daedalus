@@ -9,6 +9,7 @@ A reviewed production allocation SHALL default to prioritizing the selected reso
 - **THEN** the minimum necessary wood workers are released, crystal is filled to the feasible target, and unused released citizens are restored to wood up to its original allocation
 
 #### Scenario: Exact shortfall cannot be calculated
+- **GIVEN** single-resource planning allows the fallback by default unless available-only or the fallback opt-out is selected
 - **WHEN** an explicitly reviewed fallback is necessary and initial allocations are authoritatively known
 - **THEN** the donor can be temporarily emptied, the selected resource maximized and surplus returned to the donor
 - **AND** uncertain assignment or ownership MUST stop further writes for reconciliation

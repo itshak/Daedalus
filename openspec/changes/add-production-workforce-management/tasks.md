@@ -1,12 +1,14 @@
 # Implementation checklist
 
-- [ ] Audit upstream slider, citizen, overcharge semantics and safe authoritative readback; test unknown data and exact-count representability.
+- [x] Audit pinned upstream slider, citizen and overcharge contracts; implement fail-closed unknown data and exact-count planning with synthetic tests.
 - [x] Build scoped read-only production inventory and city/resource discovery via existing helpers; explicit unavailable data.
 - [x] Add exact/percentage/max reviewed planner and default priority vs available-only policy with donor before/after and staged fallback.
-- [ ] Implement durable staged assignment, minimum release, authoritative readback, leftover restoration, compensation/recovery fencing and idempotency using upstream shared mutation helper.
+- [x] Implement durable staged assignment, minimum release, authoritative readback, leftover restoration, proven local-refusal compensation/recovery fencing and idempotency using upstream shared mutation helper.
 - [x] Implement reviewed resource-specific batch plans for all/selected accounts and cities; per-city result and partial failures, no unrelated assignments.
 - [x] Build Production web/native editors and bulk actions, academy/temple sections, default unchecked available-only checkbox and explicit review; translations/accessibility.
-- [ ] Test sufficient/insufficient citizens, extra capacity, both resources, release-minimum and fallback, donor restoration, rejection/timeout/crash/readback mismatch, population changes, account scope, no science/temple changes, synthetic E2E and upstream parity.
+- [x] Test sufficient/insufficient citizens, extra capacity, both resources, release-minimum and fallback, donor restoration, proven local refusal/timeout/crash/readback mismatch, population changes, account scope, no unrelated workforce changes, synthetic E2E and upstream parity.
+- [ ] Verify complete CI on final revision.
+- [ ] Confirm actual authenticated game slider/readback and workerPlan definitive server-rejection semantics; live-game acceptance remains unperformed.
 
 ## Initial implementation evidence (in progress)
 
@@ -53,3 +55,5 @@
 - A definitive local pre-POST refusal is now identified by the shared cookie-worker session preflight, not by guessing at a workerPlan response. The staged executor re-reads exact original target and reduced donor counts, records the rejected target, restores only fresh available citizens within the original donor cap, and records a rejected city/partial run only after full verified restoration. Changed readback or incomplete restoration remains fenced. Unattested game-server responses, transport errors and silent unchanged assignments still require manual reconciliation.
 - Verification: 78 focused controller/native/hygiene tests; 2 native production UI tests (including the new scoped fallback and editor navigation check); 99 web unit tests; TypeScript and Python lint pass. The existing control-center lint warnings are unchanged.
 - Remaining live-only evidence: actual slider/current/extra semantics and authenticated workerPlan failure/response behavior, and final real-game acceptance. No server rejection code is assumed. Keep live acceptance unclaimed.
+
+- Protected cookie POST boundary regression verifies a known wrong-city preflight emits the typed refusal before any POST, while a transport timeout sends exactly once and remains uncertain. 34 focused Production engine/controller/native tests pass.

@@ -489,3 +489,29 @@ def test_refusal_with_insufficient_citizens_restores_only_safe_count(staged_city
     assert f.calls == [("resource", 400), ("resource", 450)]
     with f.store._db() as conn:
         assert conn.execute("SELECT status FROM production_runs").fetchone()[0] == "prepared"
+
+
+def test_cookie_assignment_prepost_refusal_is_distinct_from_unknown_post_outcome():
+    from unittest.mock import Mock
+
+    import requests
+    from ikabot.function.modifyProduction import _submit_worker_assignment
+    from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
+    from ikabot.web.session import Session
+
+    session = Session.__new__(Session)
+    session.host = "s1-en.ikariam.gameforge.com"
+    session.urlBase = "https://" + session.host + "/index.php?"
+    session.username = "Example"
+    session._daedalus_cookies_only = True
+    session.s = Mock()
+    session.get = Mock(return_value='<span id="avatarName">Example</span> currentCityId: 999, actionRequest: "synthetic-token-1234"')
+    with pytest.raises(ReviewedMutationNotSubmitted, match="city context"):
+        _submit_worker_assignment(session, "1", "2", "tradegood", None, 900, reviewed=True)
+    session.s.post.assert_not_called()
+    session.get.return_value = '<span id="avatarName">Example</span> currentCityId: 1, actionRequest: "synthetic-token-1234"'
+    session.s.post.side_effect = requests.exceptions.Timeout("synthetic response lost")
+    with pytest.raises(RuntimeError, match="uncertain") as error:
+        _submit_worker_assignment(session, "1", "2", "tradegood", None, 900, reviewed=True)
+    assert not isinstance(error.value, ReviewedMutationNotSubmitted)
+    session.s.post.assert_called_once()
