@@ -36,6 +36,9 @@ class FakeNative:
 @pytest.fixture
 def mac(monkeypatch, tmp_path):
     native = FakeNative()
+    # The minimal CI environment does not install keyring; never import or
+    # access a real OS credential provider in this synthetic fixture.
+    monkeypatch.setitem(sys.modules, "keyring", native)
     root = tmp_path / "private"
     monkeypatch.setattr(vault, "enabled", lambda: True)
     monkeypatch.setattr(vault, "_native_provider", lambda: native)
