@@ -909,6 +909,7 @@ class MainWindow(FluentWindow):
             lambda: self._request("capabilities")
         )
         self.military_page.refresh_requested.connect(self._queue_military_reads)
+        self.production_page.configure_workers.connect(self._configure_catalog_task)
         self.production_page.refresh_requested.connect(self._queue_production_reads)
         self.production_page.preview_requested.connect(
             lambda grouped: self._request_production_action("production_preview", {"grouped": grouped}))

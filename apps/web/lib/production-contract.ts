@@ -72,13 +72,13 @@ export function verifyProductionRuns(data:unknown,account:string):ProductionRun[
     for(const row of run.cities){
       if(!obj(row)||!int(row.city_id,999999999999)||!row.city_id||cities.has(row.city_id)
         ||!["wood","wine","marble","crystal","sulfur"].includes(String(row.resource))
-        ||!["not_started","running","complete","stale"].includes(String(row.status))
+        ||!["not_started","running","complete","stale","rejected"].includes(String(row.status))
         ||!["target_before","donor_before","donor_release"].every(k=>int(row[k],2000000))||(row.desired!==null&&!int(row.desired,2000000))
         ||!Array.isArray(row.stages)||row.stages.length>3)throw Error("Invalid production receipt");
       cities.add(row.city_id);const stages=new Set();
       for(const stage of row.stages){
         if(!obj(stage)||!["release","target","restore","secondary"].includes(String(stage.stage))||stages.has(stage.stage)
-          ||!["resource","tradegood"].includes(String(stage.kind))||!["pending","confirmed"].includes(String(stage.status))
+          ||!["resource","tradegood"].includes(String(stage.kind))||!["pending","confirmed","rejected"].includes(String(stage.status))
           ||!int(stage.value,2000000))throw Error("Invalid stage");
         if(stage.observed!==undefined&&(!obj(stage.observed)||!int(stage.observed.resource,2000000)||!int(stage.observed.tradegood,2000000)))throw Error("Invalid readback");
         stages.add(stage.stage);

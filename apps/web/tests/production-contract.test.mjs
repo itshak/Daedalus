@@ -36,3 +36,15 @@ test("history and reconciliation routes and receipts remain account scoped",()=>
   assert.equal(allowedRequest("POST",["accounts","a","production-runs",id,"reconcile"],new URLSearchParams()),true);
   assert.equal(allowedRequest("POST",["accounts","a","production-runs","invalid","reconcile"],new URLSearchParams()),false);
 });
+
+
+test("a definitively refused target and confirmed restoration are visible as partial execution",()=>{
+  const id="12345678-1234-4234-8234-123456789abc";
+  const row={city_id:1,resource:"crystal",status:"rejected",target_before:400,donor_before:700,
+    desired:900,donor_release:300,stages:[
+      {stage:"release",kind:"resource",value:400,status:"confirmed"},
+      {stage:"target",kind:"tradegood",value:900,status:"rejected",observed:{resource:400,tradegood:400}},
+      {stage:"restore",kind:"resource",value:700,status:"confirmed"}],
+    result:{city_id:1,target:400,donor:700,shortfall:500}};
+  assert.equal(verifyProductionRuns({account_id:"a",runs:[{run_id:id,status:"partial",cities:[row]}]},"a")[0].cities[0].stages[1].status,"rejected");
+});

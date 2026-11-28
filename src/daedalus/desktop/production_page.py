@@ -20,6 +20,7 @@ from daedalus.production_inventory import validate_production_inventory
 
 
 class ProductionPage(QWidget):
+    configure_workers = Signal(str)
     refresh_requested = Signal(list)
     preview_requested = Signal(dict)
     start_requested = Signal(list)
@@ -87,7 +88,8 @@ class ProductionPage(QWidget):
         self.available_only = CheckBox("Use only available population")
         self.fallback = CheckBox("Allow reviewed full donor release")
         self.fallback.setToolTip("Only if available citizens or target capacity are unknown; restore unused donor workers.")
-        self.available_only.toggled.connect(lambda checked: self.fallback.setChecked(False) if checked else None)
+        self.fallback.setChecked(False)
+        self.available_only.toggled.connect(self._available_policy_changed)
         self.mode.currentIndexChanged.connect(self._update_controls)
         self.available_only.toggled.connect(self._update_controls)
         for widget in (self.mode, self.amount, self.overcharge, self.available_only, self.fallback):
@@ -99,6 +101,10 @@ class ProductionPage(QWidget):
         self.targets.itemChanged.connect(self._target_changed)
         layout.addWidget(self.targets, 1)
         controls = QHBoxLayout()
+        self.configure_button = PushButton("Configure workers")
+        self.configure_button.clicked.connect(lambda: self.configure_workers.emit(
+            "modifyAcademyWorkers" if self.resource_combo.currentData() == "academy" else "modifyTempleWorkers"))
+        controls.addWidget(self.configure_button)
         self.preview_button = PrimaryPushButton("Preview selected cities")
         self.preview_button.clicked.connect(self._preview)
         self.confirm_button = PrimaryPushButton("Confirm and start")
@@ -120,8 +126,14 @@ class ProductionPage(QWidget):
         if self.resource_combo.currentData() == "all":
             self.mode.setCurrentIndex(0)
             self.fallback.setChecked(False)
+        elif self.resource_combo.currentData() in {"wood", "wine", "marble", "crystal", "sulfur"}:
+            self.fallback.setChecked(not self.available_only.isChecked())
         self._discard_review()
         self._render()
+
+    def _available_policy_changed(self, checked):
+        if self.resource_combo.currentData() in {"wood", "wine", "marble", "crystal", "sulfur"}:
+            self.fallback.setChecked(not checked)
 
     def _discard_review(self):
         self._reviews = []
@@ -131,6 +143,8 @@ class ProductionPage(QWidget):
     def _update_controls(self, *_):
         resource = self.resource_combo.currentData()
         both = resource == "all"
+        self.configure_button.setVisible(resource in {"academy", "temple"})
+        self.configure_button.setEnabled(not self._busy and not self._loading and bool(self.eligible_ids()))
         self.both_priority.setVisible(both)
         self.both_priority.setEnabled(not self._busy and not self._reviews and not self._loading)
         editing = not self._loading and not self._busy and not self._reviews and (

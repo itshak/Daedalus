@@ -4,8 +4,8 @@
 - [x] Build scoped read-only production inventory and city/resource discovery via existing helpers; explicit unavailable data.
 - [x] Add exact/percentage/max reviewed planner and default priority vs available-only policy with donor before/after and staged fallback.
 - [ ] Implement durable staged assignment, minimum release, authoritative readback, leftover restoration, compensation/recovery fencing and idempotency using upstream shared mutation helper.
-- [ ] Implement reviewed resource-specific batch plans for all/selected accounts and cities; per-city result and partial failures, no unrelated assignments.
-- [ ] Build Production web/native editors and bulk actions, academy/temple sections, default unchecked available-only checkbox and explicit review; translations/accessibility.
+- [x] Implement reviewed resource-specific batch plans for all/selected accounts and cities; per-city result and partial failures, no unrelated assignments.
+- [x] Build Production web/native editors and bulk actions, academy/temple sections, default unchecked available-only checkbox and explicit review; translations/accessibility.
 - [ ] Test sufficient/insufficient citizens, extra capacity, both resources, release-minimum and fallback, donor restoration, rejection/timeout/crash/readback mismatch, population changes, account scope, no science/temple changes, synthetic E2E and upstream parity.
 
 ## Initial implementation evidence (in progress)
@@ -45,3 +45,11 @@
 - Web and native execution history shows confirmed/pending stage receipts and per-city results. Manual reconciliation requires current allocations and a separate approval; it performs no game write.
 - Verification: 98 web unit tests, 40 focused production/upstream/worker tests, 41 native scope tests, TypeScript, targeted ESLint, repository Python lint. Browser E2E and full latest-head CI remain pending. No live account mutation performed.
 - A definitive target rejection is not exposed as an attested outcome by the existing workerPlan helper. Unknown or unchanged readback therefore fences rather than automatically compensating. Actual game slider semantics and rejection evidence remain unverified. Keep the change active rather than declaring this scenario or live acceptance complete.
+
+
+## Final engineering additions (2026-11-28)
+- All CI jobs on f431770 passed, including the Production-specific browser E2E. Subsequent changes require a fresh matrix.
+- Single-resource plans default to allowing the bounded full donor-release fallback, still subject to explicit reviewed preview/confirmation. Available-only disables it; both-resource plans require a known population and explicit priority. Both clients provide direct navigation from the academy and temple sections to the existing reviewed workforce editors.
+- A definitive local pre-POST refusal is now identified by the shared cookie-worker session preflight, not by guessing at a workerPlan response. The staged executor re-reads exact original target and reduced donor counts, records the rejected target, restores only fresh available citizens within the original donor cap, and records a rejected city/partial run only after full verified restoration. Changed readback or incomplete restoration remains fenced. Unattested game-server responses, transport errors and silent unchanged assignments still require manual reconciliation.
+- Verification: 78 focused controller/native/hygiene tests; 2 native production UI tests (including the new scoped fallback and editor navigation check); 99 web unit tests; TypeScript and Python lint pass. The existing control-center lint warnings are unchanged.
+- Remaining live-only evidence: actual slider/current/extra semantics and authenticated workerPlan failure/response behavior, and final real-game acceptance. No server rejection code is assumed. Keep live acceptance unclaimed.

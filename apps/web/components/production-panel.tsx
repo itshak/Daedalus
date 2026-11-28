@@ -40,7 +40,7 @@ function verified(value:unknown,account:string,city:number):Inventory {
 }
 
 /** Key this view by the shell account identity and refresh generation. */
-export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}){
+export function ProductionPanel({accounts,role,configureWorkers}:{accounts:Account[];role:string;configureWorkers:(task:"modifyAcademyWorkers"|"modifyTempleWorkers")=>void}){
   const {t,locale}=useLanguage();
   const [rows,setRows]=useState<Entry[]>([]);
   const [errors,setErrors]=useState<string[]>([]);
@@ -50,7 +50,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
   const [section,setSection]=useState<"resources"|"academy"|"temple">("resources");
   const [mode,setMode]=useState<ProductionDraft["mode"]>("maximum");
   const [amount,setAmount]=useState("100");
-  const [overcharge,setOvercharge]=useState(false),[availableOnly,setAvailableOnly]=useState(false),[fallback,setFallback]=useState(false);
+  const [overcharge,setOvercharge]=useState(false),[availableOnly,setAvailableOnly]=useState(false),[fallback,setFallback]=useState(true);
   const [excluded,setExcluded]=useState<string[]>([]);
   const [overrides,setOverrides]=useState<Record<string,string>>({});
   const [reviews,setReviews]=useState<{review:PriorityReview;deadline:number}[]>([]);
@@ -145,7 +145,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
     <div className="under-tabs" role="group" aria-label={t("Workforce section")}>
       {(["resources","academy","temple"] as const).map(key=><button key={key} aria-pressed={section===key} className={section===key?"tab-selected":""} disabled={pending} onClick={()=>{setSection(key);reset();}}>{t(key==="resources"?"Production resources":key==="academy"?"Academy scientists":"Temple priests")}</button>)}
     </div>
-    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select aria-label={t("Resource")} value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setBothPriority("");setMode("maximum");setFallback(false);setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
+    {section==="resources"&&<label className="field"><span>{t("Resource")}</span><select aria-label={t("Resource")} value={filter} disabled={pending} onChange={e=>{setFilter(e.target.value);setBothPriority("");setMode("maximum");setFallback(e.target.value!=="all");setExcluded([]);setOverrides({});reset();}}><option value="all">{t("All resources")}</option>{resources.map(key=><option key={key} value={key}>{t(capital(key))}</option>)}</select></label>}
     {section==="resources"&&role!=="viewer"&&<section className="panel">
       <div className="panel-heading"><div><h3>{t("Reviewed production allocation")}</h3><p>{t("Choose one resource priority, or explicitly prioritize one site when filling both.")}</p></div></div>
       <div className="form-grid">
@@ -153,8 +153,8 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
         <label className="field"><span>{t("Target")}</span><select value={mode} disabled={!canEdit||filter==="all"} onChange={e=>setMode(e.target.value as ProductionDraft["mode"])}><option value="maximum">{t("Maximum")}</option><option value="percentage">{t("Percentage")}</option><option value="exact">{t("Exact workers")}</option></select></label>
         {mode!=="maximum"&&<label className="field"><span>{t("Amount")}</span><input type="number" min={0} max={mode==="percentage"?100:2000000} value={amount} disabled={!canEdit} onChange={e=>setAmount(e.target.value)}/></label>}
         <label><input type="checkbox" checked={overcharge} disabled={!canEdit} onChange={e=>setOvercharge(e.target.checked)}/> {t("Include extra workers")}</label>
-        <label><input type="checkbox" checked={availableOnly} disabled={!canEdit} onChange={e=>{setAvailableOnly(e.target.checked);if(e.target.checked)setFallback(false);}}/> {t("Use only available population")}</label>
-        <label><input type="checkbox" checked={fallback} disabled={!canEdit||availableOnly||filter==="all"} onChange={e=>setFallback(e.target.checked)}/> {t("Allow reviewed temporary full donor release if population or capacity is unknown")}</label>
+        <label><input type="checkbox" checked={availableOnly} disabled={!canEdit} onChange={e=>setAvailableOnly(e.target.checked)}/> {t("Use only available population")}</label>
+        <label><input type="checkbox" checked={fallback&&!availableOnly&&filter!=="all"} disabled={!canEdit||availableOnly||filter==="all"} onChange={e=>setFallback(e.target.checked)}/> {t("Allow reviewed temporary full donor release if population or capacity is unknown")}</label>
       </div>
       {(filter!=="all"||bothPriority!=="")&&<div className="table-scroll"><table><thead><tr><th>{t("Include")}</th><th>{t("Account")}</th><th>{t("City")}</th><th>{t("Exact override (optional)")}</th></tr></thead><tbody>
         {visible.filter(r=>r.inventory).map(row=><tr key={keyOf(row)}><td><input type="checkbox" aria-label={row.cityName} checked={!excluded.includes(keyOf(row))} disabled={!canEdit} onChange={e=>setExcluded(old=>e.target.checked?old.filter(k=>k!==keyOf(row)):[...old,keyOf(row)])}/></td><td>{names[row.account]}</td><td>{row.cityName}</td><td><input type="number" min={0} max={2000000} aria-label={t("Exact override (optional)")+" "+row.cityName} value={overrides[keyOf(row)]??""} disabled={!canEdit||filter==="all"||excluded.includes(keyOf(row))} onChange={e=>setOverrides(old=>({...old,[keyOf(row)]:e.target.value}))}/></td></tr>)}
@@ -165,6 +165,7 @@ export function ProductionPanel({accounts,role}:{accounts:Account[];role:string}
       {pending&&<p role="status">{t("Preparing…")}</p>}{message&&<p role="status">{t(message)}</p>}
       {results.length>0&&<ul>{results.map(r=><li key={r.account_id}>{names[r.account_id]} · {t(r.status)}</li>)}</ul>}
     </section>}
+    {section!=="resources"&&role!=="viewer"&&<div className="report-tools"><button className="secondary-button" onClick={()=>configureWorkers(section==="academy"?"modifyAcademyWorkers":"modifyTempleWorkers")}>{t("Configure workers")}</button></div>}
     <section className="panel">
       <div className="panel-heading"><div><h3>{t("City workforce")}</h3><p aria-live="polite">{loading?t("Retrieving current observations…"):t("{count} city observations",{count:rows.length})}</p></div></div>
       {!!errors.length&&<div role="alert" className="notice">{t("Some accounts could not be retrieved:")} {errors.map(id=>names[id]).join(", ")}</div>}

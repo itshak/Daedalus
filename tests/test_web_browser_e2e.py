@@ -435,6 +435,7 @@ def test_production_priority_review_browser(web_stack):
     page.get_by_role("checkbox",name="Athens",exact=True).wait_for()
     page.get_by_role("checkbox",name="Sparta",exact=True).wait_for()
     assert not page.get_by_role("checkbox",name="Use only available population").is_checked()
+    assert page.get_by_role("checkbox",name="Allow reviewed temporary full donor release",exact=False).is_checked()
     preview=page.get_by_role("button",name="Preview · 2",exact=True)
     confirm=page.get_by_role("button",name="Confirm and start",exact=False)
     state["invalid_production"]=True

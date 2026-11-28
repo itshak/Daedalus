@@ -432,3 +432,60 @@ def test_unknown_capacity_after_release_fences_instead_of_guessing(staged_city):
     assert f.calls == [("resource",0)]
     with pytest.raises(ValueError, match="Incomplete"):
         journal.begin_city(plan)
+
+@pytest.mark.parametrize("fill_both", [False, True])
+def test_proven_prepost_target_refusal_restores_original_donor(staged_city, monkeypatch, fill_both):
+    from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
+
+    f = staged_city
+    plan, journal = f.approve(draft(**({"fill_both": True} if fill_both else {})))
+    def reject_target(*args, **kwargs):
+        if args[3] == "tradegood":
+            raise ReviewedMutationNotSubmitted("Known local refusal")
+        f.submit(*args, **kwargs)
+    monkeypatch.setattr(f.module, "_submit_worker_assignment", reject_target)
+    result = f.module.execute_city_production(f.session, plan, journal)
+    assert f.calls == [("resource", 400), ("resource", 700)]
+    assert result == {"city_id": 1, "target": 400, "donor": 700, "shortfall": 500}
+    journal.finish()
+    with f.store._db() as conn:
+        assert [tuple(r) for r in conn.execute("SELECT stage,status FROM production_stages ORDER BY rowid")] == [
+            ("release", "confirmed"), ("target", "rejected"), ("restore", "confirmed")]
+        assert conn.execute("SELECT status FROM production_cities").fetchone()[0] == "rejected"
+        assert conn.execute("SELECT status FROM production_runs").fetchone()[0] == "partial"
+
+
+def test_refusal_with_changed_readback_stays_fenced(staged_city, monkeypatch):
+    from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
+
+    f = staged_city
+    plan, journal = f.approve(draft())
+    def reject_with_changed_state(*args, **kwargs):
+        if args[3] == "tradegood":
+            f.source["sites"]["tradegood"]["current"] += 1
+            raise ReviewedMutationNotSubmitted("Known local refusal")
+        f.submit(*args, **kwargs)
+    monkeypatch.setattr(f.module, "_submit_worker_assignment", reject_with_changed_state)
+    with pytest.raises(f.module.ProductionNeedsReview):
+        f.module.execute_city_production(f.session, plan, journal)
+    assert f.calls == [("resource", 400)]
+    with f.store._db() as conn:
+        assert conn.execute("SELECT status FROM production_stages WHERE stage='target'").fetchone()[0] == "pending"
+
+
+def test_refusal_with_insufficient_citizens_restores_only_safe_count(staged_city, monkeypatch):
+    from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
+
+    f = staged_city
+    plan, journal = f.approve(draft())
+    def reject_with_changed_population(*args, **kwargs):
+        if args[3] == "tradegood":
+            f.source["free_citizens"] = 50
+            raise ReviewedMutationNotSubmitted("Known local refusal")
+        f.submit(*args, **kwargs)
+    monkeypatch.setattr(f.module, "_submit_worker_assignment", reject_with_changed_population)
+    with pytest.raises(f.module.ProductionNeedsReview, match="compensation incomplete"):
+        f.module.execute_city_production(f.session, plan, journal)
+    assert f.calls == [("resource", 400), ("resource", 450)]
+    with f.store._db() as conn:
+        assert conn.execute("SELECT status FROM production_runs").fetchone()[0] == "prepared"

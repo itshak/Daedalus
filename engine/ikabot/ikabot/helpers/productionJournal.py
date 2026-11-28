@@ -79,7 +79,10 @@ class ProductionJournal:
                 if any(type(site.get(k)) is not int or not 0 <= site[k] <= 1_000_000 for k in ("maximum", "extra")):
                     raise ValueError("Target capacity still unknown")
                 desired = site["maximum"] + (site["extra"] if plan["draft"]["overcharge"] else 0)
-            if (stage not in order or stage in prior or any(v != "confirmed" for v in prior.values())
+            compensated = stage == "restore" and prior.get("target") == "rejected"
+            if (stage not in order or stage in prior or any(
+                    v != "confirmed" and not (compensated and k == "target" and v == "rejected")
+                    for k, v in prior.items())
                     or any(order[k] >= order[stage] for k in prior)
                     or kind != plan["target_kind" if stage == "target" else "donor_kind"]
                     or type(value) is not int or not 0 <= value <= 2_000_000
@@ -90,7 +93,7 @@ class ProductionJournal:
                     or (stage == "secondary" and (not plan["draft"].get("fill_both") or
                         not plan["donor_before"] - plan["donor_release"] <= value <= plan["donor_after"] or
                         (plan["donor_release"] and "release" not in prior)))
-                    or (stage == "restore" and (plan["draft"].get("fill_both") or "release" not in prior or
+                    or (stage == "restore" and ((plan["draft"].get("fill_both") and not compensated) or "release" not in prior or
                         not plan["donor_before"] - plan["donor_release"] <= value <= plan["donor_before"]))):
                 raise ValueError("Unsafe production stage")
             conn.execute("""INSERT INTO production_stages
@@ -110,15 +113,45 @@ class ProductionJournal:
                 raise ValueError("Production receipt is not pending")
             conn.commit()
 
-    def complete_city(self, plan, result):
+    def reject_target(self, plan, observed):
+        """Record only a proven no-POST target refusal plus exact readback."""
+        if (observed.get("city_id"), observed.get("island_id"), observed.get("luxury")) != (
+                plan["city_id"], plan["island_id"], plan["luxury"]):
+            raise ValueError("Production rejection identity mismatch")
+        for kind, expected in ((plan["target_kind"], plan["target_before"]),
+                               (plan["donor_kind"], plan["donor_before"] - plan["donor_release"])):
+            site = observed.get("sites", {}).get(kind, {})
+            if site.get("available") is not True or type(site.get("current")) is not int or site["current"] != expected:
+                raise ValueError("Production rejection readback mismatch")
+        with self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._city(conn, plan)
+            changed = conn.execute("""UPDATE production_stages SET status='rejected',
+                observation_json=?,updated_at=? WHERE run_id=? AND city_id=? AND stage='target' AND status='pending'""",
+                (canonical(observed), time.time(), self.run_id, plan["city_id"])).rowcount
+            if changed != 1:
+                raise ValueError("Production target receipt is not pending")
+            conn.commit()
+
+    def complete_city(self, plan, result, *, rejected=False):
         with self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
             self._city(conn, plan)
             if conn.execute("""SELECT 1 FROM production_stages WHERE run_id=? AND city_id=?
                 AND status='pending'""", (self.run_id, plan["city_id"])).fetchone():
                 raise ValueError("Production mutation still pending")
-            conn.execute("UPDATE production_cities SET status='complete',result_json=? WHERE run_id=? AND city_id=?",
-                         (canonical(result), self.run_id, plan["city_id"]))
+            target = conn.execute("""SELECT status FROM production_stages WHERE run_id=? AND city_id=?
+                AND stage='target'""", (self.run_id, plan["city_id"])).fetchone()
+            if rejected and plan["donor_release"]:
+                restore = conn.execute("""SELECT status,value FROM production_stages WHERE run_id=? AND city_id=?
+                    AND stage='restore'""", (self.run_id, plan["city_id"])).fetchone()
+                if not restore or restore["status"] != "confirmed" or restore["value"] != plan["donor_before"]:
+                    raise ValueError("Production donor restoration is unconfirmed")
+            if rejected != bool(target and target[0] == "rejected") or (rejected and
+                    (result["target"] != plan["target_before"] or result["donor"] != plan["donor_before"])):
+                raise ValueError("Incomplete production compensation")
+            conn.execute("UPDATE production_cities SET status=?,result_json=? WHERE run_id=? AND city_id=?",
+                         ("rejected" if rejected else "complete", canonical(result), self.run_id, plan["city_id"]))
             conn.commit()
 
     def skip_stale(self, plan):
@@ -135,9 +168,9 @@ class ProductionJournal:
             conn.execute("BEGIN IMMEDIATE")
             self._verify(conn)
             rows = conn.execute("SELECT status FROM production_cities WHERE run_id=?", (self.run_id,)).fetchall()
-            if len(rows) != len(json.loads(self.intent)) or any(r[0] not in ("complete", "stale") for r in rows):
+            if len(rows) != len(json.loads(self.intent)) or any(r[0] not in ("complete", "stale", "rejected") for r in rows):
                 raise ValueError("Production still needs review")
-            status = "partial" if any(r[0] == "stale" for r in rows) else "complete"
+            status = "partial" if any(r[0] != "complete" for r in rows) else "complete"
             conn.execute("UPDATE production_runs SET status=?,updated_at=? WHERE run_id=?",
                          (status, time.time(), self.run_id))
             conn.commit()

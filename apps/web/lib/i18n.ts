@@ -4,6 +4,7 @@ export const LOCALE_COOKIE = "daedalus-locale";
 export const RU: Readonly<Record<string, string>> = {
   "Reviewed production tasks started. Check execution history for completion.": "Проверенные задачи производства запущены. Проверьте историю выполнения.",
   "Production": "Производство",
+  "Configure workers": "Настроить рабочих",
   "Donor": "Другой ресурс",
   "partial": "Частично",
   "prepared": "Подготовлено",

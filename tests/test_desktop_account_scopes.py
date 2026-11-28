@@ -993,3 +993,45 @@ def test_production_inventory_scope_and_refresh_guard(app):
         assert requests[-1] == ["account-1"]
     finally:
         _dispose(page, app)
+
+
+def test_production_default_fallback_and_scoped_native_review(app):
+    from daedalus.desktop.production_page import ProductionPage
+
+    page = ProductionPage()
+    try:
+        page.set_accounts(accounts(2))
+        page.refresh()
+        for i, name in enumerate(("Athens", "Sparta")):
+            aid, city = f"account-{i}", i + 1
+            page.set_cities(aid, [{"id": city, "name": name}])
+            page.set_result(aid, city, {"account_id": aid, "city_id": city,
+                "city_name": name, "island_id": 2, "luxury": "crystal", "free_citizens": None,
+                "sites": {
+                    "resource": {"available": True, "current": 400, "maximum": 500, "extra": 100},
+                    "tradegood": {"available": True, "current": 200, "maximum": 500, "extra": 100},
+                    "academy": {"available": False, "reason": "building_absent"},
+                    "temple": {"available": False, "reason": "building_absent"},
+                }})
+        page.finish_refresh()
+        page.resource_combo.setCurrentIndex(4)
+        assert page.resource_combo.currentData() == "crystal"
+        assert page.fallback.isChecked() and not page.available_only.isChecked()
+        requests = []
+        page.preview_requested.connect(requests.append)
+        page.preview_button.click()
+        assert set(requests[0]) == {"account-0", "account-1"}
+        assert all(rows[0]["draft"]["allow_fallback"] for rows in requests[0].values())
+        page.set_review_unavailable()
+        page.available_only.setChecked(True)
+        page.preview_button.click()
+        assert all(rows[0]["draft"]["available_only"] and not rows[0]["draft"]["allow_fallback"]
+                   for rows in requests[1].values())
+        page.set_review_unavailable()
+        page.resource_combo.setCurrentIndex(6)
+        calls = []
+        page.configure_workers.connect(calls.append)
+        page.configure_button.click()
+        assert calls == ["modifyAcademyWorkers"]
+    finally:
+        _dispose(page, app)

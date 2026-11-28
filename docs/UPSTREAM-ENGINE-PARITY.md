@@ -240,3 +240,7 @@ The test fixture records exact source hashes of preserved upstream queue, parser
 Live acceptance remains separate: the first 81,500-wood shipment was previously observed; later fleet cycles and unrelated game operations remain unverified.
 
 Workshop cookie-only requests stop on uncertain responses or when the next upgrade queue cannot be observed; the original CLI path retains its behavior. These tests use synthetic original request forms only, not game submissions.
+
+
+### Reviewed production compensation
+The production executor continues to use the shared upstream worker assignment form and wait helper. The cookie-only session adapter emits a typed local refusal only for pre-POST identity, city-context or token preflight failures. This proves the reviewed write was not submitted, unlike an HTTP response, timeout or unchanged slider. The production journal allows a bounded compensation stage only following a verified refusal and fresh exact city readback; a complete compensation requires a confirmed restore receipt. No workerPlan server-rejection code is inferred from transport feedback. Synthetic rejection, changed-readback, incomplete-restoration and ambiguity cases are covered in `tests/test_production_workforce.py`. Real game response semantics remain a separate acceptance gate.

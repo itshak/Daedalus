@@ -8,6 +8,7 @@ assignment and is not evidence of an independently configurable extra pool.
 from ikabot.config import island_url
 from ikabot.function.modifyProduction import _read_worker_slider, _submit_worker_assignment
 from ikabot.helpers.varios import wait
+from ikabot.helpers.nativeMutationForms import ReviewedMutationNotSubmitted
 from ikabot.helpers import pedirInfo
 from ikabot.helpers.getJson import getIsland
 from ikabot.helpers.taskConfig import getCityById, requireOwnCity
@@ -222,6 +223,7 @@ def execute_city_production(session, plan, journal):
     A transport error, interruption or unexpected readback leaves the
     pending stage fenced. The upstream helper does not expose a definitive
     rejection contract for workerPlan; never compensate an ambiguous reply.
+    A typed local pre-POST refusal can be compensated after exact readback.
     """
     try:
         fresh = read_city_production(session, plan["city_id"])
@@ -239,7 +241,10 @@ def execute_city_production(session, plan, journal):
                                   kind, None, value, reviewed=True)
         # Original interactive workerPlan spacing on the same island.
         wait(2, 2)
-        after = read_city_production(session, plan["city_id"])
+        try:
+            after = read_city_production(session, plan["city_id"])
+        except ReviewedMutationNotSubmitted as exc:
+            raise ProductionNeedsReview("Production readback unavailable after submission") from exc
         _same_counts(after, plan, expected_target, expected_donor)
         journal.confirm(plan, stage, after)
         return after
@@ -253,7 +258,25 @@ def execute_city_production(session, plan, journal):
         site = fresh["sites"][plan["target_kind"]]
         desired = site["maximum"] + (site["extra"] if plan["draft"]["overcharge"] else 0)
     if wanted != target:
-        fresh = submit("target", plan["target_kind"], wanted, wanted, donor)
+        try:
+            fresh = submit("target", plan["target_kind"], wanted, wanted, donor)
+        except ReviewedMutationNotSubmitted:
+            # The shared session layer proves it did not send this POST.
+            # Do not infer rejection from a response, exception or unchanged slider.
+            fresh = read_city_production(session, plan["city_id"])
+            _same_counts(fresh, plan, target, donor)
+            journal.reject_target(plan, fresh)
+            if plan["donor_release"]:
+                restored = donor_restore_target(plan, fresh, target)
+                if restored != donor:
+                    fresh = submit("restore", plan["donor_kind"], restored, target, restored)
+                    donor = restored
+                if donor != plan["donor_before"]:
+                    raise ProductionNeedsReview("Production donor compensation incomplete")
+            result = {"city_id": plan["city_id"], "target": target, "donor": donor,
+                      "shortfall": max(0, desired - target)}
+            journal.complete_city(plan, result, rejected=True)
+            return result
         target = wanted
     if plan["draft"].get("fill_both"):
         _same_counts(fresh, plan, target, donor)
