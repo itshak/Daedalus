@@ -312,6 +312,13 @@ def fill(session, destination_city, resource, useFreighters=False, reviewed_sour
         sendResources.execute_prepared_shipments(session, **prepared, policy=policy)
     if not policy.full:
         complete = policy.checkpoint is None or policy.checkpoint.warehouse_finish()
+        if not complete:
+            # Source exhaustion can coincide with a fully consumed storage
+            # budget on the final load. Verify that terminal condition instead
+            # of advertising a resumable stock shortage.
+            _, _, free, incoming = _target(session, destination_city, index)
+            if not policy._has_space(max(0, free - incoming)):
+                return
         mark(session, "finished")
         session.setStatus(f"Warehouse fill finished; submitted {policy.sent:,} {resource}" if complete else
                           f"Warehouse fill held: source stock depleted; submitted {policy.sent:,} {resource}")

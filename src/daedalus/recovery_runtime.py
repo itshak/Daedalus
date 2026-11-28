@@ -412,6 +412,7 @@ class RecoverySupervisor:
         if "fillCityWarehouse" not in active:
             self.store.settle_warehouse_jobs(account)
         jobs=self.store.desired(account,include_config=True)
+        uncertain_warehouse=self.store.warehouse_transport_uncertain(account)
         for job in jobs:
             if job["desired_state"]!="running":
                 continue
@@ -428,7 +429,7 @@ class RecoverySupervisor:
                 totals["skipped"]+=1
                 continue
             if (job["task"] in TRANSPORT_TASKS and
-                    ("fillCityWarehouse" in active or
+                    (uncertain_warehouse or "fillCityWarehouse" in active or
                      (job["task"]=="fillCityWarehouse" and active & TRANSPORT_TASKS))):
                 totals["skipped"]+=1
                 continue

@@ -474,7 +474,8 @@ def test_depleted_source_does_not_prevent_other_reviewed_sources(offline, monkey
     assert sent == [("102", 100)]
 
 
-def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monkeypatch):
+@pytest.mark.parametrize("checkpoint_mode", ["legacy", "checkpoint", "restart"])
+def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monkeypatch, tmp_path, checkpoint_mode):
     from types import SimpleNamespace
     from urllib.parse import parse_qs, urlsplit
 
@@ -503,6 +504,7 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
             self.cargo = []
             self.advisor_calls = 0
             self.waits = []
+            self.interrupted = False
 
         @staticmethod
         def response(url, page):
@@ -562,6 +564,9 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
         def wait(self, seconds):
             assert self.free == 0
             self.waits.append(seconds)
+            if checkpoint_mode == "restart" and not self.interrupted:
+                self.interrupted = True
+                raise InterruptedError("Synthetic worker interruption while awaiting fleet")
             self.free = 1
 
     world = World()
@@ -570,6 +575,7 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
     session.urlBase = "https://" + session.host + "/index.php?"
     session.s = world
     session.username = "Mine"
+    session.mundo, session.servidor = "1", "en"
     session._daedalus_cookies_only = True
     session._daedalus_managed_fill = True
     session._daedalus_fill_progress = [0, 0, 0]
@@ -585,7 +591,7 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
 
     def incoming(_session, target, *_args):
         world.selected = target
-        return world.pending
+        return world.pending - 20 if len(_args) == 3 and _args[-1] else world.pending
 
     monkeypatch.setattr(worker, "_city", read_city)
     monkeypatch.setattr(upstream, "getCityById", read_city)
@@ -594,12 +600,44 @@ def test_consolidated_multiple_loads_use_upstream_ajax_fleet_wait(offline, monke
     monkeypatch.setattr(routes, "wait", world.wait)
     monkeypatch.setattr(Session, "_Session__checkCookie", Mock(side_effect=AssertionError("legacy relogin")))
     monkeypatch.setattr(Session, "_Session__token", Mock(side_effect=AssertionError("legacy token")))
-    worker.fill.__wrapped__(session, **DRAFT, reviewed_sources=[{"city_id": 101, "amount": 300}])
+    config = {**DRAFT, "reviewed_sources": [{"city_id": 101, "amount": 300}]}
+    if checkpoint_mode != "legacy":
+        from uuid import uuid4
+
+        from daedalus.recovery_reconcile import warehouse_fill_plan
+        from daedalus.recovery_state import RecoveryStore
+        account = Account("alpha", "s1-en", "Mine", "Mine", True)
+        config["transfer_id"] = str(uuid4())
+        store = RecoveryStore(tmp_path / "private" / "recovery.sqlite3")
+        store.prepare_fixed_transfer(account, config, task="fillCityWarehouse")
+        store.finish_fixed_transfer(account, config["transfer_id"], status="started", task_id="synthetic")
+        monkeypatch.setenv("DAEDALUS_FIXED_TRANSFER_DB", str(store.path))
+    if checkpoint_mode == "restart":
+        with pytest.raises(InterruptedError, match="Synthetic worker interruption"):
+            worker.fill.__wrapped__(session, **config)
+        assert world.cargo == [100]
+        progress = store.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+        assert not progress["uncertain"] and progress["remaining"][0][2] == 200
+        # The first cargo has arrived during downtime and the ship is free again.
+        world.pending = 20
+        world.free = 1
+        city_data[103]["freeSpaceForResources"][2] -= 100
+        city_data[103]["availableResources"][2] += 100
+        ipc = Mock()
+        ipc.cities.return_value = [{"id": k} for k in NAMES]
+        ipc.fill_preview.return_value = worker.preview_fill(session, DRAFT)
+        assert warehouse_fill_plan(store, ipc, account, config).state == "ready"
+    worker.fill.__wrapped__(session, **config)
+    if checkpoint_mode != "legacy":
+        progress = store.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+        assert progress["completed"] and not progress["uncertain"]
+        assert progress["dispatched"] == [[0, 0, 300, 0, 0]]
     assert world.cargo == [100, 100, 100]
     assert world.advisor_calls == 2
     assert world.waits == [120, 120]
     assert snapshot(session._daedalus_fill_progress) == {
-        "stage": "finished", "submitted": 300, "verified": 300}
+        "stage": "finished", "submitted": 200 if checkpoint_mode == "restart" else 300,
+        "verified": 200 if checkpoint_mode == "restart" else 300}
 
 
 @pytest.fixture
@@ -762,3 +800,16 @@ def test_warehouse_recovery_reports_unavailable_fleet(checkpointed_fill):
     ipc.fill_preview.side_effect = FillPreviewUnavailable("fill_fleet_unavailable")
     plan = warehouse_fill_plan(db, ipc, account, config)
     assert (plan.state, plan.reason) == ("deferred", "warehouse_fleet_unavailable")
+
+
+def test_uncertain_warehouse_not_advertised_as_restartable(checkpointed_fill):
+    account, config, db, journal = checkpointed_fill
+    assert db.summary(account)["auto_resume_eligible"] == 1
+    cargo = [0, 0, 40, 0, 0]
+    journal().reserve(0, cargo)
+    assert db.warehouse_transport_uncertain(account)
+    result = db.summary(account)
+    assert result["auto_resume_eligible"] == 0
+    assert result["manual_review"] == 1
+    assert result["desired_jobs"] == 1
+    assert db.fixed_transfer_progress(account, config, task="fillCityWarehouse")["uncertain"]

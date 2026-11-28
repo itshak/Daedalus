@@ -1734,6 +1734,13 @@ def create_app(
         journal=require_recovery_store(account_id)
         account = account_by_id[account_id]
         jobs = journal.desired(account, include_config=True)
+        live = None
+        if any(job["task"] == "fillCityWarehouse" for job in jobs):
+            try:
+                live = require_task_controller(account_id).list_tasks(account_id)["engine_tasks"]
+                jobs = journal.desired(account, include_config=True)
+            except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError, ValueError, HTTPException):
+                pass
         for job in jobs:
             if job["task"] == "fillCityWarehouse" and job["restart_class"] == "manual":
                 job["recovery_reason"] = "warehouse_untracked"
@@ -1752,15 +1759,9 @@ def create_app(
                                               else (progress.get("hold_reason") or "warehouse_intent_exhausted") if progress.get("completed")
                                               else journal.warehouse_reason(account, job["id"], job["revision"])
                                               or progress.get("hold_reason") or "warehouse_remaining")
-        if any(job["task"] == "fillCityWarehouse" for job in jobs):
-            try:
-                live = require_task_controller(account_id).list_tasks(account_id)["engine_tasks"]
-            except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError, ValueError, HTTPException):
-                live = None
-            for job in jobs:
-                if job["task"] == "fillCityWarehouse":
-                    job["observed_status"] = ("unavailable" if live is None else next(
-                        (r["status"] for r in live if r.get("task_id")==job["last_task_id"]), "not_observed"))
+            if job["task"] == "fillCityWarehouse":
+                job["observed_status"] = ("unavailable" if live is None else next(
+                    (r["status"] for r in live if r.get("task_id")==job["last_task_id"]), "not_observed"))
         return {"account_id":account_id,
                 "jobs":jobs,
                 "receipts":journal.receipts(account)}

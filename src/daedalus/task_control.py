@@ -481,6 +481,8 @@ class TaskController:
                     raise TaskUnavailable("Stop overlapping warehouse transport tasks first")
                 if self._recovery_store is not None and "fillCityWarehouse" not in active:
                     self._recovery_store.settle_warehouse_jobs(account)
+                    if not track_desired and self._recovery_store.warehouse_transport_uncertain(account):
+                        raise TaskUnavailable("Uncertain warehouse cargo requires reconciliation")
             if task == "vacationMode":
                 if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
                     raise TaskUnavailable("Disable automatic recovery before activating vacation mode")
@@ -569,12 +571,18 @@ class TaskController:
 
     def list_tasks(self, account_id: str) -> dict[str, object]:
         account = self._account(account_id)
-        # Read can discover an already-running task after a backend restart.
-        return {"account_id": account.id,
-                "engine_tasks": self._ipc.list_managed_tasks(account),
-                "requests": self._ledger.entries(account.id),
-                **({"production_runs": self._recovery_store.production_progress(account)}
-                   if self._recovery_store is not None else {})}
+        with self._mutex:
+            # Read can discover an already-running task after a backend restart.
+            active = self._ipc.list_managed_tasks(account)
+            if self._recovery_store is not None and not any(
+                    row.get("task") == "fillCityWarehouse" and row.get("status") in ("running", "stopping")
+                    for row in active):
+                self._recovery_store.settle_warehouse_jobs(account)
+            return {"account_id": account.id,
+                    "engine_tasks": active,
+                    "requests": self._ledger.entries(account.id),
+                    **({"production_runs": self._recovery_store.production_progress(account)}
+                       if self._recovery_store is not None else {})}
 
     def stop(self, account_id: str, task_id: str) -> dict[str, object]:
         account = self._account(account_id)

@@ -443,3 +443,33 @@ def test_warehouse_cold_start_requires_durable_safe_receipt(system, monkeypatch,
     assert len(ctl.started)==1
     s.tick()
     assert len(ctl.started)==1
+
+
+def test_uncertain_warehouse_fences_other_automatic_transport_but_not_alerts(system, monkeypatch):
+    import json
+    from uuid import uuid4
+
+    a,j,_c,_w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],status="started",task_id="old")
+    with j._db() as conn:
+        conn.execute("""INSERT INTO fixed_transfer_chunks
+            (transfer_id,route_index,cargo_json,status,updated_at) VALUES(?,?,?,'pending',?)""",
+            (cfg["transfer_id"],0,json.dumps([0,0,40,0,0]),t[0]))
+    j.capture_started(a,"consolidateResources",{
+        "limits":[100]*5,"sourceCityIds":[101],"destinationCityId":103,
+        "intervalInHours":1,"shipType":1},"old-transport")
+    j.capture_started(a,"alertAttacks",{"listen":True},"old-alert")
+    assert any(x["restart_class"]=="convergent_transport" for x in j.desired(a))
+    def unsafe_preview(*_):
+        pytest.fail("Uncertain cargo must fence automatic transport before planning")
+    monkeypatch.setattr("daedalus.recovery_runtime.convergent_transport_plan",unsafe_preview)
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",unsafe_preview)
+    j.record_loss(a)
+    t[0]+=300
+    s.tick()
+    assert [r["task"] for r in ctl.started]==["alertAttacks"]
+    assert j.summary(a)["manual_review"]==1

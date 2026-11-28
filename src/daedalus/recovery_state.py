@@ -554,18 +554,46 @@ class RecoveryStore:
                 (account.id, account.id, identity(account))).fetchall()
         return [dict(x) for x in rows]
 
+    def warehouse_transport_uncertain(self, account: Account) -> bool:
+        """Unresolved warehouse cargo must not trigger another automatic transport."""
+        for job in self.desired(account, include_config=True):
+            if (job["restart_class"] != "warehouse_fill"
+                    or job["desired_state"] not in ("running", "dispatching", "review")):
+                continue
+            try:
+                if self.fixed_transfer_progress(account, job["config"], task=job["task"])["uncertain"]:
+                    return True
+            except RecoveryConflict:
+                return True
+        return False
+
     def summary(self, account: Account) -> dict[str,object]:
         p=self.policy(account)
         e=self.event(account)
-        jobs=self.desired(account)
+        jobs=self.desired(account, include_config=True)
+        eligible=manual=0
+        for job in jobs:
+            if job["desired_state"] not in ("running", "review", "dispatching"):
+                continue
+            if job["restart_class"] == "warehouse_fill":
+                try:
+                    progress=self.fixed_transfer_progress(account,job["config"],task=job["task"])
+                except RecoveryConflict:
+                    progress={"uncertain":True}
+                if progress["uncertain"] or job["desired_state"] != "running":
+                    manual+=1
+                elif not progress["completed"]:
+                    eligible+=1
+            elif job["desired_state"] == "running":
+                if job["restart_class"] in ("continuous", "reconcile_construction",
+                        "convergent_transport", "fixed_transfer"):
+                    eligible+=1
+                elif job["restart_class"] == "manual":
+                    manual+=1
         return {"account_id":account.id,"policy":p,"event":e,
                 "desired_jobs":sum(j["desired_state"]=="running" for j in jobs),
-                "auto_resume_eligible":sum(j["restart_class"] in (
-                    "continuous", "reconcile_construction", "convergent_transport",
-                    "fixed_transfer", "warehouse_fill"
-                ) and j["desired_state"]=="running" for j in jobs),
-                "manual_review":sum(j["restart_class"]=="manual" and
-                                    j["desired_state"]=="running" for j in jobs)}
+                "auto_resume_eligible":eligible,
+                "manual_review":manual}
 
     def production_blocked(self, account: Account) -> bool:
         with self._db() as conn:
