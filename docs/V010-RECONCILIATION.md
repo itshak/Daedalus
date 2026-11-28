@@ -80,3 +80,14 @@ The parity source also contains `original-tasks.md` and `prior-checklist.md`. Th
 | redesign-macos-desktop-experience | desktop-client | First-class all-account and selected-account workflows | Reconciled into canonical spec; not proof of implementation. |
 | redesign-macos-desktop-experience | desktop-client | Automatic headless Gameforge authentication with human CAPTCHA only | Superseded by canonical Observable headless Gameforge authentication with visible failure recovery (PR #85). |
 | verify-and-release-cross-platform-parity | controller-api | Exact revision release verification | Reconciled into canonical spec; not proof of implementation. |
+
+- 2026-11-28-add-production-workforce-management: [deferred acceptance record](../openspec/changes/archive/2026-11-28-add-production-workforce-management/consolidation-record.md), issue #124.
+| add-production-workforce-management | web-control-center | Scoped production management | Implemented; owner acceptance deferred to issue #124. |
+| add-production-workforce-management | engine-integration | Reuse reviewed upstream worker assignments | Implemented; owner acceptance deferred to issue #124. |
+| add-production-workforce-management | desktop-client | Native production management | Implemented; owner acceptance deferred to issue #124. |
+| add-production-workforce-management | automation-controller | Resource-priority workforce allocation | Implemented; owner acceptance deferred to issue #124. |
+
+- 2026-11-28-fix-native-worker-recovery: [deferred acceptance record](../openspec/changes/archive/2026-11-28-fix-native-worker-recovery/consolidation-record.md), issue #124.
+| fix-native-worker-recovery | desktop-client | Periodic authoritative account status refresh | Implemented; owner acceptance deferred to issue #124. |
+| fix-native-worker-recovery | automation-controller | Native session loss uses the existing safe-job reconciliation | Implemented; owner acceptance deferred to issue #124. |
+| fix-native-worker-recovery | account-sessions | Unified native worker recovery ownership | Implemented; owner acceptance deferred to issue #124. |

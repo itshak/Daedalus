@@ -5,5 +5,7 @@
 - [x] Preserve explicit manual fallback after failed automatic recovery.
 - [x] Add synthetic regression tests for native worker loss, grace, manual fallback, API connection status and desktop polling.
 ## 2. Verification
-- [ ] Pass the complete offline suite and required GitHub CI on the final revision.
+- [x] Pass the complete offline suite and required GitHub CI on the implementation revision (bad4532; all applicable checks passed).
 - [ ] Verify production deployment and real browser takeover / lobby-token recovery; validate the new Mac build.
+
+Owner explicitly deferred remaining human-only acceptance on 2026-11-28; see [issue #124](https://github.com/itshak/Daedalus/issues/124). Unchecked tasks are unperformed, not passed. The consolidated revision must also pass CI before merge.

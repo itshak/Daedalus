@@ -1029,3 +1029,20 @@ The native shell SHALL expose equivalent scope and target invalidation behavior 
 #### Scenario: Operator switches pages
 - **WHEN** the operator navigates from warehouses to automations
 - **THEN** the same authorized working scope remains selected
+
+### Requirement: Native production management
+The native client SHALL expose equivalent scoped workforce views, bulk actions and explicit reviewed donor policy through the shared controller.
+
+#### Scenario: Operator opens workforce preview
+- **WHEN** a resource priority allocation is selected
+- **THEN** the native review shows target and donor impacts and available-only override
+
+### Requirement: Periodic authoritative account status refresh
+
+The desktop monitoring poll SHALL refresh both backend account session state and worker connection status. Known invalid owned sessions SHALL NOT be displayed as connected workers; a failed account-status poll SHALL replace stale success indicators with unknown rather than implying current authentication.
+
+#### Scenario: External login invalidates a native session
+
+- **GIVEN** an open desktop Accounts screen showing authenticated and connected
+- **WHEN** the backend reports session loss on a subsequent monitoring poll
+- **THEN** both account indicators SHALL reflect the new authoritative state without requiring a manual refresh.
