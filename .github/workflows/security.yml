@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
       - name: Check private runtime filenames in tracked source
         run: python3 scripts/check_clean_import.py
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
