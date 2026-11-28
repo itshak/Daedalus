@@ -27,6 +27,9 @@ def journal(tmp_path):
     intent = canonical_transfer(routes, False)
     with sqlite3.connect(path) as conn:
         conn.executescript("""
+            CREATE TABLE desired_jobs(
+                logical_id TEXT PRIMARY KEY, task TEXT, restart_class TEXT,
+                desired_state TEXT);
             CREATE TABLE fixed_transfers(
                 transfer_id TEXT PRIMARY KEY, account_id TEXT, identity TEXT,
                 world TEXT, player TEXT, intent_json TEXT, dispatched_json TEXT,
@@ -36,6 +39,7 @@ def journal(tmp_path):
                 transfer_id TEXT, route_index INTEGER, cargo_json TEXT,
                 status TEXT, updated_at REAL);
         """)
+        conn.execute("INSERT INTO desired_jobs VALUES(?, 'sendResources', 'fixed_transfer', 'running')", (tid,))
         conn.execute("""INSERT INTO fixed_transfers VALUES(
             ?, 'a','identity','s53-ru','captain',?,?,'prepared',1)""",
             (tid, json.dumps(intent, sort_keys=True, separators=(",", ":")),
