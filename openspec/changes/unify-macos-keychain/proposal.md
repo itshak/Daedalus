@@ -1,0 +1,2 @@
+# Consolidate macOS Keychain access
+Bulk native sign-in currently reads distinct legacy per-account Keychain items in each Selenium helper. Use one application-owned Keychain master key and a local authenticated-encryption record store, shared with saved backend tokens. Retain exact backend/account/world binding and server envelope compatibility. Preserve legacy migration and fail closed on denied or corrupt storage. No authorization bypass.

@@ -188,6 +188,8 @@ def test_captcha_requires_actual_visible_element(monkeypatch):
 
 
 def test_saved_keychain_login_is_exact_backend_and_account_scoped(monkeypatch):
+    from daedalus import shared_keychain
+    monkeypatch.setattr(shared_keychain, "enabled", lambda: False)
     records = {}
 
     monkeypatch.setitem(sys.modules, "keyring", SimpleNamespace(

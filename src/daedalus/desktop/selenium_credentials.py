@@ -46,7 +46,8 @@ def _keyring():
         import keyring
     except ImportError as exc:
         raise LoginCredentialError("macOS Keychain support is not installed") from exc
-    return keyring
+    from daedalus.shared_keychain import provider
+    return provider(keyring)
 
 
 def get_saved_login(origin: str, account_id: str, world: str) -> GameforgeCredentials | None:

@@ -17,6 +17,7 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
+from daedalus import shared_keychain
 from daedalus.desktop.selenium_auth import GameforgeCredentials
 
 logger = logging.getLogger("daedalus.desktop.selenium_worker")
@@ -100,6 +101,8 @@ class SeleniumLoginWorker(QThread):
                     "password": self._credentials.password,
                 } if self._credentials is not None else None),
             }
+            if shared_keychain.enabled():
+                payload["local_vault_state"] = shared_keychain.pipe_state()
             # Parent owns the private Chrome profile root, so hard-killing a
             # stuck helper also scrubs its temporary browser cookies.
             if sys.platform == "darwin":
@@ -141,7 +144,11 @@ class SeleniumLoginWorker(QThread):
                     self.stage_changed.emit("helper_protocol_error")
                     break
                 kind, value = message.get("kind"), message.get("value")
-                if kind == "stage" and isinstance(value, str):
+                if kind == "local_vault_state" and shared_keychain.enabled():
+                    # Never emit this private unlock result as a Qt signal,
+                    # log entry, browser argument, or backend API payload.
+                    shared_keychain.accept_pipe_state(value)
+                elif kind == "stage" and isinstance(value, str):
                     self.stage_changed.emit(value)
                 elif kind == "credentials" and isinstance(value, dict):
                     email = value.get("email")
@@ -172,7 +179,7 @@ class SeleniumLoginWorker(QThread):
                 self.login_failed.emit(
                     "The isolated Selenium browser exited unexpectedly; no session was imported"
                 )
-        except (OSError, ValueError, TypeError) as exc:
+        except (OSError, ValueError, TypeError, shared_keychain.SharedKeychainError) as exc:
             if not self._cancel.is_set():
                 logger.warning("Unable to start or read isolated Selenium process: %s", type(exc).__name__)
                 self.stage_changed.emit("helper_start_failed")

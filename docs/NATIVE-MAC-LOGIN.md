@@ -8,20 +8,25 @@
 
 Daedalus distinguishes **two** independent Keychain operations:
 
-- The genuine **macOS Keychain**, which protects saved Gameforge credentials,
-  the API bearer and the Mac-only key used for encrypted login backups. The
-  user may need to approve access per item, especially when changing to an
-  ad-hoc-signed preview build. Daedalus now restores a valid exact-world legacy
-  session first (without any Keychain read), avoids querying both credential
-  and vault key records for a single login, and never re-encrypts an existing
-  server vault merely because the user signs in again.
+- The genuine **macOS Keychain** protects one application master key.
+  Saved API tokens, scoped Gameforge credentials and the existing per-account
+  server-backup keys reside in owner-private authenticated ciphertext records.
+  Daedalus reuses the unlocked master in memory across its isolated browser
+  helpers through their anonymous private pipes. After migration, no individual
+  account's login needs a Keychain query. A denial is not retried for each
+  account; restart the app to try unlocking again. Exact-world saved sessions
+  can still be restored without any credential access.
+  On upgrade, legacy independently protected items are copied into the encrypted
+  vault on first use, without deleting the originals or changing their ACLs.
+  macOS may require one-time access approval for those old items. Explicit
+  forgetting removes the legacy entry and records a local tombstone.
 - **Chromium Safe Storage**, which is internal to Chrome and not needed for
   Daedalus's temporary browser. On macOS, Selenium uses a fresh owner-private
   profile and Chromium's documented test-only `--use-mock-keychain` switch
   to avoid repeated browser-side OS authorization dialogs. The profile is
   removed when the helper exits, and this switch must NEVER be applied to
-  the operator's regular browser profile. The real Daedalus Keychain is still
-  used to protect persistent secrets.
+  the operator's regular browser profile. The real Daedalus Keychain master key still
+  protects all persistent secrets.
 
 Chrome's visibility is also bounded: after the lobby Play click, Selenium
 follows the game window without switching back to the lobby every poll,
@@ -34,7 +39,9 @@ registration form.
 
 **Limit:** Apple Keychain's consent rules are controlled by macOS, not by
 Selenium. An ad-hoc-signed preview cannot guarantee that "Always Allow"
-persists across future rebuilds. Stable Developer ID signing and normal
+persists across future rebuilds. macOS can also require approval when the
+Keychain is locked or its consent has been revoked. The intended normal
+workflow is one app-wide authorization rather than per-account prompts. Stable Developer ID signing and normal
 notarized distribution remain the supported way to retain code identity
 across releases; the application must not bypass OS approval for persistent
 credentials.

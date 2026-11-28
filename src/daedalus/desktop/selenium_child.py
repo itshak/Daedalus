@@ -40,6 +40,11 @@ def execute(request: dict[str, object]) -> int:
     if not isinstance(record, dict) or record.get("id") != aid or record.get("world") != world:
         _emit("error", "Invalid account selection")
         return 2
+    from daedalus import shared_keychain
+
+    if shared_keychain.enabled():
+        shared_keychain.accept_pipe_state(request.get("local_vault_state"))
+        shared_keychain.observe_unlock(lambda state: _emit("local_vault_state", state))
     credentials = None
     remember = request.get("remember") is True
     entered = request.get("credentials")
@@ -116,28 +121,6 @@ def execute(request: dict[str, object]) -> int:
     _emit("cookie", cookie)
     return 0
 
-    # Do not send a saved password back to the GUI. Only an email address
-    # is required to bind the resulting world cookie to the chosen account.
-    _emit("credentials", {"email": credentials.email, "remember": remember})
-    _emit("stage", "launching_chrome")
-    login_options = {"visible_only": True} if request.get("visible_only") is True else {}
-    cookie = login_world(
-        credentials, world, notify=lambda stage: _emit("stage", stage), **login_options,
-    )
-
-    # Only the client-sealed login envelope is prepared here. The server may
-    # persist it ONLY after independent account verification. Never persist
-    # the plaintext password before that authenticated receipt.
-    vault = None
-    if remember:
-        try:
-            vault = seal_login(origin, aid, world, credentials)
-        except LoginCredentialError:
-            _emit("stage", "keychain_save_failed")
-    if vault is not None:
-        _emit("vault", vault)
-    _emit("cookie", cookie)
-    return 0
 
 
 def main() -> int:

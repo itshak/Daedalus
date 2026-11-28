@@ -87,7 +87,8 @@ def _keyring():
         import keyring
     except ImportError as exc:
         raise PreferenceError("OS keyring support is unavailable") from exc
-    return keyring
+    from daedalus.shared_keychain import provider
+    return provider(keyring)
 
 
 def remember_connection(url: str, token: str, *, path: str | Path | None = None) -> None:
