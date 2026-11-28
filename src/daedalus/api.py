@@ -622,7 +622,10 @@ def create_app(
         # Only configured identities; never enumerate unrelated engine accounts.
         attached = [
             account.id for account in configured_accounts
-            if account.enabled and sum(
+            if account.enabled
+            and (owner.active_lease(account.id) is None
+                 or owner.status(account.id) == SessionPhase.AUTHENTICATED.value)
+            and sum(
                 item["world"].casefold() == account.world.casefold()
                 and item["player"].casefold() == account.player.casefold()
                 for item in live

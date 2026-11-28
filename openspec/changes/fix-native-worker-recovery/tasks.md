@@ -1,0 +1,9 @@
+## 1. Implementation
+- [x] Adopt native browser-cookie workers into the automatic recovery supervisor and shared task controller.
+- [x] Fence periodic cookie restoration against durable recovery events and stop invalid worker descendants.
+- [x] Refresh native session and worker indicators and fail closed on polling errors.
+- [x] Preserve explicit manual fallback after failed automatic recovery.
+- [x] Add synthetic regression tests for native worker loss, grace, manual fallback, API connection status and desktop polling.
+## 2. Verification
+- [ ] Pass the complete offline suite and required GitHub CI on the final revision.
+- [ ] Verify production deployment and real browser takeover / lobby-token recovery; validate the new Mac build.

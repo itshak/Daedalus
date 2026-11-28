@@ -352,7 +352,7 @@ def test_dead_worker_is_definitive_loss_even_without_ipc_probe(system):
     class Lease:
         phase=SessionPhase.AUTHENTICATED
         def transition(self,phase):self.phase=phase
-    w.running=SimpleNamespace(alive=lambda:False,lease=Lease())
+    w.running=SimpleNamespace(alive=lambda:False,lease=Lease(),stop=lambda:None)
     s.tick()
     assert j.event(a)["due_at"]==t[0]+300
     assert w.running.lease.phase==SessionPhase.NEEDS_ASSISTANCE
@@ -397,3 +397,51 @@ def test_identity_change_during_grace_never_starts_replacement_player(system):
     assert not w.starts and not ctl.started
     assert j.event(replacement) is None
     assert not j.desired(replacement)
+
+def test_adopted_native_worker_is_monitored_and_recovered(tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.auth_assistance import AssistanceBroker
+    from daedalus.recovery_runtime import ManagedAccountWorker, RecoveryWorkers
+
+    now = [1000.0]
+    account = Account("native", "s53-ru", "Example", "Example", True)
+    owner = AccountSessionCoordinator([account], state_dir=tmp_path / "locks")
+    lease = owner.acquire(account.id)
+    lease.transition(SessionPhase.AUTHENTICATED)
+    broker = AssistanceBroker(owner)
+    adopted = []
+    controller = SimpleNamespace(
+        adopt_verified_saved_worker=lambda aid, existing: adopted.append((aid, existing)),
+        owned_sessions=lambda: tuple(lease for _, lease in adopted),
+    )
+    valid = [True]
+    router = SimpleNamespace(validate_account=lambda _: valid[0])
+    credentials = SimpleNamespace(available=lambda _: False)
+    workers = RecoveryWorkers(owner, controller, router, credentials, broker)
+    child = ManagedAccountWorker(account, tmp_path / "ipc.json",
+                                 SimpleNamespace(poll=lambda: None), lease, router)
+    child.alive = lambda: not child._stopped
+    child.stop = lambda: setattr(child, "_stopped", True)
+    workers.adopt_cookie_worker(child)
+    assert workers.get(account) is child
+    assert adopted == [(account.id, lease)]
+    store = RecoveryStore(tmp_path / "journal.sqlite", clock=lambda: now[0])
+    supervisor = RecoverySupervisor([account], store, workers, controller,
+                                    credentials, clock=lambda: now[0])
+    supervisor.tick()
+    assert store.event(account) is None
+    valid[0] = False
+    supervisor.tick()
+    now[0] += 30
+    supervisor.tick()
+    assert store.event(account)["phase"] == "grace"
+    assert store.event(account)["due_at"] == now[0] + 300
+    assert owner.status(account.id) == "needs_assistance"
+    assert not child.alive()
+    now[0] += 300
+    supervisor.tick()
+    assert store.event(account)["last_reason"] == "token_unavailable"
+    workers.release_stopped_for_manual_login(account)
+    assert owner.status(account.id) == "not_connected"
+    store.note_verified_manual_recovery(account)
+    assert store.event(account)["phase"] == "restored"
