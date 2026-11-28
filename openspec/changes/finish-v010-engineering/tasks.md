@@ -32,3 +32,5 @@ Only engineering work belongs here. Owner-only live checks are in `docs/V010-OWN
 - Progress: Implemented beta metadata, README, changelog, community docs, web and macOS build provenance and version-consistency tests. Fixed recovery-reconcile test fixtures to use actual restored epochs; full local Python suite 676 passed / 25 skipped. Remaining: final CI, approved release publication/rollout and completion of other workstreams.
 
 - Version-gated Vercel deployment: repository and project Ignored Build Step now distinguish a reviewed main version increase from ordinary development pushes; the manual override is documented. CI remains continuous. Final policy merge and actual deployment observation are required before declaring the coordinated release complete.
+
+- Subsequent beta staging: the existing release tool now accepts coordinated 0.x metadata rather than only 0.1.0. It checks runtime/Python/web/lockfile agreement and retains exact-main CI, immutable tag and checksum safeguards. No version bump or rollout is implied.
