@@ -21,6 +21,12 @@ TOKEN = "synthetic-test-only-" + ("x" * 32)
 URL = "http://127.0.0.1:8765"
 
 
+@pytest.fixture(autouse=True)
+def legacy_provider_only(monkeypatch):
+    from daedalus import shared_keychain
+    monkeypatch.setattr(shared_keychain, "enabled", lambda: False)
+
+
 @pytest.fixture
 def keyring(monkeypatch):
     records = {}
