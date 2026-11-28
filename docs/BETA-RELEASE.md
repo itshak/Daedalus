@@ -39,3 +39,8 @@ Ordinary main pushes and pull requests run GitHub CI but skip Vercel builds. The
 This gate is a version-bump trigger, not a publication or CI approval mechanism: do not bump the version until the release candidate has been reviewed. The GitHub versioned release remains a separate explicit approval. For a failed build, a necessary hotfix without a version increase, or an older revision, use Vercel Deployments → Redeploy and uncheck **Use project's Ignore Build Step**, or manually create a deployment from an exact reviewed Git SHA in the dashboard. Select production only after approval. Do not remove the persistent policy to redeploy. No additional deploy credentials or public hooks are required.
 
 The clean server-only installation must pass `daedalus doctor --smoke` in a fresh virtual environment with a synthetic home. The server extra includes the HTTP client required by that diagnostic; package CI exercises the actual wheel with `[server]` rather than assuming developer-only dependencies are installed. Do not restart an authenticated production worker merely to test installation.
+
+
+## Subsequent beta versions
+
+The same immutable release staging procedure accepts later coordinated 0.x versions (including v0.1.1), with matching Python, runtime, web package and both lockfile version fields. It still requires the exact current main SHA, all seven successful workflows, matching preview tag and DMG checksum. It cannot publish a stable release or replace a published version. A version bump and release approval are separate from this preparation.

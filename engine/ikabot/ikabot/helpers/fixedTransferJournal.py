@@ -52,8 +52,9 @@ def _verified_uuid(value):
 class FixedTransferJournal:
     """Unprivileged engine-facing read/commit access to an existing host ledger."""
 
-    def __init__(self, session, transfer_id, routes, use_freighters=False, *, db_path=None):
+    def __init__(self, session, transfer_id, routes, use_freighters=False, *, db_path=None, warehouse=False):
         self.transfer_id = _verified_uuid(transfer_id)
+        self.warehouse = warehouse
         self.intent = canonical_transfer(routes, use_freighters)
         self.canonical = json.dumps(self.intent, sort_keys=True, separators=(",", ":"))
         self.world = f"s{session.mundo}-{session.servidor}".casefold()
@@ -97,8 +98,19 @@ class FixedTransferJournal:
         ).fetchone()
         if (row is None or row["world"] != self.world or row["player"] != self.player
                 or row["intent_json"] != self.canonical
-                or row["status"] not in ("prepared", "running", "complete")):
+                or row["status"] not in ("prepared", "running", "complete", "held_stock")):
             raise FixedTransferUnsafe("Fixed transfer is not approved for this identity")
+        if row["status"] == "held_stock" and not self.warehouse:
+            raise FixedTransferUnsafe("Unexpected transport state")
+        job = conn.execute("SELECT task,restart_class,desired_state FROM desired_jobs WHERE logical_id=?",
+                           (self.transfer_id,)).fetchone()
+        if not self.warehouse and job is not None and job["restart_class"] == "warehouse_fill":
+            raise FixedTransferUnsafe("Warehouse checkpoint requires warehouse observation policy")
+        if self.warehouse:
+            if (job is None or job["task"] != "fillCityWarehouse"
+                    or job["restart_class"] != "warehouse_fill"
+                    or job["desired_state"] not in ("dispatching", "running")):
+                raise FixedTransferUnsafe("Warehouse intent is no longer approved")
         dispatched = json.loads(row["dispatched_json"])
         targets = [route["resources"] for route in self.intent["routes"]]
         if (not isinstance(dispatched, list) or len(dispatched) != len(targets)
@@ -110,11 +122,17 @@ class FixedTransferJournal:
         return dispatched
 
     def _pending(self, conn):
-        return conn.execute(
+        pending = conn.execute(
             """SELECT chunk_id FROM fixed_transfer_chunks
                WHERE transfer_id=? AND status='pending' LIMIT 1""",
             (self.transfer_id,),
         ).fetchone()
+        if pending is not None or not self.warehouse:
+            return pending
+        return conn.execute("""SELECT c.chunk_id FROM fixed_transfer_chunks c
+            LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
+            WHERE c.transfer_id=? AND c.status='confirmed' AND v.chunk_id IS NULL LIMIT 1""",
+                            (self.transfer_id,)).fetchone()
 
     def remaining(self, index, requested):
         """Never reuse a quantity from an unconfirmed transport POST."""
@@ -198,3 +216,50 @@ class FixedTransferJournal:
     def rejected(self, chunk_id, quantities):
         """Only call for a definitive server 'not dispatched' response."""
         self._transition(chunk_id, quantities, "rejected")
+
+
+    def warehouse_observed(self, quantities):
+        """Attest visibility of exactly one accepted warehouse cargo receipt."""
+        if not self.warehouse:
+            raise FixedTransferUnsafe("Not a warehouse checkpoint")
+        with self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._verify(conn)
+            rows = conn.execute("""SELECT c.chunk_id,c.cargo_json FROM fixed_transfer_chunks c
+                LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
+                WHERE c.transfer_id=? AND c.status='confirmed' AND v.chunk_id IS NULL""",
+                                (self.transfer_id,)).fetchall()
+            if len(rows) != 1 or json.loads(rows[0]["cargo_json"]) != quantities:
+                raise FixedTransferUnsafe("Warehouse receipt cannot be matched to observed cargo")
+            conn.execute("INSERT INTO warehouse_fill_verified VALUES(?,?,?)",
+                         (rows[0]["chunk_id"], self.transfer_id, time.time()))
+            conn.commit()
+
+    def warehouse_capacity_reached(self):
+        """A verified exhausted budget is terminal for this one-time intent."""
+        if not self.warehouse:
+            raise FixedTransferUnsafe("Not a warehouse checkpoint")
+        with self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._verify(conn)
+            if self._pending(conn):
+                raise FixedTransferUnsafe("Warehouse cargo requires reconciliation")
+            conn.execute("UPDATE fixed_transfers SET status='capacity_reached',updated_at=? WHERE transfer_id=?",
+                         (time.time(), self.transfer_id))
+            conn.commit()
+
+
+    def warehouse_finish(self):
+        """Do not call depleted source stock a completed one-time transfer."""
+        if not self.warehouse:
+            raise FixedTransferUnsafe("Not a warehouse checkpoint")
+        with self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            sent = self._verify(conn)
+            if self._pending(conn):
+                raise FixedTransferUnsafe("Warehouse cargo requires reconciliation")
+            complete = all(vec == r["resources"] for vec, r in zip(sent, self.intent["routes"]))
+            conn.execute("UPDATE fixed_transfers SET status=?,updated_at=? WHERE transfer_id=?",
+                         ("complete" if complete else "held_stock", time.time(), self.transfer_id))
+            conn.commit()
+            return complete

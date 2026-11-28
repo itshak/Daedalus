@@ -66,6 +66,9 @@ test("warehouse fill shares storage across all source cities and deducts incomin
  const value={account_id:"alpha",task:"fillCityWarehouse",draft,observation,preview_id:"a".repeat(43),expires_in:120};
  assert.equal(validRewardDistributionRequest({task:"fillCityWarehouse",draft}),true);
  assert.match(parseRewardDistributionReview(value,"alpha","fillCityWarehouse",draft).policySummary,/planned transfer: 130/);
+ assert.match(parseRewardDistributionReview(value,"alpha","fillCityWarehouse",draft).policySummary,/eligibility was not reported/);
+ assert.match(parseRewardDistributionReview({...value,recovery_reason:"warehouse_checkpoint_eligible"},"alpha","fillCityWarehouse",draft).policySummary,/Automatic recovery eligible/);
+ assert.throws(()=>parseRewardDistributionReview({...value,recovery_reason:"unknown"},"alpha","fillCityWarehouse",draft));
  assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,amount:150}},"alpha","fillCityWarehouse",draft));
  assert.throws(()=>parseRewardDistributionReview({...value,observation:{...observation,sources:[observation.sources[0],{...observation.sources[1],amount:50}]}},"alpha","fillCityWarehouse",draft));
  assert.throws(()=>parseRewardDistributionReview(value,"beta","fillCityWarehouse",draft));

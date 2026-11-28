@@ -60,6 +60,41 @@ def canonical_fixed_transfer(config: dict[str, Any]) -> dict[str, Any] | None:
     return {"routes": clean, "useFreighters": freighters}
 
 
+def canonical_warehouse_fill(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Freeze the reviewed one-time source caps; never include new sources."""
+    if not isinstance(config, dict) or set(config) - {
+            "destination_city", "resource", "useFreighters", "reviewed_sources", "transfer_id"}:
+        return None
+    dest, resource = config.get("destination_city"), config.get("resource")
+    sources = config.get("reviewed_sources")
+    keys = ("wood", "wine", "marble", "crystal", "sulfur")
+    if (type(dest) is not int or not 0 < dest < 10**12 or resource not in keys
+            or type(config.get("useFreighters")) is not bool
+            or not isinstance(sources, list) or not 0 < len(sources) <= 40):
+        return None
+    routes, seen = [], set()
+    for row in sources:
+        if not isinstance(row, dict) or set(row) != {"city_id", "amount"}:
+            return None
+        cid, amount = row["city_id"], row["amount"]
+        if (type(cid) is not int or not 0 < cid < 10**12 or cid == dest or cid in seen
+                or type(amount) is not int or not 0 < amount <= 10**12):
+            return None
+        seen.add(cid)
+        cargo = [0] * 5
+        cargo[keys.index(resource)] = amount
+        routes.append({"from": cid, "to": dest, "resources": cargo})
+    return canonical_fixed_transfer({"routes": routes, "useFreighters": config["useFreighters"]})
+
+
+def checkpoint_intent(task, config):
+    if task == "sendResources":
+        return canonical_fixed_transfer(config)
+    if task == "fillCityWarehouse":
+        return canonical_warehouse_fill(config)
+    return None
+
+
 def _valid_transfer_id(value: object) -> bool:
     if not isinstance(value, str):
         return False
@@ -80,6 +115,9 @@ def restart_class_for(task: str, config: dict[str, Any]) -> str:
     if (task == "sendResources" and canonical_fixed_transfer(config) is not None
             and _valid_transfer_id(config.get("transfer_id"))):
         return "fixed_transfer"
+    if (task == "fillCityWarehouse" and canonical_warehouse_fill(config) is not None
+            and _valid_transfer_id(config.get("transfer_id"))):
+        return "warehouse_fill"
     if task == "constructionList":  # noqa: SIM102 - explicit task allowlist
         if (config.get("expand_overall") is True
                 and config.get("wait_resources") is False
@@ -219,3 +257,38 @@ def fixed_transfer_plan(store: Any, ipc: Any, account: Account,
     if progress["completed"]:
         return ResumePlan("completed", "fixed_transfer_dispatched")
     return ResumePlan("ready", "fixed_transfer_remaining", config)
+
+
+def warehouse_fill_plan(store: Any, ipc: Any, account: Account, config: dict[str, Any]) -> ResumePlan:
+    """Reconcile remaining caps and fresh storage, not historical stock totals."""
+    from daedalus.engine_ipc import FillPreviewUnavailable
+    from daedalus.fill_warehouse_review import validate_fill
+    if restart_class_for("fillCityWarehouse", config) != "warehouse_fill":
+        return ResumePlan("review", "warehouse_untracked")
+    progress = store.fixed_transfer_progress(account, config, task="fillCityWarehouse")
+    if progress["uncertain"]:
+        return ResumePlan("review", "warehouse_receipt_uncertain")
+    if progress["completed"]:
+        return ResumePlan("completed", progress.get("hold_reason") or "warehouse_intent_exhausted")
+    own_ids = {city["id"] for city in ipc.cities(account)}
+    if config["destination_city"] not in own_ids or any(
+            row["city_id"] not in own_ids for row in config["reviewed_sources"]):
+        return ResumePlan("review", "warehouse_city_changed")
+    draft = {k: config[k] for k in ("destination_city", "resource", "useFreighters")}
+    try:
+        fresh = validate_fill(draft, ipc.fill_preview(account, draft))
+    except FillPreviewUnavailable as exc:
+        if exc.reason == "fill_fleet_unavailable":
+            return ResumePlan("deferred", "warehouse_fleet_unavailable")
+        raise
+    if fresh["budget"] == 0:
+        return ResumePlan("completed", "warehouse_capacity_reached")
+    if fresh["total_ships"] <= 0 or fresh["capacity"] <= 0:
+        return ResumePlan("deferred", "warehouse_fleet_unavailable")
+    stock = {r["city_id"]: r["stock"] for r in fresh["sources"]}
+    if not all(r["city_id"] in stock for r in config["reviewed_sources"]):
+        return ResumePlan("review", "warehouse_source_unavailable")
+    if not any(min(sum(remaining), stock[row["city_id"]]) > 0
+               for row, remaining in zip(config["reviewed_sources"], progress["remaining"])):
+        return ResumePlan("deferred", "warehouse_source_stock_missing")
+    return ResumePlan("ready", "warehouse_remaining", config)

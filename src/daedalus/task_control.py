@@ -36,6 +36,10 @@ _SECRET_WORDS = frozenset({
 })
 
 
+TRANSPORT_TASKS = {"sendResources", "fillCityWarehouse", "consolidateResources",
+                               "resourceTransportManager", "distributeResources"}
+
+
 class TaskUnavailable(RuntimeError):
     """The task cannot run safely through the currently attached engine."""
 
@@ -354,6 +358,9 @@ class TaskController:
         """
         with self._mutex:
             account = self._account(account_id)
+            previous = self._owned.get(account_id)
+            if previous is not None and previous.phase is SessionPhase.CLOSED:
+                self._owned.pop(account_id, None)
             if (
                 lease.account != account
                 or lease._coordinator is not self._coordinator
@@ -388,7 +395,8 @@ class TaskController:
     def owned_sessions(self) -> tuple[OwnedAccountSession, ...]:
         """Immutable snapshot for the opt-in trusted monitor; no IPC request."""
         with self._mutex:
-            return tuple(self._owned.values())
+            return tuple(lease for lease in self._owned.values()
+                         if lease.phase is not SessionPhase.CLOSED)
 
     def preflight(self, account_id: str, task: str) -> dict[str, object]:
         """Never reserve a dispatch; return only checked prerequisites."""
@@ -444,12 +452,12 @@ class TaskController:
                 raise ValueError("Production requires a protected, reviewed journal")
             clean["production_run_id"] = request_id
         is_fixed = False
-        if task == "sendResources" and self._recovery_store is not None:
-            from daedalus.recovery_reconcile import canonical_fixed_transfer
+        if task in ("sendResources", "fillCityWarehouse") and self._recovery_store is not None:
+            from daedalus.recovery_reconcile import checkpoint_intent
             if track_desired:
                 if "transfer_id" in clean:
                     raise ValueError("Fixed transfer journal key is server-owned")
-                if canonical_fixed_transfer(clean) is not None:
+                if checkpoint_intent(task, clean) is not None:
                     clean["transfer_id"] = request_id
                     is_fixed = True
             else:
@@ -469,6 +477,16 @@ class TaskController:
                     {"modifyProduction", "modifyAcademyWorkers", "modifyTempleWorkers"}
                     for row in self._ipc.list_managed_tasks(account)):
                 raise TaskUnavailable("Stop existing worker assignment tasks first")
+            if task in TRANSPORT_TASKS:
+                active = {row.get("task") for row in self._ipc.list_managed_tasks(account)
+                          if row.get("status") in {"running", "stopping"}}
+                if ("fillCityWarehouse" in active or
+                        (task == "fillCityWarehouse" and active & TRANSPORT_TASKS)):
+                    raise TaskUnavailable("Stop overlapping warehouse transport tasks first")
+                if self._recovery_store is not None and "fillCityWarehouse" not in active:
+                    self._recovery_store.settle_warehouse_jobs(account)
+                    if not track_desired and self._recovery_store.warehouse_transport_uncertain(account):
+                        raise TaskUnavailable("Uncertain warehouse cargo requires reconciliation")
             if task == "vacationMode":
                 if self._recovery_store is not None and self._recovery_store.policy(account)["enabled"]:
                     raise TaskUnavailable("Disable automatic recovery before activating vacation mode")
@@ -492,7 +510,7 @@ class TaskController:
             if is_fixed and track_desired:
                 # Record the immutable original intent before engine dispatch.
                 try:
-                    self._recovery_store.prepare_fixed_transfer(account, clean)
+                    self._recovery_store.prepare_fixed_transfer(account, clean, task=task)
                 except (ValueError, OSError, sqlite3.Error) as exc:
                     raise TaskUnavailable("Unable to persist fixed transfer intent") from exc
             fresh, receipt = self._ledger.reserve(account.id, request_id, task, digest)
@@ -557,12 +575,18 @@ class TaskController:
 
     def list_tasks(self, account_id: str) -> dict[str, object]:
         account = self._account(account_id)
-        # Read can discover an already-running task after a backend restart.
-        return {"account_id": account.id,
-                "engine_tasks": self._ipc.list_managed_tasks(account),
-                "requests": self._ledger.entries(account.id),
-                **({"production_runs": self._recovery_store.production_progress(account)}
-                   if self._recovery_store is not None else {})}
+        with self._mutex:
+            # Read can discover an already-running task after a backend restart.
+            active = self._ipc.list_managed_tasks(account)
+            if self._recovery_store is not None and not any(
+                    row.get("task") == "fillCityWarehouse" and row.get("status") in ("running", "stopping")
+                    for row in active):
+                self._recovery_store.settle_warehouse_jobs(account)
+            return {"account_id": account.id,
+                    "engine_tasks": active,
+                    "requests": self._ledger.entries(account.id),
+                    **({"production_runs": self._recovery_store.production_progress(account)}
+                       if self._recovery_store is not None else {})}
 
     def stop(self, account_id: str, task_id: str) -> dict[str, object]:
         account = self._account(account_id)

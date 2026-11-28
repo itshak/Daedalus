@@ -16,7 +16,7 @@
 
 **Daedalus is an open-source, multi-account management and automation suite for Ikariam, powered by the upstream [IkaBot](https://github.com/Ikabot-Collective/ikabot) engine.** It combines a native macOS application, a responsive web control center, and a self-hosted Python backend. Manage the same accounts and automations from either client, without running a separate bot for each interface.
 
-> **Beta — v0.1.0 target.** The core system is implemented and in use, but this is prerelease software. Live game-changing workflows, recovery and physical Mac acceptance are still being validated. No stable-release certification or guarantee of game outcomes is implied. See [current status](docs/PROJECT-STATUS.md) and [known limitations](#beta-limitations).
+> **Beta — v0.1.1 target.** The core system is implemented and in use, but this is prerelease software. Live game-changing workflows, recovery and physical Mac acceptance are still being validated. No stable-release certification or guarantee of game outcomes is implied. See [current status](docs/PROJECT-STATUS.md) and [known limitations](#beta-limitations).
 
 [Download macOS](https://github.com/itshak/Daedalus/releases) · [Web control center](https://daedalus.tongrix.com) · [Installation and configuration](#getting-started) · [Report a bug](https://github.com/itshak/Daedalus/issues/new/choose)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -622,7 +623,10 @@ def create_app(
         # Only configured identities; never enumerate unrelated engine accounts.
         attached = [
             account.id for account in configured_accounts
-            if account.enabled and sum(
+            if account.enabled
+            and (owner.active_lease(account.id) is None
+                 or owner.status(account.id) == SessionPhase.AUTHENTICATED.value)
+            and sum(
                 item["world"].casefold() == account.world.casefold()
                 and item["player"].casefold() == account.player.casefold()
                 for item in live
@@ -696,8 +700,28 @@ def create_app(
                 validate_market_observation(task, draft, observed)
                 config["reviewed_market"] = True
             ticket = operation_previews.issue(account_id, task, config)
-            return {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
-                    "preview_id": ticket, "expires_in": operation_previews.ttl}
+            response = {"account_id": account_id, "task": task, "draft": draft, "observation": observed,
+                        "preview_id": ticket, "expires_in": operation_previews.ttl}
+            if task == "fillCityWarehouse":
+                from daedalus.recovery_reconcile import canonical_warehouse_fill
+
+                if canonical_warehouse_fill(config) is None:
+                    reason = "warehouse_untracked"
+                elif controller._recovery_store is None or recovery_supervisor is None:
+                    reason = "warehouse_recovery_unavailable"
+                else:
+                    policy = controller._recovery_store.policy(account)
+                    if not policy["enabled"] or not policy["auto_resume"]:
+                        reason = "warehouse_policy_disabled"
+                    elif not recovery_credentials or not recovery_credentials.available(account):
+                        reason = "warehouse_token_unavailable"
+                    elif policy["pause_indefinite"] or (policy["pause_until"] is not None
+                                                        and policy["pause_until"] > time.time()):
+                        reason = "warehouse_recovery_paused"
+                    else:
+                        reason = "warehouse_checkpoint_eligible"
+                response["recovery_reason"] = reason
+            return response
         except FillPreviewUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except ValueError as exc:
@@ -1713,16 +1737,34 @@ def create_app(
         journal=require_recovery_store(account_id)
         account = account_by_id[account_id]
         jobs = journal.desired(account, include_config=True)
+        live = None
+        if any(job["task"] == "fillCityWarehouse" for job in jobs):
+            try:
+                live = require_task_controller(account_id).list_tasks(account_id)["engine_tasks"]
+                jobs = journal.desired(account, include_config=True)
+            except (EngineIPCUnavailable, TaskUnavailable, SessionBusyError, ValueError, HTTPException):
+                pass
         for job in jobs:
-            if job["restart_class"] == "fixed_transfer":
+            if job["task"] == "fillCityWarehouse" and job["restart_class"] == "manual":
+                job["recovery_reason"] = "warehouse_untracked"
+            if job["restart_class"] in ("fixed_transfer", "warehouse_fill"):
                 try:
                     job["transfer_progress"] = journal.fixed_transfer_progress(
-                        account, job["config"],
+                        account, job["config"], task=job["task"],
                     )
                 except RecoveryConflict:
                     # Missing or corrupt progress must be visible as uncertain,
                     # not silently interpreted as zero shipments.
                     job["transfer_progress"] = {"uncertain": True}
+                if job["restart_class"] == "warehouse_fill":
+                    progress = job["transfer_progress"]
+                    job["recovery_reason"] = ("warehouse_receipt_uncertain" if progress["uncertain"]
+                                              else (progress.get("hold_reason") or "warehouse_intent_exhausted") if progress.get("completed")
+                                              else journal.warehouse_reason(account, job["id"], job["revision"])
+                                              or progress.get("hold_reason") or "warehouse_remaining")
+            if job["task"] == "fillCityWarehouse":
+                job["observed_status"] = ("unavailable" if live is None else next(
+                    (r["status"] for r in live if r.get("task_id")==job["last_task_id"]), "not_observed"))
         return {"account_id":account_id,
                 "jobs":jobs,
                 "receipts":journal.receipts(account)}

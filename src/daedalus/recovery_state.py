@@ -16,7 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from daedalus.accounts import Account
-from daedalus.recovery_reconcile import canonical_fixed_transfer, restart_class_for
+from daedalus.recovery_reconcile import checkpoint_intent, restart_class_for
 from daedalus.task_control import validated_configuration
 
 # Only continuously observing tasks with no in-game state-changing operation may
@@ -103,6 +103,14 @@ class RecoveryStore:
                 );
                 CREATE INDEX IF NOT EXISTS fixed_transfer_pending
                     ON fixed_transfer_chunks(transfer_id, status);
+                CREATE TABLE IF NOT EXISTS warehouse_fill_recovery(
+                    transfer_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+                    reason TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS warehouse_fill_verified(
+                    chunk_id INTEGER PRIMARY KEY, transfer_id TEXT NOT NULL,
+                    observed_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS production_runs(
                     run_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
                     identity TEXT NOT NULL, world TEXT NOT NULL, player TEXT NOT NULL,
@@ -376,6 +384,18 @@ class RecoveryStore:
                  now, account.id, epoch))
             conn.commit()
 
+    def note_verified_manual_recovery(self, account: Account) -> None:
+        """A separately attested explicit browser login resolves a failed epoch."""
+        with self._mutex, self._db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            event = self._event(conn, account)
+            if event and event["phase"] == "failed":
+                now = self._clock()
+                conn.execute("""UPDATE events SET state='restored',due_at=?,
+                    last_reason='verified',updated_at=? WHERE account_id=? AND epoch=?""",
+                    (now, now, account.id, event["epoch"]))
+            conn.commit()
+
     def capture_started(self, account: Account, task: str, config: dict,
                         task_id: str, *, restart_class: str | None = None) -> str:
         clean, digest = validated_configuration(config)
@@ -422,18 +442,64 @@ class RecoveryStore:
             **({"config":json.loads(r["config_json"])} if include_config else {}),
         } for r in rows]
 
-    def complete_job(self, account: Account, job_id: str, *, revision: int) -> bool:
-        """Mark an absolute construction target completed only after game readback."""
+    def complete_job(self, account: Account, job_id: str, *, revision: int,
+                     warehouse_reason: str | None = None, epoch: str | None = None) -> bool:
+        """Persist a verified terminal observation and preserve its reason."""
         with self._mutex, self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if epoch is not None and not self._resume_permitted(conn, account, epoch):
+                return False
+            if warehouse_reason is not None:
+                if warehouse_reason not in {"warehouse_capacity_reached", "warehouse_intent_exhausted"}:
+                    raise RecoveryConflict("Invalid warehouse completion reason")
+                job = conn.execute("""SELECT j.restart_class, f.status FROM desired_jobs j
+                    JOIN fixed_transfers f ON f.transfer_id=j.logical_id
+                    WHERE j.logical_id=? AND j.account_id=? AND j.identity=?
+                    AND j.revision=? AND j.desired_state='running'""",
+                    (job_id, account.id, identity(account), revision)).fetchone()
+                if job is None or job["restart_class"] != "warehouse_fill":
+                    return False
+                pending = conn.execute("""SELECT 1 FROM fixed_transfer_chunks c
+                    LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
+                    WHERE c.transfer_id=? AND (c.status='pending' OR
+                    (c.status='confirmed' AND v.chunk_id IS NULL)) LIMIT 1""", (job_id,)).fetchone()
+                unresolved_resume = conn.execute("""SELECT 1 FROM resume_receipts
+                    WHERE account_id=? AND logical_id=? AND status IN ('dispatching','unconfirmed') LIMIT 1""",
+                    (account.id, job_id)).fetchone()
+                if pending or unresolved_resume or job["status"] not in ("prepared", "running", "held_stock", "complete", "capacity_reached"):
+                    return False
             changed = conn.execute("""UPDATE desired_jobs
                 SET desired_state='completed', revision=revision+1
                 WHERE account_id=? AND identity=? AND logical_id=?
                   AND revision=? AND desired_state='running'
-                  AND restart_class IN ('reconcile_construction','fixed_transfer')""",
-                (account.id, identity(account), job_id, revision)).rowcount
+                  AND restart_class IN ('reconcile_construction','fixed_transfer','warehouse_fill')
+                  AND (restart_class!='warehouse_fill' OR ? IS NOT NULL)""",
+                (account.id, identity(account), job_id, revision, warehouse_reason)).rowcount
+            if changed and warehouse_reason is not None:
+                conn.execute("UPDATE fixed_transfers SET status=?,updated_at=? WHERE transfer_id=?",
+                             ("capacity_reached" if warehouse_reason == "warehouse_capacity_reached" else "complete",
+                              self._clock(), job_id))
+                conn.execute("""INSERT INTO warehouse_fill_recovery(transfer_id,revision,reason) VALUES(?,?,?)
+                    ON CONFLICT(transfer_id) DO UPDATE SET revision=excluded.revision,reason=excluded.reason""",
+                    (job_id, revision+1, warehouse_reason))
             conn.commit()
             return changed == 1
+
+    def settle_warehouse_jobs(self, account: Account) -> None:
+        """Retire already verified terminal jobs before matching a new launch.
+
+        Caller must have established that no warehouse worker is active.
+        """
+        for job in self.desired(account, include_config=True):
+            if job["restart_class"] != "warehouse_fill" or job["desired_state"] != "running":
+                continue
+            try:
+                progress = self.fixed_transfer_progress(account, job["config"], task=job["task"])
+            except RecoveryConflict:
+                continue
+            if progress["completed"] and not progress["uncertain"]:
+                self.complete_job(account, job["id"], revision=job["revision"],
+                                  warehouse_reason=progress.get("hold_reason") or "warehouse_intent_exhausted")
 
     def _resume_permitted(self, conn, account: Account, epoch: str) -> bool:
         policy = self._policy(conn, account)
@@ -459,7 +525,7 @@ class RecoveryStore:
             if (not row or row["desired_state"] != "running"
                     or row["restart_class"] not in (
                         "continuous", "reconcile_construction", "convergent_transport",
-                        "fixed_transfer")):
+                        "fixed_transfer", "warehouse_fill")):
                 conn.rollback()
                 return None
             old=conn.execute("""SELECT * FROM resume_receipts WHERE account_id=?
@@ -504,18 +570,46 @@ class RecoveryStore:
                 (account.id, account.id, identity(account))).fetchall()
         return [dict(x) for x in rows]
 
+    def warehouse_transport_uncertain(self, account: Account) -> bool:
+        """Unresolved warehouse cargo must not trigger another automatic transport."""
+        for job in self.desired(account, include_config=True):
+            if (job["restart_class"] != "warehouse_fill"
+                    or job["desired_state"] not in ("running", "dispatching", "review")):
+                continue
+            try:
+                if self.fixed_transfer_progress(account, job["config"], task=job["task"])["uncertain"]:
+                    return True
+            except RecoveryConflict:
+                return True
+        return False
+
     def summary(self, account: Account) -> dict[str,object]:
         p=self.policy(account)
         e=self.event(account)
-        jobs=self.desired(account)
+        jobs=self.desired(account, include_config=True)
+        eligible=manual=0
+        for job in jobs:
+            if job["desired_state"] not in ("running", "review", "dispatching"):
+                continue
+            if job["restart_class"] == "warehouse_fill":
+                try:
+                    progress=self.fixed_transfer_progress(account,job["config"],task=job["task"])
+                except RecoveryConflict:
+                    progress={"uncertain":True}
+                if progress["uncertain"] or job["desired_state"] != "running":
+                    manual+=1
+                elif not progress["completed"]:
+                    eligible+=1
+            elif job["desired_state"] == "running":
+                if job["restart_class"] in ("continuous", "reconcile_construction",
+                        "convergent_transport", "fixed_transfer"):
+                    eligible+=1
+                elif job["restart_class"] == "manual":
+                    manual+=1
         return {"account_id":account.id,"policy":p,"event":e,
                 "desired_jobs":sum(j["desired_state"]=="running" for j in jobs),
-                "auto_resume_eligible":sum(j["restart_class"] in (
-                    "continuous", "reconcile_construction", "convergent_transport",
-                    "fixed_transfer"
-                ) and j["desired_state"]=="running" for j in jobs),
-                "manual_review":sum(j["restart_class"]=="manual" and
-                                    j["desired_state"]=="running" for j in jobs)}
+                "auto_resume_eligible":eligible,
+                "manual_review":manual}
 
     def production_blocked(self, account: Account) -> bool:
         with self._db() as conn:
@@ -615,12 +709,12 @@ class RecoveryStore:
                                 "reconciled_observations": json.loads(resolved[0]) if resolved else None})
             return results
 
-    def prepare_fixed_transfer(self, account: Account, config: dict) -> str:
+    def prepare_fixed_transfer(self, account: Account, config: dict, *, task="sendResources") -> str:
         """Persist approved absolute cargo intent BEFORE engine task dispatch."""
-        if restart_class_for("sendResources", config) != "fixed_transfer":
+        if restart_class_for(task, config) not in ("fixed_transfer", "warehouse_fill"):
             raise RecoveryConflict("Fixed transfer lacks a verified checkpoint key")
         clean, digest = validated_configuration(config)
-        intent = canonical_fixed_transfer(clean)
+        intent = checkpoint_intent(task, clean)
         if intent is None:
             raise RecoveryConflict("Unsupported fixed transfer routes")
         transfer_id = config["transfer_id"]
@@ -639,9 +733,9 @@ class RecoveryStore:
             conn.execute("""INSERT INTO desired_jobs(
                 logical_id,account_id,identity,task,config_json,digest,
                 restart_class,desired_state,last_task_id,approved_at)
-                VALUES(?,?,?,?,?,?,'fixed_transfer','dispatching',NULL,?)""",
-                (transfer_id, account.id, identity(account), "sendResources",
-                 canonical, digest, now))
+                VALUES(?,?,?,?,?,?,?,'dispatching',NULL,?)""",
+                (transfer_id, account.id, identity(account), task,
+                 canonical, digest, restart_class_for(task, clean), now))
             conn.execute("""INSERT INTO fixed_transfers(
                 transfer_id,account_id,identity,world,player,intent_json,
                 dispatched_json,status,updated_at)
@@ -661,7 +755,7 @@ class RecoveryStore:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("""SELECT desired_state FROM desired_jobs
                 WHERE logical_id=? AND account_id=? AND identity=?
-                AND restart_class='fixed_transfer'""",
+                AND restart_class IN ('fixed_transfer','warehouse_fill')""",
                 (transfer_id, account.id, identity(account))).fetchone()
             if row is None or row[0] != "dispatching":
                 raise RecoveryConflict("Fixed transfer start receipt was already resolved")
@@ -683,27 +777,56 @@ class RecoveryStore:
                     (self._clock(), transfer_id))
             conn.commit()
 
+    def record_warehouse_reason(self, account: Account, job_id: str, revision: int, reason: str) -> None:
+        """Persist a bounded reconciliation reason, tied to the exact job revision."""
+        if reason not in {"warehouse_untracked", "warehouse_receipt_uncertain", "warehouse_intent_exhausted",
+                          "warehouse_city_changed", "warehouse_capacity_reached", "warehouse_fleet_unavailable",
+                          "warehouse_source_unavailable", "warehouse_source_stock_missing",
+                          "warehouse_remaining", "warehouse_observation_unavailable"}:
+            raise RecoveryConflict("Unknown warehouse recovery reason")
+        with self._mutex, self._db() as conn:
+            conn.execute("""INSERT INTO warehouse_fill_recovery(transfer_id,revision,reason)
+                SELECT logical_id,revision,? FROM desired_jobs WHERE logical_id=? AND account_id=?
+                AND identity=? AND revision=? AND restart_class='warehouse_fill'
+                ON CONFLICT(transfer_id) DO UPDATE SET revision=excluded.revision,reason=excluded.reason""",
+                         (reason, job_id, account.id, identity(account), revision))
+            conn.commit()
+
+    def warehouse_reason(self, account: Account, job_id: str, revision: int) -> str | None:
+        with self._mutex, self._db() as conn:
+            row = conn.execute("""SELECT r.reason FROM warehouse_fill_recovery r JOIN desired_jobs j
+                ON j.logical_id=r.transfer_id WHERE j.account_id=? AND j.identity=? AND j.logical_id=?
+                AND r.revision=? AND j.revision=?""",
+                               (account.id, identity(account), job_id, revision, revision)).fetchone()
+        return row["reason"] if row else None
+
     def fixed_transfer_progress(self, account: Account,
-                                config: dict) -> dict[str, object]:
+                                config: dict, *, task="sendResources") -> dict[str, object]:
         """Read accepted transport receipts; a pending POST blocks replay."""
-        if restart_class_for("sendResources", config) != "fixed_transfer":
+        if restart_class_for(task, config) not in ("fixed_transfer", "warehouse_fill"):
             raise RecoveryConflict("Fixed transfer intent is untracked")
         tid = config["transfer_id"]
-        normalized = canonical_fixed_transfer(config)
+        normalized = checkpoint_intent(task, config)
         expected = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         with self._mutex, self._db() as conn:
             row = conn.execute("""SELECT ft.intent_json,ft.dispatched_json,ft.status
                 FROM fixed_transfers ft JOIN desired_jobs j
                   ON j.logical_id=ft.transfer_id
                 WHERE ft.transfer_id=? AND ft.account_id=? AND ft.identity=?
-                  AND j.account_id=? AND j.identity=? AND j.task='sendResources'
+                  AND j.account_id=? AND j.identity=? AND j.task=?
                   AND j.config_json=?""", (
                     tid, account.id, identity(account), account.id,
-                    identity(account), json.dumps(config, sort_keys=True,
+                    identity(account), task, json.dumps(config, sort_keys=True,
                                                  separators=(",", ":")),
                 )).fetchone()
             pending = conn.execute("""SELECT COUNT(*) FROM fixed_transfer_chunks
                 WHERE transfer_id=? AND status='pending'""", (tid,)).fetchone()[0]
+            if task == "fillCityWarehouse":
+                confirmed_chunks = conn.execute("""SELECT route_index,cargo_json FROM fixed_transfer_chunks
+                    WHERE transfer_id=? AND status='confirmed'""", (tid,)).fetchall()
+                pending += conn.execute("""SELECT COUNT(*) FROM fixed_transfer_chunks c
+                    LEFT JOIN warehouse_fill_verified v ON v.chunk_id=c.chunk_id AND v.transfer_id=c.transfer_id
+                    WHERE c.transfer_id=? AND c.status='confirmed' AND v.chunk_id IS NULL""", (tid,)).fetchone()[0]
         if row is None or row["intent_json"] != expected:
             raise RecoveryConflict("Missing or mismatched fixed transfer checkpoint")
         try:
@@ -715,12 +838,31 @@ class RecoveryStore:
                                   for v, cap in zip(vector, limits))
                            for vector, limits in zip(sent, target))):
                 raise ValueError("Invalid fixed shipment counters")
+            if task == "fillCityWarehouse":
+                totals = [[0] * 5 for _ in target]
+                for chunk in confirmed_chunks:
+                    index = chunk["route_index"]
+                    cargo = json.loads(chunk["cargo_json"])
+                    if (type(index) is not int or not 0 <= index < len(target)
+                            or not isinstance(cargo, list) or len(cargo) != 5
+                            or any(type(v) is not int or v < 0 for v in cargo)):
+                        raise ValueError("Invalid warehouse receipt")
+                    totals[index] = [a + b for a, b in zip(totals[index], cargo)]
+                if totals != sent:
+                    raise ValueError("Warehouse receipt totals do not match checkpoint")
         except (ValueError, TypeError) as exc:
             raise RecoveryConflict("Fixed transfer progress is corrupt") from exc
         return {
             "dispatched": sent,
             "remaining": [[limit - actual for limit, actual in zip(t, s)]
                           for t, s in zip(target, sent)],
-            "uncertain": pending > 0 or row["status"] not in ("prepared", "running", "complete"),
-            "completed": all(t == s for t, s in zip(target, sent)),
+            "uncertain": pending > 0 or row["status"] not in (
+                ("prepared", "running", "complete", "capacity_reached", "held_stock")
+                if task == "fillCityWarehouse" else ("prepared", "running", "complete")),
+            "completed": (all(t == s for t, s in zip(target, sent)) or
+                          (task == "fillCityWarehouse" and row["status"] == "capacity_reached"))
+                         and (task != "fillCityWarehouse" or (pending == 0 and row["status"] in
+                              ("prepared", "running", "complete", "capacity_reached", "held_stock"))),
+            **({"hold_reason": "warehouse_source_stock_missing"} if task == "fillCityWarehouse" and row["status"] == "held_stock" else {}),
+            **({"hold_reason": "warehouse_capacity_reached"} if task == "fillCityWarehouse" and row["status"] == "capacity_reached" else {}),
         }

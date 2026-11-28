@@ -352,7 +352,7 @@ def test_dead_worker_is_definitive_loss_even_without_ipc_probe(system):
     class Lease:
         phase=SessionPhase.AUTHENTICATED
         def transition(self,phase):self.phase=phase
-    w.running=SimpleNamespace(alive=lambda:False,lease=Lease())
+    w.running=SimpleNamespace(alive=lambda:False,lease=Lease(),stop=lambda:None)
     s.tick()
     assert j.event(a)["due_at"]==t[0]+300
     assert w.running.lease.phase==SessionPhase.NEEDS_ASSISTANCE
@@ -397,3 +397,164 @@ def test_identity_change_during_grace_never_starts_replacement_player(system):
     assert not w.starts and not ctl.started
     assert j.event(replacement) is None
     assert not j.desired(replacement)
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_warehouse_cold_start_requires_durable_safe_receipt(system, monkeypatch, uncertain):
+    from uuid import uuid4
+
+    a,j,_c,w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],
+                            status="unconfirmed" if uncertain else "started",
+                            task_id=None if uncertain else "old")
+    # No earlier recovery epoch or prior reconnect.
+    assert j.event(a) is None
+
+    class DormantThread:
+        def __init__(self,**_):pass
+        def start(self):pass
+
+    monkeypatch.setattr("daedalus.recovery_runtime.threading.Thread",DormantThread)
+    s.start()
+    if uncertain:
+        assert j.event(a) is None
+        return
+    assert j.event(a)["phase"]=="grace"
+    assert j.event(a)["due_at"]==t[0]+300
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",
+                        lambda *_:SimpleNamespace(state="ready",reason="warehouse_remaining",config=cfg))
+    ctl._ipc=object()
+    def start(aid,task,config,request_id,*,confirmed,track_desired):
+        assert aid==a.id and task=="fillCityWarehouse" and config==cfg
+        assert confirmed and not track_desired and request_id
+        ctl.started.append({"task":task,"task_id":"warehouse-restored"})
+        return {"status":"started","task_id":"warehouse-restored"}
+    ctl.start=start
+    t[0]+=299
+    s.tick()
+    assert not w.starts
+    t[0]+=1
+    s.tick()
+    assert w.starts==[a.id]
+    assert len(ctl.started)==1
+    s.tick()
+    assert len(ctl.started)==1
+
+
+def test_uncertain_warehouse_fences_other_automatic_transport_but_not_alerts(system, monkeypatch):
+    import json
+    from uuid import uuid4
+
+    a,j,_c,_w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],status="started",task_id="old")
+    with j._db() as conn:
+        conn.execute("""INSERT INTO fixed_transfer_chunks
+            (transfer_id,route_index,cargo_json,status,updated_at) VALUES(?,?,?,'pending',?)""",
+            (cfg["transfer_id"],0,json.dumps([0,0,40,0,0]),t[0]))
+    j.capture_started(a,"consolidateResources",{
+        "limits":[100]*5,"sourceCityIds":[101],"destinationCityId":103,
+        "intervalInHours":1,"shipType":1},"old-transport")
+    j.capture_started(a,"alertAttacks",{"listen":True},"old-alert")
+    assert any(x["restart_class"]=="convergent_transport" for x in j.desired(a))
+    def unsafe_preview(*_):
+        pytest.fail("Uncertain cargo must fence automatic transport before planning")
+    monkeypatch.setattr("daedalus.recovery_runtime.convergent_transport_plan",unsafe_preview)
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",unsafe_preview)
+    j.record_loss(a)
+    t[0]+=300
+    s.tick()
+    assert [r["task"] for r in ctl.started]==["alertAttacks"]
+    assert j.summary(a)["manual_review"]==1
+
+
+def test_fast_warehouse_completion_does_not_race_restoration_receipt(system, monkeypatch):
+    from uuid import uuid4
+
+    a,j,_c,_w,ctl,s,t=system
+    cfg={"destination_city":103,"resource":"marble","useFreighters":False,
+         "reviewed_sources":[{"city_id":101,"amount":100}],
+         "transfer_id":str(uuid4())}
+    j.prepare_fixed_transfer(a,cfg,task="fillCityWarehouse")
+    j.finish_fixed_transfer(a,cfg["transfer_id"],status="started",task_id="old")
+    monkeypatch.setattr("daedalus.recovery_runtime.warehouse_fill_plan",
+                        lambda *_:SimpleNamespace(state="ready",reason="warehouse_remaining",config=cfg))
+    ctl._ipc=object()
+    def start(*_a, **_kw):
+        # Fresh engine guard observes no destination capacity before the
+        # new task is listed. No game cargo was submitted.
+        with j._db() as conn:
+            conn.execute("UPDATE fixed_transfers SET status='capacity_reached' WHERE transfer_id=?",
+                         (cfg["transfer_id"],))
+        return {"status":"started","task_id":"fast-warehouse"}
+    def list_tasks(_):
+        j.settle_warehouse_jobs(a)
+        return {"engine_tasks":[]}
+    ctl.start=start
+    ctl.list_tasks=list_tasks
+    ctl.stop=lambda *_:pytest.fail("A completed warehouse job is not a user stop")
+    j.record_loss(a)
+    t[0]+=300
+    s.tick()
+    row=j.desired(a)[0]
+    assert row["desired_state"]=="completed"
+    assert row["last_task_id"]=="fast-warehouse"
+    assert j.warehouse_reason(a,row["id"],row["revision"])=="warehouse_capacity_reached"
+    assert j.receipts(a)[0]["status"]=="started"
+    s.tick()
+    assert len(j.receipts(a))==1
+
+def test_adopted_native_worker_is_monitored_and_recovered(tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator
+    from daedalus.auth_assistance import AssistanceBroker
+    from daedalus.recovery_runtime import ManagedAccountWorker, RecoveryWorkers
+
+    now = [1000.0]
+    account = Account("native", "s53-ru", "Example", "Example", True)
+    owner = AccountSessionCoordinator([account], state_dir=tmp_path / "locks")
+    lease = owner.acquire(account.id)
+    lease.transition(SessionPhase.AUTHENTICATED)
+    broker = AssistanceBroker(owner)
+    adopted = []
+    controller = SimpleNamespace(
+        adopt_verified_saved_worker=lambda aid, existing: adopted.append((aid, existing)),
+        owned_sessions=lambda: tuple(lease for _, lease in adopted),
+    )
+    valid = [True]
+    router = SimpleNamespace(validate_account=lambda _: valid[0])
+    credentials = SimpleNamespace(available=lambda _: False)
+    workers = RecoveryWorkers(owner, controller, router, credentials, broker)
+    child = ManagedAccountWorker(account, tmp_path / "ipc.json",
+                                 SimpleNamespace(poll=lambda: None), lease, router)
+    child.alive = lambda: not child._stopped
+    child.stop = lambda: setattr(child, "_stopped", True)
+    workers.adopt_cookie_worker(child)
+    assert workers.get(account) is child
+    assert adopted == [(account.id, lease)]
+    store = RecoveryStore(tmp_path / "journal.sqlite", clock=lambda: now[0])
+    supervisor = RecoverySupervisor([account], store, workers, controller,
+                                    credentials, clock=lambda: now[0])
+    supervisor.tick()
+    assert store.event(account) is None
+    valid[0] = False
+    supervisor.tick()
+    now[0] += 30
+    supervisor.tick()
+    assert store.event(account)["phase"] == "grace"
+    assert store.event(account)["due_at"] == now[0] + 300
+    assert owner.status(account.id) == "needs_assistance"
+    assert not child.alive()
+    now[0] += 300
+    supervisor.tick()
+    assert store.event(account)["last_reason"] == "token_unavailable"
+    workers.release_stopped_for_manual_login(account)
+    assert owner.status(account.id) == "not_connected"
+    store.note_verified_manual_recovery(account)
+    assert store.event(account)["phase"] == "restored"

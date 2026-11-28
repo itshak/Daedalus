@@ -272,7 +272,11 @@ class APIWorker(QThread):
             elif self.action == "monitor_attach" and self.account_id:
                 result = self.client.monitor_existing_account(self.account_id, confirmed=True)
             elif self.action == "assistance_pending":
-                result = self.client.pending_assistance()
+                result = {
+                    **self.client.pending_assistance(),
+                    "accounts": self.client.accounts(),
+                    "connected_accounts": _known_ikabot_workers(self.client),
+                }
             elif self.action == "auth_assistance" and self.account_id:
                 result = self.client.auth_assistance(self.account_id)
             elif self.action == "native_login_start" and self.account_id:
@@ -2476,7 +2480,9 @@ class MainWindow(FluentWindow):
                 safe = [
                     f"{row.get('task','Job')}: "
                     f"{row.get('desired_state','unknown')} "
-                    f"({'auto eligible' if row.get('restart_class') == 'continuous' else 'review needed'})"
+                    f"({'auto eligible' if row.get('restart_class') in {'continuous', 'fixed_transfer', 'warehouse_fill', 'reconcile_construction', 'convergent_transport'} and not (row.get('transfer_progress') or {}).get('uncertain') else 'review needed'})"
+                    + (f" · {row.get('recovery_reason','').replace('_',' ')}" if row.get("recovery_reason") else "")
+                    + (f" · observed: {row.get('observed_status')}" if row.get("observed_status") else "")
                     for row in job_rows if isinstance(row, dict)
                 ]
                 self._notice(
@@ -2510,6 +2516,12 @@ class MainWindow(FluentWindow):
             QTimer.singleShot(0, lambda: self._request("accounts"))
         elif action == "assistance_pending":
             assert isinstance(payload, dict)
+            rows = payload.get("accounts")
+            if isinstance(rows, list):
+                self.accounts_page.set_connected_ids(payload.get("connected_accounts"))
+                if rows != self.accounts_page._accounts:
+                    self._show_accounts(rows)
+                self._recovery_followup = ("recovery_index", "")
             for ticket in payload.get("tickets", []):
                 ticket_id = ticket.get("ticket_id")
                 if (
@@ -2912,6 +2924,12 @@ class MainWindow(FluentWindow):
     def _on_failed(self, action: str, error: str) -> None:
         if self._stale_scope_read(action):
             return
+        if action in {"accounts", "assistance_pending"}:
+            self.accounts_page.set_connected_ids(None)
+            rows = [dict(row, session_status="unknown")
+                    for row in self.accounts_page._accounts]
+            if rows != self.accounts_page._accounts:
+                self._show_accounts(rows)
         if action == "proxy_profiles":
             self.appearance_page.set_proxy_unavailable(getattr(self._worker, "account_id", None))
         if action == "world_reports":

@@ -142,6 +142,8 @@ def test_controller_assigns_server_owned_transfer_id_before_engine_dispatch(tmp_
             self.sent = []
         def has_account(self, account):
             return account == ACCOUNT
+        def list_managed_tasks(self, account):
+            return []
         def preflight_task(self, account, task):
             return {"ready": True, "reason": "none"}
         def start_managed_task(self, account, task, configuration, request_id):
@@ -181,6 +183,8 @@ def test_controller_never_replays_uncertain_initial_fixed_task_start(tmp_path):
     class IPC:
         def has_account(self, account):
             return True
+        def list_managed_tasks(self, account):
+            return []
         def preflight_task(self, account, task):
             return {"ready": True, "reason": "none"}
         def start_managed_task(self, *_):

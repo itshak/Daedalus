@@ -455,19 +455,7 @@ def main(argv: list[str] | None = None) -> int:
                     # NativeBrowserHandoff validates monitor ownership at
                     # construction, so attach before creating the handoff.
                     monitor.attach_dedicated_worker(worker)
-            native_handoff = None
-            if args.enable_native_browser_login:
-                from daedalus.browser_cookie_workers import BrowserCookieWorkers
-                from daedalus.native_browser_handoff import NativeBrowserHandoff
-
-                cookie_workers = BrowserCookieWorkers(owner, ipc)
-                native_handoff = NativeBrowserHandoff(
-                    configured, owner, monitor=monitor if worker is not None else None,
-                    dedicated_worker=worker, cookie_workers=cookie_workers,
-                )
-                # Defer bounded saved-cookie verification to a daemon thread.
-                # A game-world outage must never block Uvicorn from starting.
-                # The explicit flag below opts into read-only automatic retries.
+            workers = None
             if args.enable_auto_recovery:
                 from daedalus.recovery_runtime import RecoverySupervisor, RecoveryWorkers
 
@@ -478,6 +466,22 @@ def main(argv: list[str] | None = None) -> int:
                     configured, recovery_store, workers, task_controller,
                     recovery_credentials,
                 )
+            native_handoff = None
+            if args.enable_native_browser_login:
+                from daedalus.browser_cookie_workers import BrowserCookieWorkers
+                from daedalus.native_browser_handoff import NativeBrowserHandoff
+
+                cookie_workers = BrowserCookieWorkers(
+                    owner, ipc, recovery_workers=workers,
+                    recovery_store=recovery_store if workers is not None else None,
+                )
+                native_handoff = NativeBrowserHandoff(
+                    configured, owner, monitor=monitor if worker is not None else None,
+                    dedicated_worker=worker, cookie_workers=cookie_workers,
+                )
+                # Defer bounded saved-cookie verification to a daemon thread.
+                # A game-world outage must never block Uvicorn from starting.
+                # The explicit flag below opts into read-only automatic retries.
             app = create_app(
                 accounts_path=args.accounts_file, ipc_client=ipc,
                 session_coordinator=owner, task_controller=task_controller,

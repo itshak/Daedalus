@@ -624,3 +624,31 @@ def test_shrine_favor_api_requires_auth_and_is_read_only(account_file):
     assert resp.json()["shrine"]["favor"] is None
     assert ipc.calls == ["alpha"]
     assert client.post(url, json={}, headers=auth).status_code == 405
+
+def test_attached_but_invalid_worker_not_reported_connected(account_file, tmp_path):
+    from daedalus.account_sessions import AccountSessionCoordinator, SessionPhase
+    from daedalus.accounts import load_accounts
+
+    account = load_accounts(account_file)[0]
+    owner = AccountSessionCoordinator([account], state_dir=tmp_path / "locks")
+    lease = owner.acquire(account.id)
+    lease.transition(SessionPhase.AUTHENTICATED)
+
+    class IPC:
+        def list_sessions(self):
+            return [{"world": account.world, "player": account.player}]
+
+    app = create_app(accounts_path=account_file, api_token=TOKEN, ipc_client=IPC(),
+                     session_coordinator=owner)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    try:
+        assert client.get("/api/v1/engine/connected-accounts", headers=headers).json()[
+            "connected_account_ids"] == [account.id]
+        lease.transition(SessionPhase.NEEDS_ASSISTANCE)
+        assert client.get("/api/v1/accounts", headers=headers).json()["accounts"][0][
+            "session_status"] == "needs_assistance"
+        assert client.get("/api/v1/engine/connected-accounts", headers=headers).json()[
+            "connected_account_ids"] == []
+    finally:
+        lease.close()

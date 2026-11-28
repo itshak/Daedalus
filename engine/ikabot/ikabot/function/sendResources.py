@@ -118,7 +118,7 @@ def resource_amounts(value, name):
     return amounts
 
 
-def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None):
+def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None, *, warehouse=False):
     """Checks the config of a sendResources task started from the CLI
     Parameters
     ----------
@@ -178,7 +178,7 @@ def prepare_sendResources(session, routes, useFreighters=False, transfer_id=None
         if any(str(route["to"]) not in own_ids for route in checked):
             raise ValueError("Unattended fixed transfers require owned recipients")
         FixedTransferJournal(
-            session, transfer_id, checked, bool(useFreighters),
+            session, transfer_id, _checkpoint_routes(checked), bool(useFreighters), warehouse=warehouse,
         )
     # Historical unmanaged tasks keep the original available-stock preflight.
     for origin, amounts in ({} if transfer_id is not None else asked).items():
@@ -358,6 +358,12 @@ def do_it(session, routes, useFreighters=False, transfer_id=None):
     execute_prepared_shipments(session, routes, useFreighters, transfer_id=transfer_id)
 
 
+def _checkpoint_routes(routes):
+    """Upstream normalizes IDs to strings; durable controller intent uses integers."""
+    return [{**row, "from": _destination_id(row["from"]), "to": _destination_id(row["to"])}
+            for row in routes]
+
+
 def execute_prepared_shipments(session, routes, useFreighters=False, *, transfer_id=None, policy=None):
     """Shared upstream route resolution/execution; internal policy is not a JSON field."""
     if policy is not None:
@@ -391,8 +397,10 @@ def execute_prepared_shipments(session, routes, useFreighters=False, *, transfer
     if transfer_id is not None:
         from ikabot.helpers.fixedTransferJournal import FixedTransferJournal
         checkpoint = FixedTransferJournal(
-            session, transfer_id, list(routes), useFreighters,
+            session, transfer_id, _checkpoint_routes(routes), useFreighters, warehouse=policy is not None,
         )
+        if policy is not None:
+            policy.checkpoint = checkpoint
     if any("recipient" in route for route in routes):
         executeRoutes(session, shipments, useFreighters, checkpoint=checkpoint,
                       verify_recipient=lambda index: _verify_recipient(session, routes[index]))

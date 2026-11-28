@@ -38,10 +38,14 @@ class BrowserCookieWorkers:
     """One leased IkaBot process per exact configured account; no task replay."""
 
     def __init__(self, owner: AccountSessionCoordinator, router: RoutedAccountIPC,
-                 *, launch_timeout: float = 35.0) -> None:
+                 *, launch_timeout: float = 35.0,
+                 recovery_workers: RecoveryWorkers | None = None,
+                 recovery_store=None) -> None:
         self.owner = owner
         self.router = router
         self.launch_timeout = launch_timeout
+        self.recovery_workers = recovery_workers
+        self.recovery_store = recovery_store
         self._workers: dict[str, ManagedAccountWorker] = {}
         self._mutex = threading.RLock()
         self._connectivity: dict[str, tuple[float, bool]] = {}
@@ -139,6 +143,18 @@ class BrowserCookieWorkers:
                 del self._workers[aid]
                 logger.warning("Verified cookie worker exited; account is disconnected")
 
+    def prepare_manual_login(self, account: Account) -> None:
+        """Allow explicit fallback after the supervisor has exhausted recovery."""
+        if self.recovery_workers is None or self.recovery_store is None:
+            return
+        with self._mutex:
+            event = self.recovery_store.event(account)
+            if ((event and event["phase"] == "failed")
+                    or not self.recovery_store.policy(account)["enabled"]):
+                worker = self.recovery_workers.get(account)
+                if worker is not None and not worker.alive():
+                    self.recovery_workers.release_stopped_for_manual_login(account)
+
     def start(self, account: Account) -> None:
         """Requires prior one-time browser consent and a server-bound cookie.
 
@@ -156,6 +172,7 @@ class BrowserCookieWorkers:
                 pass
             lease = self.owner.acquire(account.id)
             child = None
+            attached = False
             descriptor = RecoveryWorkers._descriptor(account)
             try:
                 if descriptor.exists():
@@ -196,7 +213,13 @@ class BrowserCookieWorkers:
                                 worker = ManagedAccountWorker(
                                     account, descriptor, child, lease, self.router,
                                 )
-                                self._workers[account.id] = worker
+                                if self.recovery_workers is not None:
+                                    self.recovery_workers.adopt_cookie_worker(worker)
+                                else:
+                                    self._workers[account.id] = worker
+                                attached = True
+                                if self.recovery_store is not None:
+                                    self.recovery_store.note_verified_manual_recovery(account)
                                 logger.info("Cookie-only worker independently authenticated and attached")
                                 return
                         except (EngineIPCUnavailable, ValueError, OSError):
@@ -207,7 +230,7 @@ class BrowserCookieWorkers:
                 logger.warning("Cookie-only worker startup failed without attaching a session")
                 raise RecoveryWorkerError("Cookie-only worker startup failed") from None
             finally:
-                if account.id not in self._workers:
+                if not attached:
                     if child is not None:
                         try:
                             ManagedAccountWorker(
@@ -244,6 +267,14 @@ class BrowserCookieWorkers:
             self.reap()
             if self.owner.status(account.id) == SessionPhase.AUTHENTICATED.value:
                 report["connected"] += 1
+                continue
+            # A confirmed loss belongs exclusively to the durable supervisor:
+            # never let the read-only cookie retry bypass grace or browser pause.
+            if self.recovery_store is not None and self.recovery_store.event(account):
+                report["unavailable"] += 1
+                continue
+            if self.owner.status(account.id) != "not_connected":
+                report["unavailable"] += 1
                 continue
             try:
                 _email_binding(account, None)

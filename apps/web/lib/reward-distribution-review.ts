@@ -13,11 +13,21 @@ const equal=(a:unknown,b:unknown):boolean=>Array.isArray(a)&&Array.isArray(b)?a.
 export function validRewardDistributionRequest(v:unknown){
   return obj(v)&&Object.keys(v).length===2&&(["loginDaily","distributeResources","buyResources","sellResources"].includes(String(v.task))||policyTask(String(v.task)))&&validNativeConfig(v.task,v.draft);
 }
+const recoveryMessages:Readonly<Record<string,string>>={
+  warehouse_untracked:"Manual review: no eligible positive allocation or more than 40 source cities.",
+  warehouse_recovery_unavailable:"Automatic recovery is unavailable on this server.",
+  warehouse_policy_disabled:"Automatic recovery is disabled for this account.",
+  warehouse_token_unavailable:"Automatic recovery is blocked until a saved server login is available.",
+  warehouse_recovery_paused:"Automatic recovery is paused.",
+  warehouse_checkpoint_eligible:"Automatic recovery eligible: resumes only remaining reviewed cargo after fresh checks."
+};
 export function parseRewardDistributionReview(v:unknown,account:string,task:string,draft:Draft):Review{
-  if(!obj(v)||Object.keys(v).length!==6||v.account_id!==account||v.task!==task||!equal(v.draft,draft)||
+  const recovery=obj(v)&&task==="fillCityWarehouse"&&Object.hasOwn(v,"recovery_reason");
+  if(recovery&&(typeof v.recovery_reason!=="string"||!Object.hasOwn(recoveryMessages,v.recovery_reason)))throw new Error("Invalid warehouse recovery status");
+  if(!obj(v)||Object.keys(v).length!==(recovery?7:6)||v.account_id!==account||v.task!==task||!equal(v.draft,draft)||
     typeof v.preview_id!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(v.preview_id)||!int(v.expires_in,1,120)||!obj(v.observation))throw new Error("Invalid review");
   const base={preview_id:v.preview_id,expires_in:v.expires_in},o=v.observation;
-  if(policyTask(task))return {...base,policySummary:policySummary(task,draft,o)};
+  if(policyTask(task))return {...base,policySummary:policySummary(task,draft,o)+(task==="fillCityWarehouse"?"\n"+(recovery?recoveryMessages[String(v.recovery_reason)]:"Automatic recovery eligibility was not reported by the server."):"")};
   if(task==="loginDaily"){
     const keys=["wine_city","wood_city","luxury_city"].filter(k=>draft[k]!==null);
     if(Object.keys(o).length!==5||!obj(o.cities)||Object.keys(o.cities).length!==keys.length||
@@ -72,16 +82,16 @@ function policySummary(task:string,d:Draft,o:Draft):string{
       !int(o.stock,0,1e12)||!int(o.free_space,0,1e12)||!int(o.incoming,0,1e12)||!int(o.budget,0,1e12)||!int(o.amount,0,1e12)||
       o.budget!==Math.max(0,o.free_space-o.incoming)||!int(o.capacity,0,1e8)||!int(o.total_ships,0,1e8)||!int(o.available_ships,0,o.total_ships)||
       !Array.isArray(o.sources)||o.sources.length>99)return bad();
-    let remaining=o.budget,last=0;
+    let remaining=o.budget,last=0,positiveSources=0;
     const lines:string[]=[];
     for(const row of o.sources){
       if(!obj(row)||!keys(row,["city_id","city_name","stock","amount"])||!int(row.city_id,last+1,999999999999)||row.city_id===d.destination_city||
         !name(row.city_name)||!int(row.stock,0,1e12)||!int(row.amount,0,1e12)||row.amount!==Math.min(remaining,row.stock))return bad();
-      last=row.city_id;remaining-=row.amount;
+      last=row.city_id;remaining-=row.amount;if(row.amount>0)positiveSources++;
       lines.push(row.city_name+": "+row.amount.toLocaleString()+" / "+row.stock.toLocaleString());
     }
     if(o.amount!==o.budget-remaining||(o.amount>0&&(!o.capacity||!o.total_ships)))return bad();
-    return o.destination_name+" · "+d.resource+"\nCurrent stock: "+o.stock.toLocaleString()+"; free space: "+o.free_space.toLocaleString()+"; incoming: "+o.incoming.toLocaleString()+"\nAvailable budget: "+o.budget.toLocaleString()+"; planned transfer: "+o.amount.toLocaleString()+"\n"+o.available_ships+"/"+o.total_ships+" vessels free; "+o.capacity+" per vessel.\n"+lines.join("\n")+"\nOne-time transfer; check incoming cargo and storage before each load. No automatic replay.";
+    return o.destination_name+" · "+d.resource+"\nCurrent stock: "+o.stock.toLocaleString()+"; free space: "+o.free_space.toLocaleString()+"; incoming: "+o.incoming.toLocaleString()+"\nAvailable budget: "+o.budget.toLocaleString()+"; planned transfer: "+o.amount.toLocaleString()+"\n"+o.available_ships+"/"+o.total_ships+" vessels free; "+o.capacity+" per vessel.\n"+lines.join("\n")+"\nOne-time transfer; check incoming cargo and storage before each load.\n"+(positiveSources>0&&positiveSources<=40?"Recovery requires an enabled server policy and verified checkpoints. Ambiguous receipts require review.":"Recovery: manual review (no checkpointable positive allocation or too many sources).");
   }
   if(["consolidateResources","resourceTransportManager","donationBot","searchForIslandSpaces","dumpWorld","autoPirate"].includes(task))
     return recurringSummary(task,d,o);

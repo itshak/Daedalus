@@ -34,3 +34,8 @@ Detailed historical acceptance instructions: [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANC
 4. Test controlled takeover/recovery and actual Mac behavior; confirm coordinated rollout separately.
 
 Provider-level configuration: verify open signup and anonymous sign-in are disabled in the Supabase dashboard. The Free plan does not include compromised-password protection; upgrade only with explicit owner approval. Use unique strong operator passwords. Verify invitation, login/revocation and no unauthorized access after deployment.
+
+
+## v0.1.1 deferred acceptance
+
+On 2026-11-28 the owner explicitly deferred personal/live acceptance and authorized the next coordinated beta. [Issue #124](https://github.com/itshak/Daedalus/issues/124) is assigned to the owner. O1/O3/O5 cover native worker takeover, token recovery, and the matching physical Mac build. O2 covers actual production slider semantics, reviewed allocations and verified restoration, plus real warehouse cargo attribution and capacity. O6 records actual deployed revision and rollback. These are unperformed, not passed; stable certification is NOT TESTED / NOT APPROVED.

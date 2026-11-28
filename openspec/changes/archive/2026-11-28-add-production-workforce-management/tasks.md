@@ -7,7 +7,7 @@
 - [x] Implement reviewed resource-specific batch plans for all/selected accounts and cities; per-city result and partial failures, no unrelated assignments.
 - [x] Build Production web/native editors and bulk actions, academy/temple sections, default unchecked available-only checkbox and explicit review; translations/accessibility.
 - [x] Test sufficient/insufficient citizens, extra capacity, both resources, release-minimum and fallback, donor restoration, proven local refusal/timeout/crash/readback mismatch, population changes, account scope, no unrelated workforce changes, synthetic E2E and upstream parity.
-- [ ] Verify complete CI on final revision.
+- [x] Verify complete CI on the implementation revision (24668ab; all applicable checks passed).
 - [ ] Confirm actual authenticated game slider/readback and workerPlan definitive server-rejection semantics; live-game acceptance remains unperformed.
 
 ## Initial implementation evidence (in progress)
@@ -57,3 +57,5 @@
 - Remaining live-only evidence: actual slider/current/extra semantics and authenticated workerPlan failure/response behavior, and final real-game acceptance. No server rejection code is assumed. Keep live acceptance unclaimed.
 
 - Protected cookie POST boundary regression verifies a known wrong-city preflight emits the typed refusal before any POST, while a transport timeout sends exactly once and remains uncertain. 34 focused Production engine/controller/native tests pass.
+
+Owner explicitly deferred remaining human-only acceptance on 2026-11-28; see [issue #124](https://github.com/itshak/Daedalus/issues/124). Unchecked tasks are unperformed, not passed. The consolidated revision must also pass CI before merge.

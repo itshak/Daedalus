@@ -186,6 +186,6 @@ def test_beta_bundle_metadata_matches_python_project(packager, tmp_path):
     data=plistlib.loads(target.read_bytes())
     version=tomllib.loads((packager.ROOT/"pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     assert data["DaedalusReleaseVersion"]==version
-    assert data["CFBundleShortVersionString"]=="0.1.0"
+    assert data["CFBundleShortVersionString"]==version.split("b",1)[0]
     assert data["DaedalusSourceRevision"]=="a"*40
     assert data["CFBundleIdentifier"]==packager.BUNDLE_IDENTIFIER
