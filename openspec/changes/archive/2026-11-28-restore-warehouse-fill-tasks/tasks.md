@@ -5,7 +5,7 @@
 - [x] Implement safe startup and reconnect restoration and completed/held outcomes, including stop/epoch fencing.
 - [x] Expose eligibility and reasons before launch and in web/native recovery views.
 - [x] Test simulated multi-shipment restart, in-transit and arrived cargo, ambiguous write, legacy jobs, changed stock, stop/reconnect and upstream parity; document separate live acceptance.
-- [ ] Verify complete CI on final combined revision.
+- [x] Verify complete CI on combined implementation revision (2118dea; 22 applicable checks passed, 959 offline tests passed, 5 skipped).
 - [ ] Verify real-game multi-shipment recovery, cargo attribution, capacity and live acceptance (unperformed).
 
 
@@ -24,3 +24,5 @@
 - Engine fixture updated to reflect the real ledger schema: 33 combined fixed-transfer and warehouse tests pass. A synthetic world exercises real upstream multi-load waiting and protected POST with both legacy and durable checkpoint paths, including process interruption after one verified shipment and arrival during downtime; restored execution sends exactly the remaining 200 units, never the original 300. Final storage-budget exhaustion now records terminal capacity even when source stock ends on the same load. Recovery summaries exclude uncertain and terminal warehouse work from automatically restartable counts; unresolved warehouse cargo fences all automatic transport restoration, without stopping unrelated alerts. Completed jobs settle on authoritative task-list reads as well as on reconnect. 124 focused controller/engine/API/hygiene regressions plus the separate new fence regression pass. Full final-head CI and real-game acceptance remain separate gates.
 
 - Final fast-completion race regression: task-list reads cannot retire an intent while its restoration receipt is dispatching or unconfirmed. A verified instant completion records the successful engine launch first and then persists the terminal capacity/intent state without a spurious stop. A later local retirement failure cannot rewrite an already durable launch as uncertain. 78 focused task/recovery/fill tests passed.
+
+Owner explicitly deferred the unperformed live-game acceptance on 2026-11-28 to [issue #124](https://github.com/itshak/Daedalus/issues/124). This is an engineering archive, not live certification.

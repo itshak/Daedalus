@@ -91,3 +91,7 @@ The parity source also contains `original-tasks.md` and `prior-checklist.md`. Th
 | fix-native-worker-recovery | desktop-client | Periodic authoritative account status refresh | Implemented; owner acceptance deferred to issue #124. |
 | fix-native-worker-recovery | automation-controller | Native session loss uses the existing safe-job reconciliation | Implemented; owner acceptance deferred to issue #124. |
 | fix-native-worker-recovery | account-sessions | Unified native worker recovery ownership | Implemented; owner acceptance deferred to issue #124. |
+
+- 2026-11-28-restore-warehouse-fill-tasks: [deferred acceptance record](../openspec/changes/archive/2026-11-28-restore-warehouse-fill-tasks/consolidation-record.md), issue #124.
+| restore-warehouse-fill-tasks | controller-api | Explicit recovery eligibility | Implemented; owner acceptance deferred to issue #124. |
+| restore-warehouse-fill-tasks | automation-controller | Safe restoration of eligible warehouse-fill jobs | Implemented; owner acceptance deferred to issue #124. |
